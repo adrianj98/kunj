@@ -1,9 +1,6 @@
 // AI-powered commit message generation using AWS Bedrock Claude 3.5 Sonnet
 
-import {
-  BedrockRuntimeClient,
-  InvokeModelCommand,
-} from "@aws-sdk/client-bedrock-runtime";
+const { ChatBedrockConverse } = require("@langchain/aws");
 import { defaultProvider } from "@aws-sdk/credential-provider-node";
 import { loadConfig } from "@aws-sdk/node-config-provider";
 import { NODE_REGION_CONFIG_OPTIONS, NODE_REGION_CONFIG_FILE_OPTIONS } from "@aws-sdk/config-resolver";
@@ -16,6 +13,12 @@ const execAsync = promisify(exec);
 // Cache for region and credentials to avoid multiple async calls
 let cachedRegion: string | null = null;
 let regionProvider: (() => Promise<string>) | null = null;
+let cachedClient: any | null = null;
+
+// Get the default model ID - using the correct format for AWS Bedrock
+function getDefaultModelId(): string {
+  return process.env.BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20240620-v1:0';
+}
 
 // Get the region provider
 function getRegionProvider(): () => Promise<string> {
@@ -54,24 +57,31 @@ async function getAWSRegion(): Promise<string> {
   return cachedRegion;
 }
 
-// Initialize AWS Bedrock client
-function getBedrockClient(): BedrockRuntimeClient {
-  // The SDK will automatically use the credential chain via defaultProvider:
-  // 1. Environment variables (AWS_ACCESS_KEY_ID, etc.)
-  // 2. Shared credentials file (~/.aws/credentials)
-  // 3. Shared config file (~/.aws/config with AWS_PROFILE)
-  // 4. ECS container credentials
-  // 5. EC2 instance metadata service (IMDS)
-  // 6. SSO credentials
-  // 7. Web identity token credentials
-  // 8. Process credentials
+// Initialize AWS Bedrock client using ChatBedrockConverse
+async function getBedrockClient(): Promise<any> {
+  if (!cachedClient) {
+    const region = await getAWSRegion();
+    const modelId = getDefaultModelId();
 
-  return new BedrockRuntimeClient({
-    // Region will be resolved asynchronously when needed
-    region: getRegionProvider(),
-    // Credentials will be resolved via the default provider chain
-    credentials: defaultProvider(),
-  });
+    // The ChatBedrockConverse will automatically use the credential chain via defaultProvider:
+    // 1. Environment variables (AWS_ACCESS_KEY_ID, etc.)
+    // 2. Shared credentials file (~/.aws/credentials)
+    // 3. Shared config file (~/.aws/config with AWS_PROFILE)
+    // 4. ECS container credentials
+    // 5. EC2 instance metadata service (IMDS)
+    // 6. SSO credentials
+    // 7. Web identity token credentials
+    // 8. Process credentials
+
+    cachedClient = new ChatBedrockConverse({
+      model: modelId,
+      region,
+      credentials: defaultProvider(),
+      temperature: 0.7,
+      maxTokens: 500,
+    });
+  }
+  return cachedClient;
 }
 
 // Get the diff for the files being committed
@@ -149,36 +159,17 @@ MESSAGE: <commit subject>
 BODY: <optional detailed description>`;
 
     // Get the Bedrock client
-    const client = getBedrockClient();
-
-    // Using Claude 3.5 Sonnet
-    const modelId =
-      process.env.BEDROCK_MODEL || "anthropic.claude-3-5-sonnet-20241022-v2:0";
+    const client = await getBedrockClient();
 
     console.log(chalk.blue("🤖 Analyzing changes with Claude 3.5 Sonnet..."));
 
-    // Invoke the model
-    const command = new InvokeModelCommand({
-      modelId,
-      body: JSON.stringify({
-        anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 500,
-        temperature: 0.7,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-      contentType: "application/json",
-    });
-
-    const response = await client.send(command);
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+    // Invoke the model using ChatBedrockConverse
+    const response = await client.invoke([
+      { role: "user", content: prompt }
+    ]);
 
     // Extract the content from Claude's response
-    const content = responseBody.content?.[0]?.text || "";
+    const content = response.content?.toString() || "";
 
     // Parse the response
     const typeMatch = content.match(/TYPE:\s*(\w+)/i);
@@ -190,17 +181,17 @@ BODY: <optional detailed description>`;
     }
 
     const type = typeMatch[1].toLowerCase();
-    const message = messageMatch[1].trim();
+    const commitMessage = messageMatch[1].trim();
     const body = bodyMatch ? bodyMatch[1].trim() : undefined;
 
     // Build the full message
     const fullMessage = body
-      ? `${type}: ${message}\n\n${body}`
-      : `${type}: ${message}`;
+      ? `${type}: ${commitMessage}\n\n${body}`
+      : `${type}: ${commitMessage}`;
 
     return {
       type,
-      message,
+      message: commitMessage,
       fullMessage,
     };
   } catch (error: any) {
@@ -248,23 +239,22 @@ function suggestCommitType(files: string[]): string {
 // Check if AWS credentials are configured
 export async function checkAWSCredentials(): Promise<boolean> {
   try {
-    const client = getBedrockClient();
+    const client = await getBedrockClient();
 
     // Try a minimal invoke to check if we have valid credentials and access
     // We use a very small request to minimize cost
-    const command = new InvokeModelCommand({
-      modelId: process.env.BEDROCK_MODEL || "anthropic.claude-3-5-sonnet-20241022-v2:0",
-      body: JSON.stringify({
-        anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 1,
-        messages: [{ role: "user", content: "test" }],
-      }),
-      contentType: "application/json",
-    });
-
-    // Try to send the command
     try {
-      await client.send(command);
+      // Set a very low max tokens to minimize cost
+      const testClient = new ChatBedrockConverse({
+        model: getDefaultModelId(),
+        region: await getAWSRegion(),
+        credentials: defaultProvider(),
+        maxTokens: 1,
+      });
+
+      await testClient.invoke([
+        { role: "user", content: "test" }
+      ]);
       return true; // If successful, credentials are valid
     } catch (err: any) {
       // Check specific error types
@@ -284,8 +274,18 @@ export async function checkAWSCredentials(): Promise<boolean> {
       // Check for missing credentials
       if (err.message?.includes("Could not load credentials") ||
           err.message?.includes("Missing credentials") ||
-          err.message?.includes("No credentials")) {
+          err.message?.includes("No credentials") ||
+          err.message?.includes("Could not resolve credentials")) {
         return false;
+      }
+
+      // Check for invalid model identifier
+      if (err.message?.includes("model identifier is invalid") ||
+          err.message?.includes("ValidationException")) {
+        // Model doesn't exist but credentials are OK
+        console.error(chalk.yellow("Warning: Model not available:", getDefaultModelId()));
+        console.error(chalk.yellow("Try setting BEDROCK_MODEL environment variable to a valid model ID"));
+        return true;
       }
 
       // Other errors (like ResourceNotFoundException for the model,
@@ -304,6 +304,6 @@ export async function checkAWSCredentials(): Promise<boolean> {
 export async function getAWSConfigInfo(): Promise<{ region: string; model: string }> {
   return {
     region: await getAWSRegion(),
-    model: process.env.BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20241022-v2:0'
+    model: getDefaultModelId()
   };
 }

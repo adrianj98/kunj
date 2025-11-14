@@ -98,11 +98,13 @@ This will show you:
 
 You can set the `BEDROCK_MODEL` environment variable to use different Claude models:
 
-- `anthropic.claude-3-5-sonnet-20241022-v2:0` - **Claude 3.5 Sonnet (default)** - Latest, most capable
-- `anthropic.claude-3-5-sonnet-20240620-v1:0` - Claude 3.5 Sonnet (previous version)
+- `anthropic.claude-3-5-sonnet-20240620-v1:0` - **Claude 3.5 Sonnet (default)** - Latest, most capable
 - `anthropic.claude-3-opus-20240229-v1:0` - Claude 3 Opus - Very capable (higher cost)
 - `anthropic.claude-3-sonnet-20240229-v1:0` - Claude 3 Sonnet - Balanced
 - `anthropic.claude-3-haiku-20240307-v1:0` - Claude 3 Haiku - Fastest and cheapest
+- `anthropic.claude-v2:1` - Claude 2.1
+- `anthropic.claude-v2` - Claude 2
+- `anthropic.claude-instant-v1` - Claude Instant - Very fast and economical
 
 ## Usage
 
@@ -188,7 +190,7 @@ Committed 2 files:
 ### Environment Variables
 
 - `AWS_REGION` or `AWS_DEFAULT_REGION`: AWS region (default: us-east-1)
-- `BEDROCK_MODEL`: Claude model to use (default: anthropic.claude-3-5-sonnet-20241022-v2:0)
+- `BEDROCK_MODEL`: Claude model to use (default: anthropic.claude-3-5-sonnet-20240620-v1:0)
 - `AWS_ACCESS_KEY_ID`: AWS access key
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key
 - `AWS_PROFILE`: AWS profile name (alternative to keys)
