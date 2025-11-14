@@ -1806,40 +1806,148 @@ program
           return "feat";
         };
 
-        const questions = [
+        // Check if AI is available
+        let aiAvailable = false;
+        try {
+          // Try to dynamically import the AI module
+          const aiModule = await import('./lib/ai-commit');
+          aiAvailable = await aiModule.isAIAvailable();
+        } catch {
+          // AI module not available
+        }
+
+        const commitTypeChoices = [
+          { name: "feat: A new feature", value: "feat" },
+          { name: "fix: A bug fix", value: "fix" },
+          { name: "docs: Documentation changes", value: "docs" },
+          { name: "style: Code style changes", value: "style" },
+          { name: "refactor: Code refactoring", value: "refactor" },
+          { name: "test: Adding or updating tests", value: "test" },
+          { name: "chore: Maintenance tasks", value: "chore" },
+          { name: "(none): No prefix", value: "" }
+        ];
+
+        // Add AI option if available
+        if (aiAvailable) {
+          commitTypeChoices.unshift({
+            name: chalk.magenta("🤖 AI: Generate message with AI"),
+            value: "ai"
+          });
+        }
+
+        const { commitType } = await inquirer.prompt([
           {
             type: "list",
             name: "commitType",
             message: "Select commit type:",
-            choices: [
-              { name: "feat: A new feature", value: "feat" },
-              { name: "fix: A bug fix", value: "fix" },
-              { name: "docs: Documentation changes", value: "docs" },
-              { name: "style: Code style changes", value: "style" },
-              { name: "refactor: Code refactoring", value: "refactor" },
-              { name: "test: Adding or updating tests", value: "test" },
-              { name: "chore: Maintenance tasks", value: "chore" },
-              { name: "(none): No prefix", value: "" }
-            ],
-            default: suggestType()
-          },
-          {
-            type: "input",
-            name: "commitMessage",
-            message: "Enter commit message:",
-            validate: (input: string) => {
-              if (!input.trim()) {
-                return "Commit message cannot be empty";
-              }
-              return true;
-            }
+            choices: commitTypeChoices,
+            default: aiAvailable ? "ai" : suggestType()
           }
-        ];
+        ]);
 
-        const answers = await inquirer.prompt(questions);
-        commitMessage = answers.commitType
-          ? `${answers.commitType}: ${answers.commitMessage}`
-          : answers.commitMessage;
+        // Handle AI commit message generation
+        if (commitType === "ai") {
+          try {
+            const { generateAICommitMessage } = await import('./lib/ai-commit');
+            const aiMessage = await generateAICommitMessage(filesToCommit, true);
+
+            if (aiMessage) {
+              commitMessage = aiMessage;
+
+              // Show generated message and allow editing
+              console.log(chalk.cyan("\n🤖 AI Generated Message:"));
+              console.log(chalk.white(aiMessage));
+
+              const { useAI, editedMessage } = await inquirer.prompt([
+                {
+                  type: "confirm",
+                  name: "useAI",
+                  message: "Use this AI-generated message?",
+                  default: true
+                },
+                {
+                  type: "input",
+                  name: "editedMessage",
+                  message: "Edit the message (or press Enter to use as-is):",
+                  default: aiMessage,
+                  when: (answers: any) => answers.useAI
+                }
+              ]);
+
+              if (!useAI) {
+                // Fall back to manual entry
+                const { manualMessage } = await inquirer.prompt([
+                  {
+                    type: "input",
+                    name: "manualMessage",
+                    message: "Enter commit message manually:",
+                    validate: (input: string) => {
+                      if (!input.trim()) {
+                        return "Commit message cannot be empty";
+                      }
+                      return true;
+                    }
+                  }
+                ]);
+                commitMessage = manualMessage;
+              } else if (editedMessage) {
+                commitMessage = editedMessage;
+              }
+            } else {
+              // AI generation failed, fall back to manual
+              console.log(chalk.yellow("AI generation failed. Please enter message manually."));
+              const { manualMessage } = await inquirer.prompt([
+                {
+                  type: "input",
+                  name: "manualMessage",
+                  message: "Enter commit message:",
+                  validate: (input: string) => {
+                    if (!input.trim()) {
+                      return "Commit message cannot be empty";
+                    }
+                    return true;
+                  }
+                }
+              ]);
+              commitMessage = manualMessage;
+            }
+          } catch (error) {
+            console.log(chalk.yellow("AI generation not available. Please enter message manually."));
+            const { manualMessage } = await inquirer.prompt([
+              {
+                type: "input",
+                name: "manualMessage",
+                message: "Enter commit message:",
+                validate: (input: string) => {
+                  if (!input.trim()) {
+                    return "Commit message cannot be empty";
+                  }
+                  return true;
+                }
+              }
+            ]);
+            commitMessage = manualMessage;
+          }
+        } else {
+          // Manual commit message entry
+          const { commitMsg } = await inquirer.prompt([
+            {
+              type: "input",
+              name: "commitMsg",
+              message: "Enter commit message:",
+              validate: (input: string) => {
+                if (!input.trim()) {
+                  return "Commit message cannot be empty";
+                }
+                return true;
+              }
+            }
+          ]);
+
+          commitMessage = commitType && commitType !== ""
+            ? `${commitType}: ${commitMsg}`
+            : commitMsg;
+        }
 
         // Show preview and confirm
         console.log(chalk.cyan("\nCommit message preview:"));
