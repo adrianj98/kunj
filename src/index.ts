@@ -63,16 +63,132 @@ async function executeGitCommand(
   }
 }
 
+// Helper function to check if there are uncommitted changes
+async function hasUncommittedChanges(): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync("git status --porcelain");
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Helper function to create a stash for a branch
+async function createStash(branchName: string): Promise<boolean> {
+  try {
+    const hasChanges = await hasUncommittedChanges();
+    if (!hasChanges) {
+      return false; // No changes to stash
+    }
+
+    const stashMessage = `kunj-auto-stash-${branchName}-${Date.now()}`;
+    const result = await executeGitCommand(
+      `git stash push -m "${stashMessage}"`
+    );
+
+    if (result.success) {
+      console.log(
+        chalk.yellow(`📦 Stashed changes from branch '${branchName}'`)
+      );
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// Helper function to find and pop a stash for a branch
+async function popStashForBranch(branchName: string): Promise<boolean> {
+  try {
+    // Get list of stashes
+    const { stdout } = await execAsync("git stash list");
+    if (!stdout.trim()) {
+      return false; // No stashes available
+    }
+
+    // Find the most recent kunj auto-stash for this branch
+    const stashes = stdout.trim().split("\n");
+    const branchStashPattern = `kunj-auto-stash-${branchName}-`;
+
+    for (let i = 0; i < stashes.length; i++) {
+      if (stashes[i].includes(branchStashPattern)) {
+        // Found a stash for this branch, pop it
+        const stashIndex = stashes[i].match(/stash@{(\d+)}/)?.[1];
+        if (stashIndex !== undefined) {
+          const result = await executeGitCommand(
+            `git stash pop stash@{${stashIndex}}`
+          );
+          if (result.success) {
+            console.log(
+              chalk.yellow(
+                `📤 Restored stashed changes for branch '${branchName}'`
+              )
+            );
+            return true;
+          } else if (result.message.includes("conflict")) {
+            console.log(
+              chalk.yellow(
+                `⚠️  Stash applied with conflicts. Please resolve them manually.`
+              )
+            );
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// Helper function to clean up old kunj stashes (optional cleanup)
+async function cleanupOldStashes(): Promise<void> {
+  try {
+    const { stdout } = await execAsync("git stash list");
+    if (!stdout.trim()) return;
+
+    const stashes = stdout.trim().split("\n");
+    const kunjStashes = stashes.filter((stash) =>
+      stash.includes("kunj-auto-stash-")
+    );
+
+    // Keep only the most recent stash per branch
+    const branchStashes = new Map<
+      string,
+      { index: number; timestamp: number }
+    >();
+
+    kunjStashes.forEach((stash) => {
+      const match = stash.match(/stash@{(\d+)}.*kunj-auto-stash-(.+?)-(\d+)/);
+      if (match) {
+        const [, index, branch, timestamp] = match;
+        const existing = branchStashes.get(branch);
+        if (!existing || parseInt(timestamp) > existing.timestamp) {
+          branchStashes.set(branch, {
+            index: parseInt(index),
+            timestamp: parseInt(timestamp),
+          });
+        }
+      }
+    });
+  } catch {
+    // Silently fail cleanup
+  }
+}
+
 program
   .name("kunj")
-  .description("A CLI too    l for working with git branches")
+  .description("A CLI tool for working with git branches")
   .version("1.0.0");
 
 // Create command: kunj create <branch>
 program
   .command("create <branch>")
   .description("Create a new branch and switch to it")
-  .action(async (branchName: string) => {
+  .option("--no-stash", "Disable automatic stashing of changes")
+  .action(async (branchName: string, options?: { stash?: boolean }) => {
     try {
       // Check if we're in a git repository
       const isGitRepo = await checkGitRepo();
@@ -84,6 +200,15 @@ program
       console.log(
         chalk.blue(`Creating branch '${branchName}' and switching to it...`)
       );
+
+      // Get current branch before creating new one
+      const currentBranch = await getCurrentBranch();
+
+      // Stash changes if auto-stash is enabled (default)
+      const shouldStash = options?.stash !== false;
+      if (shouldStash) {
+        await createStash(currentBranch);
+      }
 
       // Create and checkout the branch
       const result = await executeGitCommand(`git checkout -b ${branchName}`);
@@ -118,7 +243,8 @@ program
 program
   .command("switch [branch]")
   .description("Switch to a branch (interactive if no branch specified)")
-  .action(async (branchName?: string) => {
+  .option("--no-stash", "Disable automatic stashing of changes")
+  .action(async (branchName?: string, options?: { stash?: boolean }) => {
     try {
       // Check if we're in a git repository
       const isGitRepo = await checkGitRepo();
@@ -129,7 +255,21 @@ program
 
       // If branch name is provided, switch directly
       if (branchName) {
+        const currentBranch = await getCurrentBranch();
+
+        // Check if we're already on the target branch
+        if (currentBranch === branchName) {
+          console.log(chalk.yellow(`Already on branch '${branchName}'`));
+          process.exit(0);
+        }
+
         console.log(chalk.blue(`Switching to branch '${branchName}'...`));
+
+        // Stash changes if auto-stash is enabled (default)
+        const shouldStash = options?.stash !== false;
+        if (shouldStash) {
+          await createStash(currentBranch);
+        }
 
         const result = await executeGitCommand(`git checkout ${branchName}`);
 
@@ -137,6 +277,11 @@ program
           console.log(
             chalk.green(`✓ Successfully switched to branch '${branchName}'`)
           );
+
+          // Try to pop any existing stash for this branch
+          if (shouldStash) {
+            await popStashForBranch(branchName);
+          }
         } else {
           if (result.message.includes("did not match any file")) {
             console.error(chalk.red(`✗ Branch '${branchName}' does not exist`));
@@ -201,6 +346,12 @@ program
 
         console.log(chalk.blue(`Switching to branch '${selectedBranch}'...`));
 
+        // Stash changes if auto-stash is enabled (default)
+        const shouldStash = options?.stash !== false;
+        if (shouldStash) {
+          await createStash(currentBranch);
+        }
+
         const result = await executeGitCommand(
           `git checkout ${selectedBranch}`
         );
@@ -209,6 +360,11 @@ program
           console.log(
             chalk.green(`✓ Successfully switched to branch '${selectedBranch}'`)
           );
+
+          // Try to pop any existing stash for this branch
+          if (shouldStash) {
+            await popStashForBranch(selectedBranch);
+          }
         } else {
           console.error(
             chalk.red(`✗ Failed to switch branch: ${result.message}`)
