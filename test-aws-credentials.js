@@ -9,7 +9,7 @@ async function testAWSCredentials() {
   console.log(chalk.blue('Testing AWS Credential Detection\n'));
 
   // Show current configuration
-  const configInfo = getAWSConfigInfo();
+  const configInfo = await getAWSConfigInfo();
   console.log(chalk.cyan('Current AWS Configuration:'));
   console.log(`  Region: ${chalk.yellow(configInfo.region)}`);
   console.log(`  Model: ${chalk.yellow(configInfo.model)}`);

@@ -7,7 +7,9 @@
       "Bash(node dist/index.js:*)",
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(npm install:*)",
+      "Bash(npx:*)"
     ],
     "deny": [],
     "ask": []

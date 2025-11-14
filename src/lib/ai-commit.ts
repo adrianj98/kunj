@@ -4,68 +4,73 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from "@aws-sdk/client-bedrock-runtime";
+import { defaultProvider } from "@aws-sdk/credential-provider-node";
+import { loadConfig } from "@aws-sdk/node-config-provider";
+import { NODE_REGION_CONFIG_OPTIONS, NODE_REGION_CONFIG_FILE_OPTIONS } from "@aws-sdk/config-resolver";
 import { exec } from "child_process";
 import { promisify } from "util";
 import chalk from "chalk";
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
 
 const execAsync = promisify(exec);
 
-// Get AWS region from config files or environment
-function getAWSRegion(): string {
-  // First check environment variables
-  if (process.env.AWS_REGION) return process.env.AWS_REGION;
-  if (process.env.AWS_DEFAULT_REGION) return process.env.AWS_DEFAULT_REGION;
-  if (process.env.AMAZON_REGION) return process.env.AMAZON_REGION;
+// Cache for region and credentials to avoid multiple async calls
+let cachedRegion: string | null = null;
+let regionProvider: (() => Promise<string>) | null = null;
 
-  // Try to read from AWS config file
-  try {
-    const configPath = path.join(os.homedir(), '.aws', 'config');
-    if (fs.existsSync(configPath)) {
-      const config = fs.readFileSync(configPath, 'utf8');
-      const profileName = process.env.AWS_PROFILE || 'default';
+// Get the region provider
+function getRegionProvider(): () => Promise<string> {
+  if (!regionProvider) {
+    // Use the SDK's built-in config loader which checks all standard sources
+    const baseProvider = loadConfig(
+      NODE_REGION_CONFIG_OPTIONS,
+      NODE_REGION_CONFIG_FILE_OPTIONS
+    );
 
-      // Look for the region in the specified profile
-      const profileRegex = new RegExp(`\\[(?:profile )?${profileName}\\][^\\[]*region\\s*=\\s*([^\\s]+)`, 'im');
-      const match = config.match(profileRegex);
-      if (match && match[1]) {
-        return match[1];
+    // Wrap with fallback
+    regionProvider = async () => {
+      try {
+        const region = await baseProvider();
+        return region || 'us-east-1';
+      } catch (error) {
+        // Fallback if no region is configured anywhere
+        return 'us-east-1';
       }
-
-      // Fallback to default profile if not found
-      if (profileName !== 'default') {
-        const defaultMatch = config.match(/\[(?:profile )?default\][^\[]*region\s*=\s*([^\s]+)/im);
-        if (defaultMatch && defaultMatch[1]) {
-          return defaultMatch[1];
-        }
-      }
-    }
-  } catch (error) {
-    // Ignore errors reading config file
+    };
   }
+  return regionProvider;
+}
 
-  // Default fallback
-  return 'us-east-1';
+// Get AWS region using SDK's config resolver
+async function getAWSRegion(): Promise<string> {
+  if (!cachedRegion) {
+    try {
+      const provider = getRegionProvider();
+      cachedRegion = await provider();
+    } catch (error) {
+      // Fallback to default if region resolution fails
+      cachedRegion = 'us-east-1';
+    }
+  }
+  return cachedRegion;
 }
 
 // Initialize AWS Bedrock client
 function getBedrockClient(): BedrockRuntimeClient {
-  // The SDK will automatically use the credential chain:
+  // The SDK will automatically use the credential chain via defaultProvider:
   // 1. Environment variables (AWS_ACCESS_KEY_ID, etc.)
   // 2. Shared credentials file (~/.aws/credentials)
   // 3. Shared config file (~/.aws/config with AWS_PROFILE)
-  // 4. EC2/ECS task roles
-  // 5. EC2 instance metadata service
+  // 4. ECS container credentials
+  // 5. EC2 instance metadata service (IMDS)
   // 6. SSO credentials
-  // 7. And more...
-
-  const region = getAWSRegion();
+  // 7. Web identity token credentials
+  // 8. Process credentials
 
   return new BedrockRuntimeClient({
-    region,
-    // The SDK handles credentials automatically via the credential chain
+    // Region will be resolved asynchronously when needed
+    region: getRegionProvider(),
+    // Credentials will be resolved via the default provider chain
+    credentials: defaultProvider(),
   });
 }
 
@@ -296,9 +301,9 @@ export async function checkAWSCredentials(): Promise<boolean> {
 }
 
 // Get information about the current AWS configuration
-export function getAWSConfigInfo(): { region: string; model: string } {
+export async function getAWSConfigInfo(): Promise<{ region: string; model: string }> {
   return {
-    region: getAWSRegion(),
+    region: await getAWSRegion(),
     model: process.env.BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20241022-v2:0'
   };
 }
