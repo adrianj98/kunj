@@ -225,42 +225,22 @@ export class CommitCommand extends BaseCommand {
       };
     }
 
-    const questions = [
+    // First, only ask for the commit type
+    // Default to AI if it's available, otherwise use the suggested type
+    const { commitType } = await inquirer.prompt([
       {
         type: "list",
         name: "commitType",
         message: "Select commit type:",
         choices: commitTypeChoices,
-        default: suggestedType,
+        default: aiAvailable ? "ai" : suggestedType,
       },
-      {
-        type: "input",
-        name: "commitMessage",
-        message: "Enter commit message:",
-        validate: (input: any) => {
-          if (!input.trim()) {
-            return "Commit message cannot be empty";
-          }
-          if (input.length > 100) {
-            return "Commit message should be less than 100 characters";
-          }
-          return true;
-        },
-      },
-      {
-        type: "editor",
-        name: "commitBody",
-        message: "Additional commit details (optional, press Enter to skip):",
-        default: "",
-      },
-    ];
-
-    const answers = await inquirer.prompt(questions);
+    ]);
 
     // Handle AI-generated commit message
     let message: string;
 
-    if (answers.commitType === "ai") {
+    if (commitType === "ai") {
       // Generate commit message using AI
       const aiResult = await generateAICommitMessage(files);
 
@@ -320,13 +300,37 @@ export class CommitCommand extends BaseCommand {
         message = editMessage || aiResult.fullMessage || "";
       }
     } else {
+      // For non-AI options, ask for message and body
+      const manualAnswers = await inquirer.prompt([
+        {
+          type: "input",
+          name: "commitMessage",
+          message: "Enter commit message:",
+          validate: (input: any) => {
+            if (!input.trim()) {
+              return "Commit message cannot be empty";
+            }
+            if (input.length > 100) {
+              return "Commit message should be less than 100 characters";
+            }
+            return true;
+          },
+        },
+        {
+          type: "editor",
+          name: "commitBody",
+          message: "Additional commit details (optional, press Enter to skip):",
+          default: "",
+        },
+      ]);
+
       // Construct the final commit message manually
-      message = answers.commitMessage;
-      if (answers.commitType) {
-        message = `${answers.commitType}: ${message}`;
+      message = manualAnswers.commitMessage;
+      if (commitType) {
+        message = `${commitType}: ${message}`;
       }
-      if (answers.commitBody && answers.commitBody.trim()) {
-        message += `\n\n${answers.commitBody.trim()}`;
+      if (manualAnswers.commitBody && manualAnswers.commitBody.trim()) {
+        message += `\n\n${manualAnswers.commitBody.trim()}`;
       }
     }
 

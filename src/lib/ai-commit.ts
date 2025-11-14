@@ -244,8 +244,6 @@ function suggestCommitType(files: string[]): string {
 // Check if AWS credentials are configured
 export async function checkAWSCredentials(): Promise<boolean> {
   try {
-    const client = await getBedrockClient();
-
     // Try a minimal invoke to check if we have valid credentials and access
     // We use a very small request to minimize cost
     try {
