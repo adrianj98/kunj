@@ -1627,5 +1627,264 @@ program
     }
   });
 
+// Commit command: kunj commit
+program
+  .command("commit")
+  .description("Interactive commit - select files and commit with message")
+  .option("-a, --all", "Stage all changed files automatically")
+  .option("-m, --message <message>", "Commit message (skip interactive prompt)")
+  .option("--amend", "Amend the last commit")
+  .action(async (options: { all?: boolean; message?: string; amend?: boolean } = {}) => {
+    try {
+      // Check if we're in a git repository
+      const isGitRepo = await checkGitRepo();
+      if (!isGitRepo) {
+        console.error(chalk.red("Error: Not a git repository"));
+        process.exit(1);
+      }
+
+      const currentBranch = await getCurrentBranch();
+      console.log(chalk.blue(`On branch: ${currentBranch}`));
+
+      // Get all file statuses
+      const { stdout } = await execAsync("git status --porcelain=v1");
+      const files: Array<{
+        path: string;
+        status: string;
+        staged: boolean;
+        displayName?: string;
+      }> = [];
+
+      if (stdout.trim()) {
+        const lines = stdout.split("\n").filter(line => line.trim());
+        for (const line of lines) {
+          if (line.length < 3) continue;
+
+          const indexStatus = line[0];
+          const workTreeStatus = line[1];
+          const filePath = line.substring(3);
+
+          let status = "modified";
+          let staged = false;
+
+          // Check for renamed files
+          if (filePath.includes(" -> ")) {
+            const [old, newPath] = filePath.split(" -> ");
+            files.push({
+              path: newPath,
+              displayName: `${old} → ${newPath}`,
+              status: "renamed",
+              staged: indexStatus === "R"
+            });
+            continue;
+          }
+
+          // Determine status based on git status codes
+          if (indexStatus === "A" || workTreeStatus === "A" || (indexStatus === "?" && workTreeStatus === "?")) {
+            status = "new";
+            staged = indexStatus === "A";
+          } else if (indexStatus === "D" || workTreeStatus === "D") {
+            status = "deleted";
+            staged = indexStatus === "D";
+          } else if (indexStatus === "M" || workTreeStatus === "M") {
+            status = "modified";
+            staged = indexStatus === "M";
+          } else if (indexStatus === "?" && workTreeStatus === "?") {
+            status = "new";
+            staged = false;
+          }
+
+          files.push({
+            path: filePath,
+            status,
+            staged
+          });
+        }
+      }
+
+      if (files.length === 0) {
+        console.log(chalk.yellow("No changes to commit"));
+        console.log(chalk.gray("Working tree is clean"));
+        return;
+      }
+
+      // Separate staged and unstaged files
+      const stagedFiles = files.filter(f => f.staged);
+      const unstagedFiles = files.filter(f => !f.staged);
+
+      let filesToCommit: string[] = [];
+
+      if (options.all) {
+        filesToCommit = files.map(f => f.path);
+        console.log(chalk.cyan(`Staging all ${filesToCommit.length} changed files...`));
+        await execAsync(`git add ${filesToCommit.map(f => `"${f}"`).join(" ")}`);
+      } else if (unstagedFiles.length > 0) {
+        // Interactive file selection
+        const getStatusIcon = (status: string) => {
+          switch (status) {
+            case "new": return chalk.green("+");
+            case "modified": return chalk.yellow("M");
+            case "deleted": return chalk.red("D");
+            case "renamed": return chalk.blue("R");
+            default: return chalk.gray("?");
+          }
+        };
+
+        const fileChoices = files.map(file => {
+          const statusIcon = getStatusIcon(file.status);
+          const stagedIndicator = file.staged ? chalk.green("[staged]") : "";
+          const fileName = file.displayName || file.path;
+
+          return {
+            name: `${statusIcon} ${fileName} ${stagedIndicator}`,
+            value: file.path,
+            checked: file.staged
+          };
+        });
+
+        console.log(chalk.cyan("\nSelect files to include in commit:"));
+        console.log(chalk.gray("(Use arrow keys to move, space to select, enter to confirm)"));
+
+        const { selectedFiles } = await inquirer.prompt([
+          {
+            type: "checkbox",
+            name: "selectedFiles",
+            message: "Files to commit:",
+            choices: fileChoices,
+            pageSize: 15,
+            validate: (input) => {
+              if (input.length === 0) {
+                return "You must select at least one file";
+              }
+              return true;
+            }
+          }
+        ]);
+
+        filesToCommit = selectedFiles;
+        if (filesToCommit.length === 0) {
+          console.log(chalk.yellow("No files selected"));
+          return;
+        }
+
+        console.log(chalk.cyan(`Staging ${filesToCommit.length} selected files...`));
+        await execAsync(`git add ${filesToCommit.map(f => `"${f}"`).join(" ")}`);
+      } else if (stagedFiles.length > 0) {
+        console.log(chalk.green(`${stagedFiles.length} files already staged`));
+        filesToCommit = stagedFiles.map(f => f.path);
+      } else {
+        console.log(chalk.yellow("No files to commit"));
+        return;
+      }
+
+      // Get commit message
+      let commitMessage: string;
+
+      if (options.message) {
+        commitMessage = options.message;
+      } else {
+        // Get recent commits for reference
+        const { stdout: logOutput } = await execAsync("git log --oneline -n 5");
+        const recentCommits = logOutput.split("\n")
+          .filter(line => line.trim())
+          .map(line => {
+            const match = line.match(/^[a-f0-9]+\s+(.+)$/);
+            return match ? match[1] : line;
+          });
+
+        console.log(chalk.cyan("\nRecent commit messages for reference:"));
+        recentCommits.forEach((msg, i) => {
+          console.log(chalk.gray(`  ${i + 1}. ${msg}`));
+        });
+
+        // Suggest commit type based on files
+        const suggestType = () => {
+          if (filesToCommit.some(f => f.includes("test") || f.includes("spec"))) return "test";
+          if (filesToCommit.some(f => f.includes(".md") || f.includes("README"))) return "docs";
+          if (filesToCommit.some(f => f.includes("package.json") || f.includes("tsconfig"))) return "build";
+          if (filesToCommit.some(f => f.includes(".yml") || f.includes(".yaml") || f.includes(".github"))) return "ci";
+          return "feat";
+        };
+
+        const questions = [
+          {
+            type: "list",
+            name: "commitType",
+            message: "Select commit type:",
+            choices: [
+              { name: "feat: A new feature", value: "feat" },
+              { name: "fix: A bug fix", value: "fix" },
+              { name: "docs: Documentation changes", value: "docs" },
+              { name: "style: Code style changes", value: "style" },
+              { name: "refactor: Code refactoring", value: "refactor" },
+              { name: "test: Adding or updating tests", value: "test" },
+              { name: "chore: Maintenance tasks", value: "chore" },
+              { name: "(none): No prefix", value: "" }
+            ],
+            default: suggestType()
+          },
+          {
+            type: "input",
+            name: "commitMessage",
+            message: "Enter commit message:",
+            validate: (input: string) => {
+              if (!input.trim()) {
+                return "Commit message cannot be empty";
+              }
+              return true;
+            }
+          }
+        ];
+
+        const answers = await inquirer.prompt(questions);
+        commitMessage = answers.commitType
+          ? `${answers.commitType}: ${answers.commitMessage}`
+          : answers.commitMessage;
+
+        // Show preview and confirm
+        console.log(chalk.cyan("\nCommit message preview:"));
+        console.log(chalk.white(commitMessage));
+
+        const { confirmed } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "confirmed",
+            message: "Proceed with this commit?",
+            default: true
+          }
+        ]);
+
+        if (!confirmed) {
+          console.log(chalk.yellow("Commit cancelled"));
+          return;
+        }
+      }
+
+      // Create the commit
+      console.log(chalk.blue("Creating commit..."));
+      const commitCommand = options.amend
+        ? `git commit --amend -m "${commitMessage.replace(/"/g, '\\"')}"`
+        : `git commit -m "${commitMessage.replace(/"/g, '\\"')}"`;
+
+      const { stdout: commitOutput } = await execAsync(commitCommand);
+      console.log(chalk.green("✓ Commit created successfully"));
+
+      // Show commit details
+      const commitInfo = commitOutput.match(/\[([^\]]+)\]\s+(.+)/);
+      if (commitInfo) {
+        console.log(chalk.gray(`  Branch: ${commitInfo[1]}`));
+      }
+
+      // Show what was committed
+      console.log(chalk.cyan(`\nCommitted ${filesToCommit.length} files:`));
+      filesToCommit.forEach(file => {
+        console.log(chalk.gray(`  - ${file}`));
+      });
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
 // Parse command line arguments
 program.parse();
