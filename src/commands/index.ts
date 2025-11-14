@@ -4,6 +4,7 @@ export { CreateCommand } from './create';
 export { SwitchCommand } from './switch';
 export { ListCommand } from './list';
 export { CommitCommand } from './commit';
+export { PrCommand } from './pr';
 export { DeleteCommand } from './delete';
 export { ConfigCommand } from './config';
 export { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
@@ -16,6 +17,7 @@ import { CreateCommand } from './create';
 import { SwitchCommand } from './switch';
 import { ListCommand } from './list';
 import { CommitCommand } from './commit';
+import { PrCommand } from './pr';
 import { DeleteCommand } from './delete';
 import { ConfigCommand } from './config';
 import { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
@@ -27,6 +29,7 @@ export function getAllCommands(): BaseCommand[] {
     new SwitchCommand(),
     new ListCommand(),
     new CommitCommand(),
+    new PrCommand(),
     new DeleteCommand(),
     new ConfigCommand(),
     new BranchNoteCommand(),
