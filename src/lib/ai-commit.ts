@@ -3,7 +3,10 @@
 const { ChatBedrockConverse } = require("@langchain/aws");
 import { defaultProvider } from "@aws-sdk/credential-provider-node";
 import { loadConfig } from "@aws-sdk/node-config-provider";
-import { NODE_REGION_CONFIG_OPTIONS, NODE_REGION_CONFIG_FILE_OPTIONS } from "@aws-sdk/config-resolver";
+import {
+  NODE_REGION_CONFIG_OPTIONS,
+  NODE_REGION_CONFIG_FILE_OPTIONS,
+} from "@aws-sdk/config-resolver";
 import { exec } from "child_process";
 import { promisify } from "util";
 import chalk from "chalk";
@@ -17,7 +20,9 @@ let cachedClient: any | null = null;
 
 // Get the default model ID - using the correct format for AWS Bedrock
 function getDefaultModelId(): string {
-  return process.env.BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20240620-v1:0';
+  return (
+    process.env.BEDROCK_MODEL || "anthropic.claude-3-5-sonnet-20240620-v1:0"
+  );
 }
 
 // Get the region provider
@@ -33,10 +38,10 @@ function getRegionProvider(): () => Promise<string> {
     regionProvider = async () => {
       try {
         const region = await baseProvider();
-        return region || 'us-east-1';
+        return region || "us-east-1";
       } catch (error) {
         // Fallback if no region is configured anywhere
-        return 'us-east-1';
+        return "us-east-1";
       }
     };
   }
@@ -51,7 +56,7 @@ async function getAWSRegion(): Promise<string> {
       cachedRegion = await provider();
     } catch (error) {
       // Fallback to default if region resolution fails
-      cachedRegion = 'us-east-1';
+      cachedRegion = "us-east-1";
     }
   }
   return cachedRegion;
@@ -146,6 +151,8 @@ Guidelines:
 
 Analyze these code changes:
 
+
+
 Files changed: ${fileList}
 
 Diff:
@@ -164,9 +171,7 @@ BODY: <optional detailed description>`;
     console.log(chalk.blue("🤖 Analyzing changes with Claude 3.5 Sonnet..."));
 
     // Invoke the model using ChatBedrockConverse
-    const response = await client.invoke([
-      { role: "user", content: prompt }
-    ]);
+    const response = await client.invoke([{ role: "user", content: prompt }]);
 
     // Extract the content from Claude's response
     const content = response.content?.toString() || "";
@@ -252,9 +257,7 @@ export async function checkAWSCredentials(): Promise<boolean> {
         maxTokens: 1,
       });
 
-      await testClient.invoke([
-        { role: "user", content: "test" }
-      ]);
+      await testClient.invoke([{ role: "user", content: "test" }]);
       return true; // If successful, credentials are valid
     } catch (err: any) {
       // Check specific error types
@@ -272,19 +275,29 @@ export async function checkAWSCredentials(): Promise<boolean> {
       }
 
       // Check for missing credentials
-      if (err.message?.includes("Could not load credentials") ||
-          err.message?.includes("Missing credentials") ||
-          err.message?.includes("No credentials") ||
-          err.message?.includes("Could not resolve credentials")) {
+      if (
+        err.message?.includes("Could not load credentials") ||
+        err.message?.includes("Missing credentials") ||
+        err.message?.includes("No credentials") ||
+        err.message?.includes("Could not resolve credentials")
+      ) {
         return false;
       }
 
       // Check for invalid model identifier
-      if (err.message?.includes("model identifier is invalid") ||
-          err.message?.includes("ValidationException")) {
+      if (
+        err.message?.includes("model identifier is invalid") ||
+        err.message?.includes("ValidationException")
+      ) {
         // Model doesn't exist but credentials are OK
-        console.error(chalk.yellow("Warning: Model not available:", getDefaultModelId()));
-        console.error(chalk.yellow("Try setting BEDROCK_MODEL environment variable to a valid model ID"));
+        console.error(
+          chalk.yellow("Warning: Model not available:", getDefaultModelId())
+        );
+        console.error(
+          chalk.yellow(
+            "Try setting BEDROCK_MODEL environment variable to a valid model ID"
+          )
+        );
         return true;
       }
 
@@ -295,15 +308,20 @@ export async function checkAWSCredentials(): Promise<boolean> {
     }
   } catch (error: any) {
     // If we can't even create the client, credentials are not configured
-    console.error(chalk.yellow("Warning: Could not check AWS credentials:", error.message));
+    console.error(
+      chalk.yellow("Warning: Could not check AWS credentials:", error.message)
+    );
     return false;
   }
 }
 
 // Get information about the current AWS configuration
-export async function getAWSConfigInfo(): Promise<{ region: string; model: string }> {
+export async function getAWSConfigInfo(): Promise<{
+  region: string;
+  model: string;
+}> {
   return {
     region: await getAWSRegion(),
-    model: getDefaultModelId()
+    model: getDefaultModelId(),
   };
 }
