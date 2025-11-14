@@ -27,9 +27,19 @@ The Kunj CLI now supports AI-generated commit messages using AWS Bedrock with Cl
 
 ### Step 2: Configure AWS Credentials
 
-Choose one of these methods:
+The AI commit feature uses the AWS SDK's credential chain, which automatically checks multiple sources for credentials in the following order:
 
-#### Option A: AWS CLI Configuration
+1. **Environment Variables** (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION)
+2. **Shared Credentials File** (~/.aws/credentials)
+3. **Shared Config File** (~/.aws/config)
+4. **ECS Task Role** (if running on ECS)
+5. **EC2 Instance Profile** (if running on EC2)
+6. **AWS SSO** (if configured)
+
+Choose any of these configuration methods:
+
+#### Option A: AWS CLI Configuration (Recommended)
+
 ```bash
 aws configure
 # Enter your AWS Access Key ID
@@ -37,7 +47,22 @@ aws configure
 # Enter your default region (e.g., us-east-1)
 ```
 
-#### Option B: Environment Variables
+This creates files at `~/.aws/credentials` and `~/.aws/config` that the SDK automatically uses.
+
+#### Option B: AWS Profile
+
+```bash
+# Configure a specific profile
+aws configure --profile my-profile
+
+# Use the profile
+export AWS_PROFILE="my-profile"
+```
+
+The region is automatically read from the profile's configuration.
+
+#### Option C: Environment Variables
+
 ```bash
 export AWS_ACCESS_KEY_ID="your-access-key"
 export AWS_SECRET_ACCESS_KEY="your-secret-key"
@@ -47,13 +72,29 @@ export AWS_REGION="us-east-1"
 export BEDROCK_MODEL="anthropic.claude-3-5-sonnet-20241022-v2:0"
 ```
 
-#### Option C: AWS Profile
+#### Option D: AWS SSO
+
+If your organization uses AWS SSO:
+
 ```bash
-export AWS_PROFILE="your-profile-name"
-export AWS_REGION="us-east-1"
+aws sso login --profile your-sso-profile
+export AWS_PROFILE="your-sso-profile"
 ```
 
-### Step 3: Available Models
+### Step 3: Test Your Configuration
+
+You can verify that your AWS credentials are properly configured by running:
+
+```bash
+node test-aws-credentials.js
+```
+
+This will show you:
+- Which region is configured
+- Which model will be used
+- Whether your credentials are valid
+
+### Step 4: Available Models
 
 You can set the `BEDROCK_MODEL` environment variable to use different Claude models:
 
@@ -69,6 +110,7 @@ You can set the `BEDROCK_MODEL` environment variable to use different Claude mod
 
 1. Make your code changes
 2. Run the commit command:
+
    ```bash
    kunj commit
    ```
@@ -100,6 +142,8 @@ Files to commit: 2 selected
 Recent commit messages for reference:
   1. feat: Add interactive commit command
   2. refactor: Extract commands to modular structure
+
+
 
 Select commit type:
 ❯ 🤖 AI: Generate message with AI
@@ -152,6 +196,7 @@ Committed 2 files:
 ### Cost Considerations
 
 AWS Bedrock charges per token processed. Typical costs per commit message:
+
 - Claude 3.5 Sonnet: ~$0.003-0.004
 - Claude 3 Opus: ~$0.015
 - Claude 3 Sonnet: ~$0.003
@@ -164,11 +209,13 @@ The actual cost depends on the size of your code diff. Claude 3.5 Sonnet provide
 ### "AI: Not configured" Message
 
 If you see this in the commit type menu:
+
 ```
 🤖 AI: Not configured (set AWS credentials)
 ```
 
 This means:
+
 1. AWS credentials are not set, or
 2. AWS Bedrock access is not enabled, or
 3. The configured region doesn't have Bedrock access
@@ -178,11 +225,13 @@ This means:
 ### "AI generation failed" Error
 
 If AI generation fails, the tool will:
+
 1. Show an error message
 2. Provide a basic fallback suggestion
 3. Allow you to write the message manually
 
 Common causes:
+
 - Network issues
 - AWS credential problems
 - Bedrock quota exceeded
@@ -191,6 +240,7 @@ Common causes:
 ### Regional Availability
 
 Not all AWS regions support Bedrock. Recommended regions:
+
 - `us-east-1` (N. Virginia)
 - `us-west-2` (Oregon)
 - `eu-west-1` (Ireland)
@@ -209,9 +259,7 @@ Not all AWS regions support Bedrock. Recommended regions:
      "Statement": [
        {
          "Effect": "Allow",
-         "Action": [
-           "bedrock:InvokeModel"
-         ],
+         "Action": ["bedrock:InvokeModel"],
          "Resource": "arn:aws:bedrock:*:*:model/anthropic.claude-*"
        }
      ]
@@ -236,6 +284,7 @@ Not all AWS regions support Bedrock. Recommended regions:
 ## Future Enhancements
 
 Potential improvements planned:
+
 - Support for other AI providers (OpenAI, local models)
 - Customizable prompt templates
 - Team-specific conventions

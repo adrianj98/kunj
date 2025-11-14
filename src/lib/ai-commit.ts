@@ -1,20 +1,71 @@
 // AI-powered commit message generation using AWS Bedrock Claude 3.5 Sonnet
 
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import chalk from 'chalk';
+import {
+  BedrockRuntimeClient,
+  InvokeModelCommand,
+} from "@aws-sdk/client-bedrock-runtime";
+import { exec } from "child_process";
+import { promisify } from "util";
+import chalk from "chalk";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 const execAsync = promisify(exec);
 
+// Get AWS region from config files or environment
+function getAWSRegion(): string {
+  // First check environment variables
+  if (process.env.AWS_REGION) return process.env.AWS_REGION;
+  if (process.env.AWS_DEFAULT_REGION) return process.env.AWS_DEFAULT_REGION;
+  if (process.env.AMAZON_REGION) return process.env.AMAZON_REGION;
+
+  // Try to read from AWS config file
+  try {
+    const configPath = path.join(os.homedir(), '.aws', 'config');
+    if (fs.existsSync(configPath)) {
+      const config = fs.readFileSync(configPath, 'utf8');
+      const profileName = process.env.AWS_PROFILE || 'default';
+
+      // Look for the region in the specified profile
+      const profileRegex = new RegExp(`\\[(?:profile )?${profileName}\\][^\\[]*region\\s*=\\s*([^\\s]+)`, 'im');
+      const match = config.match(profileRegex);
+      if (match && match[1]) {
+        return match[1];
+      }
+
+      // Fallback to default profile if not found
+      if (profileName !== 'default') {
+        const defaultMatch = config.match(/\[(?:profile )?default\][^\[]*region\s*=\s*([^\s]+)/im);
+        if (defaultMatch && defaultMatch[1]) {
+          return defaultMatch[1];
+        }
+      }
+    }
+  } catch (error) {
+    // Ignore errors reading config file
+  }
+
+  // Default fallback
+  return 'us-east-1';
+}
+
 // Initialize AWS Bedrock client
 function getBedrockClient(): BedrockRuntimeClient {
-  // Get AWS credentials from environment or AWS config
-  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
+  // The SDK will automatically use the credential chain:
+  // 1. Environment variables (AWS_ACCESS_KEY_ID, etc.)
+  // 2. Shared credentials file (~/.aws/credentials)
+  // 3. Shared config file (~/.aws/config with AWS_PROFILE)
+  // 4. EC2/ECS task roles
+  // 5. EC2 instance metadata service
+  // 6. SSO credentials
+  // 7. And more...
+
+  const region = getAWSRegion();
 
   return new BedrockRuntimeClient({
     region,
-    // Credentials will be loaded from environment or AWS config automatically
+    // The SDK handles credentials automatically via the credential chain
   });
 }
 
@@ -22,18 +73,20 @@ function getBedrockClient(): BedrockRuntimeClient {
 export async function getCommitDiff(files: string[]): Promise<string> {
   try {
     // Get the diff for staged files
-    const { stdout } = await execAsync('git diff --cached');
+    const { stdout } = await execAsync("git diff --cached");
     if (stdout) {
       return stdout;
     }
 
     // If no staged files, get diff for the specified files
-    const escapedFiles = files.map(f => `"${f}"`).join(' ');
-    const { stdout: fileDiff } = await execAsync(`git diff HEAD -- ${escapedFiles}`);
-    return fileDiff || '';
+    const escapedFiles = files.map((f) => `"${f}"`).join(" ");
+    const { stdout: fileDiff } = await execAsync(
+      `git diff HEAD -- ${escapedFiles}`
+    );
+    return fileDiff || "";
   } catch (error) {
-    console.error(chalk.yellow('Warning: Could not get file diff'));
-    return '';
+    console.error(chalk.yellow("Warning: Could not get file diff"));
+    return "";
   }
 }
 
@@ -44,13 +97,14 @@ export async function generateAICommitMessage(
 ): Promise<{ type: string; message: string; fullMessage?: string }> {
   try {
     // Get the diff if not provided
-    const fileDiff = diff || await getCommitDiff(files);
+    const fileDiff = diff || (await getCommitDiff(files));
 
     // Prepare the context for AI
-    const fileList = files.join(', ');
-    const diffPreview = fileDiff.length > 3000
-      ? fileDiff.substring(0, 3000) + '...[truncated]'
-      : fileDiff;
+    const fileList = files.join(", ");
+    const diffPreview =
+      fileDiff.length > 3000
+        ? fileDiff.substring(0, 3000) + "...[truncated]"
+        : fileDiff;
 
     // Create the prompt for Claude
     const prompt = `You are an expert at writing clear, concise git commit messages following conventional commit standards.
@@ -93,32 +147,33 @@ BODY: <optional detailed description>`;
     const client = getBedrockClient();
 
     // Using Claude 3.5 Sonnet
-    const modelId = process.env.BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20241022-v2:0';
+    const modelId =
+      process.env.BEDROCK_MODEL || "anthropic.claude-3-5-sonnet-20241022-v2:0";
 
-    console.log(chalk.blue('🤖 Analyzing changes with Claude 3.5 Sonnet...'));
+    console.log(chalk.blue("🤖 Analyzing changes with Claude 3.5 Sonnet..."));
 
     // Invoke the model
     const command = new InvokeModelCommand({
       modelId,
       body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
+        anthropic_version: "bedrock-2023-05-31",
         max_tokens: 500,
         temperature: 0.7,
         messages: [
           {
-            role: 'user',
-            content: prompt
-          }
-        ]
+            role: "user",
+            content: prompt,
+          },
+        ],
       }),
-      contentType: 'application/json',
+      contentType: "application/json",
     });
 
     const response = await client.send(command);
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
     // Extract the content from Claude's response
-    const content = responseBody.content?.[0]?.text || '';
+    const content = responseBody.content?.[0]?.text || "";
 
     // Parse the response
     const typeMatch = content.match(/TYPE:\s*(\w+)/i);
@@ -126,7 +181,7 @@ BODY: <optional detailed description>`;
     const bodyMatch = content.match(/BODY:\s*([\s\S]+)/i);
 
     if (!typeMatch || !messageMatch) {
-      throw new Error('Could not parse AI response');
+      throw new Error("Could not parse AI response");
     }
 
     const type = typeMatch[1].toLowerCase();
@@ -141,42 +196,48 @@ BODY: <optional detailed description>`;
     return {
       type,
       message,
-      fullMessage
+      fullMessage,
     };
   } catch (error: any) {
-    console.error(chalk.red('AI generation failed:'), error.message);
+    console.error(chalk.red("AI generation failed:"), error.message);
 
     // Provide a fallback suggestion based on file patterns
     const fallbackType = suggestCommitType(files);
-    const fallbackMessage = `Update ${files.length} file${files.length > 1 ? 's' : ''}`;
+    const fallbackMessage = `Update ${files.length} file${
+      files.length > 1 ? "s" : ""
+    }`;
 
     return {
       type: fallbackType,
       message: fallbackMessage,
-      fullMessage: `${fallbackType}: ${fallbackMessage}`
+      fullMessage: `${fallbackType}: ${fallbackMessage}`,
     };
   }
 }
 
 // Fallback function to suggest commit type based on files
 function suggestCommitType(files: string[]): string {
-  if (files.some(f => f.includes('test') || f.includes('spec'))) {
-    return 'test';
+  if (files.some((f) => f.includes("test") || f.includes("spec"))) {
+    return "test";
   }
-  if (files.some(f => f.includes('.md') || f.includes('README'))) {
-    return 'docs';
+  if (files.some((f) => f.includes(".md") || f.includes("README"))) {
+    return "docs";
   }
-  if (files.some(f => f.includes('package.json') || f.includes('tsconfig'))) {
-    return 'build';
+  if (files.some((f) => f.includes("package.json") || f.includes("tsconfig"))) {
+    return "build";
   }
-  if (files.some(f => f.includes('.yml') || f.includes('.yaml') || f.includes('.github'))) {
-    return 'ci';
+  if (
+    files.some(
+      (f) => f.includes(".yml") || f.includes(".yaml") || f.includes(".github")
+    )
+  ) {
+    return "ci";
   }
-  if (files.some(f => f.includes('fix') || f.includes('bug'))) {
-    return 'fix';
+  if (files.some((f) => f.includes("fix") || f.includes("bug"))) {
+    return "fix";
   }
 
-  return 'feat';
+  return "feat";
 }
 
 // Check if AWS credentials are configured
@@ -184,38 +245,60 @@ export async function checkAWSCredentials(): Promise<boolean> {
   try {
     const client = getBedrockClient();
 
-    // Try a simple list models command to check credentials
+    // Try a minimal invoke to check if we have valid credentials and access
+    // We use a very small request to minimize cost
     const command = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+      modelId: process.env.BEDROCK_MODEL || "anthropic.claude-3-5-sonnet-20241022-v2:0",
       body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
+        anthropic_version: "bedrock-2023-05-31",
         max_tokens: 1,
-        messages: [{ role: 'user', content: 'test' }]
+        messages: [{ role: "user", content: "test" }],
       }),
-      contentType: 'application/json',
+      contentType: "application/json",
     });
 
-    // We don't care about the response, just if we can authenticate
-    await client.send(command).catch((err) => {
-      if (err.name === 'CredentialsProviderError' ||
-          err.name === 'InvalidUserException' ||
-          err.$metadata?.httpStatusCode === 403) {
-        throw err;
+    // Try to send the command
+    try {
+      await client.send(command);
+      return true; // If successful, credentials are valid
+    } catch (err: any) {
+      // Check specific error types
+      if (
+        err.name === "CredentialsProviderError" ||
+        err.name === "InvalidSignatureException" ||
+        err.name === "UnrecognizedClientException" ||
+        err.name === "InvalidUserException" ||
+        err.name === "TokenRefreshRequired" ||
+        err.$metadata?.httpStatusCode === 403 ||
+        err.$metadata?.httpStatusCode === 401
+      ) {
+        // These errors indicate credential problems
+        return false;
       }
-      // Other errors (like model not found) mean credentials are OK
-    });
 
-    return true;
+      // Check for missing credentials
+      if (err.message?.includes("Could not load credentials") ||
+          err.message?.includes("Missing credentials") ||
+          err.message?.includes("No credentials")) {
+        return false;
+      }
+
+      // Other errors (like ResourceNotFoundException for the model,
+      // or throttling) mean credentials are OK but there might be
+      // other issues - we consider credentials valid in these cases
+      return true;
+    }
   } catch (error: any) {
+    // If we can't even create the client, credentials are not configured
+    console.error(chalk.yellow("Warning: Could not check AWS credentials:", error.message));
     return false;
   }
 }
 
-// Export configuration helper
-export function getAICommitConfig() {
+// Get information about the current AWS configuration
+export function getAWSConfigInfo(): { region: string; model: string } {
   return {
-    region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1',
-    model: process.env.BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20241022-v2:0',
-    configured: process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE ? true : false
+    region: getAWSRegion(),
+    model: process.env.BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20241022-v2:0'
   };
 }

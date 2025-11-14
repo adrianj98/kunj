@@ -1,8 +1,8 @@
 // Commit command - interactive file selection and commit
 
-import chalk from 'chalk';
-import inquirer from 'inquirer';
-import { BaseCommand } from '../lib/command';
+import chalk from "chalk";
+import inquirer from "inquirer";
+import { BaseCommand } from "../lib/command";
 import {
   checkGitRepo,
   getFileStatuses,
@@ -10,9 +10,9 @@ import {
   createCommit,
   getRecentCommitMessages,
   getCurrentBranch,
-  FileStatus
-} from '../lib/git';
-import { generateAICommitMessage, checkAWSCredentials, getAICommitConfig } from '../lib/ai-commit';
+  FileStatus,
+} from "../lib/git";
+import { generateAICommitMessage, checkAWSCredentials } from "../lib/ai-commit";
 
 interface CommitOptions {
   all?: boolean;
@@ -23,13 +23,19 @@ interface CommitOptions {
 export class CommitCommand extends BaseCommand {
   constructor() {
     super({
-      name: 'commit',
-      description: 'Interactive commit - select files and commit with message',
+      name: "commit",
+      description: "Interactive commit - select files and commit with message",
       options: [
-        { flags: '-a, --all', description: 'Stage all changed files automatically' },
-        { flags: '-m, --message <message>', description: 'Commit message (skip interactive prompt)' },
-        { flags: '--amend', description: 'Amend the last commit' }
-      ]
+        {
+          flags: "-a, --all",
+          description: "Stage all changed files automatically",
+        },
+        {
+          flags: "-m, --message <message>",
+          description: "Commit message (skip interactive prompt)",
+        },
+        { flags: "--amend", description: "Amend the last commit" },
+      ],
     });
   }
 
@@ -54,18 +60,22 @@ export class CommitCommand extends BaseCommand {
     }
 
     // Separate staged and unstaged files
-    const stagedFiles = files.filter(f => f.staged);
-    const unstagedFiles = files.filter(f => !f.staged);
+    const stagedFiles = files.filter((f) => f.staged);
+    const unstagedFiles = files.filter((f) => !f.staged);
 
     // If --all flag, stage all files
     let filesToCommit: string[] = [];
 
     if (options.all) {
-      filesToCommit = files.map(f => f.path);
-      console.log(chalk.cyan(`Staging all ${filesToCommit.length} changed files...`));
+      filesToCommit = files.map((f) => f.path);
+      console.log(
+        chalk.cyan(`Staging all ${filesToCommit.length} changed files...`)
+      );
       const stageResult = await stageFiles(filesToCommit);
       if (!stageResult.success) {
-        console.error(chalk.red(`Failed to stage files: ${stageResult.message}`));
+        console.error(
+          chalk.red(`Failed to stage files: ${stageResult.message}`)
+        );
         process.exit(1);
       }
     } else if (unstagedFiles.length > 0) {
@@ -78,16 +88,20 @@ export class CommitCommand extends BaseCommand {
       }
 
       // Stage selected files
-      console.log(chalk.cyan(`Staging ${filesToCommit.length} selected files...`));
+      console.log(
+        chalk.cyan(`Staging ${filesToCommit.length} selected files...`)
+      );
       const stageResult = await stageFiles(filesToCommit);
       if (!stageResult.success) {
-        console.error(chalk.red(`Failed to stage files: ${stageResult.message}`));
+        console.error(
+          chalk.red(`Failed to stage files: ${stageResult.message}`)
+        );
         process.exit(1);
       }
     } else if (stagedFiles.length > 0) {
       // Use already staged files
       console.log(chalk.green(`${stagedFiles.length} files already staged`));
-      filesToCommit = stagedFiles.map(f => f.path);
+      filesToCommit = stagedFiles.map((f) => f.path);
     } else {
       console.log(chalk.yellow("No files to commit"));
       return;
@@ -107,12 +121,6 @@ export class CommitCommand extends BaseCommand {
     }
 
     // Create the commit
-    const commitOptions = options.amend ? '--amend' : '';
-    const escapedMessage = commitMessage.replace(/"/g, '\\"');
-    const commitCommand = options.amend
-      ? `git commit --amend -m "${escapedMessage}"`
-      : `git commit -m "${escapedMessage}"`;
-
     console.log(chalk.blue("Creating commit..."));
     const result = await createCommit(commitMessage);
 
@@ -128,7 +136,7 @@ export class CommitCommand extends BaseCommand {
 
       // Show what was committed
       console.log(chalk.cyan(`\nCommitted ${filesToCommit.length} files:`));
-      filesToCommit.forEach(file => {
+      filesToCommit.forEach((file) => {
         console.log(chalk.gray(`  - ${file}`));
       });
     } else {
@@ -139,9 +147,9 @@ export class CommitCommand extends BaseCommand {
 
   private async selectFiles(files: FileStatus[]): Promise<string[]> {
     // Format file choices with status indicators
-    const fileChoices = files.map(file => {
+    const fileChoices = files.map((file) => {
       const statusIcon = this.getStatusIcon(file.status);
-      const stagedIndicator = file.staged ? chalk.green('[staged]') : '';
+      const stagedIndicator = file.staged ? chalk.green("[staged]") : "";
       const fileName = file.oldPath
         ? `${file.oldPath} → ${file.path}`
         : file.path;
@@ -149,27 +157,29 @@ export class CommitCommand extends BaseCommand {
       return {
         name: `${statusIcon} ${fileName} ${stagedIndicator}`,
         value: file.path,
-        checked: file.staged // Pre-select staged files
+        checked: file.staged, // Pre-select staged files
       };
     });
 
     console.log(chalk.cyan("\nSelect files to include in commit:"));
-    console.log(chalk.gray("(Use arrow keys to move, space to select, enter to confirm)"));
+    console.log(
+      chalk.gray("(Use arrow keys to move, space to select, enter to confirm)")
+    );
 
     const { selectedFiles } = await inquirer.prompt([
       {
-        type: 'checkbox',
-        name: 'selectedFiles',
-        message: 'Files to commit:',
+        type: "checkbox",
+        name: "selectedFiles",
+        message: "Files to commit:",
         choices: fileChoices,
         pageSize: 15,
         validate: (input: any) => {
           if (input.length === 0) {
-            return 'You must select at least one file';
+            return "You must select at least one file";
           }
           return true;
-        }
-      }
+        },
+      },
     ]);
 
     return selectedFiles;
@@ -187,64 +197,62 @@ export class CommitCommand extends BaseCommand {
     // Suggest a commit type based on files
     const suggestedType = this.suggestCommitType(files);
 
-    // Check if AI is available
-    const aiConfig = getAICommitConfig();
-    const aiAvailable = aiConfig.configured && await checkAWSCredentials();
+    const aiAvailable = await checkAWSCredentials();
 
     const commitTypeChoices = [
-      { name: chalk.cyan('🤖 AI: Generate message with AI'), value: 'ai' },
-      { name: '──────────────────────', value: '', disabled: true },
-      { name: 'feat: A new feature', value: 'feat' },
-      { name: 'fix: A bug fix', value: 'fix' },
-      { name: 'docs: Documentation changes', value: 'docs' },
-      { name: 'style: Code style changes (formatting, etc)', value: 'style' },
-      { name: 'refactor: Code refactoring', value: 'refactor' },
-      { name: 'test: Adding or updating tests', value: 'test' },
-      { name: 'chore: Maintenance tasks', value: 'chore' },
-      { name: 'build: Build system changes', value: 'build' },
-      { name: 'ci: CI configuration changes', value: 'ci' },
-      { name: 'perf: Performance improvements', value: 'perf' },
-      { name: 'revert: Revert a previous commit', value: 'revert' },
-      { name: '(none): No prefix', value: '' }
+      { name: chalk.cyan("🤖 AI: Generate message with AI"), value: "ai" },
+      { name: "──────────────────────", value: "", disabled: true },
+      { name: "feat: A new feature", value: "feat" },
+      { name: "fix: A bug fix", value: "fix" },
+      { name: "docs: Documentation changes", value: "docs" },
+      { name: "style: Code style changes (formatting, etc)", value: "style" },
+      { name: "refactor: Code refactoring", value: "refactor" },
+      { name: "test: Adding or updating tests", value: "test" },
+      { name: "chore: Maintenance tasks", value: "chore" },
+      { name: "build: Build system changes", value: "build" },
+      { name: "ci: CI configuration changes", value: "ci" },
+      { name: "perf: Performance improvements", value: "perf" },
+      { name: "revert: Revert a previous commit", value: "revert" },
+      { name: "(none): No prefix", value: "" },
     ];
 
     // If AI is not available, show a different message
     if (!aiAvailable) {
       commitTypeChoices[0] = {
-        name: chalk.gray('🤖 AI: Not configured (set AWS credentials)'),
-        value: 'ai',
-        disabled: true
+        name: chalk.gray("🤖 AI: Not configured (set AWS credentials)"),
+        value: "ai",
+        disabled: true,
       };
     }
 
     const questions = [
       {
-        type: 'list',
-        name: 'commitType',
-        message: 'Select commit type:',
+        type: "list",
+        name: "commitType",
+        message: "Select commit type:",
         choices: commitTypeChoices,
-        default: suggestedType
+        default: suggestedType,
       },
       {
-        type: 'input',
-        name: 'commitMessage',
-        message: 'Enter commit message:',
+        type: "input",
+        name: "commitMessage",
+        message: "Enter commit message:",
         validate: (input: any) => {
           if (!input.trim()) {
-            return 'Commit message cannot be empty';
+            return "Commit message cannot be empty";
           }
           if (input.length > 100) {
-            return 'Commit message should be less than 100 characters';
+            return "Commit message should be less than 100 characters";
           }
           return true;
-        }
+        },
       },
       {
-        type: 'editor',
-        name: 'commitBody',
-        message: 'Additional commit details (optional, press Enter to skip):',
-        default: ''
-      }
+        type: "editor",
+        name: "commitBody",
+        message: "Additional commit details (optional, press Enter to skip):",
+        default: "",
+      },
     ];
 
     const answers = await inquirer.prompt(questions);
@@ -252,7 +260,7 @@ export class CommitCommand extends BaseCommand {
     // Handle AI-generated commit message
     let message: string;
 
-    if (answers.commitType === 'ai') {
+    if (answers.commitType === "ai") {
       // Generate commit message using AI
       const aiResult = await generateAICommitMessage(files);
 
@@ -262,52 +270,54 @@ export class CommitCommand extends BaseCommand {
       // Ask for confirmation or editing
       const { useAI, editMessage } = await inquirer.prompt([
         {
-          type: 'confirm',
-          name: 'useAI',
-          message: 'Use this AI-generated message?',
-          default: true
+          type: "confirm",
+          name: "useAI",
+          message: "Use this AI-generated message?",
+          default: true,
         },
         {
-          type: 'input',
-          name: 'editMessage',
-          message: 'Edit the message (or press Enter to use as-is):',
+          type: "input",
+          name: "editMessage",
+          message: "Edit the message (or press Enter to use as-is):",
           default: aiResult.fullMessage,
-          when: (answers) => answers.useAI
-        }
+          when: (answers) => answers.useAI,
+        },
       ]);
 
       if (!useAI) {
         // Fall back to manual entry
         const manualAnswers = await inquirer.prompt([
           {
-            type: 'list',
-            name: 'commitType',
-            message: 'Select commit type manually:',
-            choices: commitTypeChoices.filter(c => c.value !== 'ai' && c.value !== ''),
-            default: aiResult.type
+            type: "list",
+            name: "commitType",
+            message: "Select commit type manually:",
+            choices: commitTypeChoices.filter(
+              (c) => c.value !== "ai" && c.value !== ""
+            ),
+            default: aiResult.type,
           },
           {
-            type: 'input',
-            name: 'commitMessage',
-            message: 'Enter commit message:',
+            type: "input",
+            name: "commitMessage",
+            message: "Enter commit message:",
             default: aiResult.message,
             validate: (input: any) => {
               if (!input.trim()) {
-                return 'Commit message cannot be empty';
+                return "Commit message cannot be empty";
               }
               if (input.length > 100) {
-                return 'Commit message should be less than 100 characters';
+                return "Commit message should be less than 100 characters";
               }
               return true;
-            }
-          }
+            },
+          },
         ]);
 
         message = manualAnswers.commitType
           ? `${manualAnswers.commitType}: ${manualAnswers.commitMessage}`
           : manualAnswers.commitMessage;
       } else {
-        message = editMessage || aiResult.fullMessage || '';
+        message = editMessage || aiResult.fullMessage || "";
       }
     } else {
       // Construct the final commit message manually
@@ -327,55 +337,64 @@ export class CommitCommand extends BaseCommand {
 
     const { confirmed } = await inquirer.prompt([
       {
-        type: 'confirm',
-        name: 'confirmed',
-        message: 'Proceed with this commit?',
-        default: true
-      }
+        type: "confirm",
+        name: "confirmed",
+        message: "Proceed with this commit?",
+        default: true,
+      },
     ]);
 
-    return confirmed ? message : '';
+    return confirmed ? message : "";
   }
 
-  private getStatusIcon(status: FileStatus['status']): string {
+  private getStatusIcon(status: FileStatus["status"]): string {
     switch (status) {
-      case 'new':
-        return chalk.green('+');
-      case 'modified':
-        return chalk.yellow('M');
-      case 'deleted':
-        return chalk.red('D');
-      case 'renamed':
-        return chalk.blue('R');
-      case 'copied':
-        return chalk.cyan('C');
-      case 'unmerged':
-        return chalk.magenta('U');
+      case "new":
+        return chalk.green("+");
+      case "modified":
+        return chalk.yellow("M");
+      case "deleted":
+        return chalk.red("D");
+      case "renamed":
+        return chalk.blue("R");
+      case "copied":
+        return chalk.cyan("C");
+      case "unmerged":
+        return chalk.magenta("U");
       default:
-        return chalk.gray('?');
+        return chalk.gray("?");
     }
   }
 
   private suggestCommitType(files: string[]): string {
     // Simple heuristic to suggest commit type based on file paths
-    if (files.some(f => f.includes('test') || f.includes('spec'))) {
-      return 'test';
+    if (files.some((f) => f.includes("test") || f.includes("spec"))) {
+      return "test";
     }
-    if (files.some(f => f.includes('.md') || f.includes('README'))) {
-      return 'docs';
+    if (files.some((f) => f.includes(".md") || f.includes("README"))) {
+      return "docs";
     }
-    if (files.some(f => f.includes('package.json') || f.includes('tsconfig'))) {
-      return 'build';
+    if (
+      files.some((f) => f.includes("package.json") || f.includes("tsconfig"))
+    ) {
+      return "build";
     }
-    if (files.some(f => f.includes('.yml') || f.includes('.yaml') || f.includes('.github'))) {
-      return 'ci';
+    if (
+      files.some(
+        (f) =>
+          f.includes(".yml") || f.includes(".yaml") || f.includes(".github")
+      )
+    ) {
+      return "ci";
     }
-    if (files.some(f => f.includes('fix') || f.includes('bug'))) {
-      return 'fix';
+    if (files.some((f) => f.includes("fix") || f.includes("bug"))) {
+      return "fix";
     }
 
     // Default to feat for new files, refactor for modifications
-    const hasNewFiles = files.some(f => f.endsWith('.ts') || f.endsWith('.js'));
-    return hasNewFiles ? 'feat' : 'refactor';
+    const hasNewFiles = files.some(
+      (f) => f.endsWith(".ts") || f.endsWith(".js")
+    );
+    return hasNewFiles ? "feat" : "refactor";
   }
 }
