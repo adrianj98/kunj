@@ -83,7 +83,7 @@ async function createStash(branchName: string): Promise<boolean> {
 
     const stashMessage = `kunj-auto-stash-${branchName}-${Date.now()}`;
     const result = await executeGitCommand(
-      `git stash push -m "${stashMessage}"`
+      `git stash push --include-untracked -m "${stashMessage}"`
     );
 
     if (result.success) {

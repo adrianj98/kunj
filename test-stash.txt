@@ -1,0 +1,2 @@
+This is a test file to check stashing.
+Let's see if it gets stashed.
