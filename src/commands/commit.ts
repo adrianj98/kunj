@@ -12,6 +12,7 @@ import {
   getCurrentBranch,
   FileStatus
 } from '../lib/git';
+import { generateAICommitMessage, checkAWSCredentials, getAICommitConfig } from '../lib/ai-commit';
 
 interface CommitOptions {
   all?: boolean;
@@ -186,25 +187,42 @@ export class CommitCommand extends BaseCommand {
     // Suggest a commit type based on files
     const suggestedType = this.suggestCommitType(files);
 
+    // Check if AI is available
+    const aiConfig = getAICommitConfig();
+    const aiAvailable = aiConfig.configured && await checkAWSCredentials();
+
+    const commitTypeChoices = [
+      { name: chalk.cyan('🤖 AI: Generate message with AI'), value: 'ai' },
+      { name: '──────────────────────', value: '', disabled: true },
+      { name: 'feat: A new feature', value: 'feat' },
+      { name: 'fix: A bug fix', value: 'fix' },
+      { name: 'docs: Documentation changes', value: 'docs' },
+      { name: 'style: Code style changes (formatting, etc)', value: 'style' },
+      { name: 'refactor: Code refactoring', value: 'refactor' },
+      { name: 'test: Adding or updating tests', value: 'test' },
+      { name: 'chore: Maintenance tasks', value: 'chore' },
+      { name: 'build: Build system changes', value: 'build' },
+      { name: 'ci: CI configuration changes', value: 'ci' },
+      { name: 'perf: Performance improvements', value: 'perf' },
+      { name: 'revert: Revert a previous commit', value: 'revert' },
+      { name: '(none): No prefix', value: '' }
+    ];
+
+    // If AI is not available, show a different message
+    if (!aiAvailable) {
+      commitTypeChoices[0] = {
+        name: chalk.gray('🤖 AI: Not configured (set AWS credentials)'),
+        value: 'ai',
+        disabled: true
+      };
+    }
+
     const questions = [
       {
         type: 'list',
         name: 'commitType',
         message: 'Select commit type:',
-        choices: [
-          { name: 'feat: A new feature', value: 'feat' },
-          { name: 'fix: A bug fix', value: 'fix' },
-          { name: 'docs: Documentation changes', value: 'docs' },
-          { name: 'style: Code style changes (formatting, etc)', value: 'style' },
-          { name: 'refactor: Code refactoring', value: 'refactor' },
-          { name: 'test: Adding or updating tests', value: 'test' },
-          { name: 'chore: Maintenance tasks', value: 'chore' },
-          { name: 'build: Build system changes', value: 'build' },
-          { name: 'ci: CI configuration changes', value: 'ci' },
-          { name: 'perf: Performance improvements', value: 'perf' },
-          { name: 'revert: Revert a previous commit', value: 'revert' },
-          { name: '(none): No prefix', value: '' }
-        ],
+        choices: commitTypeChoices,
         default: suggestedType
       },
       {
@@ -231,13 +249,75 @@ export class CommitCommand extends BaseCommand {
 
     const answers = await inquirer.prompt(questions);
 
-    // Construct the final commit message
-    let message = answers.commitMessage;
-    if (answers.commitType) {
-      message = `${answers.commitType}: ${message}`;
-    }
-    if (answers.commitBody && answers.commitBody.trim()) {
-      message += `\n\n${answers.commitBody.trim()}`;
+    // Handle AI-generated commit message
+    let message: string;
+
+    if (answers.commitType === 'ai') {
+      // Generate commit message using AI
+      const aiResult = await generateAICommitMessage(files);
+
+      console.log(chalk.cyan("\n🤖 AI-generated commit message:"));
+      console.log(chalk.white(aiResult.fullMessage));
+
+      // Ask for confirmation or editing
+      const { useAI, editMessage } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'useAI',
+          message: 'Use this AI-generated message?',
+          default: true
+        },
+        {
+          type: 'input',
+          name: 'editMessage',
+          message: 'Edit the message (or press Enter to use as-is):',
+          default: aiResult.fullMessage,
+          when: (answers) => answers.useAI
+        }
+      ]);
+
+      if (!useAI) {
+        // Fall back to manual entry
+        const manualAnswers = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'commitType',
+            message: 'Select commit type manually:',
+            choices: commitTypeChoices.filter(c => c.value !== 'ai' && c.value !== ''),
+            default: aiResult.type
+          },
+          {
+            type: 'input',
+            name: 'commitMessage',
+            message: 'Enter commit message:',
+            default: aiResult.message,
+            validate: (input: any) => {
+              if (!input.trim()) {
+                return 'Commit message cannot be empty';
+              }
+              if (input.length > 100) {
+                return 'Commit message should be less than 100 characters';
+              }
+              return true;
+            }
+          }
+        ]);
+
+        message = manualAnswers.commitType
+          ? `${manualAnswers.commitType}: ${manualAnswers.commitMessage}`
+          : manualAnswers.commitMessage;
+      } else {
+        message = editMessage || aiResult.fullMessage || '';
+      }
+    } else {
+      // Construct the final commit message manually
+      message = answers.commitMessage;
+      if (answers.commitType) {
+        message = `${answers.commitType}: ${message}`;
+      }
+      if (answers.commitBody && answers.commitBody.trim()) {
+        message += `\n\n${answers.commitBody.trim()}`;
+      }
     }
 
     // Show preview and confirm
