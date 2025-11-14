@@ -15,7 +15,7 @@ src/
 │   ├── switch.ts          # Switch command
 │   ├── list.ts            # List command
 │   └── ...                # Additional commands
-├── lib/                    # Core functionality
+├── lib/                   # Core functionality
 │   ├── command.ts         # Base command class & registry
 │   ├── git.ts             # Git operations
 │   ├── config.ts          # Configuration management
