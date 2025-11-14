@@ -10,9 +10,11 @@ import {
   createCommit,
   getRecentCommitMessages,
   getCurrentBranch,
+  getCommitsSinceBranch,
   FileStatus,
 } from "../lib/git";
 import { generateAICommitMessage, checkAWSCredentials } from "../lib/ai-commit";
+import { updateBranchMetadata } from "../lib/metadata";
 
 interface CommitOptions {
   all?: boolean;
@@ -139,6 +141,53 @@ export class CommitCommand extends BaseCommand {
       filesToCommit.forEach((file) => {
         console.log(chalk.gray(`  - ${file}`));
       });
+
+      // Ask if user wants to push
+      const { shouldPush } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "shouldPush",
+          message: "Push to remote repository?",
+          default: false,
+        },
+      ]);
+
+      if (shouldPush) {
+        console.log(chalk.blue("\nPushing to remote..."));
+        try {
+          const { exec } = require("child_process");
+          const { promisify } = require("util");
+          const execAsync = promisify(exec);
+
+          // First check if we need to set upstream
+          const currentBranch = await getCurrentBranch();
+          const { stdout: trackingBranch } = await execAsync(
+            `git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo ""`
+          );
+
+          if (!trackingBranch.trim()) {
+            // No upstream branch, push with -u
+            console.log(chalk.gray(`Setting upstream branch...`));
+            const { stdout, stderr } = await execAsync(
+              `git push -u origin ${currentBranch}`
+            );
+            if (stderr && !stderr.includes("Everything up-to-date")) {
+              console.log(chalk.yellow(stderr));
+            }
+            console.log(chalk.green("✓ Pushed and set upstream branch"));
+          } else {
+            // Upstream exists, normal push
+            const { stdout, stderr } = await execAsync("git push");
+            if (stderr && !stderr.includes("Everything up-to-date")) {
+              console.log(chalk.yellow(stderr));
+            }
+            console.log(chalk.green("✓ Pushed to remote"));
+          }
+        } catch (error: any) {
+          console.error(chalk.red(`✗ Push failed: ${error.message}`));
+          console.log(chalk.gray("You can manually push with: git push"));
+        }
+      }
     } else {
       console.error(chalk.red(`✗ Commit failed: ${result.message}`));
       process.exit(1);
@@ -241,11 +290,23 @@ export class CommitCommand extends BaseCommand {
     let message: string;
 
     if (commitType === "ai") {
+      // Get branch commits for context
+      const branchCommits = await getCommitsSinceBranch();
+      const currentBranch = await getCurrentBranch();
+
       // Generate commit message using AI
-      const aiResult = await generateAICommitMessage(files);
+      const aiResult = await generateAICommitMessage(files, branchCommits, currentBranch);
 
       console.log(chalk.cyan("\n🤖 AI-generated commit message:"));
       console.log(chalk.white(aiResult.fullMessage));
+
+      // Save branch description if generated
+      if (aiResult.branchDescription) {
+        updateBranchMetadata(currentBranch, {
+          description: aiResult.branchDescription
+        });
+        console.log(chalk.gray(`\nBranch description saved: ${aiResult.branchDescription}`));
+      }
 
       // Ask for confirmation or editing
       const { useAI, editMessage } = await inquirer.prompt([
@@ -299,6 +360,9 @@ export class CommitCommand extends BaseCommand {
       } else {
         message = editMessage || aiResult.fullMessage || "";
       }
+
+      // For AI, we already confirmed, so return the message
+      return message;
     } else {
       // For non-AI options, ask for message and body
       const manualAnswers = await inquirer.prompt([
@@ -332,23 +396,23 @@ export class CommitCommand extends BaseCommand {
       if (manualAnswers.commitBody && manualAnswers.commitBody.trim()) {
         message += `\n\n${manualAnswers.commitBody.trim()}`;
       }
+
+      // Show preview and confirm for manual commits
+      console.log(chalk.cyan("\nCommit message preview:"));
+      console.log(chalk.white(message));
+      console.log();
+
+      const { confirmed } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "confirmed",
+          message: "Proceed with this commit?",
+          default: true,
+        },
+      ]);
+
+      return confirmed ? message : "";
     }
-
-    // Show preview and confirm
-    console.log(chalk.cyan("\nCommit message preview:"));
-    console.log(chalk.white(message));
-    console.log();
-
-    const { confirmed } = await inquirer.prompt([
-      {
-        type: "confirm",
-        name: "confirmed",
-        message: "Proceed with this commit?",
-        default: true,
-      },
-    ]);
-
-    return confirmed ? message : "";
   }
 
   private getStatusIcon(status: FileStatus["status"]): string {

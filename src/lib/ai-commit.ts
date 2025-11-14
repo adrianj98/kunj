@@ -113,8 +113,10 @@ export async function getCommitDiff(files: string[]): Promise<string> {
 // Generate commit message using AI
 export async function generateAICommitMessage(
   files: string[],
+  branchCommits: string[],
+  currentBranch: string,
   diff?: string
-): Promise<{ type: string; message: string; fullMessage?: string }> {
+): Promise<{ type: string; message: string; fullMessage?: string; branchDescription?: string }> {
   try {
     // Get the diff if not provided
     const fileDiff = diff || (await getCommitDiff(files));
@@ -126,9 +128,14 @@ export async function generateAICommitMessage(
         ? fileDiff.substring(0, 3000) + "...[truncated]"
         : fileDiff;
 
+    // Format branch commits for context
+    const branchContext = branchCommits.length > 0
+      ? `\nRecent commits on this branch (${currentBranch}):\n${branchCommits.map(c => `- ${c}`).join('\n')}\n`
+      : '';
+
     // Create the prompt for Claude
     const prompt = `You are an expert at writing clear, concise git commit messages following conventional commit standards.
-Your task is to analyze the code changes and generate an appropriate commit message.
+Your task is to analyze the code changes and generate an appropriate commit message, and also provide a very short description of what this branch is doing overall.
 
 Conventional commit types:
 - feat: A new feature
@@ -148,10 +155,9 @@ Guidelines:
 3. Focus on WHY the change was made, not just what changed
 4. Use present tense ("add" not "added")
 5. Don't end with a period
-
+6. Also provide a very short (5-10 words) description of what this branch is accomplishing overall
+${branchContext}
 Analyze these code changes:
-
-
 
 Files changed: ${fileList}
 
@@ -163,7 +169,8 @@ ${diffPreview}
 Respond with:
 TYPE: <commit type>
 MESSAGE: <commit subject>
-BODY: <optional detailed description>`;
+BODY: <optional detailed description>
+BRANCH_DESC: <very short description of what this branch is doing, 5-10 words>`;
 
     // Get the Bedrock client
     const client = await getBedrockClient();
@@ -179,7 +186,8 @@ BODY: <optional detailed description>`;
     // Parse the response
     const typeMatch = content.match(/TYPE:\s*(\w+)/i);
     const messageMatch = content.match(/MESSAGE:\s*(.+)/i);
-    const bodyMatch = content.match(/BODY:\s*([\s\S]+)/i);
+    const bodyMatch = content.match(/BODY:\s*([^\n]*(?:\n(?!BRANCH_DESC:).*)*)/i);
+    const branchDescMatch = content.match(/BRANCH_DESC:\s*(.+)/i);
 
     if (!typeMatch || !messageMatch) {
       throw new Error("Could not parse AI response");
@@ -188,6 +196,7 @@ BODY: <optional detailed description>`;
     const type = typeMatch[1].toLowerCase();
     const commitMessage = messageMatch[1].trim();
     const body = bodyMatch ? bodyMatch[1].trim() : undefined;
+    const branchDescription = branchDescMatch ? branchDescMatch[1].trim() : undefined;
 
     // Build the full message
     const fullMessage = body
@@ -198,6 +207,7 @@ BODY: <optional detailed description>`;
       type,
       message: commitMessage,
       fullMessage,
+      branchDescription,
     };
   } catch (error: any) {
     console.error(chalk.red("AI generation failed:"), error.message);
@@ -212,6 +222,7 @@ BODY: <optional detailed description>`;
       type: fallbackType,
       message: fallbackMessage,
       fullMessage: `${fallbackType}: ${fallbackMessage}`,
+      branchDescription: undefined,
     };
   }
 }
