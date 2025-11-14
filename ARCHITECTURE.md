@@ -8,8 +8,8 @@ Kunj CLI has been refactored into a modular, pluggable architecture that makes i
 
 ```
 src/
-├── index.ts                 # Main entry point
-├── commands/               # Command implementations
+├── index.ts               # Main entry point
+├── commands/              # Command implementations
 │   ├── index.ts           # Command registry
 │   ├── create.ts          # Create command
 │   ├── switch.ts          # Switch command
@@ -40,6 +40,7 @@ The command system uses a base class pattern for pluggable commands:
 ### Git Operations (`lib/git.ts`)
 
 Encapsulates all git operations:
+
 - Branch management
 - Repository checks
 - Command execution
@@ -47,6 +48,7 @@ Encapsulates all git operations:
 ### Configuration (`lib/config.ts`)
 
 Manages user configuration:
+
 - Loading/saving config files
 - Default configuration
 - Config file paths
@@ -54,6 +56,7 @@ Manages user configuration:
 ### Metadata (`lib/metadata.ts`)
 
 Handles branch metadata:
+
 - Branch descriptions, tags, notes
 - Stash tracking
 - Last switched timestamps
@@ -61,6 +64,7 @@ Handles branch metadata:
 ### Stash Operations (`lib/stash.ts`)
 
 Manages stashing functionality:
+
 - Creating stashes with metadata
 - Restoring stashes
 - Tracking stashes per branch
@@ -74,17 +78,17 @@ To add a new command, follow these steps:
 Create a new file in `src/commands/` (e.g., `src/commands/mycommand.ts`):
 
 ```typescript
-import { BaseCommand } from '../lib/command';
+import { BaseCommand } from "../lib/command";
 
 export class MyCommand extends BaseCommand {
   constructor() {
     super({
-      name: 'mycommand <arg>',
-      description: 'Description of my command',
+      name: "mycommand <arg>",
+      description: "Description of my command",
       options: [
-        { flags: '-f, --flag', description: 'A flag option' },
-        { flags: '-o, --option <value>', description: 'An option with value' }
-      ]
+        { flags: "-f, --flag", description: "A flag option" },
+        { flags: "-o, --option <value>", description: "An option with value" },
+      ],
     });
   }
 
@@ -100,7 +104,7 @@ export class MyCommand extends BaseCommand {
 Add your command to `src/commands/index.ts`:
 
 ```typescript
-import { MyCommand } from './mycommand';
+import { MyCommand } from "./mycommand";
 
 export function getAllCommands(): BaseCommand[] {
   return [
