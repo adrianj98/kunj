@@ -148,7 +148,7 @@ export class CommitCommand extends BaseCommand {
           type: "confirm",
           name: "shouldPush",
           message: "Push to remote repository?",
-          default: false,
+          default: true,
         },
       ]);
 
