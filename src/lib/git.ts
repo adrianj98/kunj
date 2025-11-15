@@ -142,7 +142,7 @@ export async function getFileStatuses(): Promise<FileStatus[]> {
 
       const indexStatus = line[0];
       const workTreeStatus = line[1];
-      const filePath = line.substring(3);
+      let filePath = line.substring(3);
 
       // Parse the status codes
       let status: FileStatus['status'] = 'modified';
@@ -158,6 +158,32 @@ export async function getFileStatuses(): Promise<FileStatus[]> {
           staged: indexStatus === 'R',
           oldPath: old
         });
+        continue;
+      }
+
+      // Check if this is an untracked directory (ends with /)
+      if (filePath.endsWith('/') && indexStatus === '?' && workTreeStatus === '?') {
+        // Get all untracked files in this directory
+        try {
+          const { stdout: filesInDir } = await execAsync(`git ls-files --others --exclude-standard "${filePath}*"`);
+          if (filesInDir.trim()) {
+            const dirFiles = filesInDir.split('\n').filter(f => f.trim());
+            for (const file of dirFiles) {
+              files.push({
+                path: file,
+                status: 'new',
+                staged: false
+              });
+            }
+          }
+        } catch (err) {
+          // If command fails, just add the directory as is
+          files.push({
+            path: filePath.replace(/\/$/, ''), // Remove trailing slash
+            status: 'new',
+            staged: false
+          });
+        }
         continue;
       }
 
@@ -227,5 +253,63 @@ export async function getRecentCommitMessages(limit: number = 10): Promise<strin
       });
   } catch {
     return [];
+  }
+}
+
+// Get the main/master branch name
+export async function getMainBranch(): Promise<string> {
+  try {
+    // Check if main exists
+    const { stdout: mainExists } = await execAsync('git rev-parse --verify main 2>/dev/null || echo ""');
+    if (mainExists.trim()) return 'main';
+
+    // Check if master exists
+    const { stdout: masterExists } = await execAsync('git rev-parse --verify master 2>/dev/null || echo ""');
+    if (masterExists.trim()) return 'master';
+
+    // Try to get from remote
+    const { stdout: remotes } = await execAsync('git branch -r');
+    if (remotes.includes('origin/main')) return 'main';
+    if (remotes.includes('origin/master')) return 'master';
+
+    return 'main'; // Default fallback
+  } catch {
+    return 'main';
+  }
+}
+
+// Get commits since branch diverged from main/master
+export async function getCommitsSinceBranch(): Promise<string[]> {
+  try {
+    const currentBranch = await getCurrentBranch();
+    const mainBranch = await getMainBranch();
+
+    // If we're on the main branch, just return recent commits
+    if (currentBranch === mainBranch) {
+      return getRecentCommitMessages(5);
+    }
+
+    // Find the merge-base (common ancestor)
+    const { stdout: mergeBase } = await execAsync(`git merge-base ${mainBranch} HEAD 2>/dev/null || echo ""`);
+
+    if (!mergeBase.trim()) {
+      // If no merge-base found, just return recent commits
+      return getRecentCommitMessages(5);
+    }
+
+    // Get commits from merge-base to HEAD
+    const { stdout } = await execAsync(`git log --oneline ${mergeBase.trim()}..HEAD`);
+    if (!stdout.trim()) return [];
+
+    return stdout.split('\n')
+      .filter(line => line.trim())
+      .map(line => {
+        // Remove the commit hash and return just the message
+        const match = line.match(/^[a-f0-9]+\s+(.+)$/);
+        return match ? match[1] : line;
+      });
+  } catch {
+    // Fallback to recent commits if something goes wrong
+    return getRecentCommitMessages(5);
   }
 }

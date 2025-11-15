@@ -1,6 +1,6 @@
 // Base command class and registry for pluggable command system
 
-import { Command as CommanderCommand } from 'commander';
+import { Command as CommanderCommand } from "commander";
 
 export interface CommandConfig {
   name: string;
@@ -46,7 +46,7 @@ export abstract class BaseCommand {
       try {
         await this.execute(...args);
       } catch (error) {
-        console.error('Command failed:', error);
+        console.error("Command failed:", error);
         process.exit(1);
       }
     });

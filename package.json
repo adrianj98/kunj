@@ -9,19 +9,40 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run test",
+    "version": "git add -A",
+    "postversion": "git push && git push --tags"
   },
-  "keywords": ["git", "cli", "branches"],
-  "author": "",
+  "keywords": [
+    "git",
+    "cli",
+    "branches"
+  ],
+  "author": "me",
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.932.0",
+    "@aws-sdk/config-resolver": "^3.370.0",
+    "@aws-sdk/credential-provider-node": "^3.932.0",
+    "@aws-sdk/node-config-provider": "^3.370.0",
+    "@langchain/aws": "^1.0.1",
+    "@langchain/core": "^1.0.5",
     "chalk": "^4.1.2",
     "commander": "^12.0.0",
     "inquirer": "^8.2.6"
   },
   "devDependencies": {
+    "@jest/globals": "^29.7.0",
     "@types/inquirer": "^8.2.10",
+    "@types/jest": "^29.5.14",
     "@types/node": "^20.11.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }
