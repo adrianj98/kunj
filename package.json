@@ -14,9 +14,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "tsc --noEmit",
-    "prepublishOnly": "npm run build && npm run test",
-    "version": "git add -A",
-    "postversion": "git push && git push --tags"
+    "prepublishOnly": "npm run build && npm run test"
   },
   "keywords": [
     "git",
