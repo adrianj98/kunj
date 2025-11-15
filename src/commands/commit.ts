@@ -308,60 +308,10 @@ export class CommitCommand extends BaseCommand {
         console.log(chalk.gray(`\nBranch description saved: ${aiResult.branchDescription}`));
       }
 
-      // Ask for confirmation or editing
-      const { useAI, editMessage } = await inquirer.prompt([
-        {
-          type: "confirm",
-          name: "useAI",
-          message: "Use this AI-generated message?",
-          default: true,
-        },
-        {
-          type: "input",
-          name: "editMessage",
-          message: "Edit the message (or press Enter to use as-is):",
-          default: aiResult.fullMessage,
-          when: (answers) => answers.useAI,
-        },
-      ]);
+      // Use the AI-generated message directly without asking for confirmation
+      message = aiResult.fullMessage || "";
 
-      if (!useAI) {
-        // Fall back to manual entry
-        const manualAnswers = await inquirer.prompt([
-          {
-            type: "list",
-            name: "commitType",
-            message: "Select commit type manually:",
-            choices: commitTypeChoices.filter(
-              (c) => c.value !== "ai" && c.value !== ""
-            ),
-            default: aiResult.type,
-          },
-          {
-            type: "input",
-            name: "commitMessage",
-            message: "Enter commit message:",
-            default: aiResult.message,
-            validate: (input: any) => {
-              if (!input.trim()) {
-                return "Commit message cannot be empty";
-              }
-              if (input.length > 100) {
-                return "Commit message should be less than 100 characters";
-              }
-              return true;
-            },
-          },
-        ]);
-
-        message = manualAnswers.commitType
-          ? `${manualAnswers.commitType}: ${manualAnswers.commitMessage}`
-          : manualAnswers.commitMessage;
-      } else {
-        message = editMessage || aiResult.fullMessage || "";
-      }
-
-      // For AI, we already confirmed, so return the message
+      // Return the AI-generated message immediately
       return message;
     } else {
       // For non-AI options, ask for message and body
