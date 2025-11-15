@@ -21,19 +21,23 @@ interface PrOptions {
   base?: string;
   draft?: boolean;
   web?: boolean;
+  status?: boolean;
+  list?: boolean;
 }
 
 export class PrCommand extends BaseCommand {
   constructor() {
     super({
       name: "pr",
-      description: "Create a pull request on GitHub",
+      description: "Create or view pull requests on GitHub",
       options: [
         { flags: "-t, --title <title>", description: "PR title" },
         { flags: "-b, --body <body>", description: "PR body/description" },
         { flags: "--base <branch>", description: "Base branch (default: main/master)" },
         { flags: "-d, --draft", description: "Create as draft PR" },
         { flags: "-w, --web", description: "Open PR in web browser after creation" },
+        { flags: "-s, --status", description: "View status of current branch's PR" },
+        { flags: "-l, --list", description: "List all open PRs" },
       ],
     });
   }
@@ -58,6 +62,18 @@ export class PrCommand extends BaseCommand {
       process.exit(1);
     }
 
+    // Handle status flag
+    if (options.status) {
+      await this.showPrStatus();
+      return;
+    }
+
+    // Handle list flag
+    if (options.list) {
+      await this.listPrs();
+      return;
+    }
+
     const currentBranch = await getCurrentBranch();
     const mainBranch = options.base || (await getMainBranch());
 
@@ -65,6 +81,14 @@ export class PrCommand extends BaseCommand {
       console.error(chalk.red(`Error: Cannot create PR from ${mainBranch} branch`));
       console.log(chalk.yellow("Please switch to a feature branch first"));
       process.exit(1);
+    }
+
+    // Check if PR already exists for this branch
+    const existingPr = await this.checkExistingPr(currentBranch);
+    if (existingPr) {
+      console.log(chalk.blue(`Found existing PR for branch ${currentBranch}`));
+      await this.showPrStatus();
+      return;
     }
 
     console.log(chalk.blue(`Creating PR from ${currentBranch} to ${mainBranch}`));
@@ -141,6 +165,10 @@ export class PrCommand extends BaseCommand {
         const prUrl = stdout.trim();
         console.log(chalk.green("\n✓ Pull request created successfully!"));
         console.log(chalk.cyan(`PR URL: ${prUrl}`));
+
+        // Show initial PR status
+        console.log(chalk.blue("\nFetching PR status..."));
+        await this.showPrStatus();
 
         // Ask if user wants to open in browser
         if (!options.web) {
@@ -265,5 +293,191 @@ export class PrCommand extends BaseCommand {
     body += "- [ ] Documentation updated if needed\n";
 
     return { title, body };
+  }
+
+  private async checkExistingPr(branch: string): Promise<boolean> {
+    try {
+      const { stdout } = await execAsync(
+        `gh pr list --head ${branch} --json number --jq '.[0].number' 2>/dev/null || echo ""`
+      );
+      return stdout.trim() !== "";
+    } catch {
+      return false;
+    }
+  }
+
+  private async showPrStatus(): Promise<void> {
+    try {
+      const currentBranch = await getCurrentBranch();
+      console.log(chalk.blue(`\n📋 PR Status for branch: ${currentBranch}\n`));
+
+      // Get PR details
+      const { stdout: prJson } = await execAsync(
+        `gh pr view --json number,title,state,url,isDraft,mergeable,reviews,statusCheckRollup,additions,deletions,author 2>/dev/null || echo "{}"`
+      );
+
+      const pr = JSON.parse(prJson || "{}");
+
+      if (!pr.number) {
+        console.log(chalk.yellow("No PR found for the current branch"));
+        console.log(chalk.gray("Create one with: kunj pr"));
+        return;
+      }
+
+      // Basic PR info
+      console.log(chalk.cyan("📌 PR Info:"));
+      console.log(`  Number: #${pr.number}`);
+      console.log(`  Title: ${pr.title}`);
+      console.log(`  Author: ${pr.author?.login || "unknown"}`);
+      console.log(`  State: ${this.formatState(pr.state, pr.isDraft)}`);
+      console.log(`  URL: ${chalk.blue(pr.url)}`);
+      console.log(`  Changes: ${chalk.green(`+${pr.additions}`)} ${chalk.red(`-${pr.deletions}`)}`);
+
+      // Mergeable status
+      const mergeableIcon = pr.mergeable === "MERGEABLE" ? "✅" : pr.mergeable === "CONFLICTING" ? "❌" : "⏳";
+      console.log(`  Mergeable: ${mergeableIcon} ${pr.mergeable || "unknown"}`);
+
+      // Reviews/Approvals
+      console.log(chalk.cyan("\n✅ Reviews:"));
+      if (pr.reviews && pr.reviews.length > 0) {
+        const approvals = pr.reviews.filter((r: any) => r.state === "APPROVED");
+        const changesRequested = pr.reviews.filter((r: any) => r.state === "CHANGES_REQUESTED");
+        const pending = pr.reviews.filter((r: any) => r.state === "PENDING");
+
+        console.log(`  Approvals: ${chalk.green(approvals.length)} ✅`);
+        if (approvals.length > 0) {
+          approvals.forEach((r: any) => {
+            console.log(chalk.gray(`    - ${r.author.login}`));
+          });
+        }
+
+        if (changesRequested.length > 0) {
+          console.log(`  Changes Requested: ${chalk.red(changesRequested.length)} 🔄`);
+          changesRequested.forEach((r: any) => {
+            console.log(chalk.gray(`    - ${r.author.login}`));
+          });
+        }
+
+        if (pending.length > 0) {
+          console.log(`  Pending: ${chalk.yellow(pending.length)} ⏳`);
+        }
+      } else {
+        console.log(chalk.gray("  No reviews yet"));
+      }
+
+      // GitHub Actions / Status Checks
+      console.log(chalk.cyan("\n🚀 Status Checks:"));
+      if (pr.statusCheckRollup && pr.statusCheckRollup.length > 0) {
+        const checks = pr.statusCheckRollup;
+        const passed = checks.filter((c: any) => c.conclusion === "SUCCESS" || c.status === "COMPLETED");
+        const failed = checks.filter((c: any) => c.conclusion === "FAILURE");
+        const pending = checks.filter((c: any) => c.status === "IN_PROGRESS" || c.status === "QUEUED" || c.status === "PENDING");
+
+        console.log(`  Total: ${checks.length} checks`);
+        console.log(`  Passed: ${chalk.green(passed.length)} ✅`);
+        console.log(`  Failed: ${chalk.red(failed.length)} ❌`);
+        console.log(`  Running: ${chalk.yellow(pending.length)} 🔄`);
+
+        // Show individual check status
+        console.log(chalk.gray("\n  Details:"));
+        checks.forEach((check: any) => {
+          const icon = this.getCheckIcon(check.conclusion || check.status);
+          const name = check.name || check.context || "Unknown check";
+          const status = check.conclusion || check.status || "unknown";
+          console.log(`    ${icon} ${name}: ${status}`);
+        });
+      } else {
+        console.log(chalk.gray("  No status checks configured"));
+      }
+
+      // Quick actions
+      console.log(chalk.cyan("\n🔧 Quick Actions:"));
+      console.log(chalk.gray("  View in browser: gh pr view --web"));
+      console.log(chalk.gray("  Merge PR: gh pr merge"));
+      console.log(chalk.gray("  Close PR: gh pr close"));
+
+    } catch (error: any) {
+      console.error(chalk.red("Failed to get PR status:"), error.message);
+      process.exit(1);
+    }
+  }
+
+  private async listPrs(): Promise<void> {
+    try {
+      console.log(chalk.blue("\n📋 Open Pull Requests:\n"));
+
+      const { stdout } = await execAsync(
+        `gh pr list --json number,title,author,isDraft,headRefName,reviews,statusCheckRollup --limit 20`
+      );
+
+      const prs = JSON.parse(stdout || "[]");
+
+      if (prs.length === 0) {
+        console.log(chalk.gray("No open pull requests"));
+        return;
+      }
+
+      prs.forEach((pr: any) => {
+        const approvals = pr.reviews?.filter((r: any) => r.state === "APPROVED").length || 0;
+        const checks = pr.statusCheckRollup || [];
+        const failedChecks = checks.filter((c: any) => c.conclusion === "FAILURE").length;
+        const pendingChecks = checks.filter((c: any) =>
+          c.status === "IN_PROGRESS" || c.status === "QUEUED" || c.status === "PENDING"
+        ).length;
+
+        const checkStatus = failedChecks > 0 ? chalk.red("❌") :
+                          pendingChecks > 0 ? chalk.yellow("🔄") :
+                          checks.length > 0 ? chalk.green("✅") : "";
+
+        const approvalStatus = approvals > 0 ? chalk.green(`✅ ${approvals}`) : chalk.gray("0");
+        const draftStatus = pr.isDraft ? chalk.gray("[DRAFT]") : "";
+
+        console.log(
+          `#${chalk.cyan(pr.number)} ${checkStatus} ${approvalStatus} ${draftStatus} ${pr.title}`
+        );
+        console.log(
+          chalk.gray(`     Branch: ${pr.headRefName} | Author: ${pr.author.login}`)
+        );
+        console.log();
+      });
+
+      console.log(chalk.gray("\nView details: kunj pr --status"));
+    } catch (error: any) {
+      console.error(chalk.red("Failed to list PRs:"), error.message);
+      process.exit(1);
+    }
+  }
+
+  private formatState(state: string, isDraft: boolean): string {
+    if (isDraft) return chalk.gray("DRAFT");
+    switch (state) {
+      case "OPEN":
+        return chalk.green("OPEN");
+      case "CLOSED":
+        return chalk.red("CLOSED");
+      case "MERGED":
+        return chalk.magenta("MERGED");
+      default:
+        return state;
+    }
+  }
+
+  private getCheckIcon(status: string): string {
+    switch (status) {
+      case "SUCCESS":
+      case "COMPLETED":
+        return chalk.green("✅");
+      case "FAILURE":
+        return chalk.red("❌");
+      case "IN_PROGRESS":
+      case "QUEUED":
+      case "PENDING":
+        return chalk.yellow("🔄");
+      case "CANCELLED":
+      case "SKIPPED":
+        return chalk.gray("⏭️");
+      default:
+        return chalk.gray("❓");
+    }
   }
 }
