@@ -142,7 +142,7 @@ export async function getFileStatuses(): Promise<FileStatus[]> {
 
       const indexStatus = line[0];
       const workTreeStatus = line[1];
-      const filePath = line.substring(3);
+      let filePath = line.substring(3);
 
       // Parse the status codes
       let status: FileStatus['status'] = 'modified';
@@ -158,6 +158,32 @@ export async function getFileStatuses(): Promise<FileStatus[]> {
           staged: indexStatus === 'R',
           oldPath: old
         });
+        continue;
+      }
+
+      // Check if this is an untracked directory (ends with /)
+      if (filePath.endsWith('/') && indexStatus === '?' && workTreeStatus === '?') {
+        // Get all untracked files in this directory
+        try {
+          const { stdout: filesInDir } = await execAsync(`git ls-files --others --exclude-standard "${filePath}*"`);
+          if (filesInDir.trim()) {
+            const dirFiles = filesInDir.split('\n').filter(f => f.trim());
+            for (const file of dirFiles) {
+              files.push({
+                path: file,
+                status: 'new',
+                staged: false
+              });
+            }
+          }
+        } catch (err) {
+          // If command fails, just add the directory as is
+          files.push({
+            path: filePath.replace(/\/$/, ''), // Remove trailing slash
+            status: 'new',
+            staged: false
+          });
+        }
         continue;
       }
 
