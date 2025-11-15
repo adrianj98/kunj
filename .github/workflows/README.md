@@ -1,83 +1,92 @@
 # GitHub Actions Workflows
 
-Automated CI/CD setup for Kunj CLI with auto-release on merge to main.
+Simple CI/CD setup for Kunj CLI with tag-based releases.
 
 ## Workflows
 
 ### CI (`ci.yml`)
-- **Runs on**: Pull requests to main
+- **Runs on**: Pull requests to main + pushes to main
 - **Does**: Install → Test → Build → Verify
-- **Purpose**: Ensure code quality before merging
+- **Purpose**: Ensure code quality
 
-### Auto-Release (`release.yml`)
-- **Runs on**: Every merge/push to main (except [skip ci] commits)
-- **Does**:
-  1. Build and test
-  2. Determine version bump based on commit message
-  3. Bump version in package.json
-  4. Create git tag
-  5. Publish to NPM
-  6. Create GitHub release
-- **Purpose**: Automated versioning and publishing
+### Release (`release.yml`)
+- **Runs on**: Version tags (v*.*.*)
+- **Does**: Build → Test → Publish to NPM → Create GitHub Release
+- **Purpose**: Automated publishing when you push a version tag
 
-## Version Bumping Logic
+## How to Release
 
-The workflow automatically determines how to bump the version based on commit messages:
+1. **Commit your changes** to main
+2. **Create and push a version tag**:
 
-| Commit Message | Version Bump | Example |
-|----------------|--------------|---------|
-| Contains `BREAKING CHANGE` or `!` | Major | 1.0.0 → 2.0.0 |
-| Starts with `feat:` | Minor | 1.0.0 → 1.1.0 |
-| Everything else | Patch | 1.0.0 → 1.0.1 |
-
-## How It Works
-
-1. **Create PR** → CI runs tests
-2. **Merge PR** → Auto-release workflow:
-   - Bumps version
-   - Creates tag `v1.0.1`
-   - Publishes to NPM
-   - Creates GitHub release
-
-## Skip Release
-
-To merge without triggering a release, include `[skip ci]` in your commit message:
 ```bash
-git commit -m "docs: update readme [skip ci]"
+# Create a tag with your desired version
+git tag v1.2.3
+git push origin v1.2.3
+
+# Or push all tags
+git push --tags
 ```
 
-## Manual Version Control
+3. **Automatic release** - The workflow will:
+   - Extract version from tag (1.2.3)
+   - Update package.json to match
+   - Build and test
+   - Publish to NPM
+   - Create GitHub release with changelog
 
-If you need specific version control, you can:
-1. Update version manually in package.json before merge
-2. The workflow will detect and use that version
+## Version Management
 
-## Required Secrets
-
-- `NPM_TOKEN`: Your NPM automation token for publishing
-
-## Examples
+You control the version by creating tags:
 
 ```bash
-# Feature commit (minor bump)
-git commit -m "feat: add new command"
-# After merge → 1.0.0 → 1.1.0
+# Patch release (1.0.0 → 1.0.1)
+git tag v1.0.1
 
-# Fix commit (patch bump)
-git commit -m "fix: resolve stash issue"
-# After merge → 1.1.0 → 1.1.1
+# Minor release (1.0.1 → 1.1.0)
+git tag v1.1.0
 
-# Breaking change (major bump)
-git commit -m "feat!: change CLI interface"
-# After merge → 1.1.1 → 2.0.0
+# Major release (1.1.0 → 2.0.0)
+git tag v2.0.0
 
-# Skip release
-git commit -m "chore: update deps [skip ci]"
-# After merge → No release
+# Pre-release
+git tag v2.0.0-beta.1
+```
+
+## Required Setup
+
+### 1. NPM Token
+Add `NPM_TOKEN` secret in repository settings:
+- Go to Settings → Secrets and variables → Actions
+- Add new secret: `NPM_TOKEN` with your NPM automation token
+
+### 2. GitHub Actions Permissions
+The workflow needs write permissions (already configured in workflow file):
+- Contents: write (for GitHub releases)
+- Packages: write (for NPM publishing)
+
+## Example Release Process
+
+```bash
+# 1. Make your changes and commit
+git add .
+git commit -m "feat: add awesome feature"
+git push origin main
+
+# 2. Wait for CI to pass
+
+# 3. Tag and release
+git tag v1.2.0
+git push origin v1.2.0
+
+# 4. Watch the Actions tab - release will automatically:
+#    - Publish to NPM as version 1.2.0
+#    - Create GitHub release v1.2.0
 ```
 
 ## Notes
 
-- Version bumps are committed back to main with `[skip ci]` to avoid loops
-- Tags are automatically created and pushed
+- The version in package.json doesn't need to be updated manually
+- The workflow uses the tag version as the source of truth
+- Tags must follow the pattern `v*.*.*` (e.g., v1.0.0, v2.1.3)
 - GitHub releases include auto-generated changelogs
