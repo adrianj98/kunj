@@ -1,22 +1,17 @@
 // Constants and default values for Kunj CLI
 
 import { KunjConfig } from '../types';
+import { initializeSettings, settingsRegistry } from '../settings';
+
+// Initialize settings registry
+initializeSettings();
+
+// Generate default config from registered settings
+const generatedDefaults = settingsRegistry.getDefaultConfig();
 
 export const defaultConfig: KunjConfig = {
-  preferences: {
-    autoStash: true,
-    branchSort: "recent",
-    showStashDetails: true,
-    pageSize: 15,
-    showOnlyWIP: false,
-    wipTags: ["wip", "in-progress", "working", "draft"],
-    doneTags: ["done", "completed", "merged", "ready"],
-    personalWIPMode: true,
-    recentDays: 7,
-    stashAgeDays: 30,
-    showOnlyConfigured: false
-  },
-  aliases: {}
+  ...generatedDefaults,
+  aliases: {} // Aliases are not part of settings registry
 };
 
 export const KUNJ_DIR = ".kunj";

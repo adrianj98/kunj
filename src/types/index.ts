@@ -15,6 +15,15 @@ export interface KunjConfig {
     showOnlyConfigured: boolean;
   };
   aliases: Record<string, string>;
+  ai?: {
+    provider?: "bedrock" | "openai" | "anthropic";
+    model?: string;
+    awsRegion?: string;
+    enabled?: boolean;
+    autoGenerateCommitMessage?: boolean;
+    includeBranchContext?: boolean;
+    maxContextCommits?: number;
+  };
 }
 
 export interface BranchStash {

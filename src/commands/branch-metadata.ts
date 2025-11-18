@@ -170,7 +170,7 @@ export class BranchDescCommand extends BaseCommand {
       const description = descArgs.join(" ");
       updateBranchMetadata(branch, { description });
       console.log(chalk.green(`✓ Updated description for branch '${branch}'`));
-      console.log(chalk.gray(`Description: ${description}`));
+      console.log(chalk.cyan(`Description: ${description}`));
     } else {
       // Display existing description
       if (metadata.description) {

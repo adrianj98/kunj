@@ -13,7 +13,7 @@ import {
   getCommitsSinceBranch,
   FileStatus,
 } from "../lib/git";
-import { generateAICommitMessage, checkAWSCredentials } from "../lib/ai-commit";
+import { generateAICommitMessage, checkAWSCredentials, getAWSConfigInfo } from "../lib/ai-commit";
 import { updateBranchMetadata } from "../lib/metadata";
 
 interface CommitOptions {
@@ -247,6 +247,7 @@ export class CommitCommand extends BaseCommand {
     const suggestedType = this.suggestCommitType(files);
 
     const aiAvailable = await checkAWSCredentials();
+    const aiInfo = await getAWSConfigInfo();
 
     const commitTypeChoices = [
       { name: chalk.cyan("🤖 AI: Generate message with AI"), value: "ai" },
@@ -265,13 +266,21 @@ export class CommitCommand extends BaseCommand {
       { name: "(none): No prefix", value: "" },
     ];
 
-    // If AI is not available, show a different message
+    // If AI is not available, show a helpful message
     if (!aiAvailable) {
-      commitTypeChoices[0] = {
-        name: chalk.gray("🤖 AI: Not configured (set AWS credentials)"),
-        value: "ai",
-        disabled: true,
-      };
+      if (!aiInfo.enabled) {
+        commitTypeChoices[0] = {
+          name: chalk.gray("🤖 AI: Disabled (enable with: kunj config --set ai.enabled=true)"),
+          value: "ai",
+          disabled: true,
+        };
+      } else {
+        commitTypeChoices[0] = {
+          name: chalk.gray("🤖 AI: Not configured (set AWS credentials)"),
+          value: "ai",
+          disabled: true,
+        };
+      }
     }
 
     // First, only ask for the commit type
@@ -305,7 +314,7 @@ export class CommitCommand extends BaseCommand {
         updateBranchMetadata(currentBranch, {
           description: aiResult.branchDescription
         });
-        console.log(chalk.gray(`\nBranch description saved: ${aiResult.branchDescription}`));
+        console.log(chalk.cyan(`\nBranch description saved: ${aiResult.branchDescription}`));
       }
 
       // Use the AI-generated message directly without asking for confirmation

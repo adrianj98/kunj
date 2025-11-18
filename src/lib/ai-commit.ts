@@ -2,7 +2,7 @@
 
 const { ChatBedrockConverse } = require("@langchain/aws");
 import { defaultProvider } from "@aws-sdk/credential-provider-node";
-import { loadConfig } from "@aws-sdk/node-config-provider";
+import { loadConfig as loadAwsConfig } from "@aws-sdk/node-config-provider";
 import {
   NODE_REGION_CONFIG_OPTIONS,
   NODE_REGION_CONFIG_FILE_OPTIONS,
@@ -10,6 +10,7 @@ import {
 import { exec } from "child_process";
 import { promisify } from "util";
 import chalk from "chalk";
+import { loadConfig } from "./config";
 
 const execAsync = promisify(exec);
 
@@ -18,10 +19,14 @@ let cachedRegion: string | null = null;
 let regionProvider: (() => Promise<string>) | null = null;
 let cachedClient: any | null = null;
 
-// Get the default model ID - using the correct format for AWS Bedrock
+// Get the model ID from config or environment
 function getDefaultModelId(): string {
+  const config = loadConfig();
+  // Use config first, then environment variable, then default
   return (
-    process.env.BEDROCK_MODEL || "anthropic.claude-3-5-sonnet-20240620-v1:0"
+    config.ai?.model ||
+    process.env.BEDROCK_MODEL ||
+    "anthropic.claude-3-5-sonnet-20240620-v1:0"
   );
 }
 
@@ -29,7 +34,7 @@ function getDefaultModelId(): string {
 function getRegionProvider(): () => Promise<string> {
   if (!regionProvider) {
     // Use the SDK's built-in config loader which checks all standard sources
-    const baseProvider = loadConfig(
+    const baseProvider = loadAwsConfig(
       NODE_REGION_CONFIG_OPTIONS,
       NODE_REGION_CONFIG_FILE_OPTIONS
     );
@@ -37,6 +42,13 @@ function getRegionProvider(): () => Promise<string> {
     // Wrap with fallback
     regionProvider = async () => {
       try {
+        // First check our Kunj config
+        const config = loadConfig();
+        if (config.ai?.awsRegion) {
+          return config.ai.awsRegion;
+        }
+
+        // Then fall back to SDK config
         const region = await baseProvider();
         return region || "us-east-1";
       } catch (error) {
@@ -118,6 +130,13 @@ export async function generateAICommitMessage(
   diff?: string
 ): Promise<{ type: string; message: string; fullMessage?: string; branchDescription?: string }> {
   try {
+    const config = loadConfig();
+
+    // Check if AI is enabled
+    if (!config.ai?.enabled) {
+      throw new Error("AI features are disabled in config");
+    }
+
     // Get the diff if not provided
     const fileDiff = diff || (await getCommitDiff(files));
 
@@ -128,9 +147,11 @@ export async function generateAICommitMessage(
         ? fileDiff.substring(0, 3000) + "...[truncated]"
         : fileDiff;
 
-    // Format branch commits for context
-    const branchContext = branchCommits.length > 0
-      ? `\nRecent commits on this branch (${currentBranch}):\n${branchCommits.map(c => `- ${c}`).join('\n')}\n`
+    // Format branch commits for context (if enabled in config)
+    const maxCommits = config.ai?.maxContextCommits || 10;
+    const includeBranch = config.ai?.includeBranchContext !== false; // default true
+    const branchContext = includeBranch && branchCommits.length > 0
+      ? `\nRecent commits on this branch (${currentBranch}):\n${branchCommits.slice(0, maxCommits).map(c => `- ${c}`).join('\n')}\n`
       : '';
 
     // Create the prompt for Claude
@@ -252,9 +273,16 @@ function suggestCommitType(files: string[]): string {
   return "feat";
 }
 
-// Check if AWS credentials are configured
+// Check if AI is enabled and AWS credentials are configured
 export async function checkAWSCredentials(): Promise<boolean> {
   try {
+    const config = loadConfig();
+
+    // First check if AI is enabled in config
+    if (!config.ai?.enabled) {
+      return false;
+    }
+
     // Try a minimal invoke to check if we have valid credentials and access
     // We use a very small request to minimize cost
     try {
@@ -326,11 +354,16 @@ export async function checkAWSCredentials(): Promise<boolean> {
 
 // Get information about the current AWS configuration
 export async function getAWSConfigInfo(): Promise<{
+  enabled: boolean;
   region: string;
   model: string;
+  provider?: string;
 }> {
+  const config = loadConfig();
   return {
+    enabled: config.ai?.enabled || false,
     region: await getAWSRegion(),
     model: getDefaultModelId(),
+    provider: config.ai?.provider,
   };
 }

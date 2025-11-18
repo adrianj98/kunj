@@ -23,6 +23,7 @@ interface PrOptions {
   web?: boolean;
   status?: boolean;
   list?: boolean;
+  detailed?: boolean;
 }
 
 export class PrCommand extends BaseCommand {
@@ -38,6 +39,7 @@ export class PrCommand extends BaseCommand {
         { flags: "-w, --web", description: "Open PR in web browser after creation" },
         { flags: "-s, --status", description: "View status of current branch's PR" },
         { flags: "-l, --list", description: "List all open PRs" },
+        { flags: "--detailed", description: "Show detailed GitHub Actions steps" },
       ],
     });
   }
@@ -64,7 +66,7 @@ export class PrCommand extends BaseCommand {
 
     // Handle status flag
     if (options.status) {
-      await this.showPrStatus();
+      await this.showPrStatus(options.detailed);
       return;
     }
 
@@ -87,7 +89,7 @@ export class PrCommand extends BaseCommand {
     const existingPr = await this.checkExistingPr(currentBranch);
     if (existingPr) {
       console.log(chalk.blue(`Found existing PR for branch ${currentBranch}`));
-      await this.showPrStatus();
+      await this.showPrStatus(options.detailed);
       return;
     }
 
@@ -168,7 +170,7 @@ export class PrCommand extends BaseCommand {
 
         // Show initial PR status
         console.log(chalk.blue("\nFetching PR status..."));
-        await this.showPrStatus();
+        await this.showPrStatus(options.detailed);
 
         // Ask if user wants to open in browser
         if (!options.web) {
@@ -306,7 +308,7 @@ export class PrCommand extends BaseCommand {
     }
   }
 
-  private async showPrStatus(): Promise<void> {
+  private async showPrStatus(detailed: boolean = false): Promise<void> {
     try {
       const currentBranch = await getCurrentBranch();
       console.log(chalk.blue(`\n📋 PR Status for branch: ${currentBranch}\n`));
@@ -386,6 +388,62 @@ export class PrCommand extends BaseCommand {
           const status = check.conclusion || check.status || "unknown";
           console.log(`    ${icon} ${name}: ${status}`);
         });
+
+        // Show detailed GitHub Actions steps if requested
+        if (detailed) {
+          console.log(chalk.cyan("\n📝 GitHub Actions Detailed Steps:"));
+
+          try {
+            // Get the workflow runs for this PR
+            const { stdout: runsJson } = await execAsync(
+              `gh run list --branch=${currentBranch} --json databaseId,name,status,conclusion,workflowName --limit=5`
+            );
+            const runs = JSON.parse(runsJson || "[]");
+
+            if (runs.length > 0) {
+              for (const run of runs.slice(0, 3)) { // Show up to 3 recent runs
+                console.log(chalk.yellow(`\n  Workflow: ${run.workflowName}`));
+                console.log(`    Run ID: ${run.databaseId}`);
+                console.log(`    Status: ${this.getCheckIcon(run.conclusion || run.status)} ${run.conclusion || run.status}`);
+
+                // Get detailed jobs and steps for each run
+                try {
+                  const { stdout: jobsJson } = await execAsync(
+                    `gh run view ${run.databaseId} --json jobs`
+                  );
+                  const jobsData = JSON.parse(jobsJson || "{}");
+
+                  if (jobsData.jobs && jobsData.jobs.length > 0) {
+                    console.log(chalk.gray("    Jobs:"));
+
+                    for (const job of jobsData.jobs) {
+                      const jobIcon = this.getCheckIcon(job.conclusion || job.status);
+                      console.log(`      ${jobIcon} ${job.name}`);
+
+                      if (job.steps && job.steps.length > 0) {
+                        console.log(chalk.gray("        Steps:"));
+                        for (const step of job.steps) {
+                          const stepIcon = this.getCheckIcon(step.conclusion || step.status);
+                          const duration = step.completedAt && step.startedAt
+                            ? this.formatDuration(new Date(step.completedAt).getTime() - new Date(step.startedAt).getTime())
+                            : "";
+                          console.log(`          ${stepIcon} ${step.name} ${duration ? chalk.gray(`(${duration})`) : ""}`);
+                        }
+                      }
+                    }
+                  }
+                } catch (error) {
+                  // If we can't get detailed job info, just continue
+                  console.log(chalk.gray("    (Detailed steps not available)"));
+                }
+              }
+            } else {
+              console.log(chalk.gray("  No workflow runs found for this branch"));
+            }
+          } catch (error) {
+            console.log(chalk.gray("  Unable to fetch detailed workflow information"));
+          }
+        }
       } else {
         console.log(chalk.gray("  No status checks configured"));
       }
@@ -479,5 +537,23 @@ export class PrCommand extends BaseCommand {
       default:
         return chalk.gray("❓");
     }
+  }
+
+  private formatDuration(ms: number): string {
+    if (ms < 1000) {
+      return `${ms}ms`;
+    }
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) {
+      return `${seconds}s`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (minutes < 60) {
+      return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
   }
 }

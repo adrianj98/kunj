@@ -15,6 +15,9 @@ interface SwitchOptions {
   all?: boolean;
   wip?: boolean;
   configured?: boolean;
+  create?: boolean;
+  desc?: string;
+  tag?: string[];
 }
 
 export class SwitchCommand extends BaseCommand {
@@ -27,7 +30,10 @@ export class SwitchCommand extends BaseCommand {
         { flags: '--no-stash', description: 'Disable automatic stashing of changes' },
         { flags: '-a, --all', description: 'Show all branches (override filters)' },
         { flags: '-w, --wip', description: 'Show only work-in-progress branches' },
-        { flags: '-c, --configured', description: 'Show only configured branches' }
+        { flags: '-c, --create', description: 'Create new branch if it doesn\'t exist' },
+        { flags: '-d, --desc <description>', description: 'Set description when creating branch' },
+        { flags: '-t, --tag <tags...>', description: 'Add tags when creating branch' },
+        { flags: '--configured', description: 'Show only configured branches' }
       ]
     });
   }
@@ -43,9 +49,24 @@ export class SwitchCommand extends BaseCommand {
     const config = loadConfig();
     const currentBranch = await getCurrentBranch();
 
-    // If branch specified, switch directly
+    // If branch specified, switch directly (or create if -c flag is used)
     if (targetBranch) {
       await this.switchToBranch(targetBranch, currentBranch, options);
+    } else if (options.create) {
+      // If -c flag is used without branch name, prompt for new branch name
+      const { branchName } = await inquirer.prompt([{
+        type: 'input',
+        name: 'branchName',
+        message: 'Enter new branch name:',
+        validate: (input: string) => {
+          if (!input.trim()) {
+            return 'Branch name is required';
+          }
+          return true;
+        }
+      }]);
+
+      await this.createAndSwitchToBranch(branchName, currentBranch, options);
     } else {
       // Interactive mode
       await this.interactiveSwitch(currentBranch, options);
@@ -60,6 +81,21 @@ export class SwitchCommand extends BaseCommand {
     if (currentBranch === targetBranch) {
       console.log(chalk.yellow(`Already on branch '${targetBranch}'`));
       return;
+    }
+
+    // Check if branch exists
+    const checkResult = await executeGitCommand(`git show-ref --verify --quiet refs/heads/${targetBranch}`);
+    const branchExists = checkResult.success;
+
+    if (!branchExists && options.create) {
+      // Branch doesn't exist and -c flag was used, create it
+      await this.createAndSwitchToBranch(targetBranch, currentBranch, options);
+      return;
+    } else if (!branchExists) {
+      // Branch doesn't exist and no -c flag
+      console.error(chalk.red(`✗ Branch '${targetBranch}' does not exist`));
+      console.log(chalk.gray(`Tip: Use -c flag to create and switch: kunj switch -c ${targetBranch}`));
+      process.exit(1);
     }
 
     const config = loadConfig();
@@ -206,9 +242,9 @@ export class SwitchCommand extends BaseCommand {
 
       // Add description if exists
       if (metadata.description) {
-        displayName += chalk.gray(` - ${metadata.description}`);
+        displayName += chalk.cyan(` - ${metadata.description}`);
       } else if (branch.lastActivity) {
-        displayName += chalk.gray(` - ${branch.lastActivity}`);
+        displayName += chalk.dim(` - ${branch.lastActivity}`);
       }
 
       // Add tags if exist
@@ -244,6 +280,65 @@ export class SwitchCommand extends BaseCommand {
       console.log(chalk.gray("Tip: Use 'kunj switch --all' to see all branches"));
     } else {
       console.log(chalk.yellow("No branches found"));
+    }
+  }
+
+  private async createAndSwitchToBranch(
+    branchName: string,
+    currentBranch: string,
+    options: SwitchOptions
+  ): Promise<void> {
+    const config = loadConfig();
+
+    console.log(chalk.blue(`Creating branch '${branchName}' and switching to it...`));
+
+    // Use config autoStash preference unless explicitly overridden
+    const shouldStash = options.stash !== false && config.preferences.autoStash;
+    if (shouldStash && currentBranch) {
+      await createStash(currentBranch);
+    }
+
+    // Create and checkout the branch
+    const result = await executeGitCommand(`git checkout -b ${branchName}`);
+
+    if (result.success) {
+      console.log(
+        chalk.green(`✓ Successfully created and switched to branch '${branchName}'`)
+      );
+
+      // Save metadata for the new branch
+      const metadata: any = {
+        lastSwitched: new Date().toISOString()
+      };
+
+      if (options.desc) {
+        metadata.description = options.desc;
+        console.log(chalk.cyan(`  Description: ${options.desc}`));
+      }
+
+      if (options.tag && options.tag.length > 0) {
+        metadata.tags = options.tag;
+        console.log(chalk.cyan(`  Tags: ${options.tag.join(', ')}`));
+      }
+
+      updateBranchMetadata(branchName, metadata);
+
+      // Update last switched time for previous branch
+      if (currentBranch) {
+        updateBranchMetadata(currentBranch, {
+          lastSwitched: new Date().toISOString()
+        });
+      }
+
+      // Try to pop stash for the new branch (if any exists from before)
+      if (shouldStash) {
+        await popStashForBranch(branchName);
+      }
+
+      console.log(chalk.gray("\nTip: Add notes with 'kunj branch-note'"));
+    } else {
+      console.error(chalk.red(`✗ Failed to create branch: ${result.message}`));
+      process.exit(1);
     }
   }
 }

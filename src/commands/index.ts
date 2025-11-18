@@ -7,6 +7,7 @@ export { CommitCommand } from './commit';
 export { PrCommand } from './pr';
 export { DeleteCommand } from './delete';
 export { ConfigCommand } from './config';
+export { SetupCommand } from './setup';
 export { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
 // Import all command classes here as they are created
@@ -20,6 +21,7 @@ import { CommitCommand } from './commit';
 import { PrCommand } from './pr';
 import { DeleteCommand } from './delete';
 import { ConfigCommand } from './config';
+import { SetupCommand } from './setup';
 import { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
 // Export a function that returns all command instances
@@ -32,6 +34,7 @@ export function getAllCommands(): BaseCommand[] {
     new PrCommand(),
     new DeleteCommand(),
     new ConfigCommand(),
+    new SetupCommand(),
     new BranchNoteCommand(),
     new BranchTagCommand(),
     new BranchDescCommand(),
