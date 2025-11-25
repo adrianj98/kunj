@@ -158,6 +158,7 @@ export class CommitCommand extends BaseCommand {
         // Generate work log entry if AI was used
         if (usedAI) {
           try {
+            console.log(chalk.gray("📝 Generating work log entry..."));
             const workLogEntry = await generateWorkLogEntry(
               filesToCommit,
               commitMessage,
@@ -166,11 +167,19 @@ export class CommitCommand extends BaseCommand {
 
             if (workLogEntry) {
               appendToWorkLog(workLogEntry);
-              console.log(chalk.gray("📝 Work log updated"));
+              const { getTodayLogPath } = require("../lib/work-log");
+              const logPath = getTodayLogPath();
+              console.log(chalk.green("✓ Work log updated"));
+              console.log(chalk.gray(`  Log file: ${logPath}`));
+            } else {
+              console.log(chalk.yellow("⚠ Work log entry was not generated"));
             }
           } catch (error: any) {
-            // Silently fail work log generation - it's not critical
-            console.error(chalk.gray("Note: Could not update work log"));
+            // Show the actual error for debugging
+            console.error(chalk.red("✗ Work log generation failed:"), error.message);
+            if (error.stack) {
+              console.error(chalk.gray(error.stack));
+            }
           }
         }
 
