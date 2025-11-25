@@ -74,8 +74,14 @@ export function appendToWorkLog(entry: string): void {
     content += `## ${time}\n\n${entry}\n\n`;
 
     fs.appendFileSync(logPath, content, "utf8");
-  } catch (error) {
-    console.error(chalk.red("Failed to write to work log:"), error);
+
+    // Debug: verify file was written
+    if (!fs.existsSync(logPath)) {
+      throw new Error(`Failed to create work log file at ${logPath}`);
+    }
+  } catch (error: any) {
+    console.error(chalk.red("Failed to write to work log:"), error.message);
+    throw error; // Re-throw so caller knows it failed
   }
 }
 
@@ -133,4 +139,55 @@ export function getYesterdayDate(): string {
   const month = String(yesterday.getMonth() + 1).padStart(2, "0");
   const day = String(yesterday.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+// Parse work log entries from content
+export interface WorkLogEntry {
+  time: string;
+  content: string;
+}
+
+export function parseWorkLogEntries(logContent: string): WorkLogEntry[] {
+  const entries: WorkLogEntry[] = [];
+
+  // Split by ## headers (time markers)
+  const sections = logContent.split(/^## /m).filter(s => s.trim());
+
+  for (const section of sections) {
+    const lines = section.split('\n');
+    if (lines.length === 0) continue;
+
+    // First line should be the time
+    const time = lines[0].trim();
+
+    // Rest is the content
+    const content = lines.slice(1).join('\n').trim();
+
+    if (time && content) {
+      entries.push({ time, content });
+    }
+  }
+
+  return entries;
+}
+
+// Convert work log entries to standup format (one-liners)
+export function formatAsStandupBullets(entries: WorkLogEntry[]): string[] {
+  return entries.map(entry => {
+    // Take the first sentence or up to 100 chars
+    let summary = entry.content;
+
+    // If there are multiple sentences, take the first one
+    const firstSentence = summary.match(/^[^.!?]+[.!?]/);
+    if (firstSentence) {
+      summary = firstSentence[0];
+    }
+
+    // Truncate if too long
+    if (summary.length > 120) {
+      summary = summary.substring(0, 117) + '...';
+    }
+
+    return summary.trim();
+  });
 }

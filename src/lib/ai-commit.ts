@@ -282,12 +282,12 @@ export async function generateWorkLogEntry(
       return null;
     }
 
-    // Get the diff
-    const { stdout: diff } = await execAsync(
-      `git diff --cached -- ${files.map((f) => `"${f}"`).join(" ")}`
-    );
+    // Get the diff from the last commit (HEAD)
+    // We're calling this after the commit is made, so we look at the commit we just made
+    const { stdout: diff } = await execAsync(`git show HEAD`);
 
     if (!diff.trim()) {
+      console.log(chalk.gray("No diff available for work log"));
       return null;
     }
 
@@ -296,7 +296,7 @@ export async function generateWorkLogEntry(
     const fileList = files.join(", ");
 
     // Create a prompt for generating a work log entry
-    const prompt = `You are documenting a developer's daily work. Based on this commit, write a brief, professional work log entry.
+    const prompt = `You are documenting a developer's daily work. Based on this commit, write a CONCISE itemized work log entry.
 
 Commit message: ${commitMessage}
 Branch: ${branchName}
@@ -307,21 +307,55 @@ Diff preview:
 ${diffPreview}
 \`\`\`
 
-Write a concise work log entry (2-3 sentences) that:
-1. Describes WHAT was done (the feature/fix/change)
-2. Explains WHY it was needed (the purpose/goal)
-3. Uses past tense and professional language
-4. Is suitable for reviewing your work later
+Write an ITEMIZED work log entry in this format:
+[TAG] Brief description of WHAT was done
+- Specific change 1
+- Specific change 2
+- Specific change 3 (if applicable)
 
-Do NOT include the commit message directly. Write it as a natural diary entry describing your work.
-Example: "Implemented user authentication flow with JWT tokens to secure API endpoints. Added middleware for token validation and refresh logic to maintain user sessions."
+Tags to use:
+- [feature] - New functionality added
+- [bug] - Bug fix
+- [refactor] - Code refactoring/cleanup
+- [perf] - Performance improvement
+- [docs] - Documentation update
+- [test] - Test additions/updates
+- [chore] - Maintenance tasks
 
-Respond with just the work log entry text, no additional formatting or labels.`;
+CRITICAL Guidelines:
+1. Start with [TAG] and brief summary of WHAT changed
+2. Follow with 2-4 bullet points listing specific WHAT was added/changed/removed
+3. Each bullet should be SHORT (3-6 words max)
+4. Focus ONLY on WHAT was done, NOT why it was needed
+5. Use past tense
+6. Be specific but concise
+7. NEVER explain reasons, purposes, or goals - only state the changes
+
+Good Examples (WHAT only):
+"[feature] Added user authentication
+- Built JWT token generation
+- Created login/logout endpoints
+- Added session middleware"
+
+"[bug] Fixed payment rounding
+- Updated decimal calculation
+- Added validation checks
+- Corrected currency handling"
+
+"[refactor] Restructured database layer
+- Split queries into functions
+- Removed duplicate code
+- Updated connection pooling"
+
+Bad Examples (includes WHY - DO NOT do this):
+"[feature] Added authentication to secure endpoints" ❌
+"[bug] Fixed rounding to prevent errors" ❌
+"[refactor] Split queries for better performance" ❌
+
+Respond with just the tagged entry with bullets, no additional formatting.`;
 
     // Get the Bedrock client
     const client = await getBedrockClient();
-
-    console.log(chalk.gray("📝 Generating work log entry..."));
 
     // Invoke the model
     const response = await client.invoke([{ role: "user", content: prompt }]);
@@ -333,9 +367,88 @@ Respond with just the work log entry text, no additional formatting or labels.`;
       return workLogEntry;
     }
 
+    console.log(chalk.gray("AI returned empty work log entry"));
     return null;
   } catch (error: any) {
-    console.error(chalk.gray("Work log generation failed:"), error.message);
+    console.error(chalk.red("Work log generation error:"), error.message);
+    throw error; // Re-throw to be caught by caller
+  }
+}
+
+// Generate abbreviated standup bullets from work log entries
+export async function generateStandupBullets(
+  workLogContent: string,
+  dateLabel: string
+): Promise<string[] | null> {
+  try {
+    // Check if AI is enabled
+    const config = loadConfig();
+    if (!config.ai?.enabled) {
+      return null;
+    }
+
+    if (!workLogContent || !workLogContent.trim()) {
+      return null;
+    }
+
+    // Create a prompt for generating abbreviated bullets
+    const prompt = `You are helping prepare for a daily standup meeting. Below is a work log for ${dateLabel}.
+
+Your task: Create 3-5 EXTREMELY concise bullet points using the format: <feature>: <action>
+
+Guidelines:
+- Format: "<feature area>: <action description>" (5-10 words total)
+- Feature area should be 1-2 words (e.g., Auth, API, UI, Database, etc.)
+- If the work log entry has [bug] or [fix] tag, START the action with "Fixed"
+- If [feature] tag, use casual verbs like "Added/Built/Worked on/Set up"
+- If [refactor] tag, use "Cleaned up/Improved/Reworked"
+- Use CASUAL, NATURAL language - sound like a developer talking to their team, NOT like formal documentation
+- Avoid corporate jargon or overly polished language
+- Use simple, direct words that you'd actually say out loud
+- Combine related tasks into single bullets
+- Remove redundancy and technical details
+- Use past tense
+
+Work Log:
+${workLogContent}
+
+Respond with ONLY the bullet points, one per line, starting with a dash (-). No additional text, explanations, or formatting.
+
+Example format (CASUAL tone):
+- Auth: Built JWT auth
+- Payment: Fixed that checkout bug
+- API: Added rate limiting
+- Database: Cleaned up queries
+- UI: Added dark mode`;
+
+    // Get the Bedrock client
+    const client = await getBedrockClient();
+
+    // Invoke the model
+    const response = await client.invoke([{ role: "user", content: prompt }]);
+
+    // Extract the content from Claude's response
+    const responseText = response.content?.toString().trim() || "";
+
+    if (!responseText) {
+      return null;
+    }
+
+    // Parse bullet points from response
+    const bullets = responseText
+      .split('\n')
+      .map((line: string) => line.trim())
+      .filter((line: string) => line.startsWith('-'))
+      .map((line: string) => line.substring(1).trim())
+      .filter((line: string) => line.length > 0);
+
+    if (bullets.length === 0) {
+      return null;
+    }
+
+    return bullets;
+  } catch (error: any) {
+    console.error(chalk.gray("Standup bullet generation failed:"), error.message);
     return null;
   }
 }
