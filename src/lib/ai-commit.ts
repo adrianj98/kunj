@@ -12,6 +12,8 @@ import { promisify } from "util";
 import chalk from "chalk";
 import { loadConfig } from "./config";
 import { getCommitStylePrompt } from "./commit-styles";
+import * as fs from "fs";
+import * as path from "path";
 
 const execAsync = promisify(exec);
 
@@ -19,6 +21,45 @@ const execAsync = promisify(exec);
 let cachedRegion: string | null = null;
 let regionProvider: (() => Promise<string>) | null = null;
 let cachedClient: any | null = null;
+let cachedProjectContext: string | null = null;
+let projectContextChecked = false;
+
+// Get project context from claude.md or similar files
+function getProjectContext(): string | null {
+  if (projectContextChecked) {
+    return cachedProjectContext;
+  }
+
+  projectContextChecked = true;
+
+  // Try multiple possible context file names
+  const contextFiles = [
+    'claude.md',
+    '.claude.md',
+    'CLAUDE.md',
+    '.claude/context.md',
+    'README.md',
+  ];
+
+  for (const fileName of contextFiles) {
+    const filePath = path.join(process.cwd(), fileName);
+    if (fs.existsSync(filePath)) {
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        // Limit to first 1000 chars to avoid token overload
+        cachedProjectContext = content.length > 1000
+          ? content.substring(0, 1000) + '\n...(truncated)'
+          : content;
+        console.log(chalk.gray(`📋 Using project context from ${fileName}`));
+        return cachedProjectContext;
+      } catch (error) {
+        // Ignore read errors
+      }
+    }
+  }
+
+  return null;
+}
 
 // Get the model ID from config or environment
 function getDefaultModelId(): string {
@@ -160,12 +201,18 @@ export async function generateAICommitMessage(
       ? `\nRecent commits on this branch (${currentBranch}):\n${branchCommits.slice(0, maxCommits).map(c => `- ${c}`).join('\n')}\n`
       : '';
 
+    // Get project context if available
+    const projectContext = getProjectContext();
+    const projectContextSection = projectContext
+      ? `\nProject Context:\n${projectContext}\n`
+      : '';
+
     // Get the style-specific prompt guidelines
     const styleGuidelines = getCommitStylePrompt(commitStyle, maxLength, includeBody, customInstructions);
 
     // Create the prompt for Claude
     const prompt = `${styleGuidelines}
-
+${projectContextSection}
 Your task is to analyze the code changes and generate an appropriate commit message, and also provide a very short description of what this branch is doing overall.
 ${branchContext}
 Analyze these code changes:
@@ -295,9 +342,15 @@ export async function generateWorkLogEntry(
     const diffPreview = diff.length > 4000 ? diff.substring(0, 4000) + "\n... (truncated)" : diff;
     const fileList = files.join(", ");
 
+    // Get project context if available
+    const projectContext = getProjectContext();
+    const projectContextSection = projectContext
+      ? `\nProject Context:\n${projectContext}\n`
+      : '';
+
     // Create a prompt for generating a work log entry
     const prompt = `You are documenting a developer's daily work. Based on this commit, write a CONCISE itemized work log entry.
-
+${projectContextSection}
 Commit message: ${commitMessage}
 Branch: ${branchName}
 Files changed: ${fileList}
