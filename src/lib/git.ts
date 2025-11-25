@@ -126,6 +126,8 @@ export interface FileStatus {
   status: 'modified' | 'new' | 'deleted' | 'renamed' | 'copied' | 'unmerged';
   staged: boolean;
   oldPath?: string; // For renamed files
+  additions?: number; // Lines added
+  deletions?: number; // Lines deleted
 }
 
 // Get the status of all changed files
@@ -212,6 +214,68 @@ export async function getFileStatuses(): Promise<FileStatus[]> {
         status,
         staged
       });
+    }
+
+    // Get line stats for all files efficiently
+    // Get stats for staged files
+    const stagedStatsMap = new Map<string, { additions: number; deletions: number }>();
+    try {
+      const { stdout: stagedStats } = await execAsync('git diff --numstat --cached');
+      if (stagedStats.trim()) {
+        stagedStats.split('\n').filter(l => l.trim()).forEach(line => {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 3) {
+            const additions = parseInt(parts[0]) || 0;
+            const deletions = parseInt(parts[1]) || 0;
+            const path = parts.slice(2).join(' ');
+            stagedStatsMap.set(path, { additions, deletions });
+          }
+        });
+      }
+    } catch (err) {
+      // Ignore errors
+    }
+
+    // Get stats for unstaged files
+    const unstagedStatsMap = new Map<string, { additions: number; deletions: number }>();
+    try {
+      const { stdout: unstagedStats } = await execAsync('git diff --numstat');
+      if (unstagedStats.trim()) {
+        unstagedStats.split('\n').filter(l => l.trim()).forEach(line => {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 3) {
+            const additions = parseInt(parts[0]) || 0;
+            const deletions = parseInt(parts[1]) || 0;
+            const path = parts.slice(2).join(' ');
+            unstagedStatsMap.set(path, { additions, deletions });
+          }
+        });
+      }
+    } catch (err) {
+      // Ignore errors
+    }
+
+    // Apply stats to files
+    for (const file of files) {
+      const stats = file.staged ? stagedStatsMap.get(file.path) : unstagedStatsMap.get(file.path);
+
+      if (stats) {
+        file.additions = stats.additions;
+        file.deletions = stats.deletions;
+      } else if (file.status === 'new') {
+        // For new files, count lines
+        try {
+          const { stdout: content } = await execAsync(`wc -l < "${file.path}" 2>/dev/null || echo "0"`);
+          file.additions = parseInt(content.trim()) || 0;
+          file.deletions = 0;
+        } catch {
+          file.additions = 0;
+          file.deletions = 0;
+        }
+      } else {
+        file.additions = 0;
+        file.deletions = 0;
+      }
     }
 
     return files;
@@ -311,5 +375,177 @@ export async function getCommitsSinceBranch(): Promise<string[]> {
   } catch {
     // Fallback to recent commits if something goes wrong
     return getRecentCommitMessages(5);
+  }
+}
+
+// Get colored diff for a file
+export async function getFileDiff(filePath: string): Promise<string> {
+  try {
+    // Try to get diff for staged changes first
+    const { stdout: stagedDiff } = await execAsync(`git diff --cached --color=always -- "${filePath}" 2>/dev/null || echo ""`);
+
+    if (stagedDiff.trim()) {
+      return stagedDiff;
+    }
+
+    // If no staged changes, get unstaged diff
+    const { stdout: unstagedDiff } = await execAsync(`git diff --color=always -- "${filePath}" 2>/dev/null || echo ""`);
+
+    if (unstagedDiff.trim()) {
+      return unstagedDiff;
+    }
+
+    // If it's a new file, show the entire content
+    const { stdout: status } = await execAsync(`git status --porcelain "${filePath}"`);
+    if (status.trim().startsWith('??') || status.trim().startsWith('A')) {
+      const { stdout: content } = await execAsync(`cat "${filePath}" 2>/dev/null || echo ""`);
+      // Format as a diff with all lines as additions
+      const lines = content.split('\n');
+      return chalk.green(lines.map(line => `+ ${line}`).join('\n'));
+    }
+
+    return chalk.gray('No changes to display');
+  } catch (error: any) {
+    return chalk.red(`Error getting diff: ${error.message}`);
+  }
+}
+
+// Get colored diff for a file comparing with main/master branch
+export async function getFileDiffWithMain(filePath: string): Promise<string> {
+  try {
+    const mainBranch = await getMainBranch();
+    const currentBranch = await getCurrentBranch();
+
+    if (currentBranch === mainBranch) {
+      return chalk.yellow(`Already on ${mainBranch} branch. Showing working tree changes:\n\n`) + await getFileDiff(filePath);
+    }
+
+    // Get diff comparing with main branch
+    const { stdout: diff } = await execAsync(`git diff --color=always ${mainBranch}...HEAD -- "${filePath}" 2>/dev/null || echo ""`);
+
+    if (diff.trim()) {
+      return diff;
+    }
+
+    // If no diff with main, check if file exists in main
+    const { stdout: fileInMain } = await execAsync(`git ls-tree -r ${mainBranch} --name-only "${filePath}" 2>/dev/null || echo ""`);
+
+    if (!fileInMain.trim()) {
+      return chalk.green(`File is new in this branch (not in ${mainBranch})`);
+    }
+
+    return chalk.gray(`No differences with ${mainBranch}`);
+  } catch (error: any) {
+    return chalk.red(`Error getting diff with main: ${error.message}`);
+  }
+}
+
+// Revert changes to a file
+export async function revertFile(filePath: string): Promise<GitCommandResult> {
+  try {
+    // Check if file is staged
+    const { stdout: status } = await execAsync(`git status --porcelain "${filePath}"`);
+    const isStaged = status.trim()[0] !== ' ' && status.trim()[0] !== '?';
+
+    if (isStaged) {
+      // Unstage the file first
+      await execAsync(`git reset HEAD "${filePath}"`);
+    }
+
+    // Check if it's an untracked file
+    if (status.trim().startsWith('??')) {
+      return {
+        success: false,
+        message: 'Cannot revert untracked file. Use delete instead.'
+      };
+    }
+
+    // Revert the file
+    await execAsync(`git checkout -- "${filePath}"`);
+
+    return {
+      success: true,
+      message: `Reverted ${filePath}`
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || 'Failed to revert file'
+    };
+  }
+}
+
+// Delete a file
+export async function deleteFile(filePath: string): Promise<GitCommandResult> {
+  try {
+    // Remove the file from filesystem
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+
+    await execAsync(`rm "${filePath}"`);
+
+    // Stage the deletion if it was tracked
+    const { stdout: status } = await execAsync(`git status --porcelain "${filePath}" 2>/dev/null || echo ""`);
+    if (status && !status.trim().startsWith('??')) {
+      await execAsync(`git add "${filePath}"`);
+    }
+
+    return {
+      success: true,
+      message: `Deleted ${filePath}`
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || 'Failed to delete file'
+    };
+  }
+}
+
+// Get line change statistics for a file
+export async function getFileStats(filePath: string, staged: boolean = false): Promise<{ additions: number; deletions: number }> {
+  try {
+    const command = staged
+      ? `git diff --numstat --cached -- "${filePath}"`
+      : `git diff --numstat -- "${filePath}"`;
+
+    const { stdout } = await execAsync(command);
+
+    if (!stdout.trim()) {
+      // If no diff output, might be a new file or deleted file
+      const { stdout: status } = await execAsync(`git status --porcelain "${filePath}"`);
+
+      if (status.trim().startsWith('??') || status.trim().startsWith('A')) {
+        // New file - count all lines as additions
+        try {
+          const { stdout: content } = await execAsync(`wc -l < "${filePath}" 2>/dev/null || echo "0"`);
+          const lines = parseInt(content.trim()) || 0;
+          return { additions: lines, deletions: 0 };
+        } catch {
+          return { additions: 0, deletions: 0 };
+        }
+      } else if (status.trim().startsWith('D')) {
+        // Deleted file - try to count lines from HEAD
+        try {
+          const { stdout: content } = await execAsync(`git show HEAD:"${filePath}" | wc -l`);
+          const lines = parseInt(content.trim()) || 0;
+          return { additions: 0, deletions: lines };
+        } catch {
+          return { additions: 0, deletions: 0 };
+        }
+      }
+
+      return { additions: 0, deletions: 0 };
+    }
+
+    // Parse numstat output: "additions deletions filename"
+    const parts = stdout.trim().split(/\s+/);
+    const additions = parseInt(parts[0]) || 0;
+    const deletions = parseInt(parts[1]) || 0;
+
+    return { additions, deletions };
+  } catch (error) {
+    return { additions: 0, deletions: 0 };
   }
 }

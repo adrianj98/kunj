@@ -11,6 +11,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import chalk from "chalk";
 import { loadConfig } from "./config";
+import { getCommitStylePrompt } from "./commit-styles";
 
 const execAsync = promisify(exec);
 
@@ -75,7 +76,7 @@ async function getAWSRegion(): Promise<string> {
 }
 
 // Initialize AWS Bedrock client using ChatBedrockConverse
-async function getBedrockClient(): Promise<any> {
+export async function getBedrockClient(): Promise<any> {
   if (!cachedClient) {
     const region = await getAWSRegion();
     const modelId = getDefaultModelId();
@@ -95,7 +96,7 @@ async function getBedrockClient(): Promise<any> {
       region,
       credentials: defaultProvider(),
       temperature: 0.7,
-      maxTokens: 500,
+      maxTokens: 1000, // Increased to handle both commits and PR descriptions
     });
   }
   return cachedClient;
@@ -147,36 +148,25 @@ export async function generateAICommitMessage(
         ? fileDiff.substring(0, 3000) + "...[truncated]"
         : fileDiff;
 
-    // Format branch commits for context (if enabled in config)
+    // Get AI configuration options
     const maxCommits = config.ai?.maxContextCommits || 10;
     const includeBranch = config.ai?.includeBranchContext !== false; // default true
+    const commitStyle = config.ai?.commitStyle || 'conventional';
+    const maxLength = config.ai?.subjectMaxLength || 50;
+    const includeBody = config.ai?.includeBody !== false; // default true
+    const customInstructions = config.ai?.customInstructions || '';
+
     const branchContext = includeBranch && branchCommits.length > 0
       ? `\nRecent commits on this branch (${currentBranch}):\n${branchCommits.slice(0, maxCommits).map(c => `- ${c}`).join('\n')}\n`
       : '';
 
+    // Get the style-specific prompt guidelines
+    const styleGuidelines = getCommitStylePrompt(commitStyle, maxLength, includeBody, customInstructions);
+
     // Create the prompt for Claude
-    const prompt = `You are an expert at writing clear, concise git commit messages following conventional commit standards.
+    const prompt = `${styleGuidelines}
+
 Your task is to analyze the code changes and generate an appropriate commit message, and also provide a very short description of what this branch is doing overall.
-
-Conventional commit types:
-- feat: A new feature
-- fix: A bug fix
-- docs: Documentation changes
-- style: Code style changes (formatting, etc)
-- refactor: Code refactoring
-- test: Adding or updating tests
-- chore: Maintenance tasks
-- build: Build system changes
-- ci: CI configuration changes
-- perf: Performance improvements
-
-Guidelines:
-1. Choose the most appropriate commit type based on the changes
-2. Write a clear, concise commit message (max 50 characters for the subject)
-3. Focus on WHY the change was made, not just what changed
-4. Use present tense ("add" not "added")
-5. Don't end with a period
-6. Also provide a very short (5-10 words) description of what this branch is accomplishing overall
 ${branchContext}
 Analyze these code changes:
 
@@ -188,15 +178,20 @@ ${diffPreview}
 \`\`\`
 
 Respond with:
-TYPE: <commit type>
-MESSAGE: <commit subject>
-BODY: <optional detailed description>
-BRANCH_DESC: <very short description of what this branch is doing, 5-10 words>`;
+TYPE: <commit type or category>
+MESSAGE: <commit subject line>
+${includeBody ? 'BODY: <optional detailed description>\n' : ''}BRANCH_DESC: <very short description of what this branch is doing, 5-10 words>`;
 
     // Get the Bedrock client
     const client = await getBedrockClient();
 
-    console.log(chalk.blue("🤖 Analyzing changes with Claude 3.5 Sonnet..."));
+    const styleLabel = commitStyle === 'conventional' ? 'Conventional Commits' :
+                       commitStyle === 'semantic' ? 'Semantic Commits' :
+                       commitStyle === 'gitmoji' ? 'Gitmoji' :
+                       commitStyle === 'simple' ? 'Simple' :
+                       'Custom Style';
+
+    console.log(chalk.blue(`🤖 Analyzing changes with Claude (${styleLabel})...`));
 
     // Invoke the model using ChatBedrockConverse
     const response = await client.invoke([{ role: "user", content: prompt }]);
@@ -205,27 +200,53 @@ BRANCH_DESC: <very short description of what this branch is doing, 5-10 words>`;
     const content = response.content?.toString() || "";
 
     // Parse the response
-    const typeMatch = content.match(/TYPE:\s*(\w+)/i);
-    const messageMatch = content.match(/MESSAGE:\s*(.+)/i);
-    const bodyMatch = content.match(/BODY:\s*([^\n]*(?:\n(?!BRANCH_DESC:).*)*)/i);
-    const branchDescMatch = content.match(/BRANCH_DESC:\s*(.+)/i);
+    const typeMatch = content.match(/TYPE:\s*(.+?)(?:\n|$)/i);
+    const messageMatch = content.match(/MESSAGE:\s*(.+?)(?:\n|$)/i);
+    const bodyMatch = includeBody ? content.match(/BODY:\s*([^\n]*(?:\n(?!BRANCH_DESC:).*)*)/i) : null;
+    const branchDescMatch = content.match(/BRANCH_DESC:\s*(.+?)(?:\n|$)/i);
 
     if (!typeMatch || !messageMatch) {
       throw new Error("Could not parse AI response");
     }
 
-    const type = typeMatch[1].toLowerCase();
-    const commitMessage = messageMatch[1].trim();
+    const type = typeMatch[1].trim();
+    let commitMessage = messageMatch[1].trim();
     const body = bodyMatch ? bodyMatch[1].trim() : undefined;
     const branchDescription = branchDescMatch ? branchDescMatch[1].trim() : undefined;
 
-    // Build the full message
-    const fullMessage = body
-      ? `${type}: ${commitMessage}\n\n${body}`
-      : `${type}: ${commitMessage}`;
+    // Build the full message based on commit style
+    let fullMessage: string;
+
+    if (commitStyle === 'conventional') {
+      // Format: type: message
+      const typePrefix = type.toLowerCase();
+      fullMessage = body
+        ? `${typePrefix}: ${commitMessage}\n\n${body}`
+        : `${typePrefix}: ${commitMessage}`;
+    } else if (commitStyle === 'semantic') {
+      // Format: [TYPE] message
+      fullMessage = body
+        ? `[${type.toUpperCase()}] ${commitMessage}\n\n${body}`
+        : `[${type.toUpperCase()}] ${commitMessage}`;
+    } else if (commitStyle === 'gitmoji') {
+      // Format: emoji message (type contains the emoji)
+      fullMessage = body
+        ? `${type} ${commitMessage}\n\n${body}`
+        : `${type} ${commitMessage}`;
+    } else if (commitStyle === 'simple') {
+      // Format: just message (no type prefix)
+      fullMessage = body
+        ? `${commitMessage}\n\n${body}`
+        : commitMessage;
+    } else {
+      // Custom style - use as is
+      fullMessage = body
+        ? `${type ? type + ': ' : ''}${commitMessage}\n\n${body}`
+        : `${type ? type + ': ' : ''}${commitMessage}`;
+    }
 
     return {
-      type,
+      type: type.toLowerCase(),
       message: commitMessage,
       fullMessage,
       branchDescription,
@@ -245,6 +266,77 @@ BRANCH_DESC: <very short description of what this branch is doing, 5-10 words>`;
       fullMessage: `${fallbackType}: ${fallbackMessage}`,
       branchDescription: undefined,
     };
+  }
+}
+
+// Generate a work log entry based on the commit
+export async function generateWorkLogEntry(
+  files: string[],
+  commitMessage: string,
+  branchName: string
+): Promise<string | null> {
+  try {
+    // Check if AI is enabled
+    const config = loadConfig();
+    if (!config.ai?.enabled) {
+      return null;
+    }
+
+    // Get the diff
+    const { stdout: diff } = await execAsync(
+      `git diff --cached -- ${files.map((f) => `"${f}"`).join(" ")}`
+    );
+
+    if (!diff.trim()) {
+      return null;
+    }
+
+    // Limit diff size for API
+    const diffPreview = diff.length > 4000 ? diff.substring(0, 4000) + "\n... (truncated)" : diff;
+    const fileList = files.join(", ");
+
+    // Create a prompt for generating a work log entry
+    const prompt = `You are documenting a developer's daily work. Based on this commit, write a brief, professional work log entry.
+
+Commit message: ${commitMessage}
+Branch: ${branchName}
+Files changed: ${fileList}
+
+Diff preview:
+\`\`\`diff
+${diffPreview}
+\`\`\`
+
+Write a concise work log entry (2-3 sentences) that:
+1. Describes WHAT was done (the feature/fix/change)
+2. Explains WHY it was needed (the purpose/goal)
+3. Uses past tense and professional language
+4. Is suitable for reviewing your work later
+
+Do NOT include the commit message directly. Write it as a natural diary entry describing your work.
+Example: "Implemented user authentication flow with JWT tokens to secure API endpoints. Added middleware for token validation and refresh logic to maintain user sessions."
+
+Respond with just the work log entry text, no additional formatting or labels.`;
+
+    // Get the Bedrock client
+    const client = await getBedrockClient();
+
+    console.log(chalk.gray("📝 Generating work log entry..."));
+
+    // Invoke the model
+    const response = await client.invoke([{ role: "user", content: prompt }]);
+
+    // Extract the content from Claude's response
+    const workLogEntry = response.content?.toString().trim() || "";
+
+    if (workLogEntry) {
+      return workLogEntry;
+    }
+
+    return null;
+  } catch (error: any) {
+    console.error(chalk.gray("Work log generation failed:"), error.message);
+    return null;
   }
 }
 

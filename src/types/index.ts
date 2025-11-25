@@ -23,6 +23,12 @@ export interface KunjConfig {
     autoGenerateCommitMessage?: boolean;
     includeBranchContext?: boolean;
     maxContextCommits?: number;
+    commitStyle?: "conventional" | "semantic" | "simple" | "gitmoji" | "custom";
+    subjectMaxLength?: number;
+    includeBody?: boolean;
+    customInstructions?: string;
+    autoGeneratePRDescription?: boolean;
+    includeDiffInPR?: boolean;
   };
 }
 

@@ -10,6 +10,9 @@ export interface SettingDefinition {
   category?: string;
   options?: string[]; // For enum types
   validate?: (value: any) => boolean;
+  detailedDescription?: string; // Longer explanation of what this setting does
+  examples?: string[]; // Example values or use cases
+  relatedSettings?: string[]; // Keys of related settings
 }
 
 class SettingsRegistry {

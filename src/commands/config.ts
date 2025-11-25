@@ -404,6 +404,214 @@ export class ConfigCommand extends BaseCommand {
       }
     );
 
+    // Show detailed view of a setting and handle editing
+    const showDetailedViewAndEdit = async (item: any): Promise<boolean> => {
+      console.clear();
+
+      const setting = item.settingDef;
+      const currentValue = getConfigValue(item.value);
+      const source = getSettingSource(item.value, setting.defaultValue);
+      const keys = item.value.split('.');
+      const shortKey = keys[keys.length - 1];
+
+      // Header
+      console.log(chalk.blue.bold(`\n╔${'═'.repeat(78)}╗`));
+      console.log(chalk.blue.bold(`║ ${chalk.white.bold(shortKey.padEnd(76))} ║`));
+      console.log(chalk.blue.bold(`╚${'═'.repeat(78)}╝\n`));
+
+      // Current value
+      console.log(chalk.bold('  Current Value:'));
+      console.log(`    ${formatValue(currentValue)} ${source}\n`);
+
+      // Type and category
+      console.log(chalk.bold('  Type:'));
+      console.log(`    ${chalk.cyan(setting.type)}`);
+      if (setting.category) {
+        console.log(`    Category: ${chalk.cyan(setting.category)}`);
+      }
+      console.log();
+
+      // Description
+      console.log(chalk.bold('  Description:'));
+      const desc = setting.detailedDescription || setting.description;
+      console.log(`    ${chalk.dim(desc)}\n`);
+
+      // Default value
+      console.log(chalk.bold('  Default:'));
+      console.log(`    ${formatValue(setting.defaultValue)}\n`);
+
+      // Options for enum types
+      if (setting.type === 'enum' && setting.options) {
+        console.log(chalk.bold('  Valid Options:'));
+        setting.options.forEach((opt: string) => {
+          const indicator = currentValue === opt ? chalk.green('●') : chalk.dim('○');
+          console.log(`    ${indicator} ${opt}`);
+        });
+        console.log();
+      }
+
+      // Examples
+      if (setting.examples && setting.examples.length > 0) {
+        console.log(chalk.bold('  Examples:'));
+        setting.examples.forEach((example: string) => {
+          console.log(`    ${chalk.gray('•')} ${chalk.yellow(example)}`);
+        });
+        console.log();
+      }
+
+      // Related settings
+      if (setting.relatedSettings && setting.relatedSettings.length > 0) {
+        console.log(chalk.bold('  Related Settings:'));
+        setting.relatedSettings.forEach((rel: string) => {
+          console.log(`    ${chalk.gray('→')} ${chalk.cyan(rel)}`);
+        });
+        console.log();
+      }
+
+      // Full key path
+      console.log(chalk.dim(`  Full key: ${item.value}\n`));
+
+      // Footer
+      console.log(chalk.gray('─'.repeat(80)));
+
+      // Now directly handle editing based on type
+      let newValue: any;
+      let changed = false;
+
+      if (item.type === "boolean") {
+        const { value } = await inquirer.prompt([
+          {
+            type: "list",
+            name: "value",
+            message: "Select new value:",
+            choices: [
+              {
+                name: `${formatBoolValue(true)} True${currentValue === true ? chalk.green(' (current)') : ''}`,
+                value: true
+              },
+              {
+                name: `${formatBoolValue(false)} False${currentValue === false ? chalk.green(' (current)') : ''}`,
+                value: false
+              },
+              {
+                name: chalk.gray('← Go back (discard changes)'),
+                value: 'CANCEL'
+              }
+            ],
+            default: currentValue
+          }
+        ]);
+
+        if (value === 'CANCEL') {
+          return false; // User cancelled
+        }
+
+        newValue = value;
+        changed = newValue !== currentValue;
+
+      } else if (item.type === "number") {
+        const { value } = await inquirer.prompt([
+          {
+            type: "input",
+            name: "value",
+            message: "Enter new value (or leave empty to cancel):",
+            default: currentValue.toString(),
+            validate: (input: string) => {
+              if (input.trim() === '') return true; // Allow empty for cancel
+              const num = Number(input);
+              if (isNaN(num)) return 'Please enter a valid number';
+              if (setting.validate && !setting.validate(num)) {
+                return 'Invalid value for this setting';
+              }
+              return true;
+            }
+          }
+        ]);
+
+        if (value.trim() === '') {
+          return false; // User cancelled
+        }
+
+        newValue = Number(value);
+        changed = newValue !== currentValue;
+
+      } else if (item.type === "enum") {
+        const choices = setting.options.map((opt: string) => ({
+          name: currentValue === opt ? `${opt} ${chalk.green('(current)')}` : opt,
+          value: opt
+        }));
+        choices.push({
+          name: chalk.gray('← Go back (discard changes)'),
+          value: 'CANCEL'
+        });
+
+        const { value } = await inquirer.prompt([
+          {
+            type: "list",
+            name: "value",
+            message: "Select new value:",
+            choices,
+            default: currentValue
+          }
+        ]);
+
+        if (value === 'CANCEL') {
+          return false; // User cancelled
+        }
+
+        newValue = value;
+        changed = newValue !== currentValue;
+
+      } else if (item.type === "string") {
+        const { value } = await inquirer.prompt([
+          {
+            type: "input",
+            name: "value",
+            message: "Enter new value (or leave empty to cancel):",
+            default: currentValue
+          }
+        ]);
+
+        if (value === currentValue) {
+          return false; // No change
+        }
+
+        newValue = value;
+        changed = true;
+
+      } else if (item.type === "array") {
+        const currentArray = Array.isArray(currentValue) ? currentValue : [];
+        const { value } = await inquirer.prompt([
+          {
+            type: "input",
+            name: "value",
+            message: "Enter comma-separated values (or leave empty to cancel):",
+            default: currentArray.join(', ')
+          }
+        ]);
+
+        if (value === currentArray.join(', ')) {
+          return false; // No change
+        }
+
+        const arrayValue = value.split(',').map((v: string) => v.trim()).filter((v: string) => v !== '');
+        newValue = arrayValue;
+        changed = JSON.stringify(newValue) !== JSON.stringify(currentValue);
+      }
+
+      // Apply the change if there was one
+      if (changed) {
+        updateSetting(item.value, newValue);
+        console.log(chalk.green(`\n✓ Set ${item.value} to ${formatValue(newValue)}`));
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause to show success
+      } else {
+        console.log(chalk.gray('\n  Value unchanged'));
+        await new Promise(resolve => setTimeout(resolve, 800));
+      }
+
+      return true; // Continue editing
+    };
+
     let editing = true;
     while (editing) {
       // Update display names with current values
@@ -447,6 +655,7 @@ export class ConfigCommand extends BaseCommand {
       const item = configItems.find(i => i.value === selectedItem);
       if (!item) continue;
 
+      // Handle action items (save/exit)
       if (item.type === "action") {
         if (selectedItem === "save") {
           if (isGlobal) {
@@ -461,70 +670,11 @@ export class ConfigCommand extends BaseCommand {
           console.log(chalk.yellow("Configuration not saved"));
           editing = false;
         }
-      } else if (item.type === "boolean") {
-        // Toggle boolean value
-        const currentValue = getConfigValue(item.value);
-        const newValue = !currentValue;
-        updateSetting(item.value, newValue);
-        console.log(chalk.green(`✓ Toggled ${item.value} to ${newValue}`));
-      } else if (item.type === "number") {
-        // Edit number value
-        const { newValue } = await inquirer.prompt([
-          {
-            type: "number",
-            name: "newValue",
-            message: `Enter new value for ${item.value}:`,
-            default: item.current
-          }
-        ]);
-        if (newValue !== undefined && !isNaN(newValue)) {
-          updateSetting(item.value, newValue);
-          console.log(chalk.green(`✓ Set ${item.value} to ${newValue}`));
-        }
-      } else if (item.type === "enum") {
-        // Select from enum options
-        const { newValue } = await inquirer.prompt([
-          {
-            type: "list",
-            name: "newValue",
-            message: `Select value for ${item.value}:`,
-            choices: item.options,
-            default: item.current
-          }
-        ]);
-        updateSetting(item.value, newValue);
-        console.log(chalk.green(`✓ Set ${item.value} to ${newValue}`));
-      } else if (item.type === "string") {
-        // Edit string value
-        const { newValue } = await inquirer.prompt([
-          {
-            type: "input",
-            name: "newValue",
-            message: `Enter new value for ${item.value}:`,
-            default: item.current
-          }
-        ]);
-        if (newValue !== undefined && newValue !== "") {
-          updateSetting(item.value, newValue);
-          console.log(chalk.green(`✓ Set ${item.value} to ${newValue}`));
-        }
-      } else if (item.type === "array") {
-        // Edit array value (comma-separated input)
-        const currentArray = Array.isArray(item.current) ? item.current : [];
-        const { newValue } = await inquirer.prompt([
-          {
-            type: "input",
-            name: "newValue",
-            message: `Enter comma-separated values for ${item.value}:`,
-            default: currentArray.join(', ')
-          }
-        ]);
-        if (newValue !== undefined) {
-          const arrayValue = newValue.split(',').map((v: string) => v.trim()).filter((v: string) => v !== '');
-          updateSetting(item.value, arrayValue);
-          console.log(chalk.green(`✓ Set ${item.value} to [${arrayValue.join(', ')}]`));
-        }
+        continue;
       }
+
+      // Show detailed view and handle editing in one step
+      await showDetailedViewAndEdit(item);
     }
   }
 }

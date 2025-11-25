@@ -52,7 +52,7 @@ export class CreateCommand extends BaseCommand {
     }
 
     // Create and checkout the branch
-    const result = await executeGitCommand(`git checkout -b ${branchName}`);
+    const result = await executeGitCommand(`git switch -c ${branchName}`);
 
     if (result.success) {
       console.log(

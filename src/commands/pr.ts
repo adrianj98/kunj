@@ -12,6 +12,9 @@ import {
   getMainBranch,
 } from "../lib/git";
 import { getBranchMetadataItem } from "../lib/metadata";
+import { loadConfig } from "../lib/config";
+import { generateAIPRDescription, getPRDiff } from "../lib/ai-pr";
+import { checkAWSCredentials } from "../lib/ai-commit";
 
 const execAsync = promisify(exec);
 
@@ -31,6 +34,7 @@ export class PrCommand extends BaseCommand {
     super({
       name: "pr",
       description: "Create or view pull requests on GitHub",
+      arguments: "[prNumber]",
       options: [
         { flags: "-t, --title <title>", description: "PR title" },
         { flags: "-b, --body <body>", description: "PR body/description" },
@@ -44,7 +48,7 @@ export class PrCommand extends BaseCommand {
     });
   }
 
-  async execute(options: PrOptions = {}): Promise<void> {
+  async execute(prNumber?: string, options: PrOptions = {}): Promise<void> {
     // Check if we're in a git repository
     const isGitRepo = await checkGitRepo();
     if (!isGitRepo) {
@@ -62,6 +66,22 @@ export class PrCommand extends BaseCommand {
       console.log(chalk.gray("  Windows: See https://github.com/cli/cli#installation"));
       console.log(chalk.yellow("\nThen authenticate with: gh auth login"));
       process.exit(1);
+    }
+
+    // If PR number is provided, show that specific PR's status
+    if (prNumber) {
+      // Strip # if present (support both "123" and "#123")
+      const cleanNumber = prNumber.replace(/^#/, '');
+
+      // Validate it's a number
+      if (!/^\d+$/.test(cleanNumber)) {
+        console.error(chalk.red(`Error: Invalid PR number '${prNumber}'`));
+        console.log(chalk.yellow("Usage: kunj pr #123  or  kunj pr 123"));
+        process.exit(1);
+      }
+
+      await this.showPrStatus(options.detailed, cleanNumber);
+      return;
     }
 
     // Handle status flag
@@ -108,11 +128,55 @@ export class PrCommand extends BaseCommand {
 
     if (!title || !body) {
       // Interactive mode
-      const suggestions = await this.generatePrSuggestions(
-        currentBranch,
-        branchDescription,
-        commits
-      );
+      const config = loadConfig();
+      let suggestions;
+
+      // Try AI generation if enabled and autoGeneratePRDescription is true
+      const shouldUseAI = config.ai?.enabled && (config.ai?.autoGeneratePRDescription !== false);
+
+      if (shouldUseAI) {
+        try {
+          // Check if AWS credentials are available
+          const hasCredentials = await checkAWSCredentials();
+
+          if (hasCredentials) {
+            // Get the diff for AI context
+            const diff = await getPRDiff(mainBranch);
+
+            // Generate with AI
+            suggestions = await generateAIPRDescription(
+              currentBranch,
+              mainBranch,
+              branchMetadata,
+              commits,
+              diff
+            );
+            console.log(chalk.green("✓ Generated PR description with AI"));
+          } else {
+            console.log(chalk.yellow("⚠ AWS credentials not configured, using heuristic generation"));
+            suggestions = await this.generatePrSuggestions(
+              currentBranch,
+              branchDescription,
+              commits
+            );
+          }
+        } catch (error: any) {
+          console.log(chalk.yellow(`⚠ AI generation failed: ${error.message}`));
+          console.log(chalk.gray("  Falling back to heuristic generation"));
+          suggestions = await this.generatePrSuggestions(
+            currentBranch,
+            branchDescription,
+            commits
+          );
+        }
+      } else {
+        // AI disabled, use heuristic generation
+        suggestions = await this.generatePrSuggestions(
+          currentBranch,
+          branchDescription,
+          commits
+        );
+      }
 
       const answers = await inquirer.prompt([
         {
@@ -308,14 +372,26 @@ export class PrCommand extends BaseCommand {
     }
   }
 
-  private async showPrStatus(detailed: boolean = false): Promise<void> {
+  private async showPrStatus(detailed: boolean = false, prNumber?: string): Promise<void> {
     try {
-      const currentBranch = await getCurrentBranch();
-      console.log(chalk.blue(`\n📋 PR Status for branch: ${currentBranch}\n`));
+      let branchInfo = "";
+      let ghCommand = "gh pr view";
+
+      if (prNumber) {
+        // Viewing a specific PR by number
+        branchInfo = `PR #${prNumber}`;
+        ghCommand = `gh pr view ${prNumber}`;
+      } else {
+        // Viewing PR for current branch
+        const currentBranch = await getCurrentBranch();
+        branchInfo = `branch: ${currentBranch}`;
+      }
+
+      console.log(chalk.blue(`\n📋 PR Status for ${branchInfo}\n`));
 
       // Get PR details
       const { stdout: prJson } = await execAsync(
-        `gh pr view --json number,title,state,url,isDraft,mergeable,reviews,statusCheckRollup,additions,deletions,author 2>/dev/null || echo "{}"`
+        `${ghCommand} --json number,title,state,url,isDraft,mergeable,reviews,statusCheckRollup,additions,deletions,author,headRefName 2>/dev/null || echo "{}"`
       );
 
       const pr = JSON.parse(prJson || "{}");
@@ -394,9 +470,10 @@ export class PrCommand extends BaseCommand {
           console.log(chalk.cyan("\n📝 GitHub Actions Detailed Steps:"));
 
           try {
-            // Get the workflow runs for this PR
+            // Get the workflow runs for this PR - use headRefName from PR data
+            const branch = pr.headRefName;
             const { stdout: runsJson } = await execAsync(
-              `gh run list --branch=${currentBranch} --json databaseId,name,status,conclusion,workflowName --limit=5`
+              `gh run list --branch=${branch} --json databaseId,name,status,conclusion,workflowName --limit=5`
             );
             const runs = JSON.parse(runsJson || "[]");
 

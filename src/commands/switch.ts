@@ -46,7 +46,6 @@ export class SwitchCommand extends BaseCommand {
       process.exit(1);
     }
 
-    const config = loadConfig();
     const currentBranch = await getCurrentBranch();
 
     // If branch specified, switch directly (or create if -c flag is used)
@@ -108,7 +107,7 @@ export class SwitchCommand extends BaseCommand {
     }
 
     // Switch to the target branch
-    const result = await executeGitCommand(`git checkout ${targetBranch}`);
+    const result = await executeGitCommand(`git switch ${targetBranch}`);
 
     if (result.success) {
       console.log(
@@ -299,7 +298,7 @@ export class SwitchCommand extends BaseCommand {
     }
 
     // Create and checkout the branch
-    const result = await executeGitCommand(`git checkout -b ${branchName}`);
+    const result = await executeGitCommand(`git switch -c ${branchName}`);
 
     if (result.success) {
       console.log(

@@ -12,9 +12,19 @@ import {
   getCurrentBranch,
   getCommitsSinceBranch,
   FileStatus,
+  getFileDiff,
+  getFileDiffWithMain,
+  revertFile,
+  deleteFile,
 } from "../lib/git";
-import { generateAICommitMessage, checkAWSCredentials, getAWSConfigInfo } from "../lib/ai-commit";
+import { generateAICommitMessage, checkAWSCredentials, getAWSConfigInfo, generateWorkLogEntry } from "../lib/ai-commit";
 import { updateBranchMetadata } from "../lib/metadata";
+import { appendToWorkLog } from "../lib/work-log";
+import { exec, spawn } from "child_process";
+import { promisify } from "util";
+import * as fs from "fs";
+
+const execAsync = promisify(exec);
 
 interface CommitOptions {
   all?: boolean;
@@ -42,199 +52,465 @@ export class CommitCommand extends BaseCommand {
   }
 
   async execute(options: CommitOptions = {}): Promise<void> {
-    // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    // Handle Ctrl-C gracefully
+    const sigintHandler = () => {
+      console.log(chalk.yellow("\n\nCommit cancelled"));
+      process.exit(0);
+    };
+    process.on("SIGINT", sigintHandler);
 
-    const currentBranch = await getCurrentBranch();
-    console.log(chalk.blue(`On branch: ${currentBranch}`));
-
-    // Get all file statuses
-    const files = await getFileStatuses();
-
-    if (files.length === 0) {
-      console.log(chalk.yellow("No changes to commit"));
-      console.log(chalk.gray("Working tree is clean"));
-      return;
-    }
-
-    // Separate staged and unstaged files
-    const stagedFiles = files.filter((f) => f.staged);
-    const unstagedFiles = files.filter((f) => !f.staged);
-
-    // If --all flag, stage all files
-    let filesToCommit: string[] = [];
-
-    if (options.all) {
-      filesToCommit = files.map((f) => f.path);
-      console.log(
-        chalk.cyan(`Staging all ${filesToCommit.length} changed files...`)
-      );
-      const stageResult = await stageFiles(filesToCommit);
-      if (!stageResult.success) {
-        console.error(
-          chalk.red(`Failed to stage files: ${stageResult.message}`)
-        );
+    try {
+      // Check if we're in a git repository
+      const isGitRepo = await checkGitRepo();
+      if (!isGitRepo) {
+        console.error(chalk.red("Error: Not a git repository"));
         process.exit(1);
       }
-    } else if (unstagedFiles.length > 0) {
-      // Interactive file selection
-      filesToCommit = await this.selectFiles(files);
 
-      if (filesToCommit.length === 0) {
-        console.log(chalk.yellow("No files selected"));
+      const currentBranch = await getCurrentBranch();
+      console.log(chalk.blue(`On branch: ${currentBranch}`));
+
+      // Get all file statuses
+      const files = await getFileStatuses();
+
+      if (files.length === 0) {
+        console.log(chalk.yellow("No changes to commit"));
+        console.log(chalk.gray("Working tree is clean"));
         return;
       }
 
-      // Stage selected files
-      console.log(
-        chalk.cyan(`Staging ${filesToCommit.length} selected files...`)
-      );
-      const stageResult = await stageFiles(filesToCommit);
-      if (!stageResult.success) {
-        console.error(
-          chalk.red(`Failed to stage files: ${stageResult.message}`)
+      // Separate staged and unstaged files
+      const stagedFiles = files.filter((f) => f.staged);
+      const unstagedFiles = files.filter((f) => !f.staged);
+
+      // If --all flag, stage all files
+      let filesToCommit: string[] = [];
+
+        if (options.all) {
+        filesToCommit = files.map((f) => f.path);
+        console.log(
+          chalk.cyan(`Staging all ${filesToCommit.length} changed files...`)
         );
-        process.exit(1);
-      }
-    } else if (stagedFiles.length > 0) {
-      // Use already staged files
-      console.log(chalk.green(`${stagedFiles.length} files already staged`));
-      filesToCommit = stagedFiles.map((f) => f.path);
-    } else {
-      console.log(chalk.yellow("No files to commit"));
-      return;
-    }
-
-    // Get commit message
-    let commitMessage: string;
-
-    if (options.message) {
-      commitMessage = options.message;
-    } else {
-      commitMessage = await this.getCommitMessage(filesToCommit);
-      if (!commitMessage) {
-        console.log(chalk.yellow("Commit cancelled"));
-        return;
-      }
-    }
-
-    // Create the commit
-    console.log(chalk.blue("Creating commit..."));
-    const result = await createCommit(commitMessage);
-
-    if (result.success) {
-      console.log(chalk.green("✓ Commit created successfully"));
-
-      // Show commit details
-      const commitInfo = result.message.match(/\[([^\]]+)\]\s+(.+)/);
-      if (commitInfo) {
-        console.log(chalk.gray(`  Branch: ${commitInfo[1]}`));
-        console.log(chalk.gray(`  Message: ${commitInfo[2]}`));
-      }
-
-      // Show what was committed
-      console.log(chalk.cyan(`\nCommitted ${filesToCommit.length} files:`));
-      filesToCommit.forEach((file) => {
-        console.log(chalk.gray(`  - ${file}`));
-      });
-
-      // Ask if user wants to push
-      const { shouldPush } = await inquirer.prompt([
-        {
-          type: "confirm",
-          name: "shouldPush",
-          message: "Push to remote repository?",
-          default: true,
-        },
-      ]);
-
-      if (shouldPush) {
-        console.log(chalk.blue("\nPushing to remote..."));
-        try {
-          const { exec } = require("child_process");
-          const { promisify } = require("util");
-          const execAsync = promisify(exec);
-
-          // First check if we need to set upstream
-          const currentBranch = await getCurrentBranch();
-          const { stdout: trackingBranch } = await execAsync(
-            `git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo ""`
+        const stageResult = await stageFiles(filesToCommit);
+        if (!stageResult.success) {
+          console.error(
+            chalk.red(`Failed to stage files: ${stageResult.message}`)
           );
+          process.exit(1);
+        }
+        } else if (unstagedFiles.length > 0) {
+        // Interactive file selection
+        try {
+          filesToCommit = await this.selectFiles(files);
 
-          if (!trackingBranch.trim()) {
-            // No upstream branch, push with -u
-            console.log(chalk.gray(`Setting upstream branch...`));
-            const { stdout, stderr } = await execAsync(
-              `git push -u origin ${currentBranch}`
-            );
-            if (stderr && !stderr.includes("Everything up-to-date")) {
-              console.log(chalk.yellow(stderr));
-            }
-            console.log(chalk.green("✓ Pushed and set upstream branch"));
-          } else {
-            // Upstream exists, normal push
-            const { stdout, stderr } = await execAsync("git push");
-            if (stderr && !stderr.includes("Everything up-to-date")) {
-              console.log(chalk.yellow(stderr));
-            }
-            console.log(chalk.green("✓ Pushed to remote"));
+          if (filesToCommit.length === 0) {
+            return;
           }
-        } catch (error: any) {
-          console.error(chalk.red(`✗ Push failed: ${error.message}`));
-          console.log(chalk.gray("You can manually push with: git push"));
+
+          // Stage selected files
+          console.log(
+            chalk.cyan(`Staging ${filesToCommit.length} selected files...`)
+          );
+          const stageResult = await stageFiles(filesToCommit);
+          if (!stageResult.success) {
+            console.error(
+              chalk.red(`Failed to stage files: ${stageResult.message}`)
+            );
+            process.exit(1);
+          }
+        } catch (err) {
+          // Handle Ctrl-C gracefully
+          console.log(chalk.yellow("\nCommit cancelled"));
+          return;
+        }
+        } else if (stagedFiles.length > 0) {
+        // Use already staged files
+        console.log(chalk.green(`${stagedFiles.length} files already staged`));
+        filesToCommit = stagedFiles.map((f) => f.path);
+        } else {
+        console.log(chalk.yellow("No files to commit"));
+        return;
+      }
+
+      // Get commit message
+      let commitMessage: string;
+      let usedAI = false;
+
+      if (options.message) {
+        commitMessage = options.message;
+        } else {
+        const result = await this.getCommitMessage(filesToCommit);
+        commitMessage = result.message;
+        usedAI = result.usedAI;
+        if (!commitMessage) {
+          console.log(chalk.yellow("Commit cancelled"));
+          return;
         }
       }
-    } else {
-      console.error(chalk.red(`✗ Commit failed: ${result.message}`));
-      process.exit(1);
+
+      // Create the commit
+      console.log(chalk.blue("Creating commit..."));
+      const commitResult = await createCommit(commitMessage);
+
+      if (commitResult.success) {
+        console.log(chalk.green("✓ Commit created successfully"));
+
+        // Generate work log entry if AI was used
+        if (usedAI) {
+          try {
+            const workLogEntry = await generateWorkLogEntry(
+              filesToCommit,
+              commitMessage,
+              currentBranch
+            );
+
+            if (workLogEntry) {
+              appendToWorkLog(workLogEntry);
+              console.log(chalk.gray("📝 Work log updated"));
+            }
+          } catch (error: any) {
+            // Silently fail work log generation - it's not critical
+            console.error(chalk.gray("Note: Could not update work log"));
+          }
+        }
+
+        // Show commit details
+        const commitInfo = commitResult.message.match(/\[([^\]]+)\]\s+(.+)/);
+        if (commitInfo) {
+          console.log(chalk.gray(`  Branch: ${commitInfo[1]}`));
+          console.log(chalk.gray(`  Message: ${commitInfo[2]}`));
+        }
+
+        // Show what was committed
+        console.log(chalk.cyan(`\nCommitted ${filesToCommit.length} files:`));
+        filesToCommit.forEach((file) => {
+          console.log(chalk.gray(`  - ${file}`));
+        });
+
+        // Ask if user wants to push
+        const { shouldPush } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "shouldPush",
+            message: "Push to remote repository?",
+            default: true,
+          },
+        ]);
+
+        if (shouldPush) {
+          console.log(chalk.blue("\nPushing to remote..."));
+          try {
+            const { exec } = require("child_process");
+            const { promisify } = require("util");
+            const execAsync = promisify(exec);
+
+            // First check if we need to set upstream
+            const currentBranch = await getCurrentBranch();
+            const { stdout: trackingBranch } = await execAsync(
+              `git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo ""`
+            );
+
+            if (!trackingBranch.trim()) {
+              // No upstream branch, push with -u
+              console.log(chalk.gray(`Setting upstream branch...`));
+              const { stdout, stderr } = await execAsync(
+                `git push -u origin ${currentBranch}`
+              );
+              if (stderr && !stderr.includes("Everything up-to-date")) {
+                console.log(chalk.yellow(stderr));
+              }
+              console.log(chalk.green("✓ Pushed and set upstream branch"));
+            } else {
+              // Upstream exists, normal push
+              const { stdout, stderr } = await execAsync("git push");
+              if (stderr && !stderr.includes("Everything up-to-date")) {
+                console.log(chalk.yellow(stderr));
+              }
+              console.log(chalk.green("✓ Pushed to remote"));
+            }
+          } catch (error: any) {
+            console.error(chalk.red(`✗ Push failed: ${error.message}`));
+            console.log(chalk.gray("You can manually push with: git push"));
+          }
+        }
+        } else {
+        console.error(chalk.red(`✗ Commit failed: ${commitResult.message}`));
+        process.exit(1);
+      }
+    } finally {
+      // Remove SIGINT handler
+      process.off("SIGINT", sigintHandler);
     }
   }
 
   private async selectFiles(files: FileStatus[]): Promise<string[]> {
-    // Format file choices with status indicators
-    const fileChoices = files.map((file) => {
-      const statusIcon = this.getStatusIcon(file.status);
-      const stagedIndicator = file.staged ? chalk.green("[staged]") : "";
-      const fileName = file.oldPath
-        ? `${file.oldPath} → ${file.path}`
-        : file.path;
+    const enquirer = require("enquirer");
+    const { MultiSelect } = enquirer;
 
-      return {
-        name: `${statusIcon} ${fileName} ${stagedIndicator}`,
-        value: file.path,
-        checked: file.staged, // Pre-select staged files
-      };
-    });
+    let availableFiles = [...files];
+    let needsRefresh = false;
 
-    console.log(chalk.cyan("\nSelect files to include in commit:"));
-    console.log(
-      chalk.gray("(Use arrow keys to move, space to select, enter to confirm)")
-    );
+    while (true) {
+      if (needsRefresh) {
+        availableFiles = await getFileStatuses();
+        needsRefresh = false;
+        if (availableFiles.length === 0) {
+          console.log(chalk.yellow("No files available to commit"));
+          return [];
+        }
+      }
 
-    const { selectedFiles } = await inquirer.prompt([
-      {
-        type: "checkbox",
-        name: "selectedFiles",
-        message: "Files to commit:",
-        choices: fileChoices,
-        pageSize: 15,
-        validate: (input: any) => {
-          if (input.length === 0) {
-            return "You must select at least one file";
+      // Format file choices with status indicators and line stats
+      const choices = availableFiles.map((file) => {
+        const statusIcon = this.getStatusIcon(file.status);
+        const stagedIndicator = file.staged ? chalk.green("[staged]") : "        ";
+        const fileName = file.oldPath
+          ? `${file.oldPath} → ${file.path}`
+          : file.path;
+
+        // Format line changes
+        let lineStats = "";
+        if (file.additions !== undefined || file.deletions !== undefined) {
+          const additions = file.additions || 0;
+          const deletions = file.deletions || 0;
+
+          if (additions > 0 && deletions > 0) {
+            lineStats = `${chalk.green("+" + additions)} ${chalk.red("-" + deletions)}`;
+          } else if (additions > 0) {
+            lineStats = chalk.green("+" + additions);
+          } else if (deletions > 0) {
+            lineStats = chalk.red("-" + deletions);
           }
-          return true;
-        },
-      },
-    ]);
+        }
 
-    return selectedFiles;
+        return {
+          name: file.path,
+          message: `${statusIcon} ${fileName.padEnd(50)} ${stagedIndicator} ${lineStats}`,
+          enabled: file.staged, // Pre-select staged files
+        };
+      });
+
+      const prompt = new MultiSelect({
+        name: "files",
+        message: "Select files to commit",
+        choices,
+        result(names: string[]) {
+          return names;
+        },
+        footer() {
+          return chalk.gray(
+            "\n[↑↓] Navigate  [space] Toggle  [a] Toggle all  [enter] Continue\n" +
+            "[→] View diff  [m] Diff w/main  [r] Revert  [d] Delete  [q] Cancel"
+          );
+        },
+      });
+
+      let promptClosed = false;
+
+      // Custom key handlers
+      prompt.on("keypress", async (input: string, key: any) => {
+        if (promptClosed) return;
+
+        const currentIndex = prompt.index;
+        const currentFile = availableFiles[currentIndex];
+
+        if (!currentFile) return;
+
+        // Right arrow - show diff
+        if (key.name === "right") {
+          promptClosed = true;
+          try {
+            prompt.close();
+          } catch (err) {
+            // Ignore close errors
+          }
+          await this.showScrollableDiff(currentFile.path, false);
+          needsRefresh = false;
+          return;
+        }
+
+        // 'm' - show diff with main
+        if (input === "m") {
+          promptClosed = true;
+          try {
+            prompt.close();
+          } catch (err) {
+            // Ignore close errors
+          }
+          await this.showScrollableDiff(currentFile.path, true);
+          needsRefresh = false;
+          return;
+        }
+
+        // 'r' - revert file
+        if (input === "r" && currentFile.status !== "new") {
+          promptClosed = true;
+          try {
+            prompt.close();
+          } catch (err) {
+            // Ignore close errors
+          }
+          console.log(chalk.yellow(`\nRevert ${currentFile.path}?`));
+          const { Confirm } = require("enquirer");
+          const confirmPrompt = new Confirm({
+            name: "confirm",
+            message: "This cannot be undone. Continue?",
+            initial: false,
+          });
+
+          try {
+            const confirmed = await confirmPrompt.run();
+            if (confirmed) {
+              const result = await revertFile(currentFile.path);
+              if (result.success) {
+                console.log(chalk.green(`✓ ${result.message}`));
+                needsRefresh = true;
+              } else {
+                console.log(chalk.red(`✗ ${result.message}`));
+              }
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          } catch (err) {
+            // User cancelled
+          }
+          return;
+        }
+
+        // 'd' - delete file
+        if (input === "d") {
+          promptClosed = true;
+          try {
+            prompt.close();
+          } catch (err) {
+            // Ignore close errors
+          }
+          console.log(chalk.red(`\nDelete ${currentFile.path}?`));
+          const { Confirm } = require("enquirer");
+          const confirmPrompt = new Confirm({
+            name: "confirm",
+            message: "This cannot be undone. Continue?",
+            initial: false,
+          });
+
+          try {
+            const confirmed = await confirmPrompt.run();
+            if (confirmed) {
+              const result = await deleteFile(currentFile.path);
+              if (result.success) {
+                console.log(chalk.green(`✓ ${result.message}`));
+                needsRefresh = true;
+              } else {
+                console.log(chalk.red(`✗ ${result.message}`));
+              }
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          } catch (err) {
+            // User cancelled
+          }
+          return;
+        }
+
+        // 'q' - cancel/quit
+        if (input === "q") {
+          promptClosed = true;
+          try {
+            prompt.close();
+          } catch (err) {
+            // Ignore close errors
+          }
+          throw new Error("cancelled");
+        }
+      });
+
+      try {
+        const selected = await prompt.run();
+
+        if (!selected || selected.length === 0) {
+          console.log(chalk.yellow("No files selected"));
+          return [];
+        }
+
+        return selected;
+      } catch (err: any) {
+        // Handle cancellation (Ctrl-C or 'q')
+        // Also handle readline errors
+        if (
+          err.message === "cancelled" ||
+          err.message === "" ||
+          err.code === "ERR_USE_AFTER_CLOSE" ||
+          !needsRefresh
+        ) {
+          console.log(chalk.yellow("\nCommit cancelled"));
+          return [];
+        }
+        // If needsRefresh is true, continue the loop
+      }
+    }
   }
 
-  private async getCommitMessage(files: string[]): Promise<string> {
+  private async showScrollableDiff(filePath: string, withMain: boolean): Promise<void> {
+    console.log(chalk.cyan(`\n📄 ${withMain ? "Diff with main" : "Diff preview"}: ${filePath}`));
+    console.log(chalk.gray("Loading...\n"));
+
+    const diff = withMain ? await getFileDiffWithMain(filePath) : await getFileDiff(filePath);
+
+    try {
+      // Use less for scrollable viewing with colors
+      const tempFile = `/tmp/kunj-diff-${Date.now()}.txt`;
+
+      // Write diff to temp file
+      fs.writeFileSync(tempFile, diff);
+
+      // Use spawn to properly handle interactive less
+      await new Promise<void>((resolve, reject) => {
+        const lessProcess = spawn("less", ["-R", "-F", "-X", tempFile], {
+          stdio: "inherit",
+        });
+
+        lessProcess.on("close", (code) => {
+          // Clean up temp file
+          try {
+            fs.unlinkSync(tempFile);
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+
+          if (code === 0 || code === null) {
+            resolve();
+          } else {
+            reject(new Error(`less exited with code ${code}`));
+          }
+        });
+
+        lessProcess.on("error", (err) => {
+          // Clean up temp file
+          try {
+            fs.unlinkSync(tempFile);
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+          reject(err);
+        });
+      });
+    } catch (error) {
+      // Fallback: just print the diff and wait for user
+      console.clear();
+      console.log(chalk.cyan(`\n📄 ${withMain ? "Diff with main" : "Diff preview"}: ${filePath}`));
+      console.log(chalk.gray("─".repeat(60)));
+      console.log(diff);
+      console.log(chalk.gray("─".repeat(60)));
+      console.log(chalk.gray("\nPress Enter to continue..."));
+      await inquirer.prompt([
+        {
+          type: "input",
+          name: "continue",
+          message: "",
+        },
+      ]);
+    }
+  }
+
+  private async getCommitMessage(files: string[]): Promise<{ message: string; usedAI: boolean }> {
     // Get recent commits for reference
     const recentCommits = await getRecentCommitMessages(5);
 
@@ -321,8 +597,8 @@ export class CommitCommand extends BaseCommand {
       message = aiResult.fullMessage || "";
 
       // Return the AI-generated message immediately
-      return message;
-    } else {
+      return { message, usedAI: true };
+      } else {
       // For non-AI options, ask for message and body
       const manualAnswers = await inquirer.prompt([
         {
@@ -370,7 +646,7 @@ export class CommitCommand extends BaseCommand {
         },
       ]);
 
-      return confirmed ? message : "";
+      return confirmed ? { message, usedAI: false } : { message: "", usedAI: false };
     }
   }
 
