@@ -365,6 +365,7 @@ Write an ITEMIZED work log entry in this format:
 - Specific change 1
 - Specific change 2
 - Specific change 3 (if applicable)
+Files: file1.ts, file2.ts
 
 Tags to use:
 - [feature] - New functionality added
@@ -379,26 +380,30 @@ CRITICAL Guidelines:
 1. Start with [TAG] and brief summary of WHAT changed
 2. Follow with 2-4 bullet points listing specific WHAT was added/changed/removed
 3. Each bullet should be SHORT (3-6 words max)
-4. Focus ONLY on WHAT was done, NOT why it was needed
-5. Use past tense
-6. Be specific but concise
-7. NEVER explain reasons, purposes, or goals - only state the changes
+4. End with "Files: " followed by comma-separated list of main files changed (max 3-4 files, use relative paths)
+5. Focus ONLY on WHAT was done, NOT why it was needed
+6. Use past tense
+7. Be specific but concise
+8. NEVER explain reasons, purposes, or goals - only state the changes
 
 Good Examples (WHAT only):
 "[feature] Added user authentication
 - Built JWT token generation
 - Created login/logout endpoints
-- Added session middleware"
+- Added session middleware
+Files: src/auth/jwt.ts, src/api/auth.ts"
 
 "[bug] Fixed payment rounding
 - Updated decimal calculation
 - Added validation checks
-- Corrected currency handling"
+- Corrected currency handling
+Files: src/payments/processor.ts"
 
 "[refactor] Restructured database layer
 - Split queries into functions
 - Removed duplicate code
-- Updated connection pooling"
+- Updated connection pooling
+Files: src/db/queries.ts, src/db/connection.ts"
 
 Bad Examples (includes WHY - DO NOT do this):
 "[feature] Added authentication to secure endpoints" ❌
@@ -428,6 +433,203 @@ Respond with just the tagged entry with bullets, no additional formatting.`;
   }
 }
 
+// Generate a stash message using AI
+export async function generateStashMessage(
+  files: string[]
+): Promise<string | null> {
+  try {
+    // Check if AI is enabled
+    const config = loadConfig();
+    if (!config.ai?.enabled) {
+      return null;
+    }
+
+    // Get the diff for unstaged/staged changes
+    const { stdout: diff } = await execAsync("git diff HEAD");
+
+    if (!diff.trim()) {
+      console.log(chalk.gray("No changes to stash"));
+      return null;
+    }
+
+    // Limit diff size for API
+    const diffPreview = diff.length > 3000 ? diff.substring(0, 3000) + "\n... (truncated)" : diff;
+    const fileList = files.join(", ");
+
+    // Get project context if available
+    const projectContext = getProjectContext();
+    const projectContextSection = projectContext
+      ? `\nProject Context:\n${projectContext}\n`
+      : '';
+
+    // Create a prompt for generating a stash message
+    const prompt = `You are helping a developer create a descriptive stash message for their work-in-progress changes.
+${projectContextSection}
+Files changed: ${fileList}
+
+Diff preview:
+\`\`\`diff
+${diffPreview}
+\`\`\`
+
+Generate a CONCISE stash message (one line, 50 characters max) that describes WHAT changes are being stashed.
+
+Guidelines:
+- One line only, no line breaks
+- 50 characters max
+- Use present tense (e.g., "WIP: Add user auth", "Half-done checkout flow")
+- Start with "WIP: " if work is incomplete
+- Be specific but brief
+- Focus on WHAT, not WHY
+
+Examples:
+"WIP: Add JWT authentication"
+"WIP: Refactor payment processor"
+"Half-done user profile page"
+"Incomplete API rate limiting"
+"WIP: Fix checkout bug"
+
+Respond with ONLY the stash message, nothing else.`;
+
+    // Get the Bedrock client
+    const client = await getBedrockClient();
+
+    // Invoke the model
+    const response = await client.invoke([{ role: "user", content: prompt }]);
+
+    // Extract the content from Claude's response
+    const stashMessage = response.content?.toString().trim() || "";
+
+    if (stashMessage) {
+      // Remove any quotes that might be added
+      return stashMessage.replace(/^["']|["']$/g, '');
+    }
+
+    console.log(chalk.gray("AI returned empty stash message"));
+    return null;
+  } catch (error: any) {
+    console.error(chalk.red("Stash message generation error:"), error.message);
+    return null;
+  }
+}
+
+// Generate a work log entry for a PR
+export async function generatePRLogEntry(
+  prTitle: string,
+  prBody: string,
+  commits: string[],
+  branchName: string,
+  baseBranch: string
+): Promise<string | null> {
+  try {
+    // Check if AI is enabled
+    const config = loadConfig();
+    if (!config.ai?.enabled) {
+      return null;
+    }
+
+    // Get the diff between base branch and current branch
+    const { stdout: diff } = await execAsync(`git diff ${baseBranch}...HEAD`);
+
+    if (!diff.trim()) {
+      console.log(chalk.gray("No diff available for PR log"));
+      return null;
+    }
+
+    // Limit diff size for API
+    const diffPreview = diff.length > 4000 ? diff.substring(0, 4000) + "\n... (truncated)" : diff;
+    const commitList = commits.slice(0, 10).join("\n");
+
+    // Get project context if available
+    const projectContext = getProjectContext();
+    const projectContextSection = projectContext
+      ? `\nProject Context:\n${projectContext}\n`
+      : '';
+
+    // Create a prompt for generating a PR work log entry
+    const prompt = `You are documenting a developer's daily work. Based on this pull request, write a CONCISE itemized work log entry.
+${projectContextSection}
+PR Title: ${prTitle}
+PR Description: ${prBody}
+Branch: ${branchName} → ${baseBranch}
+Commits:
+${commitList}
+
+Diff preview:
+\`\`\`diff
+${diffPreview}
+\`\`\`
+
+Write an ITEMIZED work log entry in this format:
+[TAG] Brief description of WHAT was done (PR-level summary)
+- Specific change 1
+- Specific change 2
+- Specific change 3 (if applicable)
+PR: #<will be added later>
+
+Tags to use:
+- [feature] - New functionality added
+- [bug] - Bug fix
+- [refactor] - Code refactoring/cleanup
+- [perf] - Performance improvement
+- [docs] - Documentation update
+- [test] - Test additions/updates
+- [chore] - Maintenance tasks
+
+CRITICAL Guidelines:
+1. Start with [TAG] and brief summary of WHAT the PR accomplishes overall
+2. Follow with 2-4 bullet points listing the main WHAT was added/changed/removed across all commits
+3. Each bullet should be SHORT (3-6 words max)
+4. End with "PR: #" (the PR number will be added by the system)
+5. Focus ONLY on WHAT was done, NOT why it was needed
+6. Use past tense
+7. Be specific but concise
+8. Think at the PR level - summarize the overall changes, not individual commits
+9. NEVER explain reasons, purposes, or goals - only state the changes
+
+Good Examples (WHAT only, PR-level):
+"[feature] Implemented user authentication system
+- Added JWT token generation
+- Created auth endpoints
+- Built session management
+- Added auth middleware
+PR: #"
+
+"[bug] Fixed payment processing issues
+- Corrected decimal rounding
+- Updated transaction validation
+- Fixed currency conversion
+PR: #"
+
+"[refactor] Restructured API layer
+- Split routes into modules
+- Cleaned up error handling
+- Updated middleware chain
+PR: #"
+
+Respond with just the tagged entry with bullets, no additional formatting.`;
+
+    // Get the Bedrock client
+    const client = await getBedrockClient();
+
+    // Invoke the model
+    const response = await client.invoke([{ role: "user", content: prompt }]);
+
+    // Extract the content from Claude's response
+    const prLogEntry = response.content?.toString().trim() || "";
+
+    if (prLogEntry) {
+      return prLogEntry;
+    }
+
+    console.log(chalk.gray("AI returned empty PR log entry"));
+    return null;
+  } catch (error: any) {
+    console.error(chalk.red("PR log generation error:"), error.message);
+    throw error; // Re-throw to be caught by caller
+  }
+}
+
 // Generate abbreviated standup bullets from work log entries
 export async function generateStandupBullets(
   workLogContent: string,
@@ -444,9 +646,15 @@ export async function generateStandupBullets(
       return null;
     }
 
+    // Get project context if available
+    const projectContext = getProjectContext();
+    const projectContextSection = projectContext
+      ? `\nProject Context:\n${projectContext}\n`
+      : '';
+
     // Create a prompt for generating abbreviated bullets
     const prompt = `You are helping prepare for a daily standup meeting. Below is a work log for ${dateLabel}.
-
+${projectContextSection}
 Your task: Create 3-5 EXTREMELY concise bullet points using the format: <feature>: <action>
 
 Guidelines:

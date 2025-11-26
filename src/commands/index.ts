@@ -9,6 +9,7 @@ export { DeleteCommand } from './delete';
 export { ConfigCommand } from './config';
 export { SetupCommand } from './setup';
 export { LogCommand } from './log';
+export { StashCommand } from './stash';
 export { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
 // Import all command classes here as they are created
@@ -24,6 +25,7 @@ import { DeleteCommand } from './delete';
 import { ConfigCommand } from './config';
 import { SetupCommand } from './setup';
 import { LogCommand } from './log';
+import { StashCommand } from './stash';
 import { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
 // Export a function that returns all command instances
@@ -38,6 +40,7 @@ export function getAllCommands(): BaseCommand[] {
     new ConfigCommand(),
     new SetupCommand(),
     new LogCommand(),
+    new StashCommand(),
     new BranchNoteCommand(),
     new BranchTagCommand(),
     new BranchDescCommand(),

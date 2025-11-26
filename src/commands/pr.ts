@@ -14,7 +14,8 @@ import {
 import { getBranchMetadataItem } from "../lib/metadata";
 import { loadConfig } from "../lib/config";
 import { generateAIPRDescription, getPRDiff } from "../lib/ai-pr";
-import { checkAWSCredentials } from "../lib/ai-commit";
+import { checkAWSCredentials, generatePRLogEntry } from "../lib/ai-commit";
+import { appendToWorkLog } from "../lib/work-log";
 
 const execAsync = promisify(exec);
 
@@ -231,6 +232,33 @@ export class PrCommand extends BaseCommand {
         const prUrl = stdout.trim();
         console.log(chalk.green("\n✓ Pull request created successfully!"));
         console.log(chalk.cyan(`PR URL: ${prUrl}`));
+
+        // Extract PR number from URL (e.g., https://github.com/user/repo/pull/123)
+        const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+        const prNumber = prNumberMatch ? prNumberMatch[1] : null;
+
+        // Generate work log entry for the PR
+        try {
+          console.log(chalk.gray("📝 Generating work log entry..."));
+          const prLogEntry = await generatePRLogEntry(
+            title!,
+            body!,
+            commits,
+            currentBranch,
+            mainBranch
+          );
+
+          if (prLogEntry && prNumber) {
+            // Replace "PR: #" with actual PR number
+            const logEntryWithNumber = prLogEntry.replace(/PR:\s*#?\s*$/, `PR: #${prNumber}`);
+            appendToWorkLog(logEntryWithNumber);
+            console.log(chalk.green("✓ Work log entry added"));
+          }
+        } catch (error: any) {
+          // Don't fail the PR creation if work log fails
+          console.log(chalk.yellow("⚠ Failed to generate work log entry"));
+          console.log(chalk.gray(`  ${error.message}`));
+        }
 
         // Show initial PR status
         console.log(chalk.blue("\nFetching PR status..."));
