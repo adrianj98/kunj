@@ -2,7 +2,7 @@
 
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { BaseCommand } from '../lib/command';
 import { checkGitRepo, getFileStatuses } from '../lib/git';
@@ -185,20 +185,100 @@ export class StashCommand extends BaseCommand {
 
       const stashes = stdout.trim().split('\n');
 
-      stashes.forEach((stash) => {
+      // Create choices for interactive selection
+      const choices = stashes.map((stash) => {
         // Parse stash line: stash@{0}: On branch-name: message
         const match = stash.match(/^(stash@\{(\d+)\}):\s+(.+)$/);
         if (match) {
           const [, stashRef, index, description] = match;
-          const color = parseInt(index) === 0 ? chalk.green : chalk.white;
-          console.log(color(`  ${stashRef}: ${description}`));
-        } else {
-          console.log(chalk.gray(`  ${stash}`));
+          return {
+            name: `${stashRef}: ${description}`,
+            value: parseInt(index),
+            short: stashRef,
+          };
         }
+        return {
+          name: stash,
+          value: -1,
+          short: stash,
+        };
       });
 
-      console.log(chalk.gray('\n💡 Tip: Use "kunj stash pop" to apply the latest stash'));
-      console.log(chalk.gray('     Use "kunj stash --apply <index>" to apply a specific stash'));
+      // Add cancel option
+      choices.push({
+        name: chalk.gray('Cancel'),
+        value: -999,
+        short: 'Cancel',
+      });
+
+      // Interactive selection
+      const { selectedStash } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'selectedStash',
+          message: 'Select a stash:',
+          choices,
+          pageSize: 15,
+        },
+      ]);
+
+      if (selectedStash === -999) {
+        return;
+      }
+
+      // Show actions for selected stash
+      const { action } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'action',
+          message: 'What would you like to do?',
+          choices: [
+            { name: 'Pop (apply and remove)', value: 'pop' },
+            { name: 'Apply (keep in stash list)', value: 'apply' },
+            { name: 'Show diff', value: 'show' },
+            { name: 'Drop (delete)', value: 'drop' },
+            { name: chalk.gray('Cancel'), value: 'cancel' },
+          ],
+        },
+      ]);
+
+      switch (action) {
+        case 'pop':
+          await this.popStashByIndex(selectedStash);
+          break;
+        case 'apply':
+          await this.applyStash(selectedStash);
+          break;
+        case 'show':
+          await this.showStashDiff(selectedStash);
+          // After showing, ask if they want to do something else
+          const { followUp } = await inquirer.prompt([
+            {
+              type: 'list',
+              name: 'followUp',
+              message: 'What next?',
+              choices: [
+                { name: 'Pop this stash', value: 'pop' },
+                { name: 'Apply this stash', value: 'apply' },
+                { name: 'Drop this stash', value: 'drop' },
+                { name: chalk.gray('Nothing'), value: 'nothing' },
+              ],
+            },
+          ]);
+          if (followUp === 'pop') {
+            await this.popStashByIndex(selectedStash);
+          } else if (followUp === 'apply') {
+            await this.applyStash(selectedStash);
+          } else if (followUp === 'drop') {
+            await this.dropStash(selectedStash);
+          }
+          break;
+        case 'drop':
+          await this.dropStash(selectedStash);
+          break;
+        case 'cancel':
+          break;
+      }
     } catch (error: any) {
       // If git stash list fails, it means no stashes exist
       if (error.message.includes('No stash entries')) {
@@ -232,6 +312,77 @@ export class StashCommand extends BaseCommand {
       } else {
         console.error(chalk.red('Failed to pop stash:'), error.message);
       }
+      process.exit(1);
+    }
+  }
+
+  private async popStashByIndex(index: number): Promise<void> {
+    try {
+      const stashRef = `stash@{${index}}`;
+
+      // Check if stash exists
+      try {
+        await execAsync(`git stash show ${stashRef}`);
+      } catch {
+        console.error(chalk.red(`Error: Stash ${stashRef} does not exist`));
+        process.exit(1);
+      }
+
+      console.log(chalk.blue(`Popping stash ${stashRef}...`));
+      const { stdout } = await execAsync(`git stash pop ${stashRef}`);
+
+      console.log(chalk.green(`✓ Stash ${stashRef} popped successfully!`));
+      if (stdout.trim()) {
+        console.log(chalk.gray(stdout.trim()));
+      }
+    } catch (error: any) {
+      if (error.message.includes('CONFLICT')) {
+        console.error(chalk.red('⚠ Merge conflicts occurred while popping stash'));
+        console.log(chalk.yellow('Please resolve conflicts manually'));
+      } else {
+        console.error(chalk.red('Failed to pop stash:'), error.message);
+      }
+      process.exit(1);
+    }
+  }
+
+  private async showStashDiff(index: number): Promise<void> {
+    try {
+      const stashRef = `stash@{${index}}`;
+
+      // Check if stash exists
+      try {
+        await execAsync(`git stash show ${stashRef}`);
+      } catch {
+        console.error(chalk.red(`Error: Stash ${stashRef} does not exist`));
+        process.exit(1);
+      }
+
+      console.log(chalk.cyan(`\n📋 Stash ${stashRef} diff:\n`));
+
+      // Show the diff with less for scrolling
+      const less = spawn('less', ['-R', '-F', '-X'], {
+        stdio: ['pipe', process.stdout, process.stderr],
+      });
+
+      const { stdout: diff } = await execAsync(`git stash show -p --color=always ${stashRef}`);
+      less.stdin.write(diff);
+      less.stdin.end();
+
+      await new Promise<void>((resolve, reject) => {
+        less.on('close', (code: number) => {
+          if (code === 0 || code === null) {
+            resolve();
+          } else {
+            reject(new Error(`less exited with code ${code}`));
+          }
+        });
+        less.on('error', reject);
+      });
+
+      console.log(); // Add newline after less exits
+    } catch (error: any) {
+      console.error(chalk.red('Failed to show stash diff:'), error.message);
       process.exit(1);
     }
   }

@@ -197,16 +197,21 @@ export class CommitCommand extends BaseCommand {
         });
 
         // Ask if user wants to push
-        const { shouldPush } = await inquirer.prompt([
+        const { pushAction } = await inquirer.prompt([
           {
-            type: "confirm",
-            name: "shouldPush",
-            message: "Push to remote repository?",
-            default: true,
+            type: "list",
+            name: "pushAction",
+            message: "What would you like to do next?",
+            choices: [
+              { name: "Push to remote", value: "push" },
+              { name: "Push and create PR", value: "pr" },
+              { name: "Skip (don't push)", value: "skip" },
+            ],
+            default: "push",
           },
         ]);
 
-        if (shouldPush) {
+        if (pushAction === "push" || pushAction === "pr") {
           console.log(chalk.blue("\nPushing to remote..."));
           try {
             const { exec } = require("child_process");
@@ -222,7 +227,7 @@ export class CommitCommand extends BaseCommand {
             if (!trackingBranch.trim()) {
               // No upstream branch, push with -u
               console.log(chalk.gray(`Setting upstream branch...`));
-              const { stdout, stderr } = await execAsync(
+              const { stderr } = await execAsync(
                 `git push -u origin ${currentBranch}`
               );
               if (stderr && !stderr.includes("Everything up-to-date")) {
@@ -231,11 +236,19 @@ export class CommitCommand extends BaseCommand {
               console.log(chalk.green("✓ Pushed and set upstream branch"));
             } else {
               // Upstream exists, normal push
-              const { stdout, stderr } = await execAsync("git push");
+              const { stderr } = await execAsync("git push");
               if (stderr && !stderr.includes("Everything up-to-date")) {
                 console.log(chalk.yellow(stderr));
               }
               console.log(chalk.green("✓ Pushed to remote"));
+            }
+
+            // If user selected "pr", create a pull request
+            if (pushAction === "pr") {
+              console.log(chalk.blue("\nCreating pull request..."));
+              const { PrCommand } = require("./pr");
+              const prCommand = new PrCommand();
+              await prCommand.execute(undefined, {});
             }
           } catch (error: any) {
             console.error(chalk.red(`✗ Push failed: ${error.message}`));
