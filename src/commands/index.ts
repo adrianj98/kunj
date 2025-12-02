@@ -9,6 +9,8 @@ export { DeleteCommand } from './delete';
 export { ConfigCommand } from './config';
 export { SetupCommand } from './setup';
 export { LogCommand } from './log';
+export { GraphCommand } from './graph';
+export { DiffCommand } from './diff';
 export { StashCommand } from './stash';
 export { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
@@ -25,6 +27,8 @@ import { DeleteCommand } from './delete';
 import { ConfigCommand } from './config';
 import { SetupCommand } from './setup';
 import { LogCommand } from './log';
+import { GraphCommand } from './graph';
+import { DiffCommand } from './diff';
 import { StashCommand } from './stash';
 import { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
@@ -40,6 +44,8 @@ export function getAllCommands(): BaseCommand[] {
     new ConfigCommand(),
     new SetupCommand(),
     new LogCommand(),
+    new GraphCommand(),
+    new DiffCommand(),
     new StashCommand(),
     new BranchNoteCommand(),
     new BranchTagCommand(),

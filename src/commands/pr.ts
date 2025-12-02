@@ -39,7 +39,7 @@ export class PrCommand extends BaseCommand {
       options: [
         { flags: "-t, --title <title>", description: "PR title" },
         { flags: "-b, --body <body>", description: "PR body/description" },
-        { flags: "--base <branch>", description: "Base branch (default: main/master)" },
+        { flags: "--base <branch>", description: "Base branch (overrides config setting)" },
         { flags: "-d, --draft", description: "Create as draft PR" },
         { flags: "-w, --web", description: "Open PR in web browser after creation" },
         { flags: "-s, --status", description: "View status of current branch's PR" },
@@ -98,10 +98,24 @@ export class PrCommand extends BaseCommand {
     }
 
     const currentBranch = await getCurrentBranch();
-    const mainBranch = options.base || (await getMainBranch());
 
-    if (currentBranch === mainBranch) {
-      console.error(chalk.red(`Error: Cannot create PR from ${mainBranch} branch`));
+    // Determine base branch: CLI option > config setting > auto-detect
+    let baseBranch = options.base;
+
+    if (!baseBranch) {
+      const config = await loadConfig();
+      const configuredBase = config.preferences?.defaultBaseBranch;
+
+      if (configuredBase && configuredBase.trim() !== '') {
+        baseBranch = configuredBase.trim();
+      } else {
+        // Auto-detect or prompt if multiple candidates
+        baseBranch = await this.selectBaseBranch();
+      }
+    }
+
+    if (currentBranch === baseBranch) {
+      console.error(chalk.red(`Error: Cannot create PR from ${baseBranch} branch`));
       console.log(chalk.yellow("Please switch to a feature branch first"));
       process.exit(1);
     }
@@ -114,7 +128,7 @@ export class PrCommand extends BaseCommand {
       return;
     }
 
-    console.log(chalk.blue(`Creating PR from ${currentBranch} to ${mainBranch}`));
+    console.log(chalk.blue(`Creating PR from ${currentBranch} to ${baseBranch}`));
 
     // Get branch metadata
     const branchMetadata = getBranchMetadataItem(currentBranch);
@@ -142,12 +156,12 @@ export class PrCommand extends BaseCommand {
 
           if (hasCredentials) {
             // Get the diff for AI context
-            const diff = await getPRDiff(mainBranch);
+            const diff = await getPRDiff(baseBranch);
 
             // Generate with AI
             suggestions = await generateAIPRDescription(
               currentBranch,
-              mainBranch,
+              baseBranch,
               branchMetadata,
               commits,
               diff
@@ -212,7 +226,7 @@ export class PrCommand extends BaseCommand {
       await this.ensurePushed(currentBranch);
 
       // Build gh command
-      let ghCommand = `gh pr create --title "${title!.replace(/"/g, '\\"')}" --body "${body!.replace(/"/g, '\\"')}" --base ${mainBranch}`;
+      let ghCommand = `gh pr create --title "${title!.replace(/"/g, '\\"')}" --body "${body!.replace(/"/g, '\\"')}" --base ${baseBranch}`;
 
       if (options.draft) {
         ghCommand += " --draft";
@@ -245,7 +259,7 @@ export class PrCommand extends BaseCommand {
             body!,
             commits,
             currentBranch,
-            mainBranch
+            baseBranch
           );
 
           if (prLogEntry && prNumber) {
@@ -387,6 +401,54 @@ export class PrCommand extends BaseCommand {
     body += "- [ ] Documentation updated if needed\n";
 
     return { title, body };
+  }
+
+  private async selectBaseBranch(): Promise<string> {
+    try {
+      // Get all branches (local and remote)
+      const { stdout } = await execAsync(
+        `git branch -a --format='%(refname:short)' 2>/dev/null`
+      );
+
+      const allBranches = stdout
+        .split('\n')
+        .map(b => b.trim())
+        .filter(b => b && !b.startsWith('remotes/'));
+
+      // Common base branch candidates
+      const candidates = ['main', 'master', 'develop', 'development', 'dev'];
+      const availableCandidates = candidates.filter(c => allBranches.includes(c));
+
+      // If only one candidate found, use it
+      if (availableCandidates.length === 1) {
+        console.log(chalk.gray(`Using base branch: ${availableCandidates[0]}`));
+        return availableCandidates[0];
+      }
+
+      // If multiple candidates, prompt user
+      if (availableCandidates.length > 1) {
+        const answer = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'baseBranch',
+            message: 'Select base branch for PR:',
+            choices: availableCandidates.map(b => ({
+              name: b,
+              value: b
+            })),
+            default: availableCandidates[0]
+          }
+        ]);
+
+        return answer.baseBranch;
+      }
+
+      // Fallback to getMainBranch
+      return await getMainBranch();
+    } catch (error) {
+      // If anything fails, use getMainBranch as fallback
+      return await getMainBranch();
+    }
   }
 
   private async checkExistingPr(branch: string): Promise<boolean> {

@@ -13,6 +13,9 @@ export interface KunjConfig {
     recentDays: number;
     stashAgeDays: number;
     showOnlyConfigured: boolean;
+    graphUnicode?: boolean;
+    graphStyle?: "default" | "light" | "dark";
+    defaultBaseBranch?: string;
   };
   aliases: Record<string, string>;
   ai?: {

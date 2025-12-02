@@ -20,9 +20,9 @@ import {
 import { generateAICommitMessage, checkAWSCredentials, getAWSConfigInfo, generateWorkLogEntry } from "../lib/ai-commit";
 import { updateBranchMetadata } from "../lib/metadata";
 import { appendToWorkLog } from "../lib/work-log";
-import { exec, spawn } from "child_process";
+import { formatDiff, formatSideBySideDiff } from "../lib/diff-formatter";
+import { exec } from "child_process";
 import { promisify } from "util";
-import * as fs from "fs";
 
 const execAsync = promisify(exec);
 
@@ -30,6 +30,7 @@ interface CommitOptions {
   all?: boolean;
   message?: string;
   amend?: boolean;
+  auto?: boolean;
 }
 
 export class CommitCommand extends BaseCommand {
@@ -47,6 +48,10 @@ export class CommitCommand extends BaseCommand {
           description: "Commit message (skip interactive prompt)",
         },
         { flags: "--amend", description: "Amend the last commit" },
+        {
+          flags: "--auto",
+          description: "Auto mode: use AI for commit message and auto-push",
+        },
       ],
     });
   }
@@ -138,6 +143,22 @@ export class CommitCommand extends BaseCommand {
 
       if (options.message) {
         commitMessage = options.message;
+        } else if (options.auto) {
+        // Auto mode: use AI without prompting
+        const branchCommits = await getCommitsSinceBranch();
+        const aiResult = await generateAICommitMessage(filesToCommit, branchCommits, currentBranch);
+        commitMessage = aiResult.fullMessage || "";
+        usedAI = true;
+
+        console.log(chalk.cyan("\n🤖 AI-generated commit message:"));
+        console.log(chalk.white(commitMessage));
+
+        // Save branch description if generated
+        if (aiResult.branchDescription) {
+          updateBranchMetadata(currentBranch, {
+            description: aiResult.branchDescription
+          });
+        }
         } else {
         const result = await this.getCommitMessage(filesToCommit);
         commitMessage = result.message;
@@ -196,20 +217,29 @@ export class CommitCommand extends BaseCommand {
           console.log(chalk.gray(`  - ${file}`));
         });
 
-        // Ask if user wants to push
-        const { pushAction } = await inquirer.prompt([
-          {
-            type: "list",
-            name: "pushAction",
-            message: "What would you like to do next?",
-            choices: [
-              { name: "Push to remote", value: "push" },
-              { name: "Push and create PR", value: "pr" },
-              { name: "Skip (don't push)", value: "skip" },
-            ],
-            default: "push",
-          },
-        ]);
+        // Ask if user wants to push (or auto-push in auto mode)
+        let pushAction = "skip";
+
+        if (options.auto) {
+          // Auto mode: always push
+          pushAction = "push";
+          console.log(chalk.gray("\n[Auto mode: pushing to remote]"));
+        } else {
+          const answer = await inquirer.prompt([
+            {
+              type: "list",
+              name: "pushAction",
+              message: "What would you like to do next?",
+              choices: [
+                { name: "Push to remote", value: "push" },
+                { name: "Push and create PR", value: "pr" },
+                { name: "Skip (don't push)", value: "skip" },
+              ],
+              default: "push",
+            },
+          ]);
+          pushAction = answer.pushAction;
+        }
 
         if (pushAction === "push" || pushAction === "pr") {
           console.log(chalk.blue("\nPushing to remote..."));
@@ -271,6 +301,7 @@ export class CommitCommand extends BaseCommand {
 
     let availableFiles = [...files];
     let needsRefresh = false;
+    let shouldContinue = false;
 
     while (true) {
       if (needsRefresh) {
@@ -281,6 +312,8 @@ export class CommitCommand extends BaseCommand {
           return [];
         }
       }
+
+      shouldContinue = false;
 
       // Format file choices with status indicators and line stats
       const choices = availableFiles.map((file) => {
@@ -347,7 +380,10 @@ export class CommitCommand extends BaseCommand {
             // Ignore close errors
           }
           await this.showScrollableDiff(currentFile.path, false);
+          shouldContinue = true;
           needsRefresh = false;
+          promptClosed = false;
+          // Continue the loop to show file selection again
           return;
         }
 
@@ -360,7 +396,10 @@ export class CommitCommand extends BaseCommand {
             // Ignore close errors
           }
           await this.showScrollableDiff(currentFile.path, true);
+          shouldContinue = true;
           needsRefresh = false;
+          promptClosed = false;
+          // Continue the loop to show file selection again
           return;
         }
 
@@ -395,6 +434,7 @@ export class CommitCommand extends BaseCommand {
           } catch (err) {
             // User cancelled
           }
+          shouldContinue = true;
           return;
         }
 
@@ -429,6 +469,7 @@ export class CommitCommand extends BaseCommand {
           } catch (err) {
             // User cancelled
           }
+          shouldContinue = true;
           return;
         }
 
@@ -454,82 +495,77 @@ export class CommitCommand extends BaseCommand {
 
         return selected;
       } catch (err: any) {
+        // If we're continuing (e.g., after viewing diff), loop again
+        if (shouldContinue || needsRefresh) {
+          continue;
+        }
+
         // Handle cancellation (Ctrl-C or 'q')
         // Also handle readline errors
         if (
           err.message === "cancelled" ||
           err.message === "" ||
-          err.code === "ERR_USE_AFTER_CLOSE" ||
-          !needsRefresh
+          err.code === "ERR_USE_AFTER_CLOSE"
         ) {
           console.log(chalk.yellow("\nCommit cancelled"));
           return [];
         }
-        // If needsRefresh is true, continue the loop
+
+        // For other errors, re-throw
+        throw err;
       }
     }
   }
 
   private async showScrollableDiff(filePath: string, withMain: boolean): Promise<void> {
+    console.clear();
     console.log(chalk.cyan(`\n📄 ${withMain ? "Diff with main" : "Diff preview"}: ${filePath}`));
-    console.log(chalk.gray("Loading...\n"));
+    console.log(chalk.gray("─".repeat(Math.min(80, process.stdout.columns || 80))));
 
-    const diff = withMain ? await getFileDiffWithMain(filePath) : await getFileDiff(filePath);
+    // Get raw diff without colors for custom formatting
+    const diff = withMain ? await getFileDiffWithMain(filePath) : await getFileDiff(filePath, false);
 
-    try {
-      // Use less for scrollable viewing with colors
-      const tempFile = `/tmp/kunj-diff-${Date.now()}.txt`;
+    // Format the diff with beautiful syntax highlighting
+    const formattedDiff = formatDiff(diff, {
+      showLineNumbers: true,
+      highlightWords: true,
+      maxWidth: process.stdout.columns || 120,
+    });
 
-      // Write diff to temp file
-      fs.writeFileSync(tempFile, diff);
+    // Print the diff directly
+    console.log(formattedDiff);
+    console.log(chalk.gray("─".repeat(Math.min(80, process.stdout.columns || 80))));
 
-      // Use spawn to properly handle interactive less
-      await new Promise<void>((resolve, reject) => {
-        const lessProcess = spawn("less", ["-R", "-F", "-X", tempFile], {
-          stdio: "inherit",
-        });
+    // Use readline to capture Escape key
+    console.log(chalk.dim("\n[Press Enter or Escape to go back to file list]"));
 
-        lessProcess.on("close", (code) => {
-          // Clean up temp file
-          try {
-            fs.unlinkSync(tempFile);
-          } catch (e) {
-            // Ignore cleanup errors
+    await new Promise<void>((resolve) => {
+      const stdin = process.stdin;
+      const wasRaw = stdin.isRaw;
+
+      // Enable raw mode to capture individual keypresses
+      if (stdin.setRawMode) {
+        stdin.setRawMode(true);
+      }
+      stdin.resume();
+
+      const onData = (key: Buffer) => {
+        const keyStr = key.toString();
+
+        // Check for Enter (0x0D or 0x0A) or Escape (0x1B)
+        if (keyStr === '\r' || keyStr === '\n' || keyStr === '\x1B') {
+          // Clean up
+          stdin.removeListener('data', onData);
+          if (stdin.setRawMode) {
+            stdin.setRawMode(wasRaw || false);
           }
+          stdin.pause();
+          resolve();
+        }
+      };
 
-          if (code === 0 || code === null) {
-            resolve();
-          } else {
-            reject(new Error(`less exited with code ${code}`));
-          }
-        });
-
-        lessProcess.on("error", (err) => {
-          // Clean up temp file
-          try {
-            fs.unlinkSync(tempFile);
-          } catch (e) {
-            // Ignore cleanup errors
-          }
-          reject(err);
-        });
-      });
-    } catch (error) {
-      // Fallback: just print the diff and wait for user
-      console.clear();
-      console.log(chalk.cyan(`\n📄 ${withMain ? "Diff with main" : "Diff preview"}: ${filePath}`));
-      console.log(chalk.gray("─".repeat(60)));
-      console.log(diff);
-      console.log(chalk.gray("─".repeat(60)));
-      console.log(chalk.gray("\nPress Enter to continue..."));
-      await inquirer.prompt([
-        {
-          type: "input",
-          name: "continue",
-          message: "",
-        },
-      ]);
-    }
+      stdin.on('data', onData);
+    });
   }
 
   private async getCommitMessage(files: string[]): Promise<{ message: string; usedAI: boolean }> {

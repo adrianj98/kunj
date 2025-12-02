@@ -7,6 +7,30 @@ import { GitCommandResult, BranchInfo } from '../types';
 
 const execAsync = promisify(exec);
 
+// Cache for git root directory
+let gitRootCache: string | null = null;
+
+// Get the git repository root directory
+export async function getGitRoot(): Promise<string> {
+  if (gitRootCache) {
+    return gitRootCache;
+  }
+
+  try {
+    const { stdout } = await execAsync('git rev-parse --show-toplevel');
+    gitRootCache = stdout.trim();
+    return gitRootCache;
+  } catch (error) {
+    throw new Error('Not in a git repository');
+  }
+}
+
+// Execute command from git root directory
+async function execFromGitRoot(command: string): Promise<{ stdout: string; stderr: string }> {
+  const gitRoot = await getGitRoot();
+  return execAsync(command, { cwd: gitRoot });
+}
+
 // Check if current directory is a git repository
 export async function checkGitRepo(): Promise<boolean> {
   try {
@@ -17,10 +41,10 @@ export async function checkGitRepo(): Promise<boolean> {
   }
 }
 
-// Execute a git command with error handling
+// Execute a git command with error handling from the git root directory
 export async function executeGitCommand(command: string): Promise<GitCommandResult> {
   try {
-    const { stdout, stderr } = await execAsync(command);
+    const { stdout, stderr } = await execFromGitRoot(command);
     return {
       success: true,
       message: stdout || stderr || ''
@@ -36,7 +60,7 @@ export async function executeGitCommand(command: string): Promise<GitCommandResu
 // Get the current branch name
 export async function getCurrentBranch(): Promise<string> {
   try {
-    const { stdout } = await execAsync('git branch --show-current');
+    const { stdout } = await execFromGitRoot('git branch --show-current');
     return stdout.trim();
   } catch {
     return '';
@@ -47,7 +71,7 @@ export async function getCurrentBranch(): Promise<string> {
 export async function getAllBranches(includeRemote: boolean = false): Promise<BranchInfo[]> {
   try {
     const command = includeRemote ? 'git branch -a' : 'git branch';
-    const { stdout } = await execAsync(command);
+    const { stdout } = await execFromGitRoot(command);
 
     if (!stdout.trim()) return [];
 
@@ -76,7 +100,7 @@ export async function getBranchesWithActivity(sortBy: 'recent' | 'alphabetical' 
       ? `git for-each-ref --sort=${sortFlag} --format='%(refname:short)|%(committerdate:relative)' refs/heads/`
       : `git for-each-ref --format='%(refname:short)|%(committerdate:relative)' refs/heads/`;
 
-    const { stdout } = await execAsync(command);
+    const { stdout } = await execFromGitRoot(command);
 
     if (!stdout.trim()) return [];
 
@@ -100,7 +124,7 @@ export async function getBranchesWithActivity(sortBy: 'recent' | 'alphabetical' 
 // Check if there are uncommitted changes
 export async function hasUncommittedChanges(): Promise<boolean> {
   try {
-    const { stdout } = await execAsync('git status --porcelain');
+    const { stdout } = await execFromGitRoot('git status --porcelain');
     return stdout.trim().length > 0;
   } catch {
     return false;
@@ -167,7 +191,7 @@ export async function getFileStatuses(): Promise<FileStatus[]> {
       if (filePath.endsWith('/') && indexStatus === '?' && workTreeStatus === '?') {
         // Get all untracked files in this directory
         try {
-          const { stdout: filesInDir } = await execAsync(`git ls-files --others --exclude-standard "${filePath}*"`);
+          const { stdout:filesInDir } = await execAsync(`git ls-files --others --exclude-standard "${filePath}*"`);
           if (filesInDir.trim()) {
             const dirFiles = filesInDir.split('\n').filter(f => f.trim());
             for (const file of dirFiles) {
@@ -220,7 +244,7 @@ export async function getFileStatuses(): Promise<FileStatus[]> {
     // Get stats for staged files
     const stagedStatsMap = new Map<string, { additions: number; deletions: number }>();
     try {
-      const { stdout: stagedStats } = await execAsync('git diff --numstat --cached');
+      const { stdout:stagedStats } = await execAsync('git diff --numstat --cached');
       if (stagedStats.trim()) {
         stagedStats.split('\n').filter(l => l.trim()).forEach(line => {
           const parts = line.split(/\s+/);
@@ -239,7 +263,7 @@ export async function getFileStatuses(): Promise<FileStatus[]> {
     // Get stats for unstaged files
     const unstagedStatsMap = new Map<string, { additions: number; deletions: number }>();
     try {
-      const { stdout: unstagedStats } = await execAsync('git diff --numstat');
+      const { stdout:unstagedStats } = await execAsync('git diff --numstat');
       if (unstagedStats.trim()) {
         unstagedStats.split('\n').filter(l => l.trim()).forEach(line => {
           const parts = line.split(/\s+/);
@@ -265,7 +289,7 @@ export async function getFileStatuses(): Promise<FileStatus[]> {
       } else if (file.status === 'new') {
         // For new files, count lines
         try {
-          const { stdout: content } = await execAsync(`wc -l < "${file.path}" 2>/dev/null || echo "0"`);
+          const { stdout:content } = await execAsync(`wc -l < "${file.path}" 2>/dev/null || echo "0"`);
           file.additions = parseInt(content.trim()) || 0;
           file.deletions = 0;
         } catch {
@@ -290,9 +314,46 @@ export async function stageFiles(filePaths: string[]): Promise<GitCommandResult>
     return { success: false, message: 'No files to stage' };
   }
 
-  // Escape file paths for shell
-  const escapedPaths = filePaths.map(path => `"${path}"`).join(' ');
-  return executeGitCommand(`git add ${escapedPaths}`);
+  // Clean and normalize file paths
+  const cleanPaths = filePaths.map(p => p.trim()).filter(p => p.length > 0);
+
+  if (cleanPaths.length === 0) {
+    return { success: false, message: 'No valid files to stage' };
+  }
+
+  // Try staging files one at a time to identify problematic paths
+  const results: { path: string; success: boolean; error?: string }[] = [];
+
+  for (const filePath of cleanPaths) {
+    try {
+      // Use git add -- with proper escaping
+      // The -- separator ensures git treats the path as a file, not an option
+      const escapedPath = filePath.replace(/"/g, '\\"');
+      const result = await executeGitCommand(`git add -- "${escapedPath}"`);
+
+      if (!result.success) {
+        results.push({ path: filePath, success: false, error: result.message });
+      } else {
+        results.push({ path: filePath, success: true });
+      }
+    } catch (error: any) {
+      results.push({ path: filePath, success: false, error: error.message });
+    }
+  }
+
+  const failedFiles = results.filter(r => !r.success);
+
+  if (failedFiles.length > 0) {
+    const errorMsg = failedFiles
+      .map(f => `  ${f.path}: ${f.error}`)
+      .join('\n');
+    return {
+      success: false,
+      message: `Failed to stage ${failedFiles.length} file(s):\n${errorMsg}`
+    };
+  }
+
+  return { success: true, message: `Staged ${cleanPaths.length} file(s)` };
 }
 
 // Create a commit with message
@@ -324,15 +385,15 @@ export async function getRecentCommitMessages(limit: number = 10): Promise<strin
 export async function getMainBranch(): Promise<string> {
   try {
     // Check if main exists
-    const { stdout: mainExists } = await execAsync('git rev-parse --verify main 2>/dev/null || echo ""');
+    const { stdout:mainExists } = await execAsync('git rev-parse --verify main 2>/dev/null || echo ""');
     if (mainExists.trim()) return 'main';
 
     // Check if master exists
-    const { stdout: masterExists } = await execAsync('git rev-parse --verify master 2>/dev/null || echo ""');
+    const { stdout:masterExists } = await execAsync('git rev-parse --verify master 2>/dev/null || echo ""');
     if (masterExists.trim()) return 'master';
 
     // Try to get from remote
-    const { stdout: remotes } = await execAsync('git branch -r');
+    const { stdout:remotes } = await execAsync('git branch -r');
     if (remotes.includes('origin/main')) return 'main';
     if (remotes.includes('origin/master')) return 'master';
 
@@ -354,7 +415,7 @@ export async function getCommitsSinceBranch(): Promise<string[]> {
     }
 
     // Find the merge-base (common ancestor)
-    const { stdout: mergeBase } = await execAsync(`git merge-base ${mainBranch} HEAD 2>/dev/null || echo ""`);
+    const { stdout:mergeBase } = await execAsync(`git merge-base ${mainBranch} HEAD 2>/dev/null || echo ""`);
 
     if (!mergeBase.trim()) {
       // If no merge-base found, just return recent commits
@@ -379,34 +440,40 @@ export async function getCommitsSinceBranch(): Promise<string[]> {
 }
 
 // Get colored diff for a file
-export async function getFileDiff(filePath: string): Promise<string> {
+export async function getFileDiff(filePath: string, colored: boolean = true): Promise<string> {
   try {
+    const colorFlag = colored ? '--color=always' : '--no-color';
+
     // Try to get diff for staged changes first
-    const { stdout: stagedDiff } = await execAsync(`git diff --cached --color=always -- "${filePath}" 2>/dev/null || echo ""`);
+    const { stdout:stagedDiff } = await execAsync(`git diff --cached ${colorFlag} -- "${filePath}" 2>/dev/null || echo ""`);
 
     if (stagedDiff.trim()) {
       return stagedDiff;
     }
 
     // If no staged changes, get unstaged diff
-    const { stdout: unstagedDiff } = await execAsync(`git diff --color=always -- "${filePath}" 2>/dev/null || echo ""`);
+    const { stdout:unstagedDiff } = await execAsync(`git diff ${colorFlag} -- "${filePath}" 2>/dev/null || echo ""`);
 
     if (unstagedDiff.trim()) {
       return unstagedDiff;
     }
 
     // If it's a new file, show the entire content
-    const { stdout: status } = await execAsync(`git status --porcelain "${filePath}"`);
+    const { stdout:status } = await execAsync(`git status --porcelain "${filePath}"`);
     if (status.trim().startsWith('??') || status.trim().startsWith('A')) {
-      const { stdout: content } = await execAsync(`cat "${filePath}" 2>/dev/null || echo ""`);
+      const { stdout:content } = await execAsync(`cat "${filePath}" 2>/dev/null || echo ""`);
       // Format as a diff with all lines as additions
       const lines = content.split('\n');
-      return chalk.green(lines.map(line => `+ ${line}`).join('\n'));
+      if (colored) {
+        return chalk.green(lines.map(line => `+ ${line}`).join('\n'));
+      } else {
+        return lines.map(line => `+ ${line}`).join('\n');
+      }
     }
 
-    return chalk.gray('No changes to display');
+    return colored ? chalk.gray('No changes to display') : 'No changes to display';
   } catch (error: any) {
-    return chalk.red(`Error getting diff: ${error.message}`);
+    return colored ? chalk.red(`Error getting diff: ${error.message}`) : `Error getting diff: ${error.message}`;
   }
 }
 
@@ -421,14 +488,14 @@ export async function getFileDiffWithMain(filePath: string): Promise<string> {
     }
 
     // Get diff comparing with main branch
-    const { stdout: diff } = await execAsync(`git diff --color=always ${mainBranch}...HEAD -- "${filePath}" 2>/dev/null || echo ""`);
+    const { stdout:diff } = await execAsync(`git diff --color=always ${mainBranch}...HEAD -- "${filePath}" 2>/dev/null || echo ""`);
 
     if (diff.trim()) {
       return diff;
     }
 
     // If no diff with main, check if file exists in main
-    const { stdout: fileInMain } = await execAsync(`git ls-tree -r ${mainBranch} --name-only "${filePath}" 2>/dev/null || echo ""`);
+    const { stdout:fileInMain } = await execAsync(`git ls-tree -r ${mainBranch} --name-only "${filePath}" 2>/dev/null || echo ""`);
 
     if (!fileInMain.trim()) {
       return chalk.green(`File is new in this branch (not in ${mainBranch})`);
@@ -444,7 +511,7 @@ export async function getFileDiffWithMain(filePath: string): Promise<string> {
 export async function revertFile(filePath: string): Promise<GitCommandResult> {
   try {
     // Check if file is staged
-    const { stdout: status } = await execAsync(`git status --porcelain "${filePath}"`);
+    const { stdout:status } = await execAsync(`git status --porcelain "${filePath}"`);
     const isStaged = status.trim()[0] !== ' ' && status.trim()[0] !== '?';
 
     if (isStaged) {
@@ -486,7 +553,7 @@ export async function deleteFile(filePath: string): Promise<GitCommandResult> {
     await execAsync(`rm "${filePath}"`);
 
     // Stage the deletion if it was tracked
-    const { stdout: status } = await execAsync(`git status --porcelain "${filePath}" 2>/dev/null || echo ""`);
+    const { stdout:status } = await execAsync(`git status --porcelain "${filePath}" 2>/dev/null || echo ""`);
     if (status && !status.trim().startsWith('??')) {
       await execAsync(`git add "${filePath}"`);
     }
@@ -510,16 +577,16 @@ export async function getFileStats(filePath: string, staged: boolean = false): P
       ? `git diff --numstat --cached -- "${filePath}"`
       : `git diff --numstat -- "${filePath}"`;
 
-    const { stdout } = await execAsync(command);
+    const { stdout } = await execFromGitRoot(command);
 
     if (!stdout.trim()) {
       // If no diff output, might be a new file or deleted file
-      const { stdout: status } = await execAsync(`git status --porcelain "${filePath}"`);
+      const { stdout:status } = await execAsync(`git status --porcelain "${filePath}"`);
 
       if (status.trim().startsWith('??') || status.trim().startsWith('A')) {
         // New file - count all lines as additions
         try {
-          const { stdout: content } = await execAsync(`wc -l < "${filePath}" 2>/dev/null || echo "0"`);
+          const { stdout:content } = await execAsync(`wc -l < "${filePath}" 2>/dev/null || echo "0"`);
           const lines = parseInt(content.trim()) || 0;
           return { additions: lines, deletions: 0 };
         } catch {
@@ -528,7 +595,7 @@ export async function getFileStats(filePath: string, staged: boolean = false): P
       } else if (status.trim().startsWith('D')) {
         // Deleted file - try to count lines from HEAD
         try {
-          const { stdout: content } = await execAsync(`git show HEAD:"${filePath}" | wc -l`);
+          const { stdout:content } = await execAsync(`git show HEAD:"${filePath}" | wc -l`);
           const lines = parseInt(content.trim()) || 0;
           return { additions: 0, deletions: lines };
         } catch {
