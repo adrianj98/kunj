@@ -4,6 +4,7 @@ import { registerCoreSettings } from './core';
 import { registerBranchFilteringSettings } from './branch-filtering';
 import { registerStashSettings } from './stash';
 import { registerAISettings } from './ai';
+import { registerFlowSettings } from './flow';
 import { settingsRegistry } from '../lib/settings-registry';
 
 let initialized = false;
@@ -19,6 +20,7 @@ export function initializeSettings(): void {
   registerBranchFilteringSettings();
   registerStashSettings();
   registerAISettings();
+  registerFlowSettings();
 
   initialized = true;
 }

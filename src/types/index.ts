@@ -1,5 +1,15 @@
 // Type definitions for Kunj CLI
 
+export interface FlowConfig {
+  enabled: boolean;
+  mainBranch: string;
+  developBranch: string;
+  featurePrefix: string;
+  releasePrefix: string;
+  hotfixPrefix: string;
+  autoDeleteOnFinish: boolean;
+}
+
 export interface KunjConfig {
   preferences: {
     autoStash: boolean;
@@ -33,6 +43,7 @@ export interface KunjConfig {
     autoGeneratePRDescription?: boolean;
     includeDiffInPR?: boolean;
   };
+  flow?: FlowConfig;
 }
 
 export interface BranchStash {
@@ -51,6 +62,10 @@ export interface BranchMetadata {
   relatedIssues?: string[];
   lastSwitched?: string;
   stashes?: BranchStash[];
+  flowType?: 'feature' | 'release' | 'hotfix';
+  flowBase?: string;
+  flowStatus?: 'active' | 'finished';
+  flowCreated?: string;
 }
 
 export interface BranchesMetadata {

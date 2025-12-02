@@ -12,6 +12,7 @@ export { LogCommand } from './log';
 export { GraphCommand } from './graph';
 export { DiffCommand } from './diff';
 export { StashCommand } from './stash';
+export { FlowCommand } from './flow';
 export { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
 // Import all command classes here as they are created
@@ -30,6 +31,7 @@ import { LogCommand } from './log';
 import { GraphCommand } from './graph';
 import { DiffCommand } from './diff';
 import { StashCommand } from './stash';
+import { FlowCommand } from './flow';
 import { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
 // Export a function that returns all command instances
@@ -47,6 +49,7 @@ export function getAllCommands(): BaseCommand[] {
     new GraphCommand(),
     new DiffCommand(),
     new StashCommand(),
+    new FlowCommand(),
     new BranchNoteCommand(),
     new BranchTagCommand(),
     new BranchDescCommand(),

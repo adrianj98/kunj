@@ -616,3 +616,106 @@ export async function getFileStats(filePath: string, staged: boolean = false): P
     return { additions: 0, deletions: 0 };
   }
 }
+
+// Check if a branch exists
+export async function branchExists(branchName: string): Promise<boolean> {
+  try {
+    await execAsync(`git rev-parse --verify ${branchName} 2>/dev/null`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Merge a branch into current branch
+export async function mergeBranch(sourceBranch: string, noFf: boolean = true): Promise<GitCommandResult> {
+  try {
+    const ffFlag = noFf ? '--no-ff' : '';
+    const { stdout, stderr } = await execFromGitRoot(`git merge ${ffFlag} ${sourceBranch}`);
+    return {
+      success: true,
+      message: stdout || stderr || `Merged ${sourceBranch}`
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || `Failed to merge ${sourceBranch}`
+    };
+  }
+}
+
+// Create a new branch from a base branch
+export async function createBranchFrom(branchName: string, baseBranch: string): Promise<GitCommandResult> {
+  try {
+    await execFromGitRoot(`git checkout -b ${branchName} ${baseBranch}`);
+    return {
+      success: true,
+      message: `Created branch ${branchName} from ${baseBranch}`
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || `Failed to create branch ${branchName}`
+    };
+  }
+}
+
+// Switch to an existing branch
+export async function switchBranch(branchName: string): Promise<GitCommandResult> {
+  try {
+    await execFromGitRoot(`git checkout ${branchName}`);
+    return {
+      success: true,
+      message: `Switched to ${branchName}`
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || `Failed to switch to ${branchName}`
+    };
+  }
+}
+
+// Create a git tag
+export async function createTag(tagName: string, message?: string): Promise<GitCommandResult> {
+  try {
+    const msgFlag = message ? `-m "${message.replace(/"/g, '\\"')}"` : '';
+    await execFromGitRoot(`git tag ${msgFlag} ${tagName}`);
+    return {
+      success: true,
+      message: `Created tag ${tagName}`
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || `Failed to create tag ${tagName}`
+    };
+  }
+}
+
+// Ensure a branch exists, create if it doesn't
+export async function ensureBranchExists(branchName: string, createFrom?: string): Promise<GitCommandResult> {
+  try {
+    const exists = await branchExists(branchName);
+    if (!exists) {
+      if (createFrom) {
+        return await createBranchFrom(branchName, createFrom);
+      } else {
+        await execFromGitRoot(`git checkout -b ${branchName}`);
+        return {
+          success: true,
+          message: `Created branch ${branchName}`
+        };
+      }
+    }
+    return {
+      success: true,
+      message: `Branch ${branchName} already exists`
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || `Failed to ensure branch ${branchName} exists`
+    };
+  }
+}
