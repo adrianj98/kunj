@@ -126,7 +126,7 @@ export class FlowCommand extends BaseCommand {
       const defaultMain = mainCandidates.find(b => branchNames.includes(b)) || 'main';
       const defaultDevelop = developCandidates.find(b => branchNames.includes(b)) || 'develop';
 
-      // Prompt for branch names
+      // Prompt for branch names and workflow settings
       const answers = await inquirer.prompt([
         {
           type: 'input',
@@ -147,11 +147,44 @@ export class FlowCommand extends BaseCommand {
             if (!input.trim()) return 'Branch name cannot be empty';
             return true;
           }
+        },
+        {
+          type: 'list',
+          name: 'mode',
+          message: 'Git Flow mode:',
+          choices: [
+            { name: 'Local merges (traditional Git Flow)', value: 'local' },
+            { name: 'Pull Requests (GitHub/GitLab)', value: 'pr' }
+          ],
+          default: 'local'
+        },
+        {
+          type: 'list',
+          name: 'prProvider',
+          message: 'PR provider:',
+          choices: [
+            { name: 'GitHub', value: 'github' },
+            { name: 'GitLab', value: 'gitlab' }
+          ],
+          default: 'github',
+          when: (answers: any) => answers.mode === 'pr'
+        },
+        {
+          type: 'confirm',
+          name: 'mergeBackToDevelop',
+          message: 'Merge releases/hotfixes back to develop?',
+          default: true
         }
       ]);
 
       // Initialize Git Flow
-      const result = await initGitFlow(answers.mainBranch, answers.developBranch);
+      const result = await initGitFlow(
+        answers.mainBranch,
+        answers.developBranch,
+        answers.mode,
+        answers.prProvider || 'github',
+        answers.mergeBackToDevelop
+      );
 
       if (result.success) {
         console.log(chalk.green('\n✓ ' + result.message));

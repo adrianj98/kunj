@@ -8,6 +8,9 @@ export interface FlowConfig {
   releasePrefix: string;
   hotfixPrefix: string;
   autoDeleteOnFinish: boolean;
+  mode: 'local' | 'pr';
+  prProvider: 'github' | 'gitlab';
+  mergeBackToDevelop: boolean;
 }
 
 export interface KunjConfig {

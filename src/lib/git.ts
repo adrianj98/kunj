@@ -719,3 +719,37 @@ export async function ensureBranchExists(branchName: string, createFrom?: string
     };
   }
 }
+
+// Pull latest changes from remote
+export async function pullBranch(branchName?: string): Promise<GitCommandResult> {
+  try {
+    const command = branchName ? `git pull origin ${branchName}` : 'git pull';
+    await execFromGitRoot(command);
+    return {
+      success: true,
+      message: branchName ? `Pulled ${branchName} from remote` : 'Pulled latest changes'
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || 'Failed to pull from remote'
+    };
+  }
+}
+
+// Push branch to remote
+export async function pushBranch(branchName: string, setUpstream: boolean = false): Promise<GitCommandResult> {
+  try {
+    const upstreamFlag = setUpstream ? '-u' : '';
+    await execFromGitRoot(`git push ${upstreamFlag} origin ${branchName}`);
+    return {
+      success: true,
+      message: `Pushed ${branchName} to remote`
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || 'Failed to push to remote'
+    };
+  }
+}
