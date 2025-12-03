@@ -235,7 +235,7 @@ export async function createReleaseBranch(version: string): Promise<GitCommandRe
 }
 
 // Finish a release branch
-export async function finishReleaseBranch(branchName: string, tagName: string, deleteAfter?: boolean): Promise<GitCommandResult> {
+export async function finishReleaseBranch(branchName: string, tagName?: string, deleteAfter?: boolean): Promise<GitCommandResult> {
   try {
     const flowConfig = await getFlowConfig();
     const shouldDelete = deleteAfter !== undefined ? deleteAfter : flowConfig.autoDeleteOnFinish;
@@ -282,30 +282,36 @@ export async function finishReleaseBranch(branchName: string, tagName: string, d
       return mergeToMain;
     }
 
-    // Create tag on main
-    const tagResult = await createTag(tagName, `Release ${tagName}`);
-    if (!tagResult.success) {
-      return {
-        success: false,
-        message: `Merged to ${flowConfig.mainBranch} but failed to create tag: ${tagResult.message}`
-      };
+    // Create tag on main if tagName is provided
+    let tagCreated = false;
+    if (tagName && tagName.trim()) {
+      const tagResult = await createTag(tagName, `Release ${tagName}`);
+      if (!tagResult.success) {
+        return {
+          success: false,
+          message: `Merged to ${flowConfig.mainBranch} but failed to create tag: ${tagResult.message}`
+        };
+      }
+      tagCreated = true;
     }
 
     // Switch to develop branch
     const switchToDevelop = await switchBranch(flowConfig.developBranch);
     if (!switchToDevelop.success) {
+      const tagMsg = tagCreated ? ' and tagged' : '';
       return {
         success: false,
-        message: `Merged to ${flowConfig.mainBranch} and tagged, but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
+        message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
       };
     }
 
     // Merge release back into develop
     const mergeToDevelop = await mergeBranch(branchName, true);
     if (!mergeToDevelop.success) {
+      const tagMsg = tagCreated ? ' and tagged' : '';
       return {
         success: false,
-        message: `Merged to ${flowConfig.mainBranch} and tagged, but failed to merge back to ${flowConfig.developBranch}: ${mergeToDevelop.message}`
+        message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to merge back to ${flowConfig.developBranch}: ${mergeToDevelop.message}`
       };
     }
 
@@ -314,24 +320,28 @@ export async function finishReleaseBranch(branchName: string, tagName: string, d
       flowStatus: 'finished'
     });
 
+    // Build success message
+    let successMsg = `Finished release '${branchName}': merged to '${flowConfig.mainBranch}'`;
+    if (tagCreated) {
+      successMsg += `, tagged '${tagName}'`;
+    }
+    successMsg += `, merged back to '${flowConfig.developBranch}'`;
+
     // Delete release branch if requested
     if (shouldDelete) {
       const deleteResult = await deleteBranch(branchName, false, false);
       if (!deleteResult.success) {
         return {
           success: true,
-          message: `Finished release '${branchName}' but failed to delete: ${deleteResult.message}`
+          message: `${successMsg} but failed to delete: ${deleteResult.message}`
         };
       }
-      return {
-        success: true,
-        message: `Finished release '${branchName}': merged to '${flowConfig.mainBranch}', tagged '${tagName}', merged back to '${flowConfig.developBranch}', and deleted`
-      };
+      successMsg += ', and deleted';
     }
 
     return {
       success: true,
-      message: `Finished release '${branchName}': merged to '${flowConfig.mainBranch}', tagged '${tagName}', and merged back to '${flowConfig.developBranch}'`
+      message: successMsg
     };
   } catch (error: any) {
     return {
@@ -383,7 +393,7 @@ export async function createHotfixBranch(version: string): Promise<GitCommandRes
 }
 
 // Finish a hotfix branch
-export async function finishHotfixBranch(branchName: string, tagName: string, deleteAfter?: boolean): Promise<GitCommandResult> {
+export async function finishHotfixBranch(branchName: string, tagName?: string, deleteAfter?: boolean): Promise<GitCommandResult> {
   try {
     const flowConfig = await getFlowConfig();
     const shouldDelete = deleteAfter !== undefined ? deleteAfter : flowConfig.autoDeleteOnFinish;
@@ -430,30 +440,36 @@ export async function finishHotfixBranch(branchName: string, tagName: string, de
       return mergeToMain;
     }
 
-    // Create tag on main
-    const tagResult = await createTag(tagName, `Hotfix ${tagName}`);
-    if (!tagResult.success) {
-      return {
-        success: false,
-        message: `Merged to ${flowConfig.mainBranch} but failed to create tag: ${tagResult.message}`
-      };
+    // Create tag on main if tagName is provided
+    let tagCreated = false;
+    if (tagName && tagName.trim()) {
+      const tagResult = await createTag(tagName, `Hotfix ${tagName}`);
+      if (!tagResult.success) {
+        return {
+          success: false,
+          message: `Merged to ${flowConfig.mainBranch} but failed to create tag: ${tagResult.message}`
+        };
+      }
+      tagCreated = true;
     }
 
     // Switch to develop branch
     const switchToDevelop = await switchBranch(flowConfig.developBranch);
     if (!switchToDevelop.success) {
+      const tagMsg = tagCreated ? ' and tagged' : '';
       return {
         success: false,
-        message: `Merged to ${flowConfig.mainBranch} and tagged, but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
+        message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
       };
     }
 
     // Merge hotfix back into develop
     const mergeToDevelop = await mergeBranch(branchName, true);
     if (!mergeToDevelop.success) {
+      const tagMsg = tagCreated ? ' and tagged' : '';
       return {
         success: false,
-        message: `Merged to ${flowConfig.mainBranch} and tagged, but failed to merge back to ${flowConfig.developBranch}: ${mergeToDevelop.message}`
+        message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to merge back to ${flowConfig.developBranch}: ${mergeToDevelop.message}`
       };
     }
 
@@ -462,24 +478,28 @@ export async function finishHotfixBranch(branchName: string, tagName: string, de
       flowStatus: 'finished'
     });
 
+    // Build success message
+    let successMsg = `Finished hotfix '${branchName}': merged to '${flowConfig.mainBranch}'`;
+    if (tagCreated) {
+      successMsg += `, tagged '${tagName}'`;
+    }
+    successMsg += `, merged back to '${flowConfig.developBranch}'`;
+
     // Delete hotfix branch if requested
     if (shouldDelete) {
       const deleteResult = await deleteBranch(branchName, false, false);
       if (!deleteResult.success) {
         return {
           success: true,
-          message: `Finished hotfix '${branchName}' but failed to delete: ${deleteResult.message}`
+          message: `${successMsg} but failed to delete: ${deleteResult.message}`
         };
       }
-      return {
-        success: true,
-        message: `Finished hotfix '${branchName}': merged to '${flowConfig.mainBranch}', tagged '${tagName}', merged back to '${flowConfig.developBranch}', and deleted`
-      };
+      successMsg += ', and deleted';
     }
 
     return {
       success: true,
-      message: `Finished hotfix '${branchName}': merged to '${flowConfig.mainBranch}', tagged '${tagName}', and merged back to '${flowConfig.developBranch}'`
+      message: successMsg
     };
   } catch (error: any) {
     return {
