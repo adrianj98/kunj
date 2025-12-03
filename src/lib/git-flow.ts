@@ -147,7 +147,8 @@ export async function createFeatureBranch(name: string): Promise<GitCommandResul
         flowType: 'feature',
         flowBase: flowConfig.developBranch,
         flowStatus: 'active',
-        flowCreated: new Date().toISOString()
+        flowCreated: new Date().toISOString(),
+        prUrl: prResult.success ? prResult.prUrl : undefined
       });
 
       if (prResult.success) {
@@ -401,7 +402,8 @@ export async function createReleaseBranch(version: string): Promise<GitCommandRe
         flowType: 'release',
         flowBase: flowConfig.developBranch,
         flowStatus: 'active',
-        flowCreated: new Date().toISOString()
+        flowCreated: new Date().toISOString(),
+        prUrl: prResult.success ? prResult.prUrl : undefined
       });
 
       if (prResult.success) {
@@ -775,7 +777,8 @@ export async function createHotfixBranch(version: string): Promise<GitCommandRes
         flowType: 'hotfix',
         flowBase: flowConfig.mainBranch,
         flowStatus: 'active',
-        flowCreated: new Date().toISOString()
+        flowCreated: new Date().toISOString(),
+        prUrl: prResult.success ? prResult.prUrl : undefined
       });
 
       if (prResult.success) {

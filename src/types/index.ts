@@ -69,6 +69,7 @@ export interface BranchMetadata {
   flowBase?: string;
   flowStatus?: 'active' | 'finished';
   flowCreated?: string;
+  prUrl?: string;
 }
 
 export interface BranchesMetadata {
