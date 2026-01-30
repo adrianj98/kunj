@@ -133,7 +133,7 @@ export async function createFeatureBranch(name: string): Promise<GitCommandResul
         };
       }
 
-      // Create PR
+      // Try to create PR (will fail if no commits yet, which is expected)
       const provider = getPRProvider(flowConfig.prProvider);
       const prResult = await provider.createPR(
         branchName,
@@ -157,6 +157,13 @@ export async function createFeatureBranch(name: string): Promise<GitCommandResul
           message: `Created feature branch '${branchName}', pushed to remote, and created PR\n  ${prResult.prUrl || ''}`
         };
       } else {
+        // Check if it's the "no commits" error
+        if (prResult.message.includes('No commits between')) {
+          return {
+            success: true,
+            message: `Created and pushed feature branch '${branchName}'\nPR will be created automatically when you push your first commit, or run 'kunj pr' manually`
+          };
+        }
         return {
           success: true,
           message: `Created and pushed feature branch '${branchName}', but PR creation failed: ${prResult.message}`
@@ -240,8 +247,25 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
         };
       }
 
-      // Merge the PR
+      // Ensure PR exists (create if needed)
       const provider = getPRProvider(flowConfig.prProvider);
+      const metadata = await import('./metadata').then(m => m.getBranchMetadataItem(branchName));
+
+      if (!metadata?.prUrl) {
+        // Try to create PR if it doesn't exist
+        const prResult = await provider.createPR(
+          branchName,
+          flowConfig.developBranch,
+          `Feature: ${branchName}`,
+          `Feature branch ${branchName}`
+        );
+
+        if (prResult.success && prResult.prUrl) {
+          await updateBranchMetadata(branchName, { prUrl: prResult.prUrl });
+        }
+      }
+
+      // Merge the PR
       const mergeResult = await provider.mergePR(branchName, flowConfig.developBranch);
 
       if (!mergeResult.success) {
@@ -388,7 +412,7 @@ export async function createReleaseBranch(version: string): Promise<GitCommandRe
         };
       }
 
-      // Create PR to main
+      // Try to create PR to main
       const provider = getPRProvider(flowConfig.prProvider);
       const prResult = await provider.createPR(
         branchName,
@@ -412,6 +436,13 @@ export async function createReleaseBranch(version: string): Promise<GitCommandRe
           message: `Created release branch '${branchName}', pushed to remote, and created PR to ${flowConfig.mainBranch}\n  ${prResult.prUrl || ''}`
         };
       } else {
+        // Check if it's the "no commits" error
+        if (prResult.message.includes('No commits between')) {
+          return {
+            success: true,
+            message: `Created and pushed release branch '${branchName}'\nPR will be created when you push commits, or run 'kunj pr --base ${flowConfig.mainBranch}' manually`
+          };
+        }
         return {
           success: true,
           message: `Created and pushed release branch '${branchName}', but PR creation failed: ${prResult.message}`
@@ -763,7 +794,7 @@ export async function createHotfixBranch(version: string): Promise<GitCommandRes
         };
       }
 
-      // Create PR to main
+      // Try to create PR to main
       const provider = getPRProvider(flowConfig.prProvider);
       const prResult = await provider.createPR(
         branchName,
@@ -787,6 +818,13 @@ export async function createHotfixBranch(version: string): Promise<GitCommandRes
           message: `Created hotfix branch '${branchName}', pushed to remote, and created PR to ${flowConfig.mainBranch}\n  ${prResult.prUrl || ''}`
         };
       } else {
+        // Check if it's the "no commits" error
+        if (prResult.message.includes('No commits between')) {
+          return {
+            success: true,
+            message: `Created and pushed hotfix branch '${branchName}'\nPR will be created when you push commits, or run 'kunj pr --base ${flowConfig.mainBranch}' manually`
+          };
+        }
         return {
           success: true,
           message: `Created and pushed hotfix branch '${branchName}', but PR creation failed: ${prResult.message}`

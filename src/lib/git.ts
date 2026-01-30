@@ -403,19 +403,19 @@ export async function getMainBranch(): Promise<string> {
   }
 }
 
-// Get commits since branch diverged from main/master
-export async function getCommitsSinceBranch(): Promise<string[]> {
+// Get commits since branch diverged from a base branch
+export async function getCommitsSinceBranch(baseBranch?: string): Promise<string[]> {
   try {
     const currentBranch = await getCurrentBranch();
-    const mainBranch = await getMainBranch();
+    const targetBaseBranch = baseBranch || await getMainBranch();
 
-    // If we're on the main branch, just return recent commits
-    if (currentBranch === mainBranch) {
+    // If we're on the base branch, just return recent commits
+    if (currentBranch === targetBaseBranch) {
       return getRecentCommitMessages(5);
     }
 
     // Find the merge-base (common ancestor)
-    const { stdout:mergeBase } = await execAsync(`git merge-base ${mainBranch} HEAD 2>/dev/null || echo ""`);
+    const { stdout:mergeBase } = await execAsync(`git merge-base ${targetBaseBranch} HEAD 2>/dev/null || echo ""`);
 
     if (!mergeBase.trim()) {
       // If no merge-base found, just return recent commits

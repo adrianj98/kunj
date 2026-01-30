@@ -139,8 +139,8 @@ export class PrCommand extends BaseCommand {
 
     console.log(chalk.blue(`Creating PR from ${currentBranch} to ${baseBranch}`));
 
-    // Get commits for PR description
-    const commits = await getCommitsSinceBranch();
+    // Get commits for PR description (using the correct base branch)
+    const commits = await getCommitsSinceBranch(baseBranch);
 
     // Prepare PR details
     let title = options.title;
