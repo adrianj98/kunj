@@ -177,7 +177,8 @@ export class PrCommand extends BaseCommand {
             suggestions = await this.generatePrSuggestions(
               currentBranch,
               branchDescription,
-              commits
+              commits,
+              branchMetadata
             );
           }
         } catch (error: any) {
@@ -186,7 +187,8 @@ export class PrCommand extends BaseCommand {
           suggestions = await this.generatePrSuggestions(
             currentBranch,
             branchDescription,
-            commits
+            commits,
+            branchMetadata
           );
         }
       } else {
@@ -194,7 +196,8 @@ export class PrCommand extends BaseCommand {
         suggestions = await this.generatePrSuggestions(
           currentBranch,
           branchDescription,
-          commits
+          commits,
+          branchMetadata
         );
       }
 
@@ -370,7 +373,8 @@ export class PrCommand extends BaseCommand {
   private async generatePrSuggestions(
     branch: string,
     description: string,
-    commits: string[]
+    commits: string[],
+    branchMetadata?: any
   ): Promise<{ title: string; body: string }> {
     // Generate a suggested title
     let title = branch
@@ -385,8 +389,26 @@ export class PrCommand extends BaseCommand {
       title = commits[0];
     }
 
+    // Add Jira context to title if available
+    const config = loadConfig();
+    const jiraKey = branchMetadata?.jiraIssueKey;
+    if (jiraKey) {
+      const jiraTitle = branchMetadata.jiraIssueTitle;
+      title = `${jiraKey}: ${jiraTitle || title}`;
+    }
+
     // Generate suggested body
-    let body = "## Summary\n\n";
+    let body = "";
+
+    // Add Jira section if available
+    if (jiraKey && config.jira?.baseUrl) {
+      const jiraUrl = `${config.jira.baseUrl}/browse/${jiraKey}`;
+      const jiraTitle = branchMetadata.jiraIssueTitle || "";
+      body += "## Jira Ticket\n\n";
+      body += `[${jiraKey}](${jiraUrl}) - ${jiraTitle}\n\n`;
+    }
+
+    body += "## Summary\n\n";
 
     if (description) {
       body += `${description}\n\n`;

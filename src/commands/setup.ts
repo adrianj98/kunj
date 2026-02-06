@@ -126,7 +126,139 @@ export class SetupCommand extends BaseCommand {
       }
     }
 
+    // Ask about Jira integration
+    await this.setupJiraIntegration();
+
     console.log(chalk.blue('\n🎉 Setup complete! Happy coding with kunj!'));
+  }
+
+  private async setupJiraIntegration(): Promise<void> {
+    console.log(chalk.blue('\n\n🔗 Jira Integration Setup (Optional)'));
+    console.log(chalk.gray('Connect kunj to your Jira Cloud instance for ticket management\n'));
+
+    const { enableJira } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'enableJira',
+      message: 'Enable Jira integration?',
+      default: false
+    }]);
+
+    if (!enableJira) {
+      console.log(chalk.gray('Skipping Jira setup\n'));
+      return;
+    }
+
+    // Get config module dynamically to avoid circular dependency
+    const { loadConfig, saveConfig } = await import('../lib/config');
+    const { checkJiraCredentials } = await import('../lib/jira');
+
+    // Prompt for Jira credentials
+    const answers = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'baseUrl',
+        message: 'Jira Cloud URL (e.g., https://company.atlassian.net):',
+        validate: (input: string) => {
+          if (!input.trim()) return 'Base URL is required';
+          if (!input.startsWith('https://')) return 'URL must start with https://';
+          if (!input.includes('.atlassian.net')) return 'Must be a valid Atlassian URL';
+          return true;
+        }
+      },
+      {
+        type: 'input',
+        name: 'email',
+        message: 'Jira account email:',
+        validate: (input: string) => {
+          if (!input.trim()) return 'Email is required';
+          if (!input.includes('@')) return 'Please enter a valid email';
+          return true;
+        }
+      },
+      {
+        type: 'password',
+        name: 'apiToken',
+        message: 'API Token (generate at https://id.atlassian.com/manage-profile/security/api-tokens):',
+        mask: '*',
+        validate: (input: string) => {
+          if (!input.trim()) return 'API token is required';
+          return true;
+        }
+      },
+      {
+        type: 'input',
+        name: 'projectKey',
+        message: 'Default project key (e.g., PROJ, DEV):',
+        validate: (input: string) => {
+          if (!input.trim()) return true; // Optional
+          if (!/^[A-Z]+$/.test(input)) return 'Project key must be uppercase letters only';
+          return true;
+        }
+      }
+    ]);
+
+    // Test credentials
+    console.log(chalk.gray('\nTesting Jira credentials...'));
+
+    // Temporarily save config for testing
+    const config = await loadConfig();
+    config.jira = {
+      enabled: true,
+      baseUrl: answers.baseUrl,
+      email: answers.email,
+      apiToken: answers.apiToken,
+      projectKey: answers.projectKey || '',
+      defaultIssueType: 'Task' as 'Story' | 'Bug' | 'Task' | 'Epic',
+      boardId: ''
+    };
+
+    await saveConfig(config);
+
+    // Test connection
+    const isValid = await checkJiraCredentials();
+
+    if (isValid) {
+      console.log(chalk.green('✓ Jira credentials validated successfully!\n'));
+
+      // Ask about board ID for sprint features
+      const { configureSprints } = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'configureSprints',
+        message: 'Configure board ID for sprint features?',
+        default: false
+      }]);
+
+      if (configureSprints) {
+        const { boardId } = await inquirer.prompt([{
+          type: 'input',
+          name: 'boardId',
+          message: 'Board ID (find in your board URL):',
+          validate: (input: string) => {
+            if (!input.trim()) return true; // Optional
+            if (!/^\d+$/.test(input)) return 'Board ID must be a number';
+            return true;
+          }
+        }]);
+
+        if (boardId) {
+          config.jira!.boardId = boardId;
+          await saveConfig(config);
+          console.log(chalk.green('✓ Board ID configured\n'));
+        }
+      }
+
+      console.log(chalk.cyan('🎯 Jira integration enabled!'));
+      console.log(chalk.gray('  Try: kunj jira list'));
+      console.log(chalk.gray('  Try: kunj jira create'));
+    } else {
+      console.log(chalk.red('✗ Jira credentials validation failed\n'));
+      console.log(chalk.yellow('Jira integration has been disabled.'));
+      console.log(chalk.gray('You can reconfigure later with: kunj config set jira.enabled true\n'));
+
+      // Disable Jira
+      config.jira!.enabled = false;
+      await saveConfig(config);
+    }
   }
 
   private async detectShell(providedShell?: string): Promise<string> {

@@ -5,6 +5,7 @@ import { loadConfig } from "./config";
 import { getCommitStylePrompt } from "./commit-styles";
 import { getBedrockClient } from "./ai-commit";
 import { BranchMetadata } from "../types";
+import { getCurrentBranch, getCommitsSinceBranch } from "./git";
 
 // Get the diff between branches for PR context
 export async function getPRDiff(baseBranch: string): Promise<string> {
@@ -55,6 +56,11 @@ export async function generateAIPRDescription(
     const branchTags = branchMetadata?.tags?.join(', ') || '';
     const branchNotes = branchMetadata?.notes || '';
 
+    // Prepare Jira context
+    const jiraContext = branchMetadata?.jiraIssueKey
+      ? `\nJira Ticket: ${branchMetadata.jiraIssueKey} - ${branchMetadata.jiraIssueTitle}\n`
+      : '';
+
     // Truncate diff if too long
     const diffPreview = prDiff.length > 5000
       ? prDiff.substring(0, 5000) + "...[truncated]"
@@ -81,7 +87,7 @@ Branch Information:
 ${branchDescription ? `- Branch purpose: ${branchDescription}` : ''}
 ${branchTags ? `- Tags: ${branchTags}` : ''}
 ${branchNotes ? `- Notes: ${branchNotes}` : ''}
-${commitsContext}
+${jiraContext}${commitsContext}
 Code Changes:
 \`\`\`diff
 ${diffPreview}
@@ -130,6 +136,14 @@ CHANGES: <detailed breakdown of key changes, one per line, use bullet points>`;
     // Build the PR body
     let body = '';
 
+    // Add Jira section if available
+    if (branchMetadata?.jiraIssueKey && config.jira?.baseUrl) {
+      const jiraKey = branchMetadata.jiraIssueKey;
+      const jiraUrl = `${config.jira.baseUrl}/browse/${jiraKey}`;
+      const jiraTitle = branchMetadata.jiraIssueTitle || '';
+      body += `## Jira Ticket\n\n[${jiraKey}](${jiraUrl}) - ${jiraTitle}\n\n`;
+    }
+
     if (summary) {
       body += `## Summary\n\n${summary}\n\n`;
     }
@@ -146,6 +160,115 @@ CHANGES: <detailed breakdown of key changes, one per line, use bullet points>`;
     console.error(chalk.red("AI PR generation failed:"), error.message);
 
     // Return empty to trigger fallback to heuristic method
+    throw error;
+  }
+}
+
+// Generate Jira ticket title and description using AI based on branch commits
+export async function generateAIJiraTicket(options?: {
+  baseBranch?: string;
+  branchMetadata?: BranchMetadata;
+}): Promise<{ summary: string; description: string }> {
+  try {
+    const config = loadConfig();
+
+    // Check if AI is enabled
+    if (!config.ai?.enabled) {
+      throw new Error("AI features are disabled in config");
+    }
+
+    // Get current branch
+    const currentBranch = await getCurrentBranch();
+
+    // Get base branch (main/master)
+    const baseBranch = options?.baseBranch || 'main';
+
+    // Get commits since base branch
+    const commits = await getCommitsSinceBranch(baseBranch);
+
+    if (commits.length === 0) {
+      throw new Error("No commits found in current branch");
+    }
+
+    // Get the diff
+    const diff = await getPRDiff(baseBranch);
+    const diffPreview = diff.length > 3000
+      ? diff.substring(0, 3000) + "...[truncated]"
+      : diff;
+
+    // Get branch metadata
+    const branchMetadata = options?.branchMetadata;
+    const branchDescription = branchMetadata?.description || '';
+    const branchTags = branchMetadata?.tags?.join(', ') || '';
+    const branchNotes = branchMetadata?.notes || '';
+
+    // Format commits for context
+    const commitsContext = commits.length > 0
+      ? `\nCommits in this branch:\n${commits.map(c => `- ${c}`).join('\n')}\n`
+      : '';
+
+    // Create the Jira-specific prompt
+    const prompt = `You are an expert at writing clear, actionable Jira tickets based on code changes.
+
+Your task is to analyze the code changes and commits to generate a Jira ticket summary and description.
+
+Branch Information:
+- Branch name: ${currentBranch}
+- Base branch: ${baseBranch}
+${branchDescription ? `- Branch purpose: ${branchDescription}` : ''}
+${branchTags ? `- Tags: ${branchTags}` : ''}
+${branchNotes ? `- Notes: ${branchNotes}` : ''}
+${commitsContext}
+Code Changes:
+\`\`\`diff
+${diffPreview}
+\`\`\`
+
+Generate a Jira ticket with:
+1. A concise summary/title (max 80 characters) that captures the main purpose
+2. A detailed description explaining:
+   - What problem this solves or feature it adds
+   - Key implementation details
+   - Any important context or requirements
+
+Guidelines:
+- Write from a business/product perspective, not just technical details
+- Focus on WHAT and WHY, not just HOW
+- Be clear and actionable
+- Use bullet points for readability in the description
+
+Respond with:
+SUMMARY: <ticket summary/title>
+DESCRIPTION: <detailed description with bullet points>`;
+
+    // Get the Bedrock client
+    const client = await getBedrockClient();
+
+    console.log(chalk.blue('🤖 Generating Jira ticket with AI...'));
+
+    // Invoke the model
+    const response = await client.invoke([{ role: "user", content: prompt }]);
+
+    // Extract the content
+    const content = response.content?.toString() || "";
+
+    // Parse the response
+    const summaryMatch = content.match(/SUMMARY:\s*(.+?)(?:\n|$)/i);
+    const descriptionMatch = content.match(/DESCRIPTION:\s*([^\n]*(?:\n(?!$).*)*)$/is);
+
+    if (!summaryMatch) {
+      throw new Error("Could not parse AI response - no summary found");
+    }
+
+    const summary = summaryMatch[1].trim();
+    const description = descriptionMatch ? descriptionMatch[1].trim() : '';
+
+    return {
+      summary,
+      description,
+    };
+  } catch (error: any) {
+    console.error(chalk.red("AI Jira ticket generation failed:"), error.message);
     throw error;
   }
 }

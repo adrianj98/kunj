@@ -7,6 +7,7 @@ import { createStash } from '../lib/stash';
 import { updateBranchMetadata } from '../lib/metadata';
 import { loadConfig } from '../lib/config';
 import { BranchMetadata } from '../types';
+import { extractJiraKey, getIssue } from '../lib/jira';
 
 interface CreateOptions {
   stash?: boolean;
@@ -77,6 +78,24 @@ export class CreateCommand extends BaseCommand {
       }
 
       updateBranchMetadata(branchName, metadata);
+
+      // Auto-link Jira ticket if key found in branch name
+      const jiraKey = extractJiraKey(branchName);
+      if (jiraKey && config.jira?.enabled) {
+        try {
+          const issue = await getIssue(jiraKey);
+          const jiraMetadata = {
+            jiraIssueKey: jiraKey,
+            jiraIssueTitle: issue.fields.summary,
+            jiraIssueStatus: issue.fields.status.name,
+            jiraIssueType: issue.fields.issuetype.name
+          };
+          updateBranchMetadata(branchName, jiraMetadata);
+          console.log(chalk.cyan(`  Linked to Jira: ${jiraKey} - ${issue.fields.summary}`));
+        } catch (error) {
+          // Silently ignore if Jira lookup fails
+        }
+      }
 
       // Update last switched time for previous branch
       if (currentBranch) {

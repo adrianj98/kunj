@@ -13,6 +13,7 @@ export { GraphCommand } from './graph';
 export { DiffCommand } from './diff';
 export { StashCommand } from './stash';
 export { FlowCommand } from './flow';
+export { JiraCommand } from './jira';
 export { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
 // Import all command classes here as they are created
@@ -32,6 +33,7 @@ import { GraphCommand } from './graph';
 import { DiffCommand } from './diff';
 import { StashCommand } from './stash';
 import { FlowCommand } from './flow';
+import { JiraCommand } from './jira';
 import { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
 
 // Export a function that returns all command instances
@@ -50,6 +52,7 @@ export function getAllCommands(): BaseCommand[] {
     new DiffCommand(),
     new StashCommand(),
     new FlowCommand(),
+    new JiraCommand(),
     new BranchNoteCommand(),
     new BranchTagCommand(),
     new BranchDescCommand(),

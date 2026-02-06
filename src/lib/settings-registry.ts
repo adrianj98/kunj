@@ -13,6 +13,7 @@ export interface SettingDefinition {
   detailedDescription?: string; // Longer explanation of what this setting does
   examples?: string[]; // Example values or use cases
   relatedSettings?: string[]; // Keys of related settings
+  sensitive?: boolean; // If true, mask the value when displaying (e.g., API tokens, passwords)
 }
 
 class SettingsRegistry {
