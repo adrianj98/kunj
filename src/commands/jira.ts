@@ -291,22 +291,42 @@ export class JiraCommand extends BaseCommand {
         return;
       }
 
+      // Get current branch to check if it's a default branch
+      const currentBranch = await getCurrentBranch();
+      const mainBranch = await getMainBranch();
+
+      // Check if on a default branch (main, master, develop, etc.)
+      const defaultBranches = ['main', 'master', 'develop', 'dev', 'trunk'];
+
+      // Also check configured branches from flow config
+      if (config.flow?.mainBranch) {
+        defaultBranches.push(config.flow.mainBranch.toLowerCase());
+      }
+      if (config.flow?.developBranch) {
+        defaultBranches.push(config.flow.developBranch.toLowerCase());
+      }
+
+      const isDefaultBranch = defaultBranches.includes(currentBranch.toLowerCase());
+
       // Try to generate ticket with AI if enabled
       let aiSummary = '';
       let aiDescription = '';
       // Use AI if: --ai flag OR (no --no-ai flag AND config enabled)
       const aiEnabled = options.ai === true || (options.ai !== false && config.jira?.aiGeneration !== false);
-      const shouldUseAI = aiEnabled && config.ai?.enabled;
+      const shouldUseAI = aiEnabled && config.ai?.enabled && !isDefaultBranch;
+
+      if (isDefaultBranch && aiEnabled && !options.summary && !options.description) {
+        console.log(chalk.yellow(`⚠ Cannot use AI on default branch "${currentBranch}"`));
+        console.log(chalk.gray('  AI needs commits to analyze. Create a feature branch first.\n'));
+      }
 
       if (shouldUseAI && !options.summary && !options.description) {
         try {
           // Check AWS credentials
           const hasAWSCreds = await checkAWSCredentials();
           if (hasAWSCreds) {
-            // Get current branch metadata
-            const currentBranch = await getCurrentBranch();
+            // Get branch metadata
             const branchMetadata = getBranchMetadataItem(currentBranch);
-            const mainBranch = await getMainBranch();
 
             // Generate ticket with AI
             const aiTicket = await generateAIJiraTicket({

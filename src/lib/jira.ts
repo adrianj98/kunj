@@ -234,10 +234,14 @@ export async function getCurrentSprint(boardId: string): Promise<any | null> {
   const client = getJiraClient();
 
   try {
-    // Use the board configuration API to get sprints
-    const response: any = await (client as any).board.getAllSprints({
-      boardId: parseInt(boardId),
-      state: 'active',
+    // Use the Agile API directly to get active sprints
+    // This uses the /rest/agile/1.0 API which is separate from the main REST API
+    const response: any = await (client as any).sendRequest({
+      url: `/rest/agile/1.0/board/${boardId}/sprint`,
+      method: 'GET',
+      params: {
+        state: 'active',
+      },
     });
 
     if (response.values && response.values.length > 0) {
@@ -245,15 +249,19 @@ export async function getCurrentSprint(boardId: string): Promise<any | null> {
     }
 
     return null;
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof Error && error.message.includes('401')) {
       clearClientCache();
       throw new Error('Authentication failed. Please check your Jira credentials.');
     }
-    if (error instanceof Error && error.message.includes('410')) {
-      console.warn(chalk.yellow(`Jira Agile API endpoint deprecated. Using alternative...`));
+
+    // Extract error details if available
+    if (error.response?.data?.errorMessages) {
+      const errorMsg = error.response.data.errorMessages.join(', ');
+      console.warn(chalk.yellow(`Could not fetch sprint: ${errorMsg}`));
       return null;
     }
+
     console.warn(chalk.yellow(`Could not fetch sprint for board ${boardId}: ${error instanceof Error ? error.message : String(error)}`));
     return null;
   }
@@ -266,19 +274,26 @@ export async function addIssueToSprint(issueKey: string, sprintId: number): Prom
   const client = getJiraClient();
 
   try {
-    // Use the sprint API to move issues to sprint
-    await (client as any).sprint.moveIssuesToSprintAndRank({
-      sprintId,
-      issues: [issueKey],
+    // Use the Agile API directly to move issues to sprint
+    await (client as any).sendRequest({
+      url: `/rest/agile/1.0/sprint/${sprintId}/issue`,
+      method: 'POST',
+      data: {
+        issues: [issueKey],
+      },
     });
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof Error && error.message.includes('401')) {
       clearClientCache();
       throw new Error('Authentication failed. Please check your Jira credentials.');
     }
-    if (error instanceof Error && error.message.includes('410')) {
-      throw new Error('Jira Agile API endpoint deprecated. Please update jira.js library or contact support.');
+
+    // Extract error details if available
+    if (error.response?.data?.errorMessages) {
+      const errorMsg = error.response.data.errorMessages.join(', ');
+      throw new Error(`Failed to add issue to sprint: ${errorMsg}`);
     }
+
     throw error;
   }
 }
