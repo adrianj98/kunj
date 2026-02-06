@@ -49,8 +49,8 @@ export class JiraCommand extends BaseCommand {
     // jira view - View ticket details
     jiraCmd
       .command('view')
-      .description('View ticket details')
-      .argument('<key>', 'Jira issue key (e.g., PROJ-123)')
+      .description('View ticket details (auto-detects from current branch if no key provided)')
+      .argument('[key]', 'Jira issue key (e.g., PROJ-123) - optional if branch is linked')
       .action(async (key) => {
         await this.viewTicket(key);
       });
@@ -171,10 +171,8 @@ export class JiraCommand extends BaseCommand {
     }
   }
 
-  private async viewTicket(key: string): Promise<void> {
+  private async viewTicket(key?: string): Promise<void> {
     try {
-      console.log(chalk.blue.bold(`\nJira Ticket: ${key}\n`));
-
       // Check configuration
       const config = loadConfig();
       if (!config.jira?.enabled) {
@@ -182,6 +180,30 @@ export class JiraCommand extends BaseCommand {
         console.log(chalk.gray('Run "kunj setup" to configure Jira.\n'));
         return;
       }
+
+      // Auto-detect ticket from current branch if no key provided
+      if (!key) {
+        const currentBranch = await getCurrentBranch();
+        const branchMetadata = getBranchMetadataItem(currentBranch);
+
+        if (branchMetadata?.jiraIssueKey) {
+          key = branchMetadata.jiraIssueKey;
+          console.log(chalk.gray(`Auto-detected ticket ${key} from branch ${currentBranch}\n`));
+        } else {
+          // Try to extract from branch name
+          const extractedKey = extractJiraKey(currentBranch);
+          if (extractedKey) {
+            key = extractedKey;
+            console.log(chalk.gray(`Extracted ticket ${key} from branch name\n`));
+          } else {
+            console.log(chalk.yellow('No Jira ticket linked to current branch.'));
+            console.log(chalk.gray('Usage: kunj jira view <key> or link a ticket with: kunj jira link <key>\n'));
+            return;
+          }
+        }
+      }
+
+      console.log(chalk.blue.bold(`\nJira Ticket: ${key}\n`));
 
       // Validate credentials
       const isValid = await checkJiraCredentials();
@@ -311,6 +333,7 @@ export class JiraCommand extends BaseCommand {
       // Try to generate ticket with AI if enabled
       let aiSummary = '';
       let aiDescription = '';
+      let aiBranchName = '';
       // Use AI if: --ai flag OR (no --no-ai flag AND config enabled)
       const aiEnabled = options.ai === true || (options.ai !== false && config.jira?.aiGeneration !== false);
       const shouldUseAI = aiEnabled && config.ai?.enabled && !isDefaultBranch;
@@ -336,6 +359,7 @@ export class JiraCommand extends BaseCommand {
 
             aiSummary = aiTicket.summary;
             aiDescription = aiTicket.description;
+            aiBranchName = aiTicket.branchName || '';
 
             console.log(chalk.green('\n✓ AI generated ticket content'));
             console.log(chalk.gray('You can review and edit before creating\n'));
@@ -424,20 +448,73 @@ export class JiraCommand extends BaseCommand {
       console.log(chalk.cyan(`  ${issue.key}: ${params.summary}`));
       console.log(chalk.gray(`  ${config.jira.baseUrl}/browse/${issue.key}\n`));
 
-      // Ask if user wants to create a branch
-      const branchAnswer = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'createBranch',
-          message: 'Create a branch from this ticket?',
-          default: true
-        }
-      ]);
+      // If on a non-default branch, link the ticket to the current branch
+      if (!isDefaultBranch) {
+        const jiraMetadata = {
+          jiraIssueKey: issue.key,
+          jiraIssueTitle: issue.fields.summary,
+          jiraIssueStatus: issue.fields.status.name,
+          jiraIssueType: issue.fields.issuetype.name,
+        };
+        updateBranchMetadata(currentBranch, jiraMetadata);
+        console.log(chalk.green(`✓ Linked ticket to branch "${currentBranch}"`));
+        console.log(chalk.gray(`  Run "kunj jira view" to see ticket details\n`));
+      } else {
+        // On default branch - ask if user wants to create a new branch
+        const branchAnswer = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'createBranch',
+            message: 'Create a new branch for this ticket?',
+            default: true
+          }
+        ]);
 
-      if (branchAnswer.createBranch) {
-        const branchName = generateBranchName(issue, 'feature');
-        console.log(chalk.gray(`\nSuggested branch name: ${branchName}`));
-        console.log(chalk.gray('Run: ') + chalk.cyan(`kunj create ${branchName}\n`));
+        if (branchAnswer.createBranch) {
+          // Generate branch name: feature/{KEY}-{ai-name} or feature/{KEY}
+          let suggestedName = '';
+          if (aiBranchName) {
+            suggestedName = `feature/${issue.key}-${aiBranchName}`;
+          } else {
+            suggestedName = `feature/${issue.key}`;
+          }
+
+          const nameAnswer = await inquirer.prompt([
+            {
+              type: 'input',
+              name: 'branchName',
+              message: 'Branch name:',
+              default: suggestedName,
+            }
+          ]);
+
+          const finalBranchName = nameAnswer.branchName;
+
+          try {
+            // Import CreateCommand dynamically to avoid circular dependencies
+            const { CreateCommand } = require('./create');
+            const createCmd = new CreateCommand();
+
+            // Create and switch to the new branch
+            await createCmd.execute(finalBranchName, {});
+
+            // Link the ticket to the new branch
+            const jiraMetadata = {
+              jiraIssueKey: issue.key,
+              jiraIssueTitle: issue.fields.summary,
+              jiraIssueStatus: issue.fields.status.name,
+              jiraIssueType: issue.fields.issuetype.name,
+            };
+            updateBranchMetadata(finalBranchName, jiraMetadata);
+
+            console.log(chalk.green(`\n✓ Created and switched to branch "${finalBranchName}"`));
+            console.log(chalk.green(`✓ Linked ticket ${issue.key} to branch`));
+            console.log(chalk.gray(`  Run "kunj jira view" to see ticket details\n`));
+          } catch (error) {
+            console.log(chalk.yellow(`\n⚠ Could not create branch automatically`));
+            console.log(chalk.gray(`  Run: kunj create ${finalBranchName}\n`));
+          }
+        }
       }
     } catch (error) {
       console.error(chalk.red('Error creating ticket:'));

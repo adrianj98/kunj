@@ -168,7 +168,7 @@ CHANGES: <detailed breakdown of key changes, one per line, use bullet points>`;
 export async function generateAIJiraTicket(options?: {
   baseBranch?: string;
   branchMetadata?: BranchMetadata;
-}): Promise<{ summary: string; description: string }> {
+}): Promise<{ summary: string; description: string; branchName?: string }> {
   try {
     const config = loadConfig();
 
@@ -230,15 +230,18 @@ Generate a Jira ticket with:
    - What problem this solves or feature it adds
    - Key implementation details
    - Any important context or requirements
+3. A short, descriptive branch name (2-4 words, lowercase, hyphen-separated)
 
 Guidelines:
 - Write from a business/product perspective, not just technical details
 - Focus on WHAT and WHY, not just HOW
 - Be clear and actionable
 - Use bullet points for readability in the description
+- Branch name should be concise and memorable (e.g., "user-auth", "fix-login-bug", "add-dark-mode")
 
 Respond with:
 SUMMARY: <ticket summary/title>
+BRANCH_NAME: <short-branch-name>
 DESCRIPTION: <detailed description with bullet points>`;
 
     // Get the Bedrock client
@@ -254,18 +257,21 @@ DESCRIPTION: <detailed description with bullet points>`;
 
     // Parse the response
     const summaryMatch = content.match(/SUMMARY:\s*(.+?)(?:\n|$)/i);
-    const descriptionMatch = content.match(/DESCRIPTION:\s*([^\n]*(?:\n(?!$).*)*)$/is);
+    const branchNameMatch = content.match(/BRANCH_NAME:\s*(.+?)(?:\n|$)/i);
+    const descriptionMatch = content.match(/DESCRIPTION:\s*([^\n]*(?:\n(?!BRANCH_NAME:|$).*)*)$/is);
 
     if (!summaryMatch) {
       throw new Error("Could not parse AI response - no summary found");
     }
 
     const summary = summaryMatch[1].trim();
+    const branchName = branchNameMatch ? branchNameMatch[1].trim() : undefined;
     const description = descriptionMatch ? descriptionMatch[1].trim() : '';
 
     return {
       summary,
       description,
+      branchName,
     };
   } catch (error: any) {
     console.error(chalk.red("AI Jira ticket generation failed:"), error.message);
