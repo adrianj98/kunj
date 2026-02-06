@@ -189,7 +189,7 @@ export async function createIssue(params: {
       assignee = { accountId: currentUser.accountId };
     }
 
-    const issue = await client.issues.createIssue({
+    const createdIssue = await client.issues.createIssue({
       fields: {
         project: {
           key: params.projectKey,
@@ -217,7 +217,11 @@ export async function createIssue(params: {
       },
     });
 
-    return issue;
+    // Fetch the full issue with all fields to return complete data
+    // createIssue only returns {id, key, self}, we need the full issue
+    const fullIssue = await getIssue(createdIssue.key);
+
+    return fullIssue;
   } catch (error) {
     if (error instanceof Error && error.message.includes('401')) {
       clearClientCache();
@@ -307,22 +311,14 @@ export async function searchIssues(jql: string, maxResults = 50): Promise<any[]>
 
 /**
  * Generate branch name from Jira issue
- * Example: "feature/PROJ-123-add-user-authentication"
+ * Example: "feature/PROJ-123"
  */
 export function generateBranchName(issue: any, prefix = 'feature'): string {
   const key = issue.key;
-  const summary = issue.fields.summary;
 
-  // Sanitize summary for branch name
-  const sanitized = summary
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '') // Remove special chars
-    .replace(/\s+/g, '-') // Replace spaces with hyphens
-    .replace(/-+/g, '-') // Collapse multiple hyphens
-    .substring(0, 50) // Limit length
-    .replace(/-$/, ''); // Remove trailing hyphen
-
-  return `${prefix}/${key}-${sanitized}`;
+  // Keep it simple - just prefix/TICKET-ID
+  // The Jira key is already descriptive and links to the full ticket details
+  return `${prefix}/${key}`;
 }
 
 /**
