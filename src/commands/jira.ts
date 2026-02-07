@@ -8,14 +8,12 @@ import { loadConfig } from '../lib/config';
 import { getCurrentBranch, getMainBranch } from '../lib/git';
 import { updateBranchMetadata, getBranchMetadataItem } from '../lib/metadata';
 import {
-  getJiraClient,
   checkJiraCredentials,
   listMyIssues,
   getIssue,
   createIssue,
   getCurrentSprint,
   addIssueToSprint,
-  generateBranchName,
   extractJiraKey,
   getBoardId,
 } from '../lib/jira';
@@ -471,13 +469,22 @@ export class JiraCommand extends BaseCommand {
         ]);
 
         if (branchAnswer.createBranch) {
-          // Generate branch name: feature/{KEY}-{ai-name} or feature/{KEY}
-          let suggestedName = '';
-          if (aiBranchName) {
-            suggestedName = `feature/${issue.key}-${aiBranchName}`;
-          } else {
-            suggestedName = `feature/${issue.key}`;
+          // Generate branch name: feature/{KEY}-{short-name}
+          let shortName = aiBranchName;
+
+          // If AI didn't generate a branch name, create one from the summary
+          if (!shortName) {
+            // Take first 2-3 words from summary, make it short
+            shortName = params.summary
+              .toLowerCase()
+              .replace(/[^a-z0-9\s]/g, '') // Remove special chars
+              .split(/\s+/) // Split into words
+              .slice(0, 2) // Take first 2 words
+              .join('-') // Join with hyphens
+              .substring(0, 20); // Max 20 chars
           }
+
+          const suggestedName = `feature/${issue.key}-${shortName}`;
 
           const nameAnswer = await inquirer.prompt([
             {
