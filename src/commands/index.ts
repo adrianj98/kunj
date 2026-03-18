@@ -15,6 +15,8 @@ export { StashCommand } from './stash';
 export { FlowCommand } from './flow';
 export { JiraCommand } from './jira';
 export { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
+export { CompletionCommand } from './completion';
+export { PromptInfoCommand } from './prompt-info';
 
 // Import all command classes here as they are created
 // This makes it easy to import all commands from a single location
@@ -35,6 +37,8 @@ import { StashCommand } from './stash';
 import { FlowCommand } from './flow';
 import { JiraCommand } from './jira';
 import { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch-metadata';
+import { CompletionCommand } from './completion';
+import { PromptInfoCommand } from './prompt-info';
 
 // Export a function that returns all command instances
 export function getAllCommands(): BaseCommand[] {
@@ -56,5 +60,7 @@ export function getAllCommands(): BaseCommand[] {
     new BranchNoteCommand(),
     new BranchTagCommand(),
     new BranchDescCommand(),
+    new CompletionCommand(),
+    new PromptInfoCommand(),
   ];
 }
