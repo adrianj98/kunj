@@ -20,6 +20,11 @@ export abstract class BaseCommand {
     this.config = config;
   }
 
+  // Getter for config (used by completion)
+  getConfig(): CommandConfig {
+    return this.config;
+  }
+
   // Register the command with Commander
   register(program: CommanderCommand): void {
     let cmd = program.command(this.config.name);

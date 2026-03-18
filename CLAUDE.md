@@ -118,6 +118,39 @@ Daily activity tracking in `.kunj/work-logs/`:
 - `kunj config` - Manage global/local settings
 - `kunj setup` - Interactive onboarding
 - `kunj delete <branch>` - Delete branch
+- `kunj completion` - Manage shell completion (--install/--uninstall)
+- `kunj prompt-info` - Output PR# for shell prompts
+
+## Shell Integration
+
+### Autocomplete
+
+Enable tab completion for commands and options:
+
+```bash
+# Install completion
+kunj completion --install
+
+# Reload shell
+source ~/.zshrc  # or ~/.bashrc
+```
+
+### PR# in Shell Prompt
+
+Display current PR number in your shell prompt. Add to `~/.zshrc`:
+
+```zsh
+# Function to show PR# in prompt
+kunj_prompt_pr() {
+  local pr=$(kunj prompt-info 2>/dev/null)
+  [ -n "$pr" ] && echo " $pr"
+}
+
+# Add to right prompt
+RPROMPT='$(kunj_prompt_pr)'
+```
+
+See `docs/SHELL_INTEGRATION.md` for detailed setup instructions and advanced configurations.
 
 ## Git Operations
 
