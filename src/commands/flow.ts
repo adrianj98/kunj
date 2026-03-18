@@ -126,7 +126,7 @@ export class FlowCommand extends BaseCommand {
       const defaultMain = mainCandidates.find(b => branchNames.includes(b)) || 'main';
       const defaultDevelop = developCandidates.find(b => branchNames.includes(b)) || 'develop';
 
-      // Prompt for branch names
+      // Prompt for branch names and workflow settings
       const answers = await inquirer.prompt([
         {
           type: 'input',
@@ -147,11 +147,44 @@ export class FlowCommand extends BaseCommand {
             if (!input.trim()) return 'Branch name cannot be empty';
             return true;
           }
+        },
+        {
+          type: 'list',
+          name: 'mode',
+          message: 'Git Flow mode:',
+          choices: [
+            { name: 'Local merges (traditional Git Flow)', value: 'local' },
+            { name: 'Pull Requests (GitHub/GitLab)', value: 'pr' }
+          ],
+          default: 'local'
+        },
+        {
+          type: 'list',
+          name: 'prProvider',
+          message: 'PR provider:',
+          choices: [
+            { name: 'GitHub', value: 'github' },
+            { name: 'GitLab', value: 'gitlab' }
+          ],
+          default: 'github',
+          when: (answers: any) => answers.mode === 'pr'
+        },
+        {
+          type: 'confirm',
+          name: 'mergeBackToDevelop',
+          message: 'Merge releases/hotfixes back to develop?',
+          default: true
         }
       ]);
 
       // Initialize Git Flow
-      const result = await initGitFlow(answers.mainBranch, answers.developBranch);
+      const result = await initGitFlow(
+        answers.mainBranch,
+        answers.developBranch,
+        answers.mode,
+        answers.prProvider || 'github',
+        answers.mergeBackToDevelop
+      );
 
       if (result.success) {
         console.log(chalk.green('\n✓ ' + result.message));
@@ -266,6 +299,13 @@ export class FlowCommand extends BaseCommand {
       // Ensure featureBranch is defined
       if (!featureBranch) {
         console.log(chalk.red('\n✗ Could not determine feature branch'));
+        return;
+      }
+
+      // Check if branch exists before prompting
+      const exists = await branchExists(featureBranch);
+      if (!exists) {
+        console.log(chalk.red(`\n✗ Branch '${featureBranch}' does not exist`));
         return;
       }
 
@@ -405,26 +445,48 @@ export class FlowCommand extends BaseCommand {
         return;
       }
 
-      // Prompt for tag name
-      const tagAnswers = await inquirer.prompt([
+      // Check if branch exists before prompting
+      const exists = await branchExists(releaseBranch);
+      if (!exists) {
+        console.log(chalk.red(`\n✗ Branch '${releaseBranch}' does not exist`));
+        return;
+      }
+
+      // Prompt whether to create a tag
+      const createTagAnswer = await inquirer.prompt([
         {
-          type: 'input',
-          name: 'tag',
-          message: 'Tag name for this release:',
-          default: releaseVersion?.startsWith('v') ? releaseVersion : `v${releaseVersion}`,
-          validate: (input: string) => {
-            if (!input.trim()) return 'Tag name cannot be empty';
-            return true;
-          }
+          type: 'confirm',
+          name: 'createTag',
+          message: 'Create a tag for this release?',
+          default: true
         }
       ]);
 
+      // Prompt for tag name if creating a tag
+      let tagName: string | undefined;
+      if (createTagAnswer.createTag) {
+        const tagAnswers = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'tag',
+            message: 'Tag name:',
+            default: releaseVersion?.startsWith('v') ? releaseVersion : `v${releaseVersion}`,
+            validate: (input: string) => {
+              if (!input.trim()) return 'Tag name cannot be empty';
+              return true;
+            }
+          }
+        ]);
+        tagName = tagAnswers.tag;
+      }
+
       // Confirm before finishing
+      const tagMsg = tagName ? `\n  → Tag: ${tagName}` : '';
       const confirmation = await inquirer.prompt([
         {
           type: 'confirm',
           name: 'confirmed',
-          message: `Finish release '${releaseBranch}'?\n  → Merge into: ${config.flow.mainBranch}\n  → Tag: ${tagAnswers.tag}\n  → Merge back into: ${config.flow.developBranch}\n  → Delete branch: ${config.flow.autoDeleteOnFinish ? 'yes' : 'no'}\n  Continue?`,
+          message: `Finish release '${releaseBranch}'?\n  → Merge into: ${config.flow.mainBranch}${tagMsg}\n  → Merge back into: ${config.flow.developBranch}\n  → Delete branch: ${config.flow.autoDeleteOnFinish ? 'yes' : 'no'}\n  Continue?`,
           default: true
         }
       ]);
@@ -435,7 +497,7 @@ export class FlowCommand extends BaseCommand {
       }
 
       // Finish release branch
-      const result = await finishReleaseBranch(releaseBranch, tagAnswers.tag);
+      const result = await finishReleaseBranch(releaseBranch, tagName);
 
       if (result.success) {
         console.log(chalk.green('\n✓ ' + result.message));
@@ -555,26 +617,48 @@ export class FlowCommand extends BaseCommand {
         return;
       }
 
-      // Prompt for tag name
-      const tagAnswers = await inquirer.prompt([
+      // Check if branch exists before prompting
+      const exists = await branchExists(hotfixBranch);
+      if (!exists) {
+        console.log(chalk.red(`\n✗ Branch '${hotfixBranch}' does not exist`));
+        return;
+      }
+
+      // Prompt whether to create a tag
+      const createTagAnswer = await inquirer.prompt([
         {
-          type: 'input',
-          name: 'tag',
-          message: 'Tag name for this hotfix:',
-          default: hotfixVersion?.startsWith('v') ? hotfixVersion : `v${hotfixVersion}`,
-          validate: (input: string) => {
-            if (!input.trim()) return 'Tag name cannot be empty';
-            return true;
-          }
+          type: 'confirm',
+          name: 'createTag',
+          message: 'Create a tag for this hotfix?',
+          default: true
         }
       ]);
 
+      // Prompt for tag name if creating a tag
+      let tagName: string | undefined;
+      if (createTagAnswer.createTag) {
+        const tagAnswers = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'tag',
+            message: 'Tag name:',
+            default: hotfixVersion?.startsWith('v') ? hotfixVersion : `v${hotfixVersion}`,
+            validate: (input: string) => {
+              if (!input.trim()) return 'Tag name cannot be empty';
+              return true;
+            }
+          }
+        ]);
+        tagName = tagAnswers.tag;
+      }
+
       // Confirm before finishing
+      const tagMsg = tagName ? `\n  → Tag: ${tagName}` : '';
       const confirmation = await inquirer.prompt([
         {
           type: 'confirm',
           name: 'confirmed',
-          message: `Finish hotfix '${hotfixBranch}'?\n  → Merge into: ${config.flow.mainBranch}\n  → Tag: ${tagAnswers.tag}\n  → Merge back into: ${config.flow.developBranch}\n  → Delete branch: ${config.flow.autoDeleteOnFinish ? 'yes' : 'no'}\n  Continue?`,
+          message: `Finish hotfix '${hotfixBranch}'?\n  → Merge into: ${config.flow.mainBranch}${tagMsg}\n  → Merge back into: ${config.flow.developBranch}\n  → Delete branch: ${config.flow.autoDeleteOnFinish ? 'yes' : 'no'}\n  Continue?`,
           default: true
         }
       ]);
@@ -585,7 +669,7 @@ export class FlowCommand extends BaseCommand {
       }
 
       // Finish hotfix branch
-      const result = await finishHotfixBranch(hotfixBranch, tagAnswers.tag);
+      const result = await finishHotfixBranch(hotfixBranch, tagName);
 
       if (result.success) {
         console.log(chalk.green('\n✓ ' + result.message));

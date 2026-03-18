@@ -9,7 +9,7 @@ dist/
 
 # Kunj local configuration and metadata
 .kunj/
-
+test-*
 # IDE
 .vscode/
 .idea/

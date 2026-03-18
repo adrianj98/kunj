@@ -80,6 +80,13 @@ export class ConfigCommand extends BaseCommand {
     }
   }
 
+  private maskSensitiveValue(value: any, setting: SettingDefinition): any {
+    if (setting.sensitive && value && typeof value === 'string' && value.length > 0) {
+      return '********';
+    }
+    return value;
+  }
+
   private listConfig(config: any, mergedConfig: any, isGlobal: boolean): void {
     const scope = isGlobal ? "Global" : "Local";
     const localConfig = isGlobal ? {} : loadLocalConfig();
@@ -157,8 +164,9 @@ export class ConfigCommand extends BaseCommand {
         }
 
         const { source, color } = getSettingSource(setting.key);
-        const formattedValue = effectiveValue !== undefined
-          ? formatConfigValue(effectiveValue)
+        const maskedValue = this.maskSensitiveValue(effectiveValue, setting);
+        const formattedValue = maskedValue !== undefined
+          ? formatConfigValue(maskedValue)
           : chalk.gray("(none)");
         const shortKey = keys[keys.length - 1];
         const paddedKey = chalk.bold(shortKey.padEnd(maxKeyLength));
@@ -334,15 +342,16 @@ export class ConfigCommand extends BaseCommand {
       }
 
       const currentValue = getConfigValue(setting.key);
+      const maskedValue = this.maskSensitiveValue(currentValue, setting);
       const keys = setting.key.split('.');
       const shortKey = keys[keys.length - 1];
       const source = getSettingSource(setting.key, setting.defaultValue);
 
       let displayValue = '';
       if (setting.type === 'boolean') {
-        displayValue = formatBoolValue(currentValue);
+        displayValue = formatBoolValue(maskedValue);
       } else {
-        displayValue = formatValue(currentValue);
+        displayValue = formatValue(maskedValue);
       }
 
       // Create a more readable display name
@@ -421,7 +430,8 @@ export class ConfigCommand extends BaseCommand {
 
       // Current value
       console.log(chalk.bold('  Current Value:'));
-      console.log(`    ${formatValue(currentValue)} ${source}\n`);
+      const maskedValue = this.maskSensitiveValue(currentValue, setting);
+      console.log(`    ${formatValue(maskedValue)} ${source}\n`);
 
       // Type and category
       console.log(chalk.bold('  Type:'));
@@ -438,7 +448,8 @@ export class ConfigCommand extends BaseCommand {
 
       // Default value
       console.log(chalk.bold('  Default:'));
-      console.log(`    ${formatValue(setting.defaultValue)}\n`);
+      const maskedDefault = this.maskSensitiveValue(setting.defaultValue, setting);
+      console.log(`    ${formatValue(maskedDefault)}\n`);
 
       // Options for enum types
       if (setting.type === 'enum' && setting.options) {
@@ -565,15 +576,18 @@ export class ConfigCommand extends BaseCommand {
       } else if (item.type === "string") {
         const { value } = await inquirer.prompt([
           {
-            type: "input",
+            type: setting.sensitive ? "password" : "input",
             name: "value",
-            message: "Enter new value (or leave empty to cancel):",
-            default: currentValue
+            message: setting.sensitive
+              ? "Enter new value (hidden, or leave empty to cancel):"
+              : "Enter new value (or leave empty to cancel):",
+            default: setting.sensitive ? undefined : currentValue,
+            mask: setting.sensitive ? '*' : undefined
           }
         ]);
 
-        if (value === currentValue) {
-          return false; // No change
+        if (value === currentValue || (setting.sensitive && !value)) {
+          return false; // No change or cancelled
         }
 
         newValue = value;
@@ -613,6 +627,9 @@ export class ConfigCommand extends BaseCommand {
     };
 
     let editing = true;
+    // Start with first non-disabled item
+    let lastSelectedIndex: number = configItems.findIndex(item => !item.disabled && item.type !== 'separator' && item.type !== 'action');
+
     while (editing) {
       // Update display names with current values
       configItems.forEach(item => {
@@ -621,15 +638,16 @@ export class ConfigCommand extends BaseCommand {
         }
 
         const currentValue = getConfigValue(item.value);
+        const maskedValue = this.maskSensitiveValue(currentValue, item.settingDef);
         const keys = item.value.split(".");
         const shortKey = keys[keys.length - 1];
         const source = getSettingSource(item.value, item.settingDef.defaultValue);
 
         let displayValue = '';
         if (item.type === "boolean") {
-          displayValue = formatBoolValue(currentValue);
+          displayValue = formatBoolValue(maskedValue);
         } else {
-          displayValue = formatValue(currentValue);
+          displayValue = formatValue(maskedValue);
         }
 
         // Update the display name
@@ -638,19 +656,30 @@ export class ConfigCommand extends BaseCommand {
       });
 
       const scope = isGlobal ? "Global" : "Local";
+
+      // Build choices array
+      const choices = configItems.map(item => ({
+        name: item.name,
+        value: item.value,
+        disabled: item.disabled
+      }));
+
+      // Find the default value based on last selected index
+      const defaultValue = lastSelectedIndex < choices.length ? choices[lastSelectedIndex].value : undefined;
+
       const { selectedItem } = await inquirer.prompt([
         {
           type: "list",
           name: "selectedItem",
           message: chalk.bold(`Configure ${scope} Settings (↑↓ to navigate, Enter to select):`),
-          choices: configItems.map(item => ({
-            name: item.name,
-            value: item.value,
-            disabled: item.disabled
-          })),
-          pageSize: 20
+          choices: choices,
+          pageSize: 20,
+          default: defaultValue
         }
       ]);
+
+      // Remember the selected item index for next iteration
+      lastSelectedIndex = choices.findIndex(c => c.value === selectedItem);
 
       const item = configItems.find(i => i.value === selectedItem);
       if (!item) continue;

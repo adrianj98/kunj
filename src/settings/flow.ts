@@ -96,6 +96,46 @@ export function registerFlowSettings(): void {
         'true - Automatically delete branches after merge (default)',
         'false - Always ask before deleting branches'
       ]
+    },
+    {
+      key: 'flow.mode',
+      description: 'Git Flow mode: local or pr',
+      detailedDescription: 'Choose how Git Flow operations are performed. "local" uses local git merges, while "pr" creates and merges pull requests on your remote provider (GitHub, GitLab, etc.).',
+      type: 'enum',
+      defaultValue: 'local',
+      options: ['local', 'pr'],
+      category: 'flow',
+      examples: [
+        'local - Use local git merges (default)',
+        'pr - Use pull requests on remote provider'
+      ],
+      relatedSettings: ['flow.prProvider']
+    },
+    {
+      key: 'flow.prProvider',
+      description: 'PR provider: github or gitlab',
+      detailedDescription: 'The pull request provider to use when flow.mode is set to "pr". Currently supports GitHub and GitLab.',
+      type: 'enum',
+      defaultValue: 'github',
+      options: ['github', 'gitlab'],
+      category: 'flow',
+      examples: [
+        'github - Use GitHub pull requests (default)',
+        'gitlab - Use GitLab merge requests'
+      ],
+      relatedSettings: ['flow.mode']
+    },
+    {
+      key: 'flow.mergeBackToDevelop',
+      description: 'Merge releases/hotfixes back to develop',
+      detailedDescription: 'After finishing a release or hotfix, automatically merge the changes back into the develop branch. This keeps develop up to date with production fixes and releases.',
+      type: 'boolean',
+      defaultValue: true,
+      category: 'flow',
+      examples: [
+        'true - Merge back to develop after release/hotfix (default)',
+        'false - Do not merge back to develop'
+      ]
     }
   ]);
 }

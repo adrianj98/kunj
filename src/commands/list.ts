@@ -171,6 +171,14 @@ export class ListCommand extends BaseCommand {
       console.log(chalk.cyan(`  │ ${metadata.description}`));
     }
 
+    // Display Jira info if available
+    if (metadata.jiraIssueKey) {
+      const jiraInfo = chalk.blue(`[${metadata.jiraIssueKey}]`) +
+                      (metadata.jiraIssueStatus ? chalk.gray(` ${metadata.jiraIssueStatus}`) : '');
+      console.log(chalk.cyan(`  │ ${jiraInfo}`) +
+                  (metadata.jiraIssueTitle ? chalk.gray(` - ${metadata.jiraIssueTitle}`) : ''));
+    }
+
     if (metadata.tags && metadata.tags.length > 0) {
       const tagStr = metadata.tags.map((tag: string) => `#${tag}`).join(" ");
       console.log(chalk.cyan(`  │ Tags: ${tagStr}`));

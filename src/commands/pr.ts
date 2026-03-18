@@ -120,22 +120,27 @@ export class PrCommand extends BaseCommand {
       process.exit(1);
     }
 
-    // Check if PR already exists for this branch
-    const existingPr = await this.checkExistingPr(currentBranch);
-    if (existingPr) {
+    // Get branch metadata
+    const branchMetadata = getBranchMetadataItem(currentBranch);
+    const branchDescription = branchMetadata?.description || "";
+
+    // Check if PR already exists for this branch (via metadata or gh CLI)
+    const existingPrFromMetadata = branchMetadata?.prUrl;
+    const existingPrFromGh = await this.checkExistingPr(currentBranch);
+
+    if (existingPrFromMetadata || existingPrFromGh) {
       console.log(chalk.blue(`Found existing PR for branch ${currentBranch}`));
+      if (existingPrFromMetadata) {
+        console.log(chalk.gray(`  ${existingPrFromMetadata}`));
+      }
       await this.showPrStatus(options.detailed);
       return;
     }
 
     console.log(chalk.blue(`Creating PR from ${currentBranch} to ${baseBranch}`));
 
-    // Get branch metadata
-    const branchMetadata = getBranchMetadataItem(currentBranch);
-    const branchDescription = branchMetadata?.description || "";
-
-    // Get commits for PR description
-    const commits = await getCommitsSinceBranch();
+    // Get commits for PR description (using the correct base branch)
+    const commits = await getCommitsSinceBranch(baseBranch);
 
     // Prepare PR details
     let title = options.title;
@@ -172,7 +177,8 @@ export class PrCommand extends BaseCommand {
             suggestions = await this.generatePrSuggestions(
               currentBranch,
               branchDescription,
-              commits
+              commits,
+              branchMetadata
             );
           }
         } catch (error: any) {
@@ -181,7 +187,8 @@ export class PrCommand extends BaseCommand {
           suggestions = await this.generatePrSuggestions(
             currentBranch,
             branchDescription,
-            commits
+            commits,
+            branchMetadata
           );
         }
       } else {
@@ -189,7 +196,8 @@ export class PrCommand extends BaseCommand {
         suggestions = await this.generatePrSuggestions(
           currentBranch,
           branchDescription,
-          commits
+          commits,
+          branchMetadata
         );
       }
 
@@ -246,6 +254,10 @@ export class PrCommand extends BaseCommand {
         const prUrl = stdout.trim();
         console.log(chalk.green("\n✓ Pull request created successfully!"));
         console.log(chalk.cyan(`PR URL: ${prUrl}`));
+
+        // Save PR URL to branch metadata
+        const { updateBranchMetadata } = await import('../lib/metadata');
+        await updateBranchMetadata(currentBranch, { prUrl });
 
         // Extract PR number from URL (e.g., https://github.com/user/repo/pull/123)
         const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
@@ -361,7 +373,8 @@ export class PrCommand extends BaseCommand {
   private async generatePrSuggestions(
     branch: string,
     description: string,
-    commits: string[]
+    commits: string[],
+    branchMetadata?: any
   ): Promise<{ title: string; body: string }> {
     // Generate a suggested title
     let title = branch
@@ -376,8 +389,26 @@ export class PrCommand extends BaseCommand {
       title = commits[0];
     }
 
+    // Add Jira context to title if available
+    const config = loadConfig();
+    const jiraKey = branchMetadata?.jiraIssueKey;
+    if (jiraKey) {
+      const jiraTitle = branchMetadata.jiraIssueTitle;
+      title = `${jiraKey}: ${jiraTitle || title}`;
+    }
+
     // Generate suggested body
-    let body = "## Summary\n\n";
+    let body = "";
+
+    // Add Jira section if available
+    if (jiraKey && config.jira?.baseUrl) {
+      const jiraUrl = `${config.jira.baseUrl}/browse/${jiraKey}`;
+      const jiraTitle = branchMetadata.jiraIssueTitle || "";
+      body += "## Jira Ticket\n\n";
+      body += `[${jiraKey}](${jiraUrl}) - ${jiraTitle}\n\n`;
+    }
+
+    body += "## Summary\n\n";
 
     if (description) {
       body += `${description}\n\n`;

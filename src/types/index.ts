@@ -8,6 +8,9 @@ export interface FlowConfig {
   releasePrefix: string;
   hotfixPrefix: string;
   autoDeleteOnFinish: boolean;
+  mode: 'local' | 'pr';
+  prProvider: 'github' | 'gitlab';
+  mergeBackToDevelop: boolean;
 }
 
 export interface KunjConfig {
@@ -44,6 +47,16 @@ export interface KunjConfig {
     includeDiffInPR?: boolean;
   };
   flow?: FlowConfig;
+  jira?: {
+    enabled: boolean;
+    baseUrl: string;
+    email: string;
+    apiToken: string;
+    projectKey: string;
+    defaultIssueType: 'Story' | 'Bug' | 'Task' | 'Epic';
+    boardId?: string;
+    aiGeneration?: boolean;
+  };
 }
 
 export interface BranchStash {
@@ -66,6 +79,11 @@ export interface BranchMetadata {
   flowBase?: string;
   flowStatus?: 'active' | 'finished';
   flowCreated?: string;
+  prUrl?: string;
+  jiraIssueKey?: string;
+  jiraIssueTitle?: string;
+  jiraIssueStatus?: string;
+  jiraIssueType?: string;
 }
 
 export interface BranchesMetadata {

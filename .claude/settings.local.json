@@ -10,7 +10,20 @@
       "Bash(git commit:*)",
       "Bash(npm install:*)",
       "Bash(npx:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(npm unlink:*)",
+      "Bash(npm link)",
+      "Bash(gh --version:*)",
+      "Bash(gh auth:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(git branch:*)",
+      "Bash(gh pr close:*)",
+      "Bash(kunj completion:*)",
+      "Bash(kunj prompt-info:*)",
+      "Bash(kunj --help:*)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []
