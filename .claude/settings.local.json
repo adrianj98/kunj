@@ -23,7 +23,10 @@
       "Bash(kunj completion:*)",
       "Bash(kunj prompt-info:*)",
       "Bash(kunj --help:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(grep -n \"any\" /Users/adrian/projects/kunj/.claude/worktrees/nifty-rosalind/src/lib/*.ts)",
+      "Bash(wc -l /Users/adrian/projects/kunj/.claude/worktrees/nifty-rosalind/src/lib/*.ts)",
+      "Bash(grep -c \"describe\\\\|it\\\\|test\" /Users/adrian/projects/kunj/.claude/worktrees/nifty-rosalind/src/lib/__tests__/*.ts)"
     ],
     "deny": [],
     "ask": []
