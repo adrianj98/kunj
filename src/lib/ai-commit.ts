@@ -7,6 +7,11 @@ import {
   NODE_REGION_CONFIG_OPTIONS,
   NODE_REGION_CONFIG_FILE_OPTIONS,
 } from "@aws-sdk/config-resolver";
+import {
+  BedrockClient,
+  ListFoundationModelsCommand,
+  ListInferenceProfilesCommand,
+} from "@aws-sdk/client-bedrock";
 import { exec } from "child_process";
 import { promisify } from "util";
 import chalk from "chalk";
@@ -70,6 +75,25 @@ function getDefaultModelId(): string {
     process.env.BEDROCK_MODEL ||
     "anthropic.claude-3-5-sonnet-20240620-v1:0"
   );
+}
+
+// Check if an error is caused by missing inference profile (newer Claude models
+// require cross-region inference profile IDs like us.anthropic.claude-... instead
+// of bare anthropic.claude-... model IDs)
+function isInferenceProfileError(err: any): boolean {
+  return (
+    err.message?.includes("on-demand throughput isn't supported") ||
+    err.message?.includes("on-demand throughput is not supported") ||
+    err.message?.includes("inference profile")
+  );
+}
+
+function logInferenceProfileHelp(modelId: string): void {
+  console.error(chalk.yellow(`\n⚠ Model '${modelId}' requires a cross-region inference profile.`));
+  console.error(chalk.yellow("  Newer Claude models cannot be called with their bare model ID."));
+  console.error(chalk.gray("  Fix: prefix the model ID with your region (e.g. 'us.', 'eu.', 'ap.'):"));
+  console.error(chalk.cyan(`    kunj config set ai.model us.${modelId}`));
+  console.error(chalk.gray("  Or set the BEDROCK_MODEL environment variable.\n"));
 }
 
 // Get the region provider
@@ -137,7 +161,7 @@ export async function getBedrockClient(): Promise<any> {
       region,
       credentials: defaultProvider(),
       temperature: 0.7,
-      maxTokens: 1000, // Increased to handle both commits and PR descriptions
+      maxTokens: 2000, // Enough for PR descriptions (title + summary + changes)
     });
   }
   return cachedClient;
@@ -299,6 +323,9 @@ ${includeBody ? 'BODY: <optional detailed description>\n' : ''}BRANCH_DESC: <ver
       branchDescription,
     };
   } catch (error: any) {
+    if (isInferenceProfileError(error)) {
+      logInferenceProfileHelp(getDefaultModelId());
+    }
     console.error(chalk.red("AI generation failed:"), error.message);
 
     // Provide a fallback suggestion based on file patterns
@@ -428,6 +455,9 @@ Respond with just the tagged entry with bullets, no additional formatting.`;
     console.log(chalk.gray("AI returned empty work log entry"));
     return null;
   } catch (error: any) {
+    if (isInferenceProfileError(error)) {
+      logInferenceProfileHelp(getDefaultModelId());
+    }
     console.error(chalk.red("Work log generation error:"), error.message);
     throw error; // Re-throw to be caught by caller
   }
@@ -625,6 +655,9 @@ Respond with just the tagged entry with bullets, no additional formatting.`;
     console.log(chalk.gray("AI returned empty PR log entry"));
     return null;
   } catch (error: any) {
+    if (isInferenceProfileError(error)) {
+      logInferenceProfileHelp(getDefaultModelId());
+    }
     console.error(chalk.red("PR log generation error:"), error.message);
     throw error; // Re-throw to be caught by caller
   }
@@ -787,6 +820,12 @@ export async function checkAWSCredentials(): Promise<boolean> {
         return false;
       }
 
+      // Check for inference profile requirement (newer Claude models)
+      if (isInferenceProfileError(err)) {
+        logInferenceProfileHelp(getDefaultModelId());
+        return false;
+      }
+
       // Check for invalid model identifier
       if (
         err.message?.includes("model identifier is invalid") ||
@@ -816,6 +855,67 @@ export async function checkAWSCredentials(): Promise<boolean> {
     );
     return false;
   }
+}
+
+export interface BedrockModelOption {
+  id: string;
+  name: string;
+  provider: string;
+  /** true = requires cross-region inference profile prefix (us./eu./ap.) */
+  requiresInferenceProfile: boolean;
+}
+
+// List available Bedrock models (foundation models + inference profiles),
+// filtered to Anthropic/Claude models only.
+export async function listBedrockModels(): Promise<BedrockModelOption[]> {
+  const region = await getAWSRegion();
+  const client = new BedrockClient({
+    region,
+    credentials: defaultProvider(),
+  });
+
+  const models: BedrockModelOption[] = [];
+
+  // 1. Foundation models (older Claude models work with on-demand)
+  try {
+    const { modelSummaries = [] } = await client.send(
+      new ListFoundationModelsCommand({ byProvider: "Anthropic" })
+    );
+    for (const m of modelSummaries) {
+      if (!m.modelId) continue;
+      const onDemandOk = m.inferenceTypesSupported?.includes("ON_DEMAND" as any);
+      models.push({
+        id: m.modelId,
+        name: m.modelName || m.modelId,
+        provider: "Anthropic",
+        requiresInferenceProfile: !onDemandOk,
+      });
+    }
+  } catch {
+    // credentials or network issue — let caller handle
+  }
+
+  // 2. Cross-region inference profiles (required for newer Claude models)
+  try {
+    const { inferenceProfileSummaries = [] } = await client.send(
+      new ListInferenceProfilesCommand({})
+    );
+    for (const p of inferenceProfileSummaries) {
+      if (!p.inferenceProfileId) continue;
+      // Filter to Anthropic/Claude profiles
+      if (!p.inferenceProfileId.includes("anthropic")) continue;
+      models.push({
+        id: p.inferenceProfileId,
+        name: p.inferenceProfileName || p.inferenceProfileId,
+        provider: "Anthropic (inference profile)",
+        requiresInferenceProfile: false, // it IS the profile
+      });
+    }
+  } catch {
+    // Not all regions/accounts have inference profiles configured
+  }
+
+  return models;
 }
 
 // Get information about the current AWS configuration

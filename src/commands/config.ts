@@ -16,6 +16,7 @@ import {
 import { defaultConfig } from '../constants';
 import { formatConfigValue, formatBoolValue, parseKeyValue } from '../lib/utils';
 import { settingsRegistry, SettingDefinition } from '../settings';
+import { listBedrockModels } from '../lib/ai-commit';
 
 interface ConfigOptions {
   set?: string;
@@ -574,6 +575,91 @@ export class ConfigCommand extends BaseCommand {
         changed = newValue !== currentValue;
 
       } else if (item.type === "string") {
+        // Special handling for ai.model: offer AWS model browser
+        if (item.value === 'ai.model') {
+          const { inputMode } = await inquirer.prompt([{
+            type: 'list',
+            name: 'inputMode',
+            message: 'How would you like to set the model?',
+            choices: [
+              { name: 'Browse available models from AWS', value: 'browse' },
+              { name: 'Enter model ID manually', value: 'manual' },
+              { name: chalk.gray('← Go back'), value: 'cancel' },
+            ],
+          }]);
+
+          if (inputMode === 'cancel') {
+            return false;
+          }
+
+          if (inputMode === 'browse') {
+            console.log(chalk.gray('  Fetching models from AWS Bedrock...'));
+            let models: Awaited<ReturnType<typeof listBedrockModels>>;
+            try {
+              models = await listBedrockModels();
+            } catch (err: any) {
+              console.log(chalk.red(`  Failed to fetch models: ${err.message}`));
+              console.log(chalk.gray('  Falling back to manual entry.'));
+              models = [];
+            }
+
+            if (models.length === 0) {
+              console.log(chalk.yellow('  No models returned. Check your AWS credentials and region.'));
+              return false;
+            }
+
+            // Separate foundation models and inference profiles
+            const profiles = models.filter(m => !m.requiresInferenceProfile);
+            const foundational = models.filter(m => m.requiresInferenceProfile);
+
+            const choices: any[] = [];
+
+            if (profiles.length > 0) {
+              choices.push(new inquirer.Separator(chalk.cyan('── Inference Profiles (recommended for new models) ──')));
+              profiles.forEach(m => {
+                choices.push({ name: `${m.id}  ${chalk.dim(m.name)}`, value: m.id });
+              });
+            }
+
+            if (foundational.length > 0) {
+              choices.push(new inquirer.Separator(chalk.cyan('── Foundation Models (on-demand) ──')));
+              foundational.forEach(m => {
+                choices.push({ name: `${m.id}  ${chalk.dim(m.name)}`, value: m.id });
+              });
+            }
+
+            choices.push(new inquirer.Separator(''));
+            choices.push({ name: chalk.gray('← Go back (discard changes)'), value: 'CANCEL' });
+
+            const { selectedModel } = await inquirer.prompt([{
+              type: 'list',
+              name: 'selectedModel',
+              message: 'Select a model:',
+              choices,
+              pageSize: 20,
+              default: currentValue,
+            }]);
+
+            if (selectedModel === 'CANCEL') {
+              return false;
+            }
+
+            newValue = selectedModel;
+            changed = newValue !== currentValue;
+          } else {
+            // manual entry
+            const { value } = await inquirer.prompt([{
+              type: 'input',
+              name: 'value',
+              message: 'Enter model ID (or leave empty to cancel):',
+              default: currentValue,
+            }]);
+
+            if (!value || value === currentValue) return false;
+            newValue = value;
+            changed = true;
+          }
+        } else {
         const { value } = await inquirer.prompt([
           {
             type: setting.sensitive ? "password" : "input",
@@ -592,6 +678,7 @@ export class ConfigCommand extends BaseCommand {
 
         newValue = value;
         changed = true;
+        }
 
       } else if (item.type === "array") {
         const currentArray = Array.isArray(currentValue) ? currentValue : [];

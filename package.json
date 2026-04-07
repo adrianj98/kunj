@@ -24,6 +24,7 @@
   "author": "me",
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-bedrock": "^3.1026.0",
     "@aws-sdk/client-bedrock-runtime": "^3.932.0",
     "@aws-sdk/config-resolver": "^3.370.0",
     "@aws-sdk/credential-provider-node": "^3.932.0",
