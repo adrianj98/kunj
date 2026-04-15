@@ -260,6 +260,7 @@ ${includeBody ? 'BODY: <optional detailed description>\n' : ''}BRANCH_DESC: <ver
                        commitStyle === 'semantic' ? 'Semantic Commits' :
                        commitStyle === 'gitmoji' ? 'Gitmoji' :
                        commitStyle === 'simple' ? 'Simple' :
+                       commitStyle === 'caveman' ? 'Caveman' :
                        'Custom Style';
 
     console.log(chalk.blue(`🤖 Analyzing changes with Claude (${styleLabel})...`));
@@ -288,8 +289,8 @@ ${includeBody ? 'BODY: <optional detailed description>\n' : ''}BRANCH_DESC: <ver
     // Build the full message based on commit style
     let fullMessage: string;
 
-    if (commitStyle === 'conventional') {
-      // Format: type: message
+    if (commitStyle === 'conventional' || commitStyle === 'caveman') {
+      // Format: type: message (caveman uses same conventional format, just terser content)
       const typePrefix = type.toLowerCase();
       fullMessage = body
         ? `${typePrefix}: ${commitMessage}\n\n${body}`
@@ -375,8 +376,46 @@ export async function generateWorkLogEntry(
       ? `\nProject Context:\n${projectContext}\n`
       : '';
 
+    // Get commit style to determine verbosity
+    const commitStyle = config.ai?.commitStyle || 'conventional';
+    const isCaveman = commitStyle === 'caveman';
+
     // Create a prompt for generating a work log entry
-    const prompt = `You are documenting a developer's daily work. Based on this commit, write a CONCISE itemized work log entry.
+    const prompt = isCaveman
+      ? `Document dev work. Ultra-terse. Based on this commit, write compressed work log entry.
+${projectContextSection}
+Commit: ${commitMessage}
+Branch: ${branchName}
+Files: ${fileList}
+
+Diff:
+\`\`\`diff
+${diffPreview}
+\`\`\`
+
+Format:
+[TAG] WHAT changed (3-5 words)
+- Change 1 (2-4 words)
+- Change 2 (2-4 words)
+Files: file1.ts, file2.ts
+
+Tags: [feature] [bug] [refactor] [perf] [docs] [test] [chore]
+
+Rules:
+- Drop articles (a/an/the), filler, hedging
+- Fragments OK. Short synonyms
+- WHAT only. No WHY. Past tense
+- 2-3 bullets max, 2-4 words each
+- Max 3 files
+
+Example:
+"[feature] Added JWT auth
+- Built token generation
+- Created auth endpoints
+Files: src/auth/jwt.ts"
+
+Tagged entry only, no extra formatting.`
+      : `You are documenting a developer's daily work. Based on this commit, write a CONCISE itemized work log entry.
 ${projectContextSection}
 Commit message: ${commitMessage}
 Branch: ${branchName}
@@ -576,8 +615,36 @@ export async function generatePRLogEntry(
       ? `\nProject Context:\n${projectContext}\n`
       : '';
 
+    // Get commit style to determine verbosity
+    const commitStyle = config.ai?.commitStyle || 'conventional';
+    const isCaveman = commitStyle === 'caveman';
+
     // Create a prompt for generating a PR work log entry
-    const prompt = `You are documenting a developer's daily work. Based on this pull request, write a CONCISE itemized work log entry.
+    const prompt = isCaveman
+      ? `Document PR work. Ultra-terse.
+${projectContextSection}
+PR: ${prTitle}
+Branch: ${branchName} → ${baseBranch}
+Commits:
+${commitList}
+
+Diff:
+\`\`\`diff
+${diffPreview}
+\`\`\`
+
+Format:
+[TAG] WHAT done (3-5 words)
+- Change 1 (2-4 words)
+- Change 2 (2-4 words)
+PR: #
+
+Tags: [feature] [bug] [refactor] [perf] [docs] [test] [chore]
+
+Rules: Drop articles/filler. Fragments OK. WHAT only. Past tense. 2-3 bullets max.
+
+Tagged entry only.`
+      : `You are documenting a developer's daily work. Based on this pull request, write a CONCISE itemized work log entry.
 ${projectContextSection}
 PR Title: ${prTitle}
 PR Description: ${prBody}
@@ -685,8 +752,21 @@ export async function generateStandupBullets(
       ? `\nProject Context:\n${projectContext}\n`
       : '';
 
+    // Get commit style to determine verbosity
+    const commitStyle = config.ai?.commitStyle || 'conventional';
+    const isCaveman = commitStyle === 'caveman';
+
     // Create a prompt for generating abbreviated bullets
-    const prompt = `You are helping prepare for a daily standup meeting. Below is a work log for ${dateLabel}.
+    const prompt = isCaveman
+      ? `Standup bullets for ${dateLabel}. Ultra-terse.
+${projectContextSection}
+Work Log:
+${workLogContent}
+
+Format: "- Area: action" (3-6 words total)
+[bug] → "Fixed..." | [feature] → "Added/Built..." | [refactor] → "Cleaned up..."
+Combine related. 2-4 bullets max. No filler. Dashes only.`
+      : `You are helping prepare for a daily standup meeting. Below is a work log for ${dateLabel}.
 ${projectContextSection}
 Your task: Create 3-5 EXTREMELY concise bullet points using the format: <feature>: <action>
 

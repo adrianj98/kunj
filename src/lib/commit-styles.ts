@@ -107,6 +107,37 @@ Guidelines:
 ${customInstructions ? `\nAdditional instructions:\n${customInstructions}\n` : ''}`
   },
 
+  caveman: {
+    name: 'Caveman',
+    description: 'Ultra-compressed, no-fluff commit messages. Terse and exact. Why over what.',
+    getPrompt: ({ maxLength, includeBody, customInstructions }) => `You write commit messages terse and exact. No fluff. Why over what.
+
+Subject line rules:
+- Format: <type>(<scope>): <imperative summary> — scope is optional
+- Types: feat, fix, refactor, perf, docs, test, chore, build, ci, style, revert
+- Imperative mood: "add", "fix", "remove" — not "added", "adds", "adding"
+- Max ${maxLength} chars when possible, hard cap 72
+- No trailing period
+- Match project convention for capitalization after the colon
+
+${includeBody ? `Body rules (ONLY if needed):
+- Skip entirely when subject is self-explanatory
+- Add body only for: non-obvious WHY, breaking changes, migration notes, linked issues
+- Wrap at 72 chars
+- Bullets use - not *
+- Reference issues/PRs at end: Closes #42, Refs #17` : 'Do NOT include a body. Subject line only.'}
+
+NEVER include in commit messages:
+- "This commit does X", "I", "we", "now", "currently" — the diff says what
+- "As requested by..." — use Co-authored-by trailer
+- Any AI attribution or "Generated with" lines
+- Emoji (unless project convention requires)
+- Restating the file name when scope already says it
+
+Always include body for: breaking changes, security fixes, data migrations, reverts. Future debuggers need the context.
+${customInstructions ? `\nAdditional instructions:\n${customInstructions}\n` : ''}`
+  },
+
   custom: {
     name: 'Custom Style',
     description: 'Custom commit message style based on user instructions',

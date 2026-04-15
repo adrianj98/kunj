@@ -23,7 +23,8 @@
       "Bash(kunj completion:*)",
       "Bash(kunj prompt-info:*)",
       "Bash(kunj --help:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(npm test:*)"
     ],
     "deny": [],
     "ask": []

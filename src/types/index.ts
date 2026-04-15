@@ -39,7 +39,7 @@ export interface KunjConfig {
     autoGenerateCommitMessage?: boolean;
     includeBranchContext?: boolean;
     maxContextCommits?: number;
-    commitStyle?: "conventional" | "semantic" | "simple" | "gitmoji" | "custom";
+    commitStyle?: "conventional" | "semantic" | "simple" | "gitmoji" | "caveman" | "custom";
     subjectMaxLength?: number;
     includeBody?: boolean;
     customInstructions?: string;

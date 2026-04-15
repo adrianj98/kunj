@@ -75,7 +75,32 @@ export async function generateAIPRDescription(
     const styleGuidelines = getCommitStylePrompt(commitStyle, maxLength, includeBody, customInstructions);
 
     // Create the PR-specific prompt
-    const prompt = `You are an expert at writing clear, informative GitHub pull request descriptions.
+    const isCaveman = commitStyle === 'caveman';
+    const prompt = isCaveman
+      ? `Write terse, actionable PR description. No fluff. Location, problem, fix.
+
+Branch: ${currentBranch} → ${baseBranch}
+${branchDescription ? `Purpose: ${branchDescription}` : ''}
+${branchTags ? `Tags: ${branchTags}` : ''}
+${jiraContext}${commitsContext}
+Diff:
+\`\`\`diff
+${diffPreview}
+\`\`\`
+
+Rules:
+- Title: imperative, max ${maxLength} chars, no trailing period
+- Summary: 1-2 sentences. WHAT and WHY. No filler words (just/really/basically/simply)
+- Changes: one bullet per change. Format: \`file/area\`: what changed. Short (3-8 words per bullet)
+- Drop: articles (a/an/the), hedging, "This PR does...", pleasantries
+- Keep: exact symbol/function names in backticks, line numbers if relevant
+- For breaking changes or security fixes: add full explanation, don't compress
+
+Respond with:
+TITLE: <pr title>
+SUMMARY: <terse overview>
+CHANGES: <bullet per change, file:what format>`
+      : `You are an expert at writing clear, informative GitHub pull request descriptions.
 
 ${styleGuidelines}
 
@@ -110,6 +135,7 @@ CHANGES: <detailed breakdown of key changes, one per line, use bullet points>`;
                        commitStyle === 'semantic' ? 'Semantic Style' :
                        commitStyle === 'gitmoji' ? 'Gitmoji Style' :
                        commitStyle === 'simple' ? 'Simple Style' :
+                       commitStyle === 'caveman' ? 'Caveman Style' :
                        'Custom Style';
 
     console.log(chalk.blue(`🤖 Generating PR description with Claude (${styleLabel})...`));

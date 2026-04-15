@@ -61,13 +61,14 @@ export function registerAISettings(): void {
       detailedDescription: 'Choose the format for AI-generated commit messages and PR descriptions. Each style follows different conventions for organizing and presenting changes. This applies to both commit messages and pull request descriptions.',
       type: 'enum',
       defaultValue: 'conventional',
-      options: ['conventional', 'semantic', 'simple', 'gitmoji', 'custom'],
+      options: ['conventional', 'semantic', 'simple', 'gitmoji', 'caveman', 'custom'],
       category: 'ai',
       examples: [
         'conventional - "feat: Add user authentication" (standard)',
         'semantic - "[MINOR] Add user authentication"',
         'simple - "Add user authentication" (no prefix)',
         'gitmoji - "✨ Add user authentication" (with emoji)',
+        'caveman - "feat(api): add GET /users/:id" (terse, no fluff)',
         'custom - Use customInstructions for your own format'
       ],
       relatedSettings: ['ai.customInstructions', 'ai.includeBody']
