@@ -18,6 +18,7 @@ export { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch
 export { CompletionCommand } from './completion';
 export { PromptInfoCommand } from './prompt-info';
 export { IssueCommand } from './issue';
+export { TeamCommand } from './team';
 
 // Import all command classes here as they are created
 // This makes it easy to import all commands from a single location
@@ -41,6 +42,7 @@ import { BranchNoteCommand, BranchTagCommand, BranchDescCommand } from './branch
 import { CompletionCommand } from './completion';
 import { PromptInfoCommand } from './prompt-info';
 import { IssueCommand } from './issue';
+import { TeamCommand } from './team';
 
 // Export a function that returns all command instances
 export function getAllCommands(): BaseCommand[] {
@@ -65,5 +67,6 @@ export function getAllCommands(): BaseCommand[] {
     new CompletionCommand(),
     new PromptInfoCommand(),
     new IssueCommand(),
+    new TeamCommand(),
   ];
 }
