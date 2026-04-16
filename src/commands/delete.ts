@@ -13,6 +13,7 @@ export class DeleteCommand extends BaseCommand {
     super({
       name: 'delete <branch>',
       description: 'Delete a branch',
+      ui: { category: 'action', widget: 'form-only', label: 'Delete Branch', icon: 'trash', order: 21 },
       options: [
         { flags: '-f, --force', description: 'Force delete the branch' }
       ]
@@ -46,6 +47,10 @@ export class DeleteCommand extends BaseCommand {
     );
 
     if (result.success) {
+      if (this.jsonMode) {
+        this.outputJSON({ success: true, branch: branchName, force: !!options.force });
+        return;
+      }
       console.log(
         chalk.green(`✓ Successfully deleted branch '${branchName}'`)
       );

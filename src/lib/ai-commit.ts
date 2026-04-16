@@ -852,6 +852,40 @@ function suggestCommitType(files: string[]): string {
   return "feat";
 }
 
+// Validate that a specific model ID works by sending a minimal request.
+// Returns { ok: true } on success or { ok: false, message, inferenceProfileNeeded } on failure.
+export async function validateBedrockModel(modelId: string): Promise<{ ok: boolean; message?: string; inferenceProfileNeeded?: boolean }> {
+  try {
+    const region = await getAWSRegion();
+    const testClient = new ChatBedrockConverse({
+      model: modelId,
+      region,
+      credentials: defaultProvider(),
+      maxTokens: 1,
+    });
+
+    await testClient.invoke([{ role: "user", content: "hi" }]);
+    return { ok: true };
+  } catch (err: any) {
+    if (isInferenceProfileError(err)) {
+      return { ok: false, inferenceProfileNeeded: true, message: `Model requires a cross-region inference profile prefix (e.g. us.${modelId})` };
+    }
+    if (err.message?.includes("model identifier is invalid") || err.message?.includes("ValidationException")) {
+      return { ok: false, message: `Model '${modelId}' is not available in this region` };
+    }
+    if (
+      err.name === "CredentialsProviderError" ||
+      err.message?.includes("Could not load credentials") ||
+      err.message?.includes("Missing credentials") ||
+      err.$metadata?.httpStatusCode === 403 ||
+      err.$metadata?.httpStatusCode === 401
+    ) {
+      return { ok: false, message: "AWS credentials are missing or invalid" };
+    }
+    return { ok: false, message: err.message || "Unknown error" };
+  }
+}
+
 // Check if AI is enabled and AWS credentials are configured
 export async function checkAWSCredentials(): Promise<boolean> {
   try {

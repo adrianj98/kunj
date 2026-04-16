@@ -25,6 +25,19 @@ export class StashCommand extends BaseCommand {
       name: 'stash',
       description: 'Stash changes with AI-generated messages',
       arguments: '[action]',
+      ui: {
+        category: 'data',
+        widget: 'table',
+        label: 'Stashes',
+        icon: 'archive',
+        defaultArgs: ['--list'],
+        dataKey: 'stashes',
+        order: 13,
+        columns: [
+          { key: 'ref', label: 'Ref' },
+          { key: 'description', label: 'Description' },
+        ],
+      },
       options: [
         {
           flags: '-l, --list',
@@ -184,6 +197,18 @@ export class StashCommand extends BaseCommand {
       }
 
       const stashes = stdout.trim().split('\n');
+
+      if (this.jsonMode) {
+        const parsed = stashes.map((stash) => {
+          const match = stash.match(/^(stash@\{(\d+)\}):\s+(.+)$/);
+          if (match) {
+            return { ref: match[1], index: parseInt(match[2]), description: match[3] };
+          }
+          return { ref: stash, index: -1, description: stash };
+        });
+        this.outputJSON({ stashes: parsed });
+        return;
+      }
 
       // Create choices for interactive selection
       const choices = stashes.map((stash) => {

@@ -16,7 +16,7 @@ import {
 import { defaultConfig } from '../constants';
 import { formatConfigValue, formatBoolValue, parseKeyValue } from '../lib/utils';
 import { settingsRegistry, SettingDefinition } from '../settings';
-import { listBedrockModels } from '../lib/ai-commit';
+import { listBedrockModels, validateBedrockModel } from '../lib/ai-commit';
 
 interface ConfigOptions {
   set?: string;
@@ -32,6 +32,14 @@ export class ConfigCommand extends BaseCommand {
     super({
       name: 'config',
       description: 'View or edit configuration',
+      ui: {
+        category: 'data',
+        widget: 'key-value',
+        label: 'Configuration',
+        icon: 'settings',
+        dataKey: 'merged',
+        order: 10,
+      },
       options: [
         { flags: '-s, --set <key=value>', description: 'Set a configuration value' },
         { flags: '-g, --get <key>', description: 'Get a configuration value' },
@@ -66,11 +74,24 @@ export class ConfigCommand extends BaseCommand {
     }
 
     if (options.list || (!options.set && !options.get)) {
+      if (this.jsonMode) {
+        this.outputJSON({
+          global: loadGlobalConfig(),
+          local: loadLocalConfig(),
+          merged: mergedConfig,
+        });
+        return;
+      }
       this.listConfig(config, mergedConfig, isGlobal);
       return;
     }
 
     if (options.get) {
+      const value = this.resolveConfigValue(mergedConfig, options.get);
+      if (this.jsonMode) {
+        this.outputJSON({ key: options.get, value });
+        return;
+      }
       this.getConfigValue(mergedConfig, options.get);
       return;
     }
@@ -199,6 +220,16 @@ export class ConfigCommand extends BaseCommand {
     console.log(chalk.dim(`  Use 'kunj config -i' for interactive editor`));
     console.log(chalk.dim(`  Use 'kunj config --global' to manage global settings`));
     console.log("");
+  }
+
+  private resolveConfigValue(config: any, keyPath: string): any {
+    const keys = keyPath.split(".");
+    let value: any = config;
+    for (const key of keys) {
+      value = value?.[key];
+      if (value === undefined) return undefined;
+    }
+    return value;
   }
 
   private getConfigValue(config: any, keyPath: string): void {
@@ -617,6 +648,18 @@ export class ConfigCommand extends BaseCommand {
               byProvider.get(m.provider)!.push(m);
             }
 
+            // Build a map from bare model IDs to their inference profile IDs
+            // e.g. "anthropic.claude-3-5-sonnet-..." → "us.anthropic.claude-3-5-sonnet-..."
+            const profileLookup = new Map<string, string>();
+            for (const p of profiles) {
+              // Inference profile IDs are typically "<region-prefix>.<bare-model-id>"
+              const dotIdx = p.id.indexOf('.');
+              if (dotIdx > 0) {
+                const bareId = p.id.substring(dotIdx + 1);
+                profileLookup.set(bareId, p.id);
+              }
+            }
+
             const choices: any[] = [];
 
             if (profiles.length > 0) {
@@ -629,8 +672,17 @@ export class ConfigCommand extends BaseCommand {
             for (const [provider, providerModels] of byProvider) {
               choices.push(new inquirer.Separator(chalk.cyan(`── ${provider} ──`)));
               providerModels.forEach(m => {
-                const tag = m.requiresInferenceProfile ? chalk.dim(' (needs inference profile)') : '';
-                choices.push({ name: `${m.id}  ${chalk.dim(m.name)}${tag}`, value: m.id });
+                if (m.requiresInferenceProfile) {
+                  const profileId = profileLookup.get(m.id);
+                  if (profileId) {
+                    // Skip — already listed under Inference Profiles with the correct ID
+                    return;
+                  }
+                  const tag = chalk.dim(' (no inference profile available)');
+                  choices.push({ name: `${m.id}  ${chalk.dim(m.name)}${tag}`, value: m.id });
+                } else {
+                  choices.push({ name: `${m.id}  ${chalk.dim(m.name)}`, value: m.id });
+                }
               });
             }
 
@@ -664,6 +716,45 @@ export class ConfigCommand extends BaseCommand {
             if (!value || value === currentValue) return false;
             newValue = value;
             changed = true;
+          }
+
+          // Validate the selected model works
+          if (changed && newValue) {
+            console.log(chalk.gray(`  Validating model ${newValue}...`));
+            let result = await validateBedrockModel(newValue);
+
+            // If it needs an inference profile, try to find one automatically
+            if (!result.ok && result.inferenceProfileNeeded) {
+              const region = newValue.match(/^(us|eu|ap)\./)?.[0];
+              if (!region) {
+                // Try common prefixes
+                for (const prefix of ['us', 'eu', 'ap']) {
+                  const prefixed = `${prefix}.${newValue}`;
+                  console.log(chalk.gray(`  Trying ${prefixed}...`));
+                  const retry = await validateBedrockModel(prefixed);
+                  if (retry.ok) {
+                    newValue = prefixed;
+                    result = retry;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (result.ok) {
+              console.log(chalk.green(`  ✓ Model is accessible${newValue !== item.current ? ` (${newValue})` : ''}`));
+            } else {
+              console.log(chalk.red(`  ✗ ${result.message}`));
+              const { proceed } = await inquirer.prompt([{
+                type: 'confirm',
+                name: 'proceed',
+                message: 'Model validation failed. Save anyway?',
+                default: false,
+              }]);
+              if (!proceed) {
+                return false;
+              }
+            }
           }
         } else {
         const { value } = await inquirer.prompt([

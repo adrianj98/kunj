@@ -95,6 +95,15 @@ export class TeamCommand extends BaseCommand {
       name: "team",
       description:
         "Fetch open PRs, save diffs, and generate a team activity report",
+      ui: {
+        category: 'dashboard',
+        widget: 'markdown',
+        label: 'Team Report',
+        icon: 'users',
+        defaultArgs: ['--no-ai'],
+        dataKey: 'report',
+        order: 5,
+      },
       options: [
         {
           flags: "--no-ai",
@@ -311,6 +320,7 @@ export class TeamCommand extends BaseCommand {
     // Generate report
     const useAI = options.ai !== false && config.ai?.enabled;
     let reportContent: string;
+    let summaries: PRSummary[] | null = null;
 
     if (useAI) {
       const hasCredentials = await checkAWSCredentials();
@@ -318,7 +328,7 @@ export class TeamCommand extends BaseCommand {
         try {
           // Map phase: summarize each PR individually
           console.log(chalk.blue("\nSummarizing PRs..."));
-          const summaries = await this.mapSummarizePRs(
+          summaries = await this.mapSummarizePRs(
             prs,
             diffs,
             recentActivity,
@@ -396,6 +406,23 @@ export class TeamCommand extends BaseCommand {
     const date = getTodayDate();
     const reportPath = path.join(teamDir, `report-${date}.md`);
     fs.writeFileSync(reportPath, reportContent, "utf8");
+
+    // JSON output
+    if (this.jsonMode) {
+      const activity: Record<string, PRActivity> = {};
+      for (const [num, act] of recentActivity) {
+        activity[num] = act;
+      }
+      this.outputJSON({
+        pullRequests: prs,
+        summaries: typeof summaries !== "undefined" ? summaries : null,
+        jiraIssues,
+        activity,
+        report: reportContent,
+        reportPath,
+      });
+      return;
+    }
 
     // Print summary
     console.log(chalk.green(`\nTeam report saved to ${reportPath}`));

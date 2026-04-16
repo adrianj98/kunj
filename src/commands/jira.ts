@@ -25,6 +25,22 @@ export class JiraCommand extends BaseCommand {
     super({
       name: 'jira',
       description: 'Jira integration commands',
+      ui: {
+        category: 'dashboard',
+        widget: 'table',
+        label: 'Jira Issues',
+        icon: 'ticket',
+        defaultArgs: ['list'],
+        dataKey: 'issues',
+        order: 4,
+        columns: [
+          { key: 'key', label: 'Key' },
+          { key: 'summary', label: 'Summary' },
+          { key: 'status', label: 'Status', format: 'badge' },
+          { key: 'type', label: 'Type' },
+          { key: 'assignee', label: 'Assignee' },
+        ],
+      },
       options: []
     });
   }
@@ -40,7 +56,9 @@ export class JiraCommand extends BaseCommand {
       .description('List tickets assigned to you')
       .option('--sprint', 'Show only tickets in active sprint')
       .option('--all', 'Show all assigned tickets')
+      .option('--json', 'Output as JSON')
       .action(async (options) => {
+        if (options.json) this.jsonMode = true;
         await this.listTickets(options);
       });
 
@@ -49,7 +67,9 @@ export class JiraCommand extends BaseCommand {
       .command('view')
       .description('View ticket details (auto-detects from current branch if no key provided)')
       .argument('[key]', 'Jira issue key (e.g., PROJ-123) - optional if branch is linked')
-      .action(async (key) => {
+      .option('--json', 'Output as JSON')
+      .action(async (key, options) => {
+        if (options.json) this.jsonMode = true;
         await this.viewTicket(key);
       });
 
@@ -135,7 +155,26 @@ export class JiraCommand extends BaseCommand {
       const issues = await listMyIssues({ jql, maxResults: 50 });
 
       if (issues.length === 0) {
+        if (this.jsonMode) {
+          this.outputJSON({ issues: [] });
+          return;
+        }
         console.log(chalk.gray('No tickets found.\n'));
+        return;
+      }
+
+      if (this.jsonMode) {
+        this.outputJSON({
+          issues: issues.map((issue: any) => ({
+            key: issue.key,
+            summary: issue.fields.summary,
+            status: issue.fields.status?.name,
+            type: issue.fields.issuetype?.name,
+            priority: issue.fields.priority?.name,
+            assignee: issue.fields.assignee?.displayName || null,
+            updated: issue.fields.updated,
+          })),
+        });
         return;
       }
 
@@ -210,6 +249,20 @@ export class JiraCommand extends BaseCommand {
       }
 
       const issue = await getIssue(key);
+
+      if (this.jsonMode) {
+        this.outputJSON({
+          key: issue.key,
+          summary: issue.fields.summary,
+          type: issue.fields.issuetype?.name,
+          status: issue.fields.status?.name,
+          priority: issue.fields.priority?.name || null,
+          assignee: issue.fields.assignee?.displayName || null,
+          reporter: issue.fields.reporter?.displayName || null,
+          description: issue.fields.description || null,
+        });
+        return;
+      }
 
       // Display ticket details
       console.log(chalk.bold('Key:      ') + chalk.blue(issue.key));

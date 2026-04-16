@@ -33,6 +33,14 @@ export class GraphCommand extends BaseCommand {
     super({
       name: 'graph',
       description: 'Visualize git commit history with subway map style graph',
+      ui: {
+        category: 'data',
+        widget: 'timeline',
+        label: 'Commit Graph',
+        icon: 'graph',
+        dataKey: 'commits',
+        order: 11,
+      },
       options: [
         {
           flags: '-a, --all',
@@ -120,7 +128,31 @@ export class GraphCommand extends BaseCommand {
       }
 
       if (!stdout.trim()) {
+        if (this.jsonMode) {
+          this.outputJSON({ commits: [] });
+          return;
+        }
         console.log(chalk.yellow('\nNo commits found matching the criteria'));
+        return;
+      }
+
+      if (this.jsonMode) {
+        // Re-run with parseable format for JSON
+        const jsonArgs = [
+          'git log',
+          `--format=%H%x00%an%x00%aI%x00%D%x00%s`,
+          `-n ${limit}`,
+        ];
+        if (options.all) jsonArgs.push('--all');
+        if (options.author) jsonArgs.push(`--author="${options.author}"`);
+        if (options.since) jsonArgs.push(`--since="${options.since}"`);
+        if (options.until) jsonArgs.push(`--until="${options.until}"`);
+        const { stdout: jsonOut } = await execAsync(jsonArgs.join(' '), { cwd: gitRoot });
+        const commits = jsonOut.trim().split('\n').filter(Boolean).map((line: string) => {
+          const [hash, author, date, refs, message] = line.split('\x00');
+          return { hash, author, date, refs: refs || null, message };
+        });
+        this.outputJSON({ commits });
         return;
       }
 

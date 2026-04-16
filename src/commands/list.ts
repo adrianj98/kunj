@@ -21,6 +21,24 @@ export class ListCommand extends BaseCommand {
     super({
       name: 'list',
       description: 'List all branches with their metadata and stashed changes',
+      ui: {
+        category: 'dashboard',
+        widget: 'table',
+        label: 'Branches',
+        icon: 'git-branch',
+        refreshInterval: 30,
+        defaultArgs: ['--all'],
+        dataKey: 'branches',
+        order: 1,
+        columns: [
+          { key: 'name', label: 'Branch' },
+          { key: 'current', label: 'Current' },
+          { key: 'lastActivity', label: 'Last Activity' },
+          { key: 'description', label: 'Description' },
+          { key: 'tags', label: 'Tags' },
+          { key: 'stashCount', label: 'Stashes' },
+        ],
+      },
       options: [
         { flags: '-a, --all', description: 'Show all branches (override filters)' },
         { flags: '-w, --wip', description: 'Show only work-in-progress branches' },
@@ -62,6 +80,33 @@ export class ListCommand extends BaseCommand {
 
     // Get all stashes with their branch associations
     const allStashes = await getAllStashesWithBranch();
+
+    // JSON output
+    if (this.jsonMode) {
+      const jsonBranches = branches.map((branch) => {
+        const metadata = branchMetadata.branches[branch.name] || {};
+        const stashes = allStashes.get(branch.name) || [];
+        return {
+          name: branch.name,
+          current: branch.name === currentBranch,
+          lastActivity: branch.lastActivity || null,
+          alias: config.aliases[branch.name] || null,
+          description: metadata.description || null,
+          tags: metadata.tags || [],
+          notes: metadata.notes || null,
+          jiraIssueKey: metadata.jiraIssueKey || null,
+          jiraIssueStatus: metadata.jiraIssueStatus || null,
+          jiraIssueTitle: metadata.jiraIssueTitle || null,
+          stashCount: stashes.length,
+          stashes: stashes.map((s: any) => ({
+            message: s.message,
+            details: s.details || null,
+          })),
+        };
+      });
+      this.outputJSON({ branches: jsonBranches });
+      return;
+    }
 
     // Display title based on filters
     const title = this.getTitle(options, config);

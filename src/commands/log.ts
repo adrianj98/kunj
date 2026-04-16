@@ -28,6 +28,15 @@ export class LogCommand extends BaseCommand {
     super({
       name: 'log',
       description: 'View daily work logs',
+      ui: {
+        category: 'data',
+        widget: 'timeline',
+        label: 'Work Logs',
+        icon: 'clock',
+        defaultArgs: ['--list'],
+        dataKey: 'logs',
+        order: 12,
+      },
       options: [
         {
           flags: '-y, --yesterday',
@@ -63,6 +72,11 @@ export class LogCommand extends BaseCommand {
     // List all logs
     if (options.list) {
       const logs = getAllWorkLogs();
+
+      if (this.jsonMode) {
+        this.outputJSON({ logs });
+        return;
+      }
 
       if (logs.length === 0) {
         console.log(chalk.yellow('No work logs found'));
@@ -118,6 +132,11 @@ export class LogCommand extends BaseCommand {
         }
         console.log(chalk.gray('\nUse: kunj log --list to see all available logs'));
       }
+      return;
+    }
+
+    if (this.jsonMode) {
+      this.outputJSON({ date: logDate, content: logContent });
       return;
     }
 

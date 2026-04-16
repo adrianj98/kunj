@@ -20,6 +20,7 @@ export class CreateCommand extends BaseCommand {
     super({
       name: 'create <branch>',
       description: 'Create a new branch and switch to it',
+      ui: { category: 'action', widget: 'form-only', label: 'Create Branch', icon: 'plus', order: 20 },
       options: [
         { flags: '--no-stash', description: 'Disable automatic stashing of changes' },
         { flags: '-d, --desc <description>', description: 'Set a description for the new branch' },
@@ -102,6 +103,17 @@ export class CreateCommand extends BaseCommand {
         updateBranchMetadata(currentBranch, {
           lastSwitched: new Date().toISOString()
         });
+      }
+
+      if (this.jsonMode) {
+        this.outputJSON({
+          success: true,
+          branch: branchName,
+          previousBranch: currentBranch,
+          description: metadata.description || null,
+          tags: metadata.tags || [],
+        });
+        return;
       }
 
       console.log(chalk.gray("\nTip: Add notes with 'kunj branch-note'"));

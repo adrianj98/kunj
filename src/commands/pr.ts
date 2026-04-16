@@ -36,6 +36,25 @@ export class PrCommand extends BaseCommand {
       name: "pr",
       description: "Create or view pull requests on GitHub",
       arguments: "[prNumber]",
+      ui: {
+        category: 'dashboard',
+        widget: 'table',
+        label: 'Pull Requests',
+        icon: 'git-pull-request',
+        refreshInterval: 60,
+        defaultArgs: ['--list'],
+        dataKey: 'pullRequests',
+        order: 2,
+        columns: [
+          { key: 'number', label: '#' },
+          { key: 'title', label: 'Title' },
+          { key: 'author', label: 'Author' },
+          { key: 'branch', label: 'Branch' },
+          { key: 'isDraft', label: 'Draft' },
+          { key: 'checksStatus', label: 'Checks', format: 'badge' },
+          { key: 'approvals', label: 'Approvals' },
+        ],
+      },
       options: [
         { flags: "-t, --title <title>", description: "PR title" },
         { flags: "-b, --body <body>", description: "PR body/description" },
@@ -93,6 +112,10 @@ export class PrCommand extends BaseCommand {
 
     // Handle list flag
     if (options.list) {
+      if (this.jsonMode) {
+        await this.listPrsJSON();
+        return;
+      }
       await this.listPrs();
       return;
     }
@@ -656,6 +679,37 @@ export class PrCommand extends BaseCommand {
       console.error(chalk.red("Failed to get PR status:"), error.message);
       process.exit(1);
     }
+  }
+
+  private async listPrsJSON(): Promise<void> {
+    const { stdout } = await execAsync(
+      `gh pr list --json number,title,author,isDraft,headRefName,baseRefName,reviews,statusCheckRollup,url,additions,deletions,createdAt,updatedAt --limit 50`
+    );
+    const prs = JSON.parse(stdout || "[]");
+    const result = prs.map((pr: any) => {
+      const approvals = pr.reviews?.filter((r: any) => r.state === "APPROVED").length || 0;
+      const checks = pr.statusCheckRollup || [];
+      const failedChecks = checks.filter((c: any) => c.conclusion === "FAILURE").length;
+      const pendingChecks = checks.filter((c: any) =>
+        c.status === "IN_PROGRESS" || c.status === "QUEUED" || c.status === "PENDING"
+      ).length;
+      return {
+        number: pr.number,
+        title: pr.title,
+        author: pr.author.login,
+        branch: pr.headRefName,
+        baseBranch: pr.baseRefName,
+        isDraft: pr.isDraft,
+        url: pr.url,
+        additions: pr.additions,
+        deletions: pr.deletions,
+        createdAt: pr.createdAt,
+        updatedAt: pr.updatedAt,
+        approvals,
+        checksStatus: failedChecks > 0 ? "failure" : pendingChecks > 0 ? "pending" : checks.length > 0 ? "success" : "none",
+      };
+    });
+    this.outputJSON({ pullRequests: result });
   }
 
   private async listPrs(): Promise<void> {

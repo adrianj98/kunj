@@ -18,6 +18,22 @@ export class DiffCommand extends BaseCommand {
     super({
       name: 'diff',
       description: 'View file changes with beautiful syntax highlighting',
+      ui: {
+        category: 'dashboard',
+        widget: 'table',
+        label: 'Changes',
+        icon: 'file-diff',
+        refreshInterval: 15,
+        dataKey: 'files',
+        order: 3,
+        columns: [
+          { key: 'path', label: 'File' },
+          { key: 'status', label: 'Status', format: 'badge' },
+          { key: 'staged', label: 'Staged' },
+          { key: 'additions', label: '+' },
+          { key: 'deletions', label: '-' },
+        ],
+      },
       options: [
         {
           flags: '-f, --file <path>',
@@ -65,6 +81,25 @@ export class DiffCommand extends BaseCommand {
           console.log(chalk.yellow('No staged changes'));
           return;
         }
+      }
+
+      // JSON output
+      if (this.jsonMode) {
+        this.outputJSON({
+          files: filesToShow.map((f) => ({
+            path: f.path,
+            status: f.status,
+            staged: f.staged,
+            additions: f.additions || 0,
+            deletions: f.deletions || 0,
+          })),
+          summary: {
+            total: filesToShow.length,
+            staged: filesToShow.filter((f) => f.staged).length,
+            unstaged: filesToShow.filter((f) => !f.staged).length,
+          },
+        });
+        return;
       }
 
       // If specific file requested

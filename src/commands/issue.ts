@@ -25,6 +25,7 @@ export class IssueCommand extends BaseCommand {
     super({
       name: "issue",
       description: "Create a GitHub issue",
+      ui: { category: 'action', widget: 'form-only', label: 'Create Issue', icon: 'tag', order: 23 },
       options: [
         { flags: "-t, --title <title>", description: "Issue title" },
         { flags: "-f, --body-file <path>", description: "Read description from a file" },
@@ -113,6 +114,17 @@ export class IssueCommand extends BaseCommand {
 
       const match = issueUrl.match(/\/issues\/(\d+)/);
       issueNumber = match ? match[1] : null;
+
+      if (this.jsonMode) {
+        this.outputJSON({
+          success: true,
+          url: issueUrl,
+          number: issueNumber ? parseInt(issueNumber) : null,
+          title,
+          labels: selectedLabels,
+        });
+        return;
+      }
 
       console.log(chalk.green("\n✓ Issue created successfully!"));
       console.log(chalk.cyan(`Issue URL: ${issueUrl}`));

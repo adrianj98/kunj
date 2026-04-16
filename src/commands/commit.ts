@@ -38,6 +38,7 @@ export class CommitCommand extends BaseCommand {
     super({
       name: "commit",
       description: "Interactive commit - select files and commit with message",
+      ui: { category: 'action', widget: 'form-only', label: 'Commit', icon: 'check', order: 22 },
       options: [
         {
           flags: "-a, --all",
