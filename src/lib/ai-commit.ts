@@ -67,7 +67,7 @@ function getProjectContext(): string | null {
 }
 
 // Get the model ID from config or environment
-function getDefaultModelId(): string {
+export function getDefaultModelId(): string {
   const config = loadConfig();
   // Use config first, then environment variable, then default
   return (
@@ -127,7 +127,7 @@ function getRegionProvider(): () => Promise<string> {
 }
 
 // Get AWS region using SDK's config resolver
-async function getAWSRegion(): Promise<string> {
+export async function getAWSRegion(): Promise<string> {
   if (!cachedRegion) {
     try {
       const provider = getRegionProvider();
@@ -956,18 +956,21 @@ export async function listBedrockModels(): Promise<BedrockModelOption[]> {
 
   const models: BedrockModelOption[] = [];
 
-  // 1. Foundation models (older Claude models work with on-demand)
+  // 1. Foundation models (all providers that support text generation)
   try {
     const { modelSummaries = [] } = await client.send(
-      new ListFoundationModelsCommand({ byProvider: "Anthropic" })
+      new ListFoundationModelsCommand({})
     );
     for (const m of modelSummaries) {
       if (!m.modelId) continue;
+      // Only include models that support text generation
+      const outputModalities = m.outputModalities || [];
+      if (!outputModalities.includes("TEXT" as any)) continue;
       const onDemandOk = m.inferenceTypesSupported?.includes("ON_DEMAND" as any);
       models.push({
         id: m.modelId,
         name: m.modelName || m.modelId,
-        provider: "Anthropic",
+        provider: m.providerName || "Unknown",
         requiresInferenceProfile: !onDemandOk,
       });
     }
@@ -975,19 +978,17 @@ export async function listBedrockModels(): Promise<BedrockModelOption[]> {
     // credentials or network issue — let caller handle
   }
 
-  // 2. Cross-region inference profiles (required for newer Claude models)
+  // 2. Cross-region inference profiles
   try {
     const { inferenceProfileSummaries = [] } = await client.send(
       new ListInferenceProfilesCommand({})
     );
     for (const p of inferenceProfileSummaries) {
       if (!p.inferenceProfileId) continue;
-      // Filter to Anthropic/Claude profiles
-      if (!p.inferenceProfileId.includes("anthropic")) continue;
       models.push({
         id: p.inferenceProfileId,
         name: p.inferenceProfileName || p.inferenceProfileId,
-        provider: "Anthropic (inference profile)",
+        provider: "Inference Profile",
         requiresInferenceProfile: false, // it IS the profile
       });
     }

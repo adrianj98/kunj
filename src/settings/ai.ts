@@ -27,6 +27,13 @@ export function registerAISettings(): void {
       category: 'ai'
     },
     {
+      key: 'ai.modelSmall',
+      description: 'Small/cheap model for bulk operations (e.g. map phase in team reports)',
+      type: 'string',
+      defaultValue: 'anthropic.claude-3-haiku-20240307-v1:0',
+      category: 'ai'
+    },
+    {
       key: 'ai.awsRegion',
       description: 'AWS region',
       type: 'string',

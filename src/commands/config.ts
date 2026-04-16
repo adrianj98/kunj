@@ -576,7 +576,7 @@ export class ConfigCommand extends BaseCommand {
 
       } else if (item.type === "string") {
         // Special handling for ai.model: offer AWS model browser
-        if (item.value === 'ai.model') {
+        if (item.value === 'ai.model' || item.value === 'ai.modelSmall') {
           const { inputMode } = await inquirer.prompt([{
             type: 'list',
             name: 'inputMode',
@@ -608,23 +608,29 @@ export class ConfigCommand extends BaseCommand {
               return false;
             }
 
-            // Separate foundation models and inference profiles
-            const profiles = models.filter(m => !m.requiresInferenceProfile);
-            const foundational = models.filter(m => m.requiresInferenceProfile);
+            // Group by provider, inference profiles first
+            const profiles = models.filter(m => !m.requiresInferenceProfile && m.provider === 'Inference Profile');
+            const byProvider = new Map<string, typeof models>();
+            for (const m of models) {
+              if (m.provider === 'Inference Profile') continue; // already in profiles
+              if (!byProvider.has(m.provider)) byProvider.set(m.provider, []);
+              byProvider.get(m.provider)!.push(m);
+            }
 
             const choices: any[] = [];
 
             if (profiles.length > 0) {
-              choices.push(new inquirer.Separator(chalk.cyan('── Inference Profiles (recommended for new models) ──')));
+              choices.push(new inquirer.Separator(chalk.cyan('── Inference Profiles (recommended) ──')));
               profiles.forEach(m => {
                 choices.push({ name: `${m.id}  ${chalk.dim(m.name)}`, value: m.id });
               });
             }
 
-            if (foundational.length > 0) {
-              choices.push(new inquirer.Separator(chalk.cyan('── Foundation Models (on-demand) ──')));
-              foundational.forEach(m => {
-                choices.push({ name: `${m.id}  ${chalk.dim(m.name)}`, value: m.id });
+            for (const [provider, providerModels] of byProvider) {
+              choices.push(new inquirer.Separator(chalk.cyan(`── ${provider} ──`)));
+              providerModels.forEach(m => {
+                const tag = m.requiresInferenceProfile ? chalk.dim(' (needs inference profile)') : '';
+                choices.push({ name: `${m.id}  ${chalk.dim(m.name)}${tag}`, value: m.id });
               });
             }
 

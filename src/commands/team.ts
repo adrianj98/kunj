@@ -8,8 +8,14 @@ import { promisify } from "util";
 import { BaseCommand } from "../lib/command";
 import { checkGitRepo } from "../lib/git";
 import { getKunjDir, loadConfig } from "../lib/config";
-import { checkAWSCredentials, getBedrockClient } from "../lib/ai-commit";
+import {
+  checkAWSCredentials,
+  getBedrockClient,
+  getDefaultModelId,
+  getAWSRegion,
+} from "../lib/ai-commit";
 import { getTodayDate } from "../lib/work-log";
+import { searchIssues, checkJiraCredentials } from "../lib/jira";
 
 const execAsync = promisify(exec);
 
@@ -23,6 +29,16 @@ interface PRCacheEntry {
   updatedAt: string;
   diffFile: string;
   activity?: { comments: PRComment[]; reviews: PRReview[] };
+  aiSummary?: string;
+}
+
+interface PRSummary {
+  prNumber: number;
+  author: string;
+  title: string;
+  summary: string;
+  area: string;
+  recentDiscussion: string;
 }
 
 interface PRCache {
@@ -61,6 +77,16 @@ interface PRReview {
 interface PRActivity {
   comments: PRComment[];
   reviews: PRReview[];
+}
+
+interface JiraIssueData {
+  key: string;
+  summary: string;
+  status: string;
+  issueType: string;
+  priority: string;
+  assignee: string;
+  updated: string;
 }
 
 export class TeamCommand extends BaseCommand {
@@ -242,23 +268,88 @@ export class TeamCommand extends BaseCommand {
 
     newCache.lastActivityFetch = now;
 
-    // Save updated cache
-    fs.writeFileSync(cachePath, JSON.stringify(newCache, null, 2), "utf8");
+    // Fetch Jira activity (recently updated issues)
+    const config = loadConfig();
+    let jiraIssues: JiraIssueData[] = [];
+
+    if (config.jira?.enabled) {
+      console.log(chalk.blue("\nFetching Jira activity..."));
+      try {
+        const hasJiraCreds = await checkJiraCredentials();
+        if (hasJiraCreds) {
+          jiraIssues = await this.fetchJiraActivity(config.jira.projectKey);
+          const jiraDir = path.join(teamDir, "jira");
+          fs.mkdirSync(jiraDir, { recursive: true });
+          // Save Jira activity to disk
+          const jiraFile = path.join(jiraDir, `issues-${getTodayDate()}.json`);
+          fs.writeFileSync(
+            jiraFile,
+            JSON.stringify(
+              { fetchedAt: now, issues: jiraIssues },
+              null,
+              2
+            ),
+            "utf8"
+          );
+          console.log(
+            chalk.green(
+              `  Found ${jiraIssues.length} recently updated issue(s)`
+            )
+          );
+        } else {
+          console.log(
+            chalk.yellow("  Jira credentials invalid, skipping.")
+          );
+        }
+      } catch (error: any) {
+        console.log(
+          chalk.yellow(`  Could not fetch Jira activity: ${error.message}`)
+        );
+      }
+    }
 
     // Generate report
-    const config = loadConfig();
     const useAI = options.ai !== false && config.ai?.enabled;
     let reportContent: string;
 
     if (useAI) {
-      console.log(chalk.blue("\nGenerating AI-powered team report..."));
       const hasCredentials = await checkAWSCredentials();
       if (hasCredentials) {
         try {
-          reportContent = await this.generateAIReport(
+          // Map phase: summarize each PR individually
+          console.log(chalk.blue("\nSummarizing PRs..."));
+          const summaries = await this.mapSummarizePRs(
             prs,
             diffs,
-            recentActivity
+            recentActivity,
+            newCache,
+            !!options.force
+          );
+
+          // Save summaries to disk
+          const summariesDir = path.join(teamDir, "summaries");
+          fs.mkdirSync(summariesDir, { recursive: true });
+          const summariesFile = path.join(
+            summariesDir,
+            `summaries-${getTodayDate()}.json`
+          );
+          fs.writeFileSync(
+            summariesFile,
+            JSON.stringify(
+              { fetchedAt: new Date().toISOString(), summaries },
+              null,
+              2
+            ),
+            "utf8"
+          );
+
+          // Reduce phase: group and synthesize
+          console.log(chalk.blue("\nGenerating team report..."));
+          reportContent = await this.reduceGenerateReport(
+            prs,
+            summaries,
+            recentActivity,
+            jiraIssues
           );
         } catch (error: any) {
           console.log(
@@ -269,7 +360,8 @@ export class TeamCommand extends BaseCommand {
           reportContent = this.generateStructuredReport(
             prs,
             diffs,
-            recentActivity
+            recentActivity,
+            jiraIssues
           );
         }
       } else {
@@ -281,7 +373,8 @@ export class TeamCommand extends BaseCommand {
         reportContent = this.generateStructuredReport(
           prs,
           diffs,
-          recentActivity
+          recentActivity,
+          jiraIssues
         );
       }
     } else {
@@ -289,9 +382,13 @@ export class TeamCommand extends BaseCommand {
       reportContent = this.generateStructuredReport(
         prs,
         diffs,
-        recentActivity
+        recentActivity,
+        jiraIssues
       );
     }
+
+    // Save updated cache (after AI map phase may have added summaries)
+    fs.writeFileSync(cachePath, JSON.stringify(newCache, null, 2), "utf8");
 
     const authors = new Set(prs.map((pr) => pr.author.login));
 
@@ -434,6 +531,27 @@ export class TeamCommand extends BaseCommand {
     });
   }
 
+  private async fetchJiraActivity(
+    projectKey?: string
+  ): Promise<JiraIssueData[]> {
+    // Fetch issues updated in the last 24h
+    const jql = projectKey
+      ? `project = ${projectKey} AND updated >= -24h ORDER BY updated DESC`
+      : `updated >= -24h ORDER BY updated DESC`;
+
+    const issues = await searchIssues(jql, 50);
+
+    return issues.map((issue: any) => ({
+      key: issue.key,
+      summary: issue.fields?.summary || "",
+      status: issue.fields?.status?.name || "Unknown",
+      issueType: issue.fields?.issuetype?.name || "Unknown",
+      priority: issue.fields?.priority?.name || "None",
+      assignee: issue.fields?.assignee?.displayName || "Unassigned",
+      updated: issue.fields?.updated || "",
+    }));
+  }
+
   private async fetchPRDiff(prNumber: number): Promise<string> {
     try {
       const { stdout } = await execAsync(`gh pr diff ${prNumber}`, {
@@ -448,89 +566,255 @@ export class TeamCommand extends BaseCommand {
     }
   }
 
-  private buildPRContext(
-    prs: PRData[],
-    diffs: Map<number, string>,
-    recentActivity: Map<number, PRActivity>
+  private async getSmallClient(): Promise<any> {
+    const { ChatBedrockConverse } = require("@langchain/aws");
+    const { defaultProvider } = require("@aws-sdk/credential-provider-node");
+    const config = loadConfig();
+    // Use modelSmall if set, otherwise fall back to the same model selection as everything else
+    const modelId =
+      config.ai?.modelSmall ||
+      process.env.BEDROCK_MODEL_SMALL ||
+      getDefaultModelId();
+    const region = await getAWSRegion();
+
+    return new ChatBedrockConverse({
+      model: modelId,
+      region,
+      credentials: defaultProvider(),
+      temperature: 0.3,
+      maxTokens: 500,
+    });
+  }
+
+  private buildMapPrompt(
+    pr: PRData,
+    diff: string,
+    activity: PRActivity | undefined
   ): string {
-    const maxDiffPerPR = Math.floor(8000 / Math.max(prs.length, 1));
-    let context = "";
+    const truncatedDiff =
+      diff.length > 50000
+        ? diff.substring(0, 50000) + "\n...[truncated]"
+        : diff;
 
-    for (const pr of prs) {
-      const diff = diffs.get(pr.number) || "";
-      const truncatedDiff =
-        diff.length > maxDiffPerPR
-          ? diff.substring(0, maxDiffPerPR) + "...[truncated]"
-          : diff;
-      const labels = pr.labels.map((l) => l.name).join(", ");
-      const activity = recentActivity.get(pr.number);
+    let activityContext = "";
+    if (activity) {
+      for (const review of activity.reviews) {
+        activityContext += `\nReview by @${review.author.login} (${review.state}): ${review.body.substring(0, 300)}`;
+      }
+      for (const comment of activity.comments) {
+        activityContext += `\nComment by @${comment.author.login}: ${comment.body.substring(0, 300)}`;
+      }
+    }
 
-      context += `\n### PR #${pr.number}: ${pr.title}
+    const labels = pr.labels.map((l) => l.name).join(", ");
+    return `Summarize this pull request concisely.
+
+PR #${pr.number}: ${pr.title}
 Author: @${pr.author.login}
 Branch: ${pr.headRefName} → ${pr.baseRefName}
-${pr.isDraft ? "Status: DRAFT\n" : ""}Created: ${pr.createdAt} | Updated: ${pr.updatedAt}
-+${pr.additions} -${pr.deletions}${labels ? ` | Labels: ${labels}` : ""}`;
+${pr.isDraft ? "DRAFT " : ""}+${pr.additions} -${pr.deletions}${labels ? ` | Labels: ${labels}` : ""}
+${activityContext ? `\nRecent discussion:${activityContext}` : ""}
 
-      // Add recent discussion
-      if (activity) {
-        const hasActivity =
-          activity.comments.length > 0 || activity.reviews.length > 0;
-        if (hasActivity) {
-          context += `\nRecent discussion (last 24h):`;
-          for (const review of activity.reviews) {
-            context += `\n  Review by @${review.author.login} (${review.state}): ${review.body.substring(0, 200)}`;
-          }
-          for (const comment of activity.comments) {
-            context += `\n  Comment by @${comment.author.login}: ${comment.body.substring(0, 200)}`;
+Diff:
+\`\`\`
+${truncatedDiff}
+\`\`\`
+
+Respond in exactly this format:
+AREA: <feature area or component this PR relates to, 2-5 words>
+SUMMARY: <what this PR does and why, 2-3 sentences>
+DISCUSSION: <summary of recent discussion if any, or "None">`;
+  }
+
+  private parseSummaryResponse(
+    pr: PRData,
+    content: string
+  ): PRSummary {
+    const areaMatch = content.match(/AREA:\s*(.+)/i);
+    const summaryMatch = content.match(
+      /SUMMARY:\s*([^\n]*(?:\n(?!DISCUSSION:).*)*)/i
+    );
+    const discussionMatch = content.match(/DISCUSSION:\s*(.*)/i);
+
+    return {
+      prNumber: pr.number,
+      author: pr.author.login,
+      title: pr.title,
+      area: areaMatch ? areaMatch[1].trim() : "General",
+      summary: summaryMatch ? summaryMatch[1].trim() : pr.title,
+      recentDiscussion: discussionMatch
+        ? discussionMatch[1].trim()
+        : "None",
+    };
+  }
+
+  // Map phase: summarize each PR individually with its full diff (parallel)
+  private async mapSummarizePRs(
+    prs: PRData[],
+    diffs: Map<number, string>,
+    recentActivity: Map<number, PRActivity>,
+    cache: PRCache,
+    force: boolean
+  ): Promise<PRSummary[]> {
+    const CONCURRENCY = 5;
+    const results: Map<number, PRSummary> = new Map();
+    let cached = 0;
+
+    // Separate cached vs needs-summarizing
+    const toSummarize: PRData[] = [];
+
+    for (const pr of prs) {
+      const cacheEntry = cache.prs[pr.number];
+      if (
+        !force &&
+        cacheEntry?.aiSummary &&
+        cacheEntry.updatedAt === pr.updatedAt
+      ) {
+        results.set(pr.number, JSON.parse(cacheEntry.aiSummary));
+        cached++;
+        console.log(chalk.gray(`  PR #${pr.number} — cached`));
+      } else {
+        toSummarize.push(pr);
+      }
+    }
+
+    if (toSummarize.length > 0) {
+      console.log(
+        chalk.gray(
+          `  Summarizing ${toSummarize.length} PR(s) in parallel (concurrency: ${CONCURRENCY})...`
+        )
+      );
+
+      const client = await this.getSmallClient();
+
+      // Process in batches
+      for (let i = 0; i < toSummarize.length; i += CONCURRENCY) {
+        const batch = toSummarize.slice(i, i + CONCURRENCY);
+        const batchNum = Math.floor(i / CONCURRENCY) + 1;
+        const totalBatches = Math.ceil(toSummarize.length / CONCURRENCY);
+        console.log(
+          chalk.gray(
+            `  Batch ${batchNum}/${totalBatches}: PRs ${batch.map((p) => `#${p.number}`).join(", ")}`
+          )
+        );
+
+        const batchResults = await Promise.allSettled(
+          batch.map(async (pr) => {
+            const diff = diffs.get(pr.number) || "";
+            const activity = recentActivity.get(pr.number);
+            const prompt = this.buildMapPrompt(pr, diff, activity);
+
+            const response = await client.invoke([
+              { role: "user", content: prompt },
+            ]);
+            const content = response.content?.toString() || "";
+            return { pr, summary: this.parseSummaryResponse(pr, content) };
+          })
+        );
+
+        for (const result of batchResults) {
+          if (result.status === "fulfilled") {
+            const { pr, summary } = result.value;
+            results.set(pr.number, summary);
+            if (cache.prs[pr.number]) {
+              cache.prs[pr.number].aiSummary = JSON.stringify(summary);
+            }
+          } else {
+            // Find which PR failed — use the batch order
+            const idx = batchResults.indexOf(result);
+            const pr = batch[idx];
+            const fallback: PRSummary = {
+              prNumber: pr.number,
+              author: pr.author.login,
+              title: pr.title,
+              area: "General",
+              summary: pr.title,
+              recentDiscussion: "None",
+            };
+            results.set(pr.number, fallback);
+            console.log(
+              chalk.yellow(
+                `    Warning: PR #${pr.number} failed: ${result.reason?.message || "unknown error"}`
+              )
+            );
           }
         }
       }
-
-      context += `\n\`\`\`diff\n${truncatedDiff}\n\`\`\`\n`;
     }
 
-    return context;
+    console.log(
+      chalk.gray(
+        `  ${prs.length} PRs processed (${cached} cached, ${toSummarize.length} summarized)`
+      )
+    );
+
+    // Return in original PR order
+    return prs.map((pr) => results.get(pr.number)!);
   }
 
-  private async generateAIReport(
+  // Reduce phase: group summaries into projects and generate final report
+  private async reduceGenerateReport(
     prs: PRData[],
-    diffs: Map<number, string>,
-    recentActivity: Map<number, PRActivity>
+    summaries: PRSummary[],
+    recentActivity: Map<number, PRActivity>,
+    jiraIssues: JiraIssueData[]
   ): Promise<string> {
     const client = await getBedrockClient();
-    const prContext = this.buildPRContext(prs, diffs, recentActivity);
     const authors = new Set(prs.map((pr) => pr.author.login));
 
-    const prompt = `You are analyzing open pull requests for a team activity report. Your job is to identify the distinct projects or efforts the team is working on, group PRs by those projects, and summarize team status.
+    // Build compact context from summaries (not raw diffs)
+    let prContext = "";
+    for (const s of summaries) {
+      prContext += `- PR #${s.prNumber} by @${s.author}: ${s.title}\n  Area: ${s.area}\n  Summary: ${s.summary}\n  Discussion: ${s.recentDiscussion}\n`;
+    }
 
-Here are all open PRs with their diffs and recent discussion:
-${prContext}
+    let jiraContext = "";
+    if (jiraIssues.length > 0) {
+      jiraContext = `\nJira Issues (updated in last 24h):\n`;
+      for (const issue of jiraIssues) {
+        jiraContext += `- ${issue.key}: ${issue.summary} [${issue.status}] (${issue.issueType}) — ${issue.assignee}\n`;
+      }
+    }
 
-Analyze these PRs and generate a report structured as follows:
+    const contextSize = prContext.length + jiraContext.length;
+    console.log(
+      chalk.gray(
+        `  Context: ${contextSize.toLocaleString()} chars (${summaries.length} PR summaries${jiraIssues.length > 0 ? ` + ${jiraIssues.length} Jira issues` : ""})`
+      )
+    );
 
-1. TEAM_SUMMARY: 2-3 sentences about what the team is collectively focused on right now. Mention the major efforts and overall momentum.
+    const prompt = `You are analyzing summarized pull requests and Jira issues for a team activity report. Group them by project/effort and synthesize.
 
-2. For each project/effort you identify, a PROJECT section. Group related PRs together under a project name that you infer from the code, branch names, labels, and PR titles. A "project" might be a feature area, a bug fix campaign, infrastructure work, etc. Include a RECENT_ACTIVITY line summarizing what happened in the last 24 hours for that project — discussions, decisions, reviews, progress. If there was no activity, say "No recent activity".
+PR Summaries:
+${prContext}${jiraContext}
 
-Format your response exactly like this:
-TEAM_SUMMARY: <overall team summary>
+Generate a report:
+
+1. TEAM_SUMMARY: Quick bullet points of what each person is doing. One bullet per person, format: "- @username: what they're working on". Keep each bullet to one line.
+
+2. For each project/effort, a PROJECT section. Identify who has the most PRs/commits in this area as LEAD. List all other contributors as TEAM. Include recent activity per project.
+
+Format:
+TEAM_SUMMARY:
+- @username: working on X and Y
+- @username2: fixing Z, reviewing A
 PROJECT: <Project Name>
-STATUS: <one-line status: active/in review/blocked/wrapping up>
-SUMMARY: <what this effort is about and current state>
-RECENT_ACTIVITY: <what happened in the last 24h for this project — discussions, reviews, decisions, progress>
-PRS:
-- PR #N by @author: <what this PR contributes to the effort>
-PROJECT: <Another Project>
-STATUS: <status>
-SUMMARY: <summary>
-RECENT_ACTIVITY: <last 24h activity for this project>
+STATUS: <active/in review/blocked/wrapping up>
+LEAD: @username
+TEAM: @user1, @user2
+SUMMARY: <what this effort is about>
+RECENT_ACTIVITY: <last 24h discussions, decisions, progress>
 PRS:
 - PR #N by @author: <contribution>
+JIRA:
+- TICKET-123: <summary> [status] — assignee
 
 Rules:
 - Every PR must appear under exactly one project
-- If a PR doesn't fit any group, put it under a "Other" project
-- Focus on WHAT and WHY, not implementation details
+- LEAD is the person with the most activity/PRs in that project
+- TEAM lists all other contributors (can be empty if solo)
+- Group Jira issues with related PRs
+- JIRA section can be omitted if none relate
 - Be concise`;
 
     const response = await client.invoke([{ role: "user", content: prompt }]);
@@ -547,33 +831,50 @@ Rules:
     report += `## Team Summary\n\n`;
     report += `${teamSummaryMatch ? teamSummaryMatch[1].trim() : `${prs.length} open PRs across ${authors.size} team members.`}\n\n`;
 
-    // Parse project sections (with RECENT_ACTIVITY)
-    const projectRegex =
-      /PROJECT:\s*(.+?)\nSTATUS:\s*(.+?)\nSUMMARY:\s*([^\n]*(?:\n(?!RECENT_ACTIVITY:|PRS:|PROJECT:).*)*)\nRECENT_ACTIVITY:\s*([^\n]*(?:\n(?!PRS:|PROJECT:).*)*)\nPRS:\s*\n((?:- PR #\d+.*(?:\n|$))*)/gi;
-    let match;
+    // Parse project sections
     const mentionedPRs = new Set<number>();
+    const projectBlocks = content
+      .split(/(?=^PROJECT:)/im)
+      .filter((b: string) => b.startsWith("PROJECT:"));
 
     report += `## Projects & Efforts\n\n`;
 
-    while ((match = projectRegex.exec(content)) !== null) {
-      const projectName = match[1].trim();
-      const status = match[2].trim();
-      const summary = match[3].trim();
-      const recentActivityText = match[4].trim();
-      const prLines = match[5].trim();
+    for (const block of projectBlocks) {
+      const nameMatch = block.match(/^PROJECT:\s*(.+)/i);
+      const statusMatch = block.match(/^STATUS:\s*(.+)/im);
+      const leadMatch = block.match(/^LEAD:\s*(.+)/im);
+      const teamMatch = block.match(/^TEAM:\s*(.+)/im);
+      const summaryMatch = block.match(
+        /^SUMMARY:\s*([^\n]*(?:\n(?!RECENT_ACTIVITY:|PRS:|JIRA:|PROJECT:|LEAD:|TEAM:).*)*)/im
+      );
+      const activityMatch = block.match(
+        /^RECENT_ACTIVITY:\s*([^\n]*(?:\n(?!PRS:|JIRA:|PROJECT:).*)*)/im
+      );
+      const prsMatch = block.match(/^PRS:\s*\n((?:- .*(?:\n|$))*)/im);
+      const jiraMatch = block.match(/^JIRA:\s*\n((?:- .*(?:\n|$))*)/im);
 
-      // Track which PRs were mentioned
+      const projectName = nameMatch ? nameMatch[1].trim() : "Unknown";
+      const status = statusMatch ? statusMatch[1].trim() : "active";
+      const lead = leadMatch ? leadMatch[1].trim() : "";
+      const team = teamMatch ? teamMatch[1].trim() : "";
+      const summary = summaryMatch ? summaryMatch[1].trim() : "";
+      const recentActivityText = activityMatch
+        ? activityMatch[1].trim()
+        : "";
+      const prLines = prsMatch ? prsMatch[1].trim() : "";
+      const jiraLines = jiraMatch ? jiraMatch[1].trim() : "";
+
+      // Track mentioned PRs
       const prNums = prLines.match(/#(\d+)/g);
       const projectPRNumbers: number[] = [];
       if (prNums) {
-        prNums.forEach((n) => {
+        prNums.forEach((n: string) => {
           const num = parseInt(n.slice(1));
           mentionedPRs.add(num);
           projectPRNumbers.push(num);
         });
       }
 
-      // Find last updated across this project's PRs
       const projectPRs = prs.filter((pr) =>
         projectPRNumbers.includes(pr.number)
       );
@@ -582,24 +883,42 @@ Rules:
 
       report += `### ${projectName}\n\n`;
       report += `**Status:** ${status} | **Last updated:** ${lastUpdated}\n\n`;
+      if (lead) {
+        report += `**Lead:** ${lead}`;
+        if (team) {
+          report += ` | **Team:** ${team}`;
+        }
+        report += `\n\n`;
+      }
       report += `${summary}\n\n`;
-      if (recentActivityText && recentActivityText.toLowerCase() !== "no recent activity") {
+      if (
+        recentActivityText &&
+        recentActivityText.toLowerCase() !== "no recent activity"
+      ) {
         report += `**Recent activity:** ${recentActivityText}\n\n`;
       }
-      report += `${prLines}\n\n`;
+      if (prLines) {
+        report += `**Pull Requests:**\n${prLines}\n\n`;
+      }
+      if (jiraLines) {
+        report += `**Jira Tickets:**\n${jiraLines}\n\n`;
+      }
     }
 
-    // Add any PRs the AI missed under "Other"
+    // Add any missed PRs
     const missedPRs = prs.filter((pr) => !mentionedPRs.has(pr.number));
     if (missedPRs.length > 0) {
       const lastUpdated = this.getLastUpdated(missedPRs);
       report += `### Other\n\n`;
       report += `**Status:** active | **Last updated:** ${lastUpdated}\n\n`;
-      // Add activity for missed PRs
-      const activityLines = this.formatActivityForPRs(missedPRs, recentActivity);
+      const activityLines = this.formatActivityForPRs(
+        missedPRs,
+        recentActivity
+      );
       if (activityLines) {
         report += `**Recent activity:** ${activityLines}\n\n`;
       }
+      report += `**Pull Requests:**\n`;
       for (const pr of missedPRs) {
         report += `- PR #${pr.number} by @${pr.author.login}: ${pr.title}\n`;
       }
@@ -639,7 +958,8 @@ Rules:
   private generateStructuredReport(
     prs: PRData[],
     diffs: Map<number, string>,
-    recentActivity: Map<number, PRActivity>
+    recentActivity: Map<number, PRActivity>,
+    jiraIssues: JiraIssueData[]
   ): string {
     const date = getTodayDate();
     const authors = new Set(prs.map((pr) => pr.author.login));
@@ -700,6 +1020,28 @@ Rules:
         report += `  - [View PR](${pr.url})\n`;
       }
       report += "\n";
+    }
+
+    // Jira activity section
+    if (jiraIssues.length > 0) {
+      report += `## Jira Activity (last 24h)\n\n`;
+
+      // Group by status
+      const byStatus = new Map<string, JiraIssueData[]>();
+      for (const issue of jiraIssues) {
+        if (!byStatus.has(issue.status)) {
+          byStatus.set(issue.status, []);
+        }
+        byStatus.get(issue.status)!.push(issue);
+      }
+
+      for (const [status, issues] of byStatus) {
+        report += `### ${status} (${issues.length})\n\n`;
+        for (const issue of issues) {
+          report += `- **${issue.key}**: ${issue.summary} (${issue.issueType}, ${issue.priority}) — ${issue.assignee}\n`;
+        }
+        report += "\n";
+      }
     }
 
     report += `---\n_Generated by kunj team | ${date}_\n`;

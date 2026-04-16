@@ -34,6 +34,7 @@ export interface KunjConfig {
   ai?: {
     provider?: "bedrock" | "openai" | "anthropic";
     model?: string;
+    modelSmall?: string;
     awsRegion?: string;
     enabled?: boolean;
     autoGenerateCommitMessage?: boolean;
