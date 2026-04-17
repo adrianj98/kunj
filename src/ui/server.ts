@@ -8,6 +8,7 @@ import { htmlLayout, buildSidebar } from "./templates/layout";
 import { renderDashboard, renderWidgetContent } from "./templates/dashboard";
 import { renderCommandPage } from "./templates/command-page";
 import { renderCommitPage } from "./templates/commit-page";
+import { renderTeamPage, renderProjectDetailPage } from "./templates/team-page";
 import { escapeHtml } from "./templates/partials";
 import { APP_JS, STYLES_CSS } from "./assets";
 import * as data from "./data";
@@ -21,6 +22,7 @@ const dataFetchers: Record<string, () => Promise<any>> = {
   stash: data.getStashList,
   log: data.getWorkLogs,
   config: async () => data.getConfiguration(),
+  team: async () => data.getTeamData(),
 };
 
 export function createServer(): express.Application {
@@ -73,6 +75,91 @@ export function createServer(): express.Application {
     res.send(htmlLayout("Dashboard", content, sidebar, "dashboard"));
   });
 
+  // --- Team page (custom UI) ---
+  app.get("/command/team", async (_req, res) => {
+    try {
+      // Try cached analysis first (fast), fall back to basic data
+      const analysis = data.getCachedTeamAnalysis() || {
+        teamSummary: [],
+        projects: [],
+        jiraByStatus: data.getTeamData().jiraByStatus,
+        prCount: data.getTeamData().prCount,
+        lastFetch: data.getTeamData().lastFetch,
+      };
+      const content = renderTeamPage(analysis);
+      res.send(htmlLayout("Team Report", content, sidebar, "team"));
+    } catch (err: any) {
+      res.status(500).send(
+        htmlLayout("Team Report", `<div class="text-red-400 p-4">${escapeHtml(err.message)}</div>`, sidebar, "team")
+      );
+    }
+  });
+
+  // --- Project detail page ---
+  app.get("/command/team/project/:name", async (req, res) => {
+    try {
+      const projectName = decodeURIComponent(req.params.name);
+      const analysis = data.getCachedTeamAnalysis() || {
+        teamSummary: [],
+        projects: [],
+        jiraByStatus: data.getTeamData().jiraByStatus,
+        slackMessages: [],
+        prCount: data.getTeamData().prCount,
+        lastFetch: data.getTeamData().lastFetch,
+      };
+
+      const project = analysis.projects.find(
+        (p: any) => p.name === projectName
+      );
+
+      if (!project) {
+        res.status(404).send(
+          htmlLayout("Project Not Found", `
+            <div class="p-8 text-center">
+              <p class="text-gray-400 mb-3">Project "${escapeHtml(projectName)}" not found</p>
+              <a href="/command/team" class="text-blue-400 hover:text-blue-300 text-sm">Back to Team Report</a>
+            </div>`, sidebar, "team")
+        );
+        return;
+      }
+
+      const content = renderProjectDetailPage(project, analysis);
+      res.send(htmlLayout(`${projectName} — Team`, content, sidebar, "team"));
+    } catch (err: any) {
+      res.status(500).send(
+        htmlLayout("Error", `<div class="text-red-400 p-4">${escapeHtml(err.message)}</div>`, sidebar, "team")
+      );
+    }
+  });
+
+  // --- SSE: Run AI team analysis with streaming progress ---
+  app.get("/api/team/analyze", async (_req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    const send = (event: string, msg: string) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(msg)}\n\n`);
+    };
+
+    try {
+      send("progress", "Reading cached data...");
+      // Small delay so the browser can render
+      await new Promise((r) => setTimeout(r, 100));
+
+      send("progress", "Analyzing PRs and Jira issues with AI...");
+      const analysis = await data.generateTeamAnalysis();
+
+      send("progress", `Found ${analysis.projects.length} projects across ${analysis.prCount} PRs`);
+      send("done", `${analysis.projects.length} projects`);
+    } catch (err: any) {
+      send("error", err.message);
+    }
+    res.end();
+  });
+
   // --- Commit page (custom UI) ---
   app.get("/command/commit", async (_req, res) => {
     try {
@@ -119,6 +206,12 @@ export function createServer(): express.Application {
 
     const content = renderCommandPage(config, pageData, error);
     res.send(htmlLayout(config.ui?.label || name, content, sidebar, name));
+  });
+
+  // --- API: Project identicon ---
+  app.get("/api/icon/:name", (req, res) => {
+    const svg = data.projectIcon(req.params.name, 40);
+    res.type("image/svg+xml").send(svg);
   });
 
   // --- API: List commands ---

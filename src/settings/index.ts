@@ -6,6 +6,7 @@ import { registerStashSettings } from './stash';
 import { registerAISettings } from './ai';
 import { registerFlowSettings } from './flow';
 import { registerJiraSettings } from './jira';
+import { registerSlackSettings } from './slack';
 import { settingsRegistry } from '../lib/settings-registry';
 
 let initialized = false;
@@ -23,6 +24,7 @@ export function initializeSettings(): void {
   registerAISettings();
   registerFlowSettings();
   registerJiraSettings();
+  registerSlackSettings();
 
   initialized = true;
 }

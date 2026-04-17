@@ -10,12 +10,21 @@ import { checkGitRepo } from "../lib/git";
 import { getKunjDir, loadConfig } from "../lib/config";
 import {
   checkAWSCredentials,
-  getBedrockClient,
   getDefaultModelId,
   getAWSRegion,
 } from "../lib/ai-commit";
+import {
+  analyzeTeamActivity,
+  buildTeamContext,
+  ParsedProject,
+} from "../lib/team-analysis";
 import { getTodayDate } from "../lib/work-log";
 import { searchIssues, checkJiraCredentials } from "../lib/jira";
+import {
+  checkSlackCredentials,
+  fetchMultiChannelHistory,
+  SlackMessage,
+} from "../lib/slack";
 
 const execAsync = promisify(exec);
 
@@ -43,6 +52,8 @@ interface PRSummary {
 
 interface PRCache {
   lastActivityFetch?: string;
+  lastSlackFetch?: string;
+  cachedSlackMessages?: SlackMessage[];
   prs: { [prNumber: string]: PRCacheEntry };
 }
 
@@ -317,6 +328,83 @@ export class TeamCommand extends BaseCommand {
       }
     }
 
+    // Fetch Slack channel activity using checkpoint
+    let slackMessages: SlackMessage[] = [];
+
+    if (config.slack?.enabled && config.slack.channels?.length > 0) {
+      console.log(chalk.blue("\nFetching Slack activity..."));
+      try {
+        const hasSlackCreds = await checkSlackCredentials();
+        if (hasSlackCreds) {
+          const lastSlackFetch = cache.lastSlackFetch;
+          const twoDaysAgoTs = String(Math.floor((Date.now() - 48 * 60 * 60 * 1000) / 1000));
+
+          // Fetch since last checkpoint, but never older than 2 days
+          const fetchSinceTs = !options.force && lastSlackFetch && lastSlackFetch > twoDaysAgoTs
+            ? lastSlackFetch
+            : undefined; // undefined = use default (48h)
+
+          if (fetchSinceTs) {
+            const checkpoint = new Date(parseFloat(fetchSinceTs) * 1000);
+            console.log(chalk.gray(`  Using checkpoint from ${checkpoint.toLocaleTimeString()}`));
+          }
+
+          const freshMessages = await fetchMultiChannelHistory(
+            config.slack.channels, 48, 50, fetchSinceTs
+          );
+
+          // Merge with cached messages, deduplicate by timestamp, prune older than 24h
+          const cachedMessages = cache.cachedSlackMessages || [];
+          const allMessages = [...cachedMessages, ...freshMessages];
+
+          // Deduplicate by channelId + timestamp
+          const seen = new Set<string>();
+          slackMessages = allMessages
+            .filter(m => {
+              const key = `${m.channelId}:${m.timestamp}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            })
+            .filter(m => parseFloat(m.timestamp) >= parseFloat(twoDaysAgoTs))
+            .sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp));
+
+          // Update cache
+          newCache.lastSlackFetch = String(Math.floor(Date.now() / 1000));
+          newCache.cachedSlackMessages = slackMessages;
+
+          if (slackMessages.length > 0) {
+            // Save Slack activity to disk
+            const slackDir = path.join(teamDir, "slack");
+            fs.mkdirSync(slackDir, { recursive: true });
+            const slackFile = path.join(slackDir, `messages-${getTodayDate()}.json`);
+            fs.writeFileSync(
+              slackFile,
+              JSON.stringify(
+                { fetchedAt: now, messages: slackMessages },
+                null,
+                2
+              ),
+              "utf8"
+            );
+            console.log(
+              chalk.green(
+                `  ${slackMessages.length} message(s) (${freshMessages.length} new, ${slackMessages.length - freshMessages.length} cached)`
+              )
+            );
+          } else {
+            console.log(chalk.gray("  No recent messages in configured channels."));
+          }
+        } else {
+          console.log(chalk.yellow("  Slack credentials invalid, skipping."));
+        }
+      } catch (error: any) {
+        console.log(
+          chalk.yellow(`  Could not fetch Slack activity: ${error.message}`)
+        );
+      }
+    }
+
     // Generate report
     const useAI = options.ai !== false && config.ai?.enabled;
     let reportContent: string;
@@ -359,7 +447,8 @@ export class TeamCommand extends BaseCommand {
             prs,
             summaries,
             recentActivity,
-            jiraIssues
+            jiraIssues,
+            slackMessages
           );
         } catch (error: any) {
           console.log(
@@ -371,7 +460,8 @@ export class TeamCommand extends BaseCommand {
             prs,
             diffs,
             recentActivity,
-            jiraIssues
+            jiraIssues,
+            slackMessages
           );
         }
       } else {
@@ -384,7 +474,8 @@ export class TeamCommand extends BaseCommand {
           prs,
           diffs,
           recentActivity,
-          jiraIssues
+          jiraIssues,
+          slackMessages
         );
       }
     } else {
@@ -393,7 +484,8 @@ export class TeamCommand extends BaseCommand {
         prs,
         diffs,
         recentActivity,
-        jiraIssues
+        jiraIssues,
+        slackMessages
       );
     }
 
@@ -417,6 +509,7 @@ export class TeamCommand extends BaseCommand {
         pullRequests: prs,
         summaries: typeof summaries !== "undefined" ? summaries : null,
         jiraIssues,
+        slackMessages,
         activity,
         report: reportContent,
         reportPath,
@@ -784,164 +877,68 @@ DISCUSSION: <summary of recent discussion if any, or "None">`;
     prs: PRData[],
     summaries: PRSummary[],
     recentActivity: Map<number, PRActivity>,
-    jiraIssues: JiraIssueData[]
+    jiraIssues: JiraIssueData[],
+    slackMessages: SlackMessage[] = []
   ): Promise<string> {
-    const client = await getBedrockClient();
     const authors = new Set(prs.map((pr) => pr.author.login));
 
-    // Build compact context from summaries (not raw diffs)
-    let prContext = "";
-    for (const s of summaries) {
-      prContext += `- PR #${s.prNumber} by @${s.author}: ${s.title}\n  Area: ${s.area}\n  Summary: ${s.summary}\n  Discussion: ${s.recentDiscussion}\n`;
-    }
-
-    let jiraContext = "";
-    if (jiraIssues.length > 0) {
-      jiraContext = `\nJira Issues (updated in last 24h):\n`;
-      for (const issue of jiraIssues) {
-        jiraContext += `- ${issue.key}: ${issue.summary} [${issue.status}] (${issue.issueType}) — ${issue.assignee}\n`;
-      }
-    }
-
-    const contextSize = prContext.length + jiraContext.length;
+    const { prContext, jiraContext, slackContext } = buildTeamContext(summaries, jiraIssues, slackMessages);
+    const contextSize = prContext.length + jiraContext.length + slackContext.length;
+    const contextParts = [
+      `${summaries.length} PR summaries`,
+      jiraIssues.length > 0 ? `${jiraIssues.length} Jira issues` : '',
+      slackMessages.length > 0 ? `${slackMessages.length} Slack messages` : '',
+    ].filter(Boolean).join(' + ');
     console.log(
       chalk.gray(
-        `  Context: ${contextSize.toLocaleString()} chars (${summaries.length} PR summaries${jiraIssues.length > 0 ? ` + ${jiraIssues.length} Jira issues` : ""})`
+        `  Context: ${contextSize.toLocaleString()} chars (${contextParts})`
       )
     );
 
-    const prompt = `You are analyzing summarized pull requests and Jira issues for a team activity report. Group them by project/effort and synthesize.
+    const result = await analyzeTeamActivity(summaries, jiraIssues, slackMessages);
 
-PR Summaries:
-${prContext}${jiraContext}
-
-Generate a report:
-
-1. TEAM_SUMMARY: Quick bullet points of what each person is doing. One bullet per person, format: "- @username: what they're working on". Keep each bullet to one line.
-
-2. For each project/effort, a PROJECT section. Identify who has the most PRs/commits in this area as LEAD. List all other contributors as TEAM. Include recent activity per project.
-
-Format:
-TEAM_SUMMARY:
-- @username: working on X and Y
-- @username2: fixing Z, reviewing A
-PROJECT: <Project Name>
-STATUS: <active/in review/blocked/wrapping up>
-LEAD: @username
-TEAM: @user1, @user2
-SUMMARY: <what this effort is about>
-RECENT_ACTIVITY: <last 24h discussions, decisions, progress>
-PRS:
-- PR #N by @author: <contribution>
-JIRA:
-- TICKET-123: <summary> [status] — assignee
-
-Rules:
-- Every PR must appear under exactly one project
-- LEAD is the person with the most activity/PRs in that project
-- TEAM lists all other contributors (can be empty if solo)
-- Group Jira issues with related PRs
-- JIRA section can be omitted if none relate
-- Be concise`;
-
-    const response = await client.invoke([{ role: "user", content: prompt }]);
-    const content = response.content?.toString() || "";
-
-    // Parse AI response into markdown report
+    // Format parsed result into markdown report
     const date = getTodayDate();
-
-    const teamSummaryMatch = content.match(
-      /TEAM_SUMMARY:\s*([^\n]*(?:\n(?!PROJECT:).*)*)/i
-    );
-
     let report = `# Team Activity Report - ${date}\n\n`;
     report += `## Team Summary\n\n`;
-    report += `${teamSummaryMatch ? teamSummaryMatch[1].trim() : `${prs.length} open PRs across ${authors.size} team members.`}\n\n`;
-
-    // Parse project sections
-    const mentionedPRs = new Set<number>();
-    const projectBlocks = content
-      .split(/(?=^PROJECT:)/im)
-      .filter((b: string) => b.startsWith("PROJECT:"));
-
+    report += `${result.teamSummary || `${prs.length} open PRs across ${authors.size} team members.`}\n\n`;
     report += `## Projects & Efforts\n\n`;
 
-    for (const block of projectBlocks) {
-      const nameMatch = block.match(/^PROJECT:\s*(.+)/i);
-      const statusMatch = block.match(/^STATUS:\s*(.+)/im);
-      const leadMatch = block.match(/^LEAD:\s*(.+)/im);
-      const teamMatch = block.match(/^TEAM:\s*(.+)/im);
-      const summaryMatch = block.match(
-        /^SUMMARY:\s*([^\n]*(?:\n(?!RECENT_ACTIVITY:|PRS:|JIRA:|PROJECT:|LEAD:|TEAM:).*)*)/im
-      );
-      const activityMatch = block.match(
-        /^RECENT_ACTIVITY:\s*([^\n]*(?:\n(?!PRS:|JIRA:|PROJECT:).*)*)/im
-      );
-      const prsMatch = block.match(/^PRS:\s*\n((?:- .*(?:\n|$))*)/im);
-      const jiraMatch = block.match(/^JIRA:\s*\n((?:- .*(?:\n|$))*)/im);
+    for (const project of result.projects) {
+      const projectPRs = prs.filter((pr) => project.prNumbers.includes(pr.number));
+      const lastUpdated = projectPRs.length > 0 ? this.getLastUpdated(projectPRs) : "unknown";
 
-      const projectName = nameMatch ? nameMatch[1].trim() : "Unknown";
-      const status = statusMatch ? statusMatch[1].trim() : "active";
-      const lead = leadMatch ? leadMatch[1].trim() : "";
-      const team = teamMatch ? teamMatch[1].trim() : "";
-      const summary = summaryMatch ? summaryMatch[1].trim() : "";
-      const recentActivityText = activityMatch
-        ? activityMatch[1].trim()
-        : "";
-      const prLines = prsMatch ? prsMatch[1].trim() : "";
-      const jiraLines = jiraMatch ? jiraMatch[1].trim() : "";
-
-      // Track mentioned PRs
-      const prNums = prLines.match(/#(\d+)/g);
-      const projectPRNumbers: number[] = [];
-      if (prNums) {
-        prNums.forEach((n: string) => {
-          const num = parseInt(n.slice(1));
-          mentionedPRs.add(num);
-          projectPRNumbers.push(num);
-        });
-      }
-
-      const projectPRs = prs.filter((pr) =>
-        projectPRNumbers.includes(pr.number)
-      );
-      const lastUpdated =
-        projectPRs.length > 0 ? this.getLastUpdated(projectPRs) : "unknown";
-
-      report += `### ${projectName}\n\n`;
-      report += `**Status:** ${status} | **Last updated:** ${lastUpdated}\n\n`;
-      if (lead) {
-        report += `**Lead:** ${lead}`;
-        if (team) {
-          report += ` | **Team:** ${team}`;
+      report += `### ${project.name}\n\n`;
+      report += `**Status:** ${project.status} | **Last updated:** ${lastUpdated}\n\n`;
+      if (project.lead) {
+        report += `**Lead:** @${project.lead}`;
+        if (project.team.length > 0) {
+          report += ` | **Team:** ${project.team.map(t => `@${t}`).join(', ')}`;
         }
         report += `\n\n`;
       }
-      report += `${summary}\n\n`;
-      if (
-        recentActivityText &&
-        recentActivityText.toLowerCase() !== "no recent activity"
-      ) {
-        report += `**Recent activity:** ${recentActivityText}\n\n`;
+      report += `${project.summary}\n\n`;
+      if (project.recentActivity && project.recentActivity.toLowerCase() !== "no recent activity") {
+        report += `**Recent activity:** ${project.recentActivity}\n\n`;
       }
-      if (prLines) {
-        report += `**Pull Requests:**\n${prLines}\n\n`;
+      if (project.prLines) {
+        report += `**Pull Requests:**\n${project.prLines}\n\n`;
       }
-      if (jiraLines) {
-        report += `**Jira Tickets:**\n${jiraLines}\n\n`;
+      if (project.jiraLines) {
+        report += `**Jira Tickets:**\n${project.jiraLines}\n\n`;
+      }
+      if (project.slackLines) {
+        report += `**Slack:**\n${project.slackLines}\n\n`;
       }
     }
 
     // Add any missed PRs
-    const missedPRs = prs.filter((pr) => !mentionedPRs.has(pr.number));
+    const missedPRs = prs.filter((pr) => !result.mentionedPRs.has(pr.number));
     if (missedPRs.length > 0) {
       const lastUpdated = this.getLastUpdated(missedPRs);
       report += `### Other\n\n`;
       report += `**Status:** active | **Last updated:** ${lastUpdated}\n\n`;
-      const activityLines = this.formatActivityForPRs(
-        missedPRs,
-        recentActivity
-      );
+      const activityLines = this.formatActivityForPRs(missedPRs, recentActivity);
       if (activityLines) {
         report += `**Recent activity:** ${activityLines}\n\n`;
       }
@@ -986,7 +983,8 @@ Rules:
     prs: PRData[],
     diffs: Map<number, string>,
     recentActivity: Map<number, PRActivity>,
-    jiraIssues: JiraIssueData[]
+    jiraIssues: JiraIssueData[],
+    slackMessages: SlackMessage[] = []
   ): string {
     const date = getTodayDate();
     const authors = new Set(prs.map((pr) => pr.author.login));
@@ -1066,6 +1064,30 @@ Rules:
         report += `### ${status} (${issues.length})\n\n`;
         for (const issue of issues) {
           report += `- **${issue.key}**: ${issue.summary} (${issue.issueType}, ${issue.priority}) — ${issue.assignee}\n`;
+        }
+        report += "\n";
+      }
+    }
+
+    // Slack activity section
+    if (slackMessages.length > 0) {
+      report += `## Slack Activity (last 24h)\n\n`;
+
+      // Group by channel
+      const byChannel = new Map<string, SlackMessage[]>();
+      for (const msg of slackMessages) {
+        if (!byChannel.has(msg.channelName)) byChannel.set(msg.channelName, []);
+        byChannel.get(msg.channelName)!.push(msg);
+      }
+
+      for (const [channel, msgs] of byChannel) {
+        report += `### #${channel} (${msgs.length} message${msgs.length !== 1 ? 's' : ''})\n\n`;
+        for (const msg of msgs) {
+          const date = new Date(parseFloat(msg.timestamp) * 1000);
+          const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const text = msg.text.length > 200 ? msg.text.substring(0, 200) + '...' : msg.text;
+          const thread = msg.threadReplyCount ? ` _(${msg.threadReplyCount} replies)_` : '';
+          report += `- **${msg.user}** (${time}): ${text}${thread}\n`;
         }
         report += "\n";
       }

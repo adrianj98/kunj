@@ -57,7 +57,51 @@ export function renderDashboard(widgets: WidgetData[]): string {
     </div>`;
 }
 
+function renderTeamWidget(data: any): string {
+  const projects = Object.entries(data.projects || {});
+  const jiraCount = data.jiraIssues?.length || 0;
+  const authors = new Set<string>();
+  for (const [, prs] of projects) {
+    for (const pr of prs as any[]) authors.add(pr.author);
+  }
+
+  // Stats bar
+  let html = `<div class="flex gap-4 px-4 py-3 border-b border-gray-700 text-xs text-gray-400">
+    <span>${data.prCount || 0} PRs</span>
+    <span>${projects.length} projects</span>
+    <span>${jiraCount} Jira issues</span>
+    <span>${authors.size} people</span>
+  </div>`;
+
+  // Compact project list
+  html += `<div class="divide-y divide-gray-700">`;
+  for (const [area, prs] of projects) {
+    const prList = prs as any[];
+    const prAuthors = [...new Set(prList.map((p: any) => p.author))];
+    html += `
+      <div class="px-4 py-2">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium text-white">${escapeHtml(area)}</span>
+          <span class="text-xs text-gray-400">${prList.length} PR${prList.length !== 1 ? "s" : ""}</span>
+        </div>
+        <div class="text-xs text-gray-400 mt-0.5">${prAuthors.map((a) => "@" + escapeHtml(a)).join(", ")}</div>
+      </div>`;
+  }
+  html += `</div>`;
+
+  if (projects.length === 0 && jiraCount === 0) {
+    html = `<div class="p-4 text-sm text-gray-400">Run <code class="bg-gray-700 px-1 py-0.5 rounded text-xs">kunj team</code> to generate</div>`;
+  }
+
+  return html;
+}
+
 export function renderWidgetContent(ui: UIWidgetConfig, data: any): string {
+  // Custom team widget rendering
+  if (data && data.projects && data.jiraByStatus) {
+    return renderTeamWidget(data);
+  }
+
   const widgetData = ui.dataKey ? data[ui.dataKey] : data;
 
   switch (ui.widget) {

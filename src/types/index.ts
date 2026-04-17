@@ -58,6 +58,13 @@ export interface KunjConfig {
     boardId?: string;
     aiGeneration?: boolean;
   };
+  slack?: {
+    enabled: boolean;
+    token: string;
+    signingSecret: string;
+    appToken: string;
+    channels: string[];
+  };
 }
 
 export interface BranchStash {

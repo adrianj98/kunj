@@ -17,6 +17,7 @@ import { defaultConfig } from '../constants';
 import { formatConfigValue, formatBoolValue, parseKeyValue } from '../lib/utils';
 import { settingsRegistry, SettingDefinition } from '../settings';
 import { listBedrockModels, validateBedrockModel } from '../lib/ai-commit';
+import { checkSlackCredentials, listSlackChannels } from '../lib/slack';
 
 interface ConfigOptions {
   set?: string;
@@ -778,23 +779,120 @@ export class ConfigCommand extends BaseCommand {
         }
 
       } else if (item.type === "array") {
-        const currentArray = Array.isArray(currentValue) ? currentValue : [];
-        const { value } = await inquirer.prompt([
-          {
-            type: "input",
-            name: "value",
-            message: "Enter comma-separated values (or leave empty to cancel):",
-            default: currentArray.join(', ')
+        // Special handling for slack.channels: interactive channel selector
+        if (item.value === 'slack.channels') {
+          const currentArray = Array.isArray(currentValue) ? currentValue : [];
+
+          const { inputMode } = await inquirer.prompt([{
+            type: 'list',
+            name: 'inputMode',
+            message: 'How would you like to set channels?',
+            choices: [
+              { name: 'Browse channels from Slack', value: 'browse' },
+              { name: 'Enter channel IDs manually', value: 'manual' },
+              { name: chalk.gray('← Go back'), value: 'cancel' },
+            ],
+          }]);
+
+          if (inputMode === 'cancel') return false;
+
+          if (inputMode === 'browse') {
+            // Resolve token from in-progress config (may not be saved yet), then saved config, then env
+            const slackToken = getConfigValue('slack.token')
+              || process.env.SLACK_BOT_TOKEN
+              || '';
+
+            if (!slackToken) {
+              console.log(chalk.red('  No Slack token found. Set slack.token first.'));
+              return false;
+            }
+
+            console.log(chalk.gray('  Checking Slack credentials...'));
+            const slackOk = await checkSlackCredentials(slackToken);
+            if (!slackOk) {
+              console.log(chalk.red('  Slack credentials are invalid. Check your slack.token.'));
+              return false;
+            }
+
+            console.log(chalk.gray('  Fetching channels...'));
+            const channels = await listSlackChannels(slackToken);
+            if (channels.length === 0) {
+              console.log(chalk.yellow('  No channels found.'));
+              return false;
+            }
+
+            const choices: any[] = [];
+            const memberChannels = channels.filter(ch => ch.isMember);
+            const otherChannels = channels.filter(ch => !ch.isMember);
+
+            if (memberChannels.length > 0) {
+              choices.push(new inquirer.Separator(chalk.cyan('── Bot is a member ──')));
+              for (const ch of memberChannels) {
+                const prefix = ch.isPrivate ? '🔒' : '#';
+                const selected = currentArray.includes(ch.id) ? chalk.green(' (selected)') : '';
+                choices.push({ name: `${prefix} ${ch.name}${selected}`, value: ch.id });
+              }
+            }
+            if (otherChannels.length > 0) {
+              choices.push(new inquirer.Separator(chalk.cyan('── Other channels ──')));
+              for (const ch of otherChannels) {
+                const prefix = ch.isPrivate ? '🔒' : '#';
+                choices.push({ name: `${prefix} ${ch.name}`, value: ch.id });
+              }
+            }
+
+            const { selectedChannels } = await inquirer.prompt([{
+              type: 'checkbox',
+              name: 'selectedChannels',
+              message: 'Select channels to post reports to:',
+              choices,
+              pageSize: 20,
+              default: currentArray,
+            }]);
+
+            if (selectedChannels.length === 0) {
+              const { confirmEmpty } = await inquirer.prompt([{
+                type: 'confirm',
+                name: 'confirmEmpty',
+                message: 'No channels selected. Clear the channel list?',
+                default: false,
+              }]);
+              if (!confirmEmpty) return false;
+            }
+
+            newValue = selectedChannels;
+            changed = JSON.stringify(newValue) !== JSON.stringify(currentArray);
+          } else {
+            // Manual entry fallback
+            const { value } = await inquirer.prompt([{
+              type: 'input',
+              name: 'value',
+              message: 'Enter comma-separated channel IDs (or leave empty to cancel):',
+              default: currentArray.join(', '),
+            }]);
+            if (value === currentArray.join(', ')) return false;
+            newValue = value.split(',').map((v: string) => v.trim()).filter((v: string) => v !== '');
+            changed = JSON.stringify(newValue) !== JSON.stringify(currentArray);
           }
-        ]);
+        } else {
+          const currentArray = Array.isArray(currentValue) ? currentValue : [];
+          const { value } = await inquirer.prompt([
+            {
+              type: "input",
+              name: "value",
+              message: "Enter comma-separated values (or leave empty to cancel):",
+              default: currentArray.join(', ')
+            }
+          ]);
 
-        if (value === currentArray.join(', ')) {
-          return false; // No change
+          if (value === currentArray.join(', ')) {
+            return false; // No change
+          }
+
+          const arrayValue = value.split(',').map((v: string) => v.trim()).filter((v: string) => v !== '');
+          newValue = arrayValue;
+          changed = JSON.stringify(newValue) !== JSON.stringify(currentValue);
         }
-
-        const arrayValue = value.split(',').map((v: string) => v.trim()).filter((v: string) => v !== '');
-        newValue = arrayValue;
-        changed = JSON.stringify(newValue) !== JSON.stringify(currentValue);
       }
 
       // Apply the change if there was one
