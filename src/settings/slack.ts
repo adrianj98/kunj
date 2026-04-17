@@ -21,7 +21,7 @@ export function registerSlackSettings(): void {
       defaultValue: '',
       category: 'slack',
       sensitive: true,
-      examples: ['xoxb-1234567890-1234567890123-abcdefghijklmnop'],
+      examples: ['xoxb-1234567890-1234567890123-....'],
       validate: (value: string) => {
         if (!value) return true;
         return value.startsWith('xoxb-');
