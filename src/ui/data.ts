@@ -26,7 +26,11 @@ import {
 } from "../lib/ai-commit";
 import {
   analyzeTeamActivity,
+  generateProjectReport,
   ParsedProject,
+  ProjectReport,
+  SlackMessageInput,
+  JiraIssueInput,
 } from "../lib/team-analysis";
 import { getAllWorkLogs, readWorkLog, getTodayDate } from "../lib/work-log";
 import { getKunjDir } from "../lib/config";
@@ -221,7 +225,7 @@ export function getTeamData(): any {
     jiraByStatus[status].push(issue);
   }
 
-  // Read Slack data
+  // Read Slack data (date file first, fall back to cache)
   let slackMessages: any[] = [];
   const slackPath = path.join(teamDir, "slack", `messages-${date}.json`);
   if (fs.existsSync(slackPath)) {
@@ -229,6 +233,9 @@ export function getTeamData(): any {
       const slackData = JSON.parse(fs.readFileSync(slackPath, "utf8"));
       slackMessages = slackData.messages || [];
     } catch {}
+  }
+  if (slackMessages.length === 0 && cache.cachedSlackMessages?.length > 0) {
+    slackMessages = cache.cachedSlackMessages;
   }
 
   // Group summaries by area (as project proxy)
@@ -343,13 +350,16 @@ export async function generateTeamAnalysis(): Promise<TeamAnalysis> {
     jiraByStatus[status].push(issue);
   }
 
-  // Read Slack data
+  // Read Slack data (date file first, fall back to cache)
   let slackMessages: any[] = [];
-  const slackPath = path.join(teamDir, "slack", `messages-${date}.json`);
-  if (fs.existsSync(slackPath)) {
+  const slackPath2 = path.join(teamDir, "slack", `messages-${date}.json`);
+  if (fs.existsSync(slackPath2)) {
     try {
-      slackMessages = JSON.parse(fs.readFileSync(slackPath, "utf8")).messages || [];
+      slackMessages = JSON.parse(fs.readFileSync(slackPath2, "utf8")).messages || [];
     } catch {}
+  }
+  if (slackMessages.length === 0 && cache.cachedSlackMessages?.length > 0) {
+    slackMessages = cache.cachedSlackMessages;
   }
 
   // If no data at all, return empty
@@ -474,6 +484,84 @@ export function getCachedTeamAnalysis(): TeamAnalysis | null {
   }
   return null;
 }
+
+export function getCachedProjectReport(projectName: string): ProjectReport | null {
+  const teamDir = path.join(getKunjDir(), "team");
+  const date = getTodayDate();
+  const slug = projectName.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
+  const reportPath = path.join(teamDir, "project-reports", `${slug}-${date}.json`);
+  if (fs.existsSync(reportPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(reportPath, "utf8"));
+    } catch {}
+  }
+  return null;
+}
+
+export async function generateProjectDetailReport(projectName: string): Promise<ProjectReport> {
+  const teamDir = path.join(getKunjDir(), "team");
+  const date = getTodayDate();
+
+  // Load analysis to find the project
+  const analysis = getCachedTeamAnalysis();
+  if (!analysis) throw new Error("No team analysis available. Run 'kunj team' first.");
+
+  const project = analysis.projects.find((p: any) => p.name === projectName);
+  if (!project) throw new Error(`Project "${projectName}" not found in analysis.`);
+
+  // Load diffs from disk
+  const diffsDir = path.join(teamDir, "diffs");
+  const cachePath = path.join(teamDir, "cache.json");
+  let cache: any = { prs: {} };
+  if (fs.existsSync(cachePath)) {
+    try { cache = JSON.parse(fs.readFileSync(cachePath, "utf8")); } catch {}
+  }
+
+  const diffs = new Map<number, string>();
+  for (const pr of project.prs) {
+    const cacheEntry = cache.prs[pr.number];
+    if (cacheEntry?.diffFile) {
+      const diffPath = path.join(diffsDir, cacheEntry.diffFile);
+      if (fs.existsSync(diffPath)) {
+        diffs.set(pr.number, fs.readFileSync(diffPath, "utf8"));
+      }
+    }
+  }
+
+  // Load Slack messages
+  let slackMessages: SlackMessageInput[] = [];
+  const slackPath = path.join(teamDir, "slack", `messages-${date}.json`);
+  if (fs.existsSync(slackPath)) {
+    try {
+      slackMessages = JSON.parse(fs.readFileSync(slackPath, "utf8")).messages || [];
+    } catch {}
+  }
+
+  // Load Jira issues for this project
+  let allJiraIssues: JiraIssueInput[] = [];
+  const jiraPath = path.join(teamDir, "jira", `issues-${date}.json`);
+  if (fs.existsSync(jiraPath)) {
+    try {
+      allJiraIssues = JSON.parse(fs.readFileSync(jiraPath, "utf8")).issues || [];
+    } catch {}
+  }
+  // Filter to this project's tickets
+  const projectJiraKeys = new Set(project.jiraTickets.map((j: any) => j.key));
+  const projectJira = allJiraIssues.filter(i => projectJiraKeys.has(i.key));
+
+  const report = await generateProjectReport(project, diffs, slackMessages, projectJira);
+
+  // Save to disk
+  const reportsDir = path.join(teamDir, "project-reports");
+  fs.mkdirSync(reportsDir, { recursive: true });
+  const slug = projectName.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
+  const reportPath = path.join(reportsDir, `${slug}-${date}.json`);
+  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf8");
+
+  return report;
+}
+
+export { ProjectReport };
 
 export function getConfiguration(): any {
   return {

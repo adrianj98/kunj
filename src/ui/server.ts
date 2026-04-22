@@ -123,13 +123,55 @@ export function createServer(): express.Application {
         return;
       }
 
-      const content = renderProjectDetailPage(project, analysis);
+      // Resolve links from config and git remote
+      const config = data.getConfiguration().merged;
+      let repoUrl: string | undefined;
+      try {
+        const { execSync } = require("child_process");
+        const remote = execSync("git remote get-url origin", { encoding: "utf8" }).trim();
+        // Convert SSH to HTTPS
+        repoUrl = remote
+          .replace(/^git@github\.com:/, "https://github.com/")
+          .replace(/\.git$/, "");
+      } catch {}
+      const jiraBaseUrl = config.jira?.baseUrl?.replace(/\/$/, "") || undefined;
+
+      const projectReport = data.getCachedProjectReport(projectName);
+      const content = renderProjectDetailPage(project, analysis, { repoUrl, jiraBaseUrl }, projectReport);
       res.send(htmlLayout(`${projectName} — Team`, content, sidebar, "team"));
     } catch (err: any) {
       res.status(500).send(
         htmlLayout("Error", `<div class="text-red-400 p-4">${escapeHtml(err.message)}</div>`, sidebar, "team")
       );
     }
+  });
+
+  // --- SSE: Generate project detail report ---
+  app.get("/api/team/project/:name/analyze", async (req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    const send = (event: string, msg: string) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(msg)}\n\n`);
+    };
+
+    try {
+      const projectName = decodeURIComponent(req.params.name);
+      send("progress", "Loading project data and diffs...");
+      await new Promise((r) => setTimeout(r, 100));
+
+      send("progress", "Analyzing code changes with AI...");
+      const report = await data.generateProjectDetailReport(projectName);
+
+      send("progress", `Report generated: ${report.keyChanges.length} key changes, ${report.prReports.length} PR analyses`);
+      send("done", "Report ready");
+    } catch (err: any) {
+      send("error", err.message);
+    }
+    res.end();
   });
 
   // --- SSE: Run AI team analysis with streaming progress ---

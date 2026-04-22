@@ -1,6 +1,7 @@
 // Team report page — project cards, avatars, Jira board, SSE refresh, stale collapsing
 
 import { escapeHtml } from "./partials";
+import { ProjectReport } from "../../lib/team-analysis";
 
 interface ProjectData {
   name: string;
@@ -229,12 +230,12 @@ export function renderTeamPage(analysis: TeamAnalysis): string {
     const projectUrl = `/command/team/project/${encodeURIComponent(project.name)}`;
 
     return `
-      <a href="${projectUrl}" class="block bg-gray-800 rounded-lg border border-gray-700 overflow-hidden hover:border-gray-500 transition-colors">
+      <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
         <div class="px-4 py-3 border-b border-gray-700">
           <div class="flex items-center gap-3">
             ${iconHtml}
             <div class="flex-1">
-              <h3 class="text-base font-semibold text-white">${escapeHtml(project.name)}</h3>
+              <h3 class="text-base font-semibold"><a href="${projectUrl}" class="text-white hover:text-blue-300 transition-colors">${escapeHtml(project.name)}</a></h3>
               <div class="flex items-center gap-2 mt-1">
                 ${project.lead ? `${avatarHtml(project.lead, true, 20)} <span class="text-xs text-gray-400">Lead</span>` : ""}
                 ${project.team.length > 0 ? `<span class="text-xs text-gray-600 mx-1">|</span> ${project.team.map((t) => avatarHtml(t, true, 20)).join(" ")}` : ""}
@@ -255,7 +256,7 @@ export function renderTeamPage(analysis: TeamAnalysis): string {
         </div>
         ${prItems ? `<div class="px-4 pb-2"><div class="text-xs text-gray-500 mb-1">Pull Requests</div>${prItems}</div>` : ""}
         ${jiraItems ? `<div class="px-4 pb-3"><div class="text-xs text-gray-500 mb-1">Jira Tickets</div>${jiraItems}</div>` : ""}
-      </a>`;
+      </div>`;
   };
 
   const activeCards = activeProjects.map((p) => renderProjectCard(p)).join("");
@@ -358,7 +359,12 @@ export function renderTeamPage(analysis: TeamAnalysis): string {
     ${sseScript()}`;
 }
 
-export function renderProjectDetailPage(project: ProjectData, analysis: TeamAnalysis): string {
+interface ProjectLinks {
+  repoUrl?: string;    // e.g. "https://github.com/org/repo"
+  jiraBaseUrl?: string; // e.g. "https://company.atlassian.net"
+}
+
+export function renderProjectDetailPage(project: ProjectData, analysis: TeamAnalysis, links: ProjectLinks = {}, report?: ProjectReport | null): string {
   const statusColor = statusBadge[project.status.toLowerCase()] || "bg-gray-700 text-gray-300";
   const updated = timeAgo(project.lastUpdated);
 
@@ -377,6 +383,50 @@ export function renderProjectDetailPage(project: ProjectData, analysis: TeamAnal
         </div>
       </div>
     </div>`;
+
+  // Related Links
+  const relatedLinks: Array<{ label: string; url: string; icon: string }> = [];
+
+  if (links.repoUrl) {
+    relatedLinks.push({ label: 'Repository', url: links.repoUrl, icon: '&#xe900;' });
+    if (project.prs.length > 0) {
+      relatedLinks.push({ label: `Open PRs (${project.prs.length})`, url: `${links.repoUrl}/pulls`, icon: '&#x21C4;' });
+    }
+  }
+  if (links.jiraBaseUrl && project.jiraTickets.length > 0) {
+    // Link to Jira board filtered by project tickets
+    const jiraKeys = project.jiraTickets.map(j => j.key);
+    const jql = encodeURIComponent(jiraKeys.map(k => `key = ${k}`).join(' OR '));
+    relatedLinks.push({ label: `Jira Tickets (${jiraKeys.length})`, url: `${links.jiraBaseUrl}/issues/?jql=${jql}`, icon: '&#x1F4CB;' });
+  }
+  // Add individual PR links
+  if (links.repoUrl) {
+    for (const pr of project.prs) {
+      relatedLinks.push({ label: `PR #${pr.number}: ${pr.description}`, url: `${links.repoUrl}/pull/${pr.number}`, icon: '&#x2192;' });
+    }
+  }
+  // Add individual Jira links
+  if (links.jiraBaseUrl) {
+    for (const j of project.jiraTickets) {
+      relatedLinks.push({ label: `${j.key}: ${j.summary}`, url: `${links.jiraBaseUrl}/browse/${j.key}`, icon: '&#x2192;' });
+    }
+  }
+
+  if (relatedLinks.length > 0) {
+    html += `
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 mb-6">
+      <h2 class="text-sm font-semibold text-white mb-3">Related Links</h2>
+      <div class="space-y-1.5">
+        ${relatedLinks.map(l => `
+        <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener"
+          class="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 py-1 truncate">
+          <span class="text-xs text-gray-500 flex-shrink-0">${l.icon}</span>
+          <span class="truncate">${escapeHtml(l.label)}</span>
+          <span class="text-xs text-gray-600 flex-shrink-0">&#x2197;</span>
+        </a>`).join("")}
+      </div>
+    </div>`;
+  }
 
   // Team section
   html += `
@@ -422,17 +472,22 @@ export function renderProjectDetailPage(project: ProjectData, analysis: TeamAnal
     <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 mb-6">
       <h2 class="text-sm font-semibold text-white mb-3">Pull Requests <span class="text-gray-400 font-normal">(${project.prs.length})</span></h2>
       <div class="space-y-0">
-        ${project.prs.map(pr => `
+        ${project.prs.map(pr => {
+          const prUrl = links.repoUrl ? `${links.repoUrl}/pull/${pr.number}` : '';
+          return `
         <div class="flex items-center gap-3 py-3 border-b border-gray-700/50 last:border-0">
           ${avatarHtml(pr.author, true, 28)}
           <div class="flex-1 min-w-0">
             <div class="text-sm text-white">${escapeHtml(pr.description)}</div>
             <div class="text-xs text-gray-500 mt-0.5">
-              #${pr.number} by @${escapeHtml(pr.author)}
+              ${prUrl ? `<a href="${escapeHtml(prUrl)}" target="_blank" class="text-blue-400 hover:text-blue-300">#${pr.number}</a>` : `#${pr.number}`}
+              by @${escapeHtml(pr.author)}
               ${pr.updatedAt ? ` &middot; ${timeAgo(pr.updatedAt)}` : ""}
             </div>
           </div>
-        </div>`).join("")}
+          ${prUrl ? `<a href="${escapeHtml(prUrl)}" target="_blank" class="text-xs text-gray-500 hover:text-blue-400 flex-shrink-0">&#x2197;</a>` : ""}
+        </div>`;
+        }).join("")}
       </div>
     </div>`;
   }
@@ -443,12 +498,16 @@ export function renderProjectDetailPage(project: ProjectData, analysis: TeamAnal
     <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 mb-6">
       <h2 class="text-sm font-semibold text-white mb-3">Jira Tickets <span class="text-gray-400 font-normal">(${project.jiraTickets.length})</span></h2>
       <div class="space-y-0">
-        ${project.jiraTickets.map(j => `
+        ${project.jiraTickets.map(j => {
+          const jiraUrl = links.jiraBaseUrl ? `${links.jiraBaseUrl}/browse/${j.key}` : '';
+          return `
         <div class="flex items-center gap-3 py-3 border-b border-gray-700/50 last:border-0">
           ${projectIconImg(project.name, 20)}
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
-              <span class="text-xs font-mono text-blue-400">${escapeHtml(j.key)}</span>
+              ${jiraUrl
+                ? `<a href="${escapeHtml(jiraUrl)}" target="_blank" class="text-xs font-mono text-blue-400 hover:text-blue-300">${escapeHtml(j.key)}</a>`
+                : `<span class="text-xs font-mono text-blue-400">${escapeHtml(j.key)}</span>`}
               <span class="text-xs ${statusColor} px-1.5 py-0.5 rounded">${escapeHtml(j.status)}</span>
             </div>
             <div class="text-sm text-white mt-0.5">${escapeHtml(j.summary)}</div>
@@ -458,7 +517,9 @@ export function renderProjectDetailPage(project: ProjectData, analysis: TeamAnal
             ${avatarHtml(j.assignee, false, 22)}
             <span class="text-xs text-gray-400">${escapeHtml(j.assignee)}</span>
           </div>` : ""}
-        </div>`).join("")}
+          ${jiraUrl ? `<a href="${escapeHtml(jiraUrl)}" target="_blank" class="text-xs text-gray-500 hover:text-blue-400 flex-shrink-0">&#x2197;</a>` : ""}
+        </div>`;
+        }).join("")}
       </div>
     </div>`;
   }
@@ -478,6 +539,204 @@ export function renderProjectDetailPage(project: ProjectData, analysis: TeamAnal
       </div>
     </div>`;
   }
+
+  // Detailed AI Report section
+  const projectSlug = encodeURIComponent(project.name);
+
+  if (report) {
+    const reportAge = timeAgo(report.generatedAt);
+
+    html += `
+    <div class="border-t border-gray-700 mt-8 pt-6 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-white">Detailed Report</h2>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-gray-500">Generated ${reportAge}</span>
+          <div id="project-progress" class="text-sm text-gray-400"></div>
+          <button onclick="refreshProjectReport('${projectSlug}')" id="project-refresh-btn"
+            class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-md">
+            Regenerate
+          </button>
+        </div>
+      </div>`;
+
+    // Overview
+    html += `
+      <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 mb-4">
+        <h3 class="text-sm font-semibold text-white mb-2">Overview</h3>
+        <p class="text-sm text-gray-300 leading-relaxed">${escapeHtml(report.overview)}</p>
+      </div>`;
+
+    // Important Slack Messages
+    if (report.importantMessages && report.importantMessages.length > 0) {
+      html += `
+      <div class="bg-gray-800 rounded-lg border border-purple-900/50 p-4 mb-4">
+        <h3 class="text-sm font-semibold text-purple-400 mb-3">Important Slack Messages</h3>
+        <div class="space-y-3">
+          ${report.importantMessages.map(msg => `
+          <div class="border-l-2 border-purple-700 pl-3">
+            <div class="flex items-center gap-2 mb-1">
+              ${avatarHtml(msg.user, true, 20)}
+              <span class="text-xs font-medium text-white">@${escapeHtml(msg.user)}</span>
+              <span class="text-xs text-gray-500">#${escapeHtml(msg.channel)}</span>
+            </div>
+            <p class="text-sm text-gray-300 italic">"${escapeHtml(msg.text)}"</p>
+            <p class="text-xs text-gray-500 mt-1">${escapeHtml(msg.why)}</p>
+          </div>`).join("")}
+        </div>
+      </div>`;
+    }
+
+    // Key Changes
+    if (report.keyChanges.length > 0) {
+      html += `
+      <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 mb-4">
+        <h3 class="text-sm font-semibold text-white mb-2">Key Changes</h3>
+        <div class="space-y-2">
+          ${report.keyChanges.map(c => `
+          <div class="flex items-start gap-2 text-sm text-gray-300">
+            <span class="text-green-400 flex-shrink-0 mt-0.5">+</span>
+            <span>${escapeHtml(c)}</span>
+          </div>`).join("")}
+        </div>
+      </div>`;
+    }
+
+    // Risks & Decisions side by side
+    if (report.risks.length > 0 || report.decisions.length > 0) {
+      html += `<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">`;
+
+      if (report.risks.length > 0) {
+        html += `
+        <div class="bg-gray-800 rounded-lg border border-red-900/50 p-4">
+          <h3 class="text-sm font-semibold text-red-400 mb-2">Risks</h3>
+          <div class="space-y-2">
+            ${report.risks.map(r => `
+            <div class="flex items-start gap-2 text-sm text-gray-300">
+              <span class="text-red-400 flex-shrink-0 mt-0.5">!</span>
+              <span>${escapeHtml(r)}</span>
+            </div>`).join("")}
+          </div>
+        </div>`;
+      }
+
+      if (report.decisions.length > 0) {
+        html += `
+        <div class="bg-gray-800 rounded-lg border border-blue-900/50 p-4">
+          <h3 class="text-sm font-semibold text-blue-400 mb-2">Decisions</h3>
+          <div class="space-y-2">
+            ${report.decisions.map(d => `
+            <div class="flex items-start gap-2 text-sm text-gray-300">
+              <span class="text-blue-400 flex-shrink-0 mt-0.5">&rarr;</span>
+              <span>${escapeHtml(d)}</span>
+            </div>`).join("")}
+          </div>
+        </div>`;
+      }
+
+      html += `</div>`;
+    }
+
+    // Next Steps
+    if (report.nextSteps.length > 0) {
+      html += `
+      <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 mb-4">
+        <h3 class="text-sm font-semibold text-yellow-400 mb-2">Next Steps</h3>
+        <div class="space-y-2">
+          ${report.nextSteps.map((s, i) => `
+          <div class="flex items-start gap-2 text-sm text-gray-300">
+            <span class="text-yellow-400 flex-shrink-0 mt-0.5">${i + 1}.</span>
+            <span>${escapeHtml(s)}</span>
+          </div>`).join("")}
+        </div>
+      </div>`;
+    }
+
+    // PR Deep Dives
+    if (report.prReports.length > 0) {
+      html += `
+      <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 mb-4">
+        <h3 class="text-sm font-semibold text-white mb-3">PR Analysis</h3>
+        <div class="space-y-4">
+          ${report.prReports.map(pr => {
+            const prUrl = links.repoUrl ? `${links.repoUrl}/pull/${pr.number}` : '';
+            return `
+          <div class="border-t border-gray-700/50 pt-3 first:border-0 first:pt-0">
+            <div class="flex items-center gap-2 mb-1.5">
+              ${avatarHtml(pr.author, true, 22)}
+              <span class="text-sm font-medium text-white">
+                ${prUrl ? `<a href="${escapeHtml(prUrl)}" target="_blank" class="hover:text-blue-300">#${pr.number}</a>` : `#${pr.number}`}
+                ${escapeHtml(pr.title)}
+              </span>
+            </div>
+            <p class="text-sm text-gray-300 mb-1.5">${escapeHtml(pr.changeSummary)}</p>
+            ${pr.filesChanged.length > 0 ? `
+            <div class="flex flex-wrap gap-1 mb-1.5">
+              ${pr.filesChanged.map(f => `<code class="text-xs bg-gray-900 text-gray-400 px-1.5 py-0.5 rounded">${escapeHtml(f)}</code>`).join("")}
+            </div>` : ""}
+            ${pr.impact ? `<p class="text-xs text-gray-500">${escapeHtml(pr.impact)}</p>` : ""}
+          </div>`;
+          }).join("")}
+        </div>
+      </div>`;
+    }
+
+    html += `</div>`;
+  } else {
+    // No report yet — show generate button
+    html += `
+    <div class="border-t border-gray-700 mt-8 pt-6 mb-6">
+      <div class="bg-gray-800 rounded-lg border border-gray-700 p-6 text-center">
+        <p class="text-gray-400 mb-3">Generate a detailed report from code diffs and Slack activity</p>
+        <div class="flex items-center justify-center gap-3">
+          <div id="project-progress" class="text-sm text-gray-400"></div>
+          <button onclick="refreshProjectReport('${projectSlug}')" id="project-refresh-btn"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md font-medium">
+            Generate Report
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // SSE script for project report
+  html += `
+    <script>
+    function refreshProjectReport(name) {
+      const area = document.getElementById('project-progress');
+      const btn = document.getElementById('project-refresh-btn');
+      if (btn) { btn.disabled = true; btn.classList.add('opacity-50'); }
+      area.textContent = 'Connecting...';
+
+      const source = new EventSource('/api/team/project/' + name + '/analyze');
+
+      source.addEventListener('progress', (e) => {
+        area.textContent = JSON.parse(e.data);
+      });
+
+      source.addEventListener('done', (e) => {
+        area.textContent = 'Done! Reloading...';
+        source.close();
+        setTimeout(() => location.reload(), 500);
+      });
+
+      source.addEventListener('error', (e) => {
+        if (e.data) {
+          area.innerHTML = '<span class="text-red-400">Error: ' + JSON.parse(e.data) + '</span>';
+        } else {
+          area.innerHTML = '<span class="text-red-400">Connection lost</span>';
+        }
+        source.close();
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+      });
+
+      source.onerror = () => {
+        area.innerHTML = '<span class="text-red-400">Connection error</span>';
+        source.close();
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+      };
+    }
+    </script>`;
 
   return html;
 }

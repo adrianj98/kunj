@@ -15,9 +15,8 @@ interface IssueOptions {
   title?: string;
   bodyFile?: string;
   label?: string;
-  tag?: string;
-  noTag?: boolean;
-  web?: boolean;
+  tag?: string | false;
+  web?: boolean | false;
 }
 
 export class IssueCommand extends BaseCommand {
@@ -33,6 +32,7 @@ export class IssueCommand extends BaseCommand {
         { flags: "--tag <tagName>", description: "Git tag to create after issue is made" },
         { flags: "--no-tag", description: "Skip git tag creation" },
         { flags: "-w, --web", description: "Open issue in browser after creation" },
+        { flags: "--no-web", description: "Skip the open-in-browser prompt" },
       ],
     });
   }
@@ -147,7 +147,7 @@ export class IssueCommand extends BaseCommand {
     }
 
     // --- Git tag ---
-    if (!options.noTag) {
+    if (options.tag !== false) {
       const defaultTagName = issueNumber ? `issue-${issueNumber}` : "";
 
       const { createGitTag } = await inquirer.prompt([
@@ -177,7 +177,7 @@ export class IssueCommand extends BaseCommand {
           console.log(chalk.yellow(`⚠ Could not create tag: ${result.message}`));
         }
       }
-    } else if (options.tag) {
+    } else if (typeof options.tag === "string" && options.tag) {
       // --tag was explicitly passed, create without prompting
       const result = await createTag(options.tag, `GitHub issue #${issueNumber || title}`);
       if (result.success) {
@@ -188,8 +188,10 @@ export class IssueCommand extends BaseCommand {
     }
 
     // --- Open in browser ---
-    if (options.web) {
-      await execAsync("gh issue view --web");
+    if (options.web === false) {
+      // --no-web: skip prompt entirely
+    } else if (options.web) {
+      await execAsync(`gh issue view ${issueNumber || ""} --web`);
     } else {
       const { openInBrowser } = await inquirer.prompt([
         {
@@ -216,6 +218,11 @@ export class IssueCommand extends BaseCommand {
   }
 
   private async selectLabels(preselected?: string): Promise<string[]> {
+    // If a label was explicitly passed via --label, use it directly without prompting
+    if (preselected) {
+      return [preselected];
+    }
+
     let availableLabels: Array<{ name: string; color: string; description: string }> = [];
 
     try {
@@ -223,18 +230,17 @@ export class IssueCommand extends BaseCommand {
       availableLabels = JSON.parse(stdout || "[]");
     } catch {
       console.log(chalk.yellow("⚠ Could not fetch labels from GitHub"));
-      return preselected ? [preselected] : [];
+      return [];
     }
 
     if (availableLabels.length === 0) {
       console.log(chalk.gray("No labels found in this repository"));
-      return preselected ? [preselected] : [];
+      return [];
     }
 
     const choices = availableLabels.map((l) => ({
       name: `${chalk.hex("#" + l.color)("■")} ${l.name}${l.description ? chalk.dim("  " + l.description) : ""}`,
       value: l.name,
-      checked: l.name === preselected,
     }));
 
     const { labels } = await inquirer.prompt([

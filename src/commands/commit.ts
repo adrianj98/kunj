@@ -297,225 +297,325 @@ export class CommitCommand extends BaseCommand {
   }
 
   private async selectFiles(files: FileStatus[]): Promise<string[]> {
-    const enquirer = require("enquirer");
-    const { MultiSelect } = enquirer;
+    // Strip ANSI escape codes for visible length calculation
+    const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+    // Truncate a string with ANSI codes to at most maxLen visible characters
+    const truncateAnsi = (str: string, maxLen: number): string => {
+      let visible = 0;
+      let result = '';
+      let i = 0;
+      while (i < str.length) {
+        if (str[i] === '\x1b' && str[i + 1] === '[') {
+          // ANSI escape sequence — copy it whole
+          const end = str.indexOf('m', i + 2);
+          if (end !== -1) {
+            result += str.slice(i, end + 1);
+            i = end + 1;
+          } else {
+            i++;
+          }
+        } else {
+          if (visible >= maxLen) break;
+          result += str[i];
+          visible++;
+          i++;
+        }
+      }
+      return result + '\x1b[0m';
+    };
+
+    const termWidth  = () => process.stdout.columns || 120;
+    const termHeight = () => process.stdout.rows    || 40;
+
+    // Dimensions — recalculated on each render so resize is handled
+    const leftWidth    = () => Math.min(48, Math.floor(termWidth() * 0.38));
+    const rightWidth   = () => termWidth() - leftWidth() - 3; // 3 = ' │ '
+    const contentLines = () => termHeight() - 4; // 2 header + 2 footer
 
     let availableFiles = [...files];
-    let needsRefresh = false;
-    let shouldContinue = false;
+    let selected       = new Set<string>(files.filter(f => f.staged).map(f => f.path));
+    let cursorIdx      = 0;
+    let fileScrollTop  = 0;
+    let diffLines: string[] = [];
+    let diffScrollTop  = 0;
+    let diffLoading    = false;
+    let withMain       = false;
+    let statusMsg      = '';
+    let isDone         = false;
+    let cancelled      = false;
+    const diffCache    = new Map<string, string[]>(); // key: `${path}:${withMain}`
 
-    while (true) {
-      if (needsRefresh) {
-        availableFiles = await getFileStatuses();
-        needsRefresh = false;
-        if (availableFiles.length === 0) {
-          console.log(chalk.yellow("No files available to commit"));
-          return [];
+    const stdin   = process.stdin;
+    const wasRaw  = stdin.isRaw;
+    if (stdin.setRawMode) stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+
+    // Enter alternate screen buffer, clear, hide cursor
+    process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l');
+
+    const render = () => {
+      const lw = leftWidth();
+      const rw = rightWidth();
+      const cl = contentLines();
+      const tw = termWidth();
+      let buf = '\x1b[H'; // move to top-left without clearing (avoids flicker)
+
+      // ── Header ──────────────────────────────────────────────────────────
+      const curFile   = availableFiles[cursorIdx];
+      const modeLabel = withMain ? ' [vs main]' : '';
+      const lHead = ` Files  ${selected.size}/${availableFiles.length} selected`;
+      const rHead = curFile ? ` Diff: ${curFile.path}${modeLabel}` : ' Diff';
+      buf += chalk.bgBlue.bold.white(lHead.padEnd(lw).slice(0, lw));
+      buf += chalk.bgBlue.white(' │ ');
+      buf += chalk.bgBlue.white(rHead.padEnd(rw).slice(0, rw));
+      buf += '\x1b[0K\n';
+      buf += chalk.gray('─'.repeat(lw) + '─┼─' + '─'.repeat(Math.max(0, rw)));
+      buf += '\x1b[0K\n';
+
+      // ── Content rows ─────────────────────────────────────────────────────
+      for (let i = 0; i < cl; i++) {
+        const fi = fileScrollTop + i;
+        const di = diffScrollTop + i;
+
+        // Left pane — file row
+        if (fi < availableFiles.length) {
+          const file      = availableFiles[fi];
+          const isCursor  = fi === cursorIdx;
+          const isChecked = selected.has(file.path);
+          const checkbox  = isChecked ? chalk.green('◉') : chalk.gray('○');
+          const icon      = this.getStatusIcon(file.status);
+          const name      = file.oldPath ? `${file.oldPath}→${file.path}` : file.path;
+
+          let stats = '';
+          const a = file.additions || 0;
+          const d = file.deletions || 0;
+          if (a > 0) stats += chalk.green(`+${a}`);
+          if (d > 0) stats += chalk.red(` -${d}`);
+
+          const rawEntry = ` ${checkbox} ${icon} ${name}`;
+          const pad      = Math.max(0, lw - stripAnsi(rawEntry).length);
+          const entry    = truncateAnsi(rawEntry, lw) + ' '.repeat(pad > 0 ? Math.min(pad, lw - stripAnsi(rawEntry).length) : 0);
+          const entryPad = (' ' + stripAnsi(rawEntry)).slice(0, lw).padEnd(lw);
+
+          if (isCursor) {
+            // High-contrast highlight: cyan background, bright white bold text
+            buf += chalk.bgCyan.whiteBright.bold('▶ ' + entryPad.slice(2));
+          } else {
+            // Re-emit with original ANSI colors but padded
+            const colored = truncateAnsi(rawEntry, lw);
+            const coloredPad = lw - Math.min(lw, stripAnsi(rawEntry).length);
+            buf += colored + ' '.repeat(coloredPad);
+          }
+        } else {
+          buf += ' '.repeat(lw);
         }
+
+        // Divider
+        buf += chalk.gray(' │ ');
+
+        // Right pane — diff row
+        if (diffLoading && i === 0) {
+          buf += chalk.gray('Loading diff…');
+        } else if (di < diffLines.length) {
+          buf += truncateAnsi(diffLines[di], rw);
+        }
+
+        buf += '\x1b[0K\n';
       }
 
-      shouldContinue = false;
+      // ── Footer ───────────────────────────────────────────────────────────
+      buf += chalk.gray('─'.repeat(tw)) + '\x1b[0K\n';
+      const footerKeys = '[↑↓] Nav  [Spc] Select  [a] All  [m] Toggle main  [j/k] Scroll diff  [r] Revert  [d] Delete  [Enter] Done  [q] Cancel';
+      if (statusMsg) {
+        buf += chalk.yellow(statusMsg.padEnd(tw).slice(0, tw)) + '\x1b[0K';
+      } else {
+        buf += chalk.gray(footerKeys.slice(0, tw)) + '\x1b[0K';
+      }
 
-      // Format file choices with status indicators and line stats
-      const choices = availableFiles.map((file) => {
-        const statusIcon = this.getStatusIcon(file.status);
-        const stagedIndicator = file.staged ? chalk.green("[staged]") : "        ";
-        const fileName = file.oldPath
-          ? `${file.oldPath} → ${file.path}`
-          : file.path;
+      process.stdout.write(buf);
+    };
 
-        // Format line changes
-        let lineStats = "";
-        if (file.additions !== undefined || file.deletions !== undefined) {
-          const additions = file.additions || 0;
-          const deletions = file.deletions || 0;
-
-          if (additions > 0 && deletions > 0) {
-            lineStats = `${chalk.green("+" + additions)} ${chalk.red("-" + deletions)}`;
-          } else if (additions > 0) {
-            lineStats = chalk.green("+" + additions);
-          } else if (deletions > 0) {
-            lineStats = chalk.red("-" + deletions);
-          }
-        }
-
-        return {
-          name: file.path,
-          message: `${statusIcon} ${fileName.padEnd(50)} ${stagedIndicator} ${lineStats}`,
-          enabled: file.staged, // Pre-select staged files
-        };
-      });
-
-      const prompt = new MultiSelect({
-        name: "files",
-        message: "Select files to commit",
-        choices,
-        result(names: string[]) {
-          return names;
-        },
-        footer() {
-          return chalk.gray(
-            "\n[↑↓] Navigate  [space] Toggle  [a] Toggle all  [enter] Continue\n" +
-            "[→] View diff  [m] Diff w/main  [r] Revert  [d] Delete  [q] Cancel"
-          );
-        },
-      });
-
-      let promptClosed = false;
-
-      // Custom key handlers
-      prompt.on("keypress", async (input: string, key: any) => {
-        if (promptClosed) return;
-
-        const currentIndex = prompt.index;
-        const currentFile = availableFiles[currentIndex];
-
-        if (!currentFile) return;
-
-        // Right arrow - show diff
-        if (key.name === "right") {
-          promptClosed = true;
-          try {
-            prompt.close();
-          } catch (err) {
-            // Ignore close errors
-          }
-          await this.showScrollableDiff(currentFile.path, false);
-          shouldContinue = true;
-          needsRefresh = false;
-          promptClosed = false;
-          // Continue the loop to show file selection again
-          return;
-        }
-
-        // 'm' - show diff with main
-        if (input === "m") {
-          promptClosed = true;
-          try {
-            prompt.close();
-          } catch (err) {
-            // Ignore close errors
-          }
-          await this.showScrollableDiff(currentFile.path, true);
-          shouldContinue = true;
-          needsRefresh = false;
-          promptClosed = false;
-          // Continue the loop to show file selection again
-          return;
-        }
-
-        // 'r' - revert file
-        if (input === "r" && currentFile.status !== "new") {
-          promptClosed = true;
-          try {
-            prompt.close();
-          } catch (err) {
-            // Ignore close errors
-          }
-          console.log(chalk.yellow(`\nRevert ${currentFile.path}?`));
-          const { Confirm } = require("enquirer");
-          const confirmPrompt = new Confirm({
-            name: "confirm",
-            message: "This cannot be undone. Continue?",
-            initial: false,
-          });
-
-          try {
-            const confirmed = await confirmPrompt.run();
-            if (confirmed) {
-              const result = await revertFile(currentFile.path);
-              if (result.success) {
-                console.log(chalk.green(`✓ ${result.message}`));
-                needsRefresh = true;
-              } else {
-                console.log(chalk.red(`✗ ${result.message}`));
-              }
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-          } catch (err) {
-            // User cancelled
-          }
-          shouldContinue = true;
-          return;
-        }
-
-        // 'd' - delete file
-        if (input === "d") {
-          promptClosed = true;
-          try {
-            prompt.close();
-          } catch (err) {
-            // Ignore close errors
-          }
-          console.log(chalk.red(`\nDelete ${currentFile.path}?`));
-          const { Confirm } = require("enquirer");
-          const confirmPrompt = new Confirm({
-            name: "confirm",
-            message: "This cannot be undone. Continue?",
-            initial: false,
-          });
-
-          try {
-            const confirmed = await confirmPrompt.run();
-            if (confirmed) {
-              const result = await deleteFile(currentFile.path);
-              if (result.success) {
-                console.log(chalk.green(`✓ ${result.message}`));
-                needsRefresh = true;
-              } else {
-                console.log(chalk.red(`✗ ${result.message}`));
-              }
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-          } catch (err) {
-            // User cancelled
-          }
-          shouldContinue = true;
-          return;
-        }
-
-        // 'q' - cancel/quit
-        if (input === "q") {
-          promptClosed = true;
-          try {
-            prompt.close();
-          } catch (err) {
-            // Ignore close errors
-          }
-          throw new Error("cancelled");
-        }
-      });
-
+    const loadDiff = async (filePath: string) => {
+      const cacheKey = `${filePath}:${withMain}`;
+      if (diffCache.has(cacheKey)) {
+        diffLines     = diffCache.get(cacheKey)!;
+        diffScrollTop = 0;
+        render();
+        return;
+      }
+      diffLoading = true;
+      diffLines   = [];
+      render();
       try {
-        const selected = await prompt.run();
-
-        if (!selected || selected.length === 0) {
-          console.log(chalk.yellow("No files selected"));
-          return [];
-        }
-
-        return selected;
-      } catch (err: any) {
-        // If we're continuing (e.g., after viewing diff), loop again
-        if (shouldContinue || needsRefresh) {
-          continue;
-        }
-
-        // Handle cancellation (Ctrl-C or 'q')
-        // Also handle readline errors
-        if (
-          err.message === "cancelled" ||
-          err.message === "" ||
-          err.code === "ERR_USE_AFTER_CLOSE"
-        ) {
-          console.log(chalk.yellow("\nCommit cancelled"));
-          return [];
-        }
-
-        // For other errors, re-throw
-        throw err;
+        const raw       = withMain ? await getFileDiffWithMain(filePath) : await getFileDiff(filePath, false);
+        const formatted = formatDiff(raw, { showLineNumbers: true, highlightWords: true, maxWidth: rightWidth() });
+        const lines     = formatted.split('\n');
+        diffCache.set(cacheKey, lines);
+        diffLines = lines;
+      } catch {
+        diffLines = [chalk.red('Error loading diff')];
       }
+      diffLoading   = false;
+      diffScrollTop = 0;
+      if (!isDone) render();
+    };
+
+    // Initial load
+    if (availableFiles.length > 0) loadDiff(availableFiles[0].path);
+    else render();
+
+    const refreshFiles = async () => {
+      availableFiles = await getFileStatuses();
+      diffCache.clear();
+      if (cursorIdx >= availableFiles.length) cursorIdx = Math.max(0, availableFiles.length - 1);
+      selected = new Set(availableFiles.filter(f => f.staged).map(f => f.path));
+      if (availableFiles.length > 0) await loadDiff(availableFiles[cursorIdx].path);
+      else render();
+    };
+
+    await new Promise<void>((resolve) => {
+      let processing = false;
+
+      const onKey = async (key: string) => {
+        if (isDone || processing) return;
+        statusMsg = '';
+
+        // Ctrl-C
+        if (key === '\x03') { cancelled = true; isDone = true; resolve(); return; }
+        // q
+        if (key === 'q') { cancelled = true; isDone = true; resolve(); return; }
+        // Enter
+        if (key === '\r' || key === '\n') { isDone = true; resolve(); return; }
+
+        // Space — toggle selection
+        if (key === ' ') {
+          const f = availableFiles[cursorIdx];
+          if (f) { if (selected.has(f.path)) selected.delete(f.path); else selected.add(f.path); }
+          render(); return;
+        }
+
+        // a — toggle all
+        if (key === 'a') {
+          if (selected.size === availableFiles.length) selected.clear();
+          else availableFiles.forEach(f => selected.add(f.path));
+          render(); return;
+        }
+
+        // ↑ — move cursor up
+        if (key === '\x1b[A') {
+          if (cursorIdx > 0) {
+            cursorIdx--;
+            if (cursorIdx < fileScrollTop) fileScrollTop = cursorIdx;
+            loadDiff(availableFiles[cursorIdx].path);
+            render();
+          }
+          return;
+        }
+
+        // ↓ — move cursor down
+        if (key === '\x1b[B') {
+          if (cursorIdx < availableFiles.length - 1) {
+            cursorIdx++;
+            const cl = contentLines();
+            if (cursorIdx >= fileScrollTop + cl) fileScrollTop = cursorIdx - cl + 1;
+            loadDiff(availableFiles[cursorIdx].path);
+            render();
+          }
+          return;
+        }
+
+        // j — scroll diff down
+        if (key === 'j' || key === '\x1b[6~') {
+          const maxScroll = Math.max(0, diffLines.length - contentLines());
+          diffScrollTop   = Math.min(maxScroll, diffScrollTop + Math.floor(contentLines() / 2));
+          render(); return;
+        }
+
+        // k — scroll diff up
+        if (key === 'k' || key === '\x1b[5~') {
+          diffScrollTop = Math.max(0, diffScrollTop - Math.floor(contentLines() / 2));
+          render(); return;
+        }
+
+        // m — toggle diff mode (current vs main)
+        if (key === 'm') {
+          withMain = !withMain;
+          const f  = availableFiles[cursorIdx];
+          if (f) await loadDiff(f.path);
+          else render();
+          return;
+        }
+
+        // r — revert file
+        if (key === 'r') {
+          const f = availableFiles[cursorIdx];
+          if (!f || f.status === 'new') { statusMsg = 'Cannot revert new files'; render(); return; }
+          processing = true;
+          stdin.removeListener('data', onKey);
+          process.stdout.write('\x1b[?1049l\x1b[?25h');
+          console.log(chalk.yellow(`\nRevert ${f.path}?`));
+          try {
+            const { Confirm } = require('enquirer');
+            const confirmed = await new Confirm({ name: 'confirm', message: 'This cannot be undone. Continue?', initial: false }).run();
+            if (confirmed) {
+              const res = await revertFile(f.path);
+              console.log(res.success ? chalk.green(`✓ ${res.message}`) : chalk.red(`✗ ${res.message}`));
+              await new Promise(r => setTimeout(r, 700));
+            }
+          } catch { /* cancelled */ }
+          process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l');
+          await refreshFiles();
+          processing = false;
+          stdin.on('data', onKey);
+          return;
+        }
+
+        // d — delete file
+        if (key === 'd') {
+          const f = availableFiles[cursorIdx];
+          if (!f) return;
+          processing = true;
+          stdin.removeListener('data', onKey);
+          process.stdout.write('\x1b[?1049l\x1b[?25h');
+          console.log(chalk.red(`\nDelete ${f.path}?`));
+          try {
+            const { Confirm } = require('enquirer');
+            const confirmed = await new Confirm({ name: 'confirm', message: 'This cannot be undone. Continue?', initial: false }).run();
+            if (confirmed) {
+              const res = await deleteFile(f.path);
+              console.log(res.success ? chalk.green(`✓ ${res.message}`) : chalk.red(`✗ ${res.message}`));
+              await new Promise(r => setTimeout(r, 700));
+            }
+          } catch { /* cancelled */ }
+          process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l');
+          await refreshFiles();
+          processing = false;
+          stdin.on('data', onKey);
+          return;
+        }
+      };
+
+      stdin.on('data', onKey);
+    });
+
+    // Restore terminal
+    process.stdout.write('\x1b[?1049l\x1b[?25h');
+    if (stdin.setRawMode) stdin.setRawMode(wasRaw || false);
+    stdin.pause();
+
+    if (cancelled) {
+      console.log(chalk.yellow('\nCommit cancelled'));
+      return [];
     }
+
+    if (selected.size === 0) {
+      console.log(chalk.yellow('No files selected'));
+      return [];
+    }
+
+    return Array.from(selected);
   }
 
   private async showScrollableDiff(filePath: string, withMain: boolean): Promise<void> {

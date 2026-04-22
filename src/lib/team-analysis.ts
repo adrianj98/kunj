@@ -33,6 +33,34 @@ export interface SlackMessageInput {
 
 // --- Output types ---
 
+export interface ImportantSlackMessage {
+  user: string;
+  channel: string;
+  text: string;
+  why: string;
+}
+
+export interface ProjectReport {
+  projectName: string;
+  overview: string;
+  keyChanges: string[];
+  risks: string[];
+  decisions: string[];
+  nextSteps: string[];
+  importantMessages: ImportantSlackMessage[];
+  prReports: Array<{
+    number: number;
+    author: string;
+    title: string;
+    changeSummary: string;
+    filesChanged: string[];
+    impact: string;
+  }>;
+  generatedAt: string;
+  /** Hash of PR state used for cache invalidation */
+  cacheKey?: string;
+}
+
 export interface ParsedProject {
   name: string;
   status: string;
@@ -255,4 +283,165 @@ export async function analyzeTeamActivity(
   const content = response.content?.toString() || "";
 
   return parseTeamAnalysisResponse(content);
+}
+
+/**
+ * Generate a detailed report for a single project using full diffs and Slack messages.
+ */
+export async function generateProjectReport(
+  project: ParsedProject,
+  diffs: Map<number, string>,
+  slackMessages: SlackMessageInput[],
+  jiraIssues: JiraIssueInput[]
+): Promise<ProjectReport> {
+  const client = await getBedrockClient();
+
+  // Build diff context per PR (truncated per PR, generous total)
+  let diffContext = "";
+  for (const pr of project.prs) {
+    const diff = diffs.get(pr.number);
+    if (!diff) continue;
+    const truncated = diff.length > 15000
+      ? diff.substring(0, 15000) + "\n...[truncated]"
+      : diff;
+    diffContext += `\n--- PR #${pr.number} by @${pr.author}: ${pr.description} ---\n${truncated}\n`;
+  }
+
+  // Build Slack context (filter to relevant channels / mentions)
+  let slackContext = "";
+  if (slackMessages.length > 0) {
+    slackContext = "\nSlack conversations:\n";
+    for (const msg of slackMessages) {
+      const text = msg.text.length > 300 ? msg.text.substring(0, 300) + "..." : msg.text;
+      const thread = msg.threadReplyCount ? ` (${msg.threadReplyCount} replies)` : "";
+      slackContext += `  [#${msg.channelName}] ${msg.user}: ${text}${thread}\n`;
+    }
+  }
+
+  // Build Jira context
+  let jiraContext = "";
+  if (jiraIssues.length > 0) {
+    jiraContext = "\nJira tickets:\n";
+    for (const issue of jiraIssues) {
+      jiraContext += `  - ${issue.key}: ${issue.summary} [${issue.status}] (${issue.issueType}) — ${issue.assignee}\n`;
+    }
+  }
+
+  const prompt = `You are writing a detailed project report for "${project.name}".
+Status: ${project.status}
+Lead: ${project.lead}
+Team: ${project.team.join(", ") || "solo"}
+
+Summary from team analysis: ${project.summary}
+Recent activity: ${project.recentActivity}
+${jiraContext}${slackContext}
+
+Code changes (diffs):
+${diffContext || "(no diffs available)"}
+
+Generate a detailed project report with these sections:
+
+OVERVIEW: A comprehensive 3-5 sentence overview of what this project is doing, the current state, and trajectory. Reference specific code changes and Slack discussions.
+
+KEY_CHANGES:
+- Each significant code change or feature, with specifics from the diffs (file names, what was added/modified)
+
+RISKS:
+- Any risks, concerns, or potential issues you can identify from the code changes, discussions, or ticket statuses. If none, say "None identified"
+
+DECISIONS:
+- Key decisions made (from Slack discussions, PR comments, or code patterns). If none visible, say "None captured"
+
+NEXT_STEPS:
+- What likely needs to happen next based on ticket statuses, open PRs, and discussion context
+
+IMPORTANT_MESSAGES:
+- [#channel] @user: "the message text" — why this message matters to the project
+
+PR_REPORT: <pr_number>
+AUTHOR: <author>
+TITLE: <pr description>
+CHANGE_SUMMARY: <2-3 sentence summary of what the diff actually does>
+FILES_CHANGED: <comma-separated list of key files>
+IMPACT: <one sentence on the impact/scope of this change>
+
+Rules:
+- Be specific — reference file names, function names, ticket keys
+- Use evidence from the diffs, not generic statements
+- One PR_REPORT block per PR
+- Keep each bullet to 1-2 sentences
+- IMPORTANT_MESSAGES should highlight Slack messages that contain decisions, blockers, questions, context, or coordination relevant to this project. Include 0-5 messages. Quote the actual message text. If no Slack data, omit the section.
+- Be concise but thorough`;
+
+  const response = await client.invoke([{ role: "user", content: prompt }]);
+  const content = response.content?.toString() || "";
+
+  // Parse response
+  const overviewMatch = content.match(/OVERVIEW:\s*([^\n]*(?:\n(?!KEY_CHANGES:).*)*)/i);
+  const keyChangesMatch = content.match(/KEY_CHANGES:\s*\n((?:- .*(?:\n|$))*)/i);
+  const risksMatch = content.match(/RISKS:\s*\n((?:- .*(?:\n|$))*)/i);
+  const decisionsMatch = content.match(/DECISIONS:\s*\n((?:- .*(?:\n|$))*)/i);
+  const nextStepsMatch = content.match(/NEXT_STEPS:\s*\n((?:- .*(?:\n|$))*)/i);
+  const importantMsgsMatch = content.match(/IMPORTANT_MESSAGES:\s*\n((?:- .*(?:\n|$))*)/i);
+
+  const parseBullets = (raw: string | undefined): string[] => {
+    if (!raw) return [];
+    return raw.trim().split("\n")
+      .map((l: string) => l.replace(/^- /, "").trim())
+      .filter(Boolean)
+      .filter(l => l.toLowerCase() !== "none identified" && l.toLowerCase() !== "none captured");
+  };
+
+  // Parse PR reports
+  const prReportBlocks = content
+    .split(/(?=^PR_REPORT:)/im)
+    .filter((b: string) => b.startsWith("PR_REPORT:"));
+
+  const prReports = prReportBlocks.map((block: string) => {
+    const numMatch = block.match(/^PR_REPORT:\s*#?(\d+)/i);
+    const authorMatch = block.match(/^AUTHOR:\s*@?(.+)/im);
+    const titleMatch = block.match(/^TITLE:\s*(.+)/im);
+    const changeSummaryMatch = block.match(/^CHANGE_SUMMARY:\s*([^\n]*(?:\n(?!FILES_CHANGED:|IMPACT:|PR_REPORT:).*)*)/im);
+    const filesMatch = block.match(/^FILES_CHANGED:\s*(.+)/im);
+    const impactMatch = block.match(/^IMPACT:\s*(.+)/im);
+
+    return {
+      number: numMatch ? parseInt(numMatch[1]) : 0,
+      author: authorMatch ? authorMatch[1].trim() : "",
+      title: titleMatch ? titleMatch[1].trim() : "",
+      changeSummary: changeSummaryMatch ? changeSummaryMatch[1].trim() : "",
+      filesChanged: filesMatch ? filesMatch[1].split(",").map((f: string) => f.trim()).filter(Boolean) : [],
+      impact: impactMatch ? impactMatch[1].trim() : "",
+    };
+  });
+
+  // Parse important Slack messages
+  const importantMessages: ImportantSlackMessage[] = [];
+  if (importantMsgsMatch?.[1]) {
+    const lines = importantMsgsMatch[1].trim().split("\n").filter(Boolean);
+    for (const line of lines) {
+      // Format: - [#channel] @user: "message text" — why it matters
+      const m = line.match(/^-\s*\[#([^\]]+)\]\s*@(\S+):\s*"([^"]+)"\s*[—–-]\s*(.+)/);
+      if (m) {
+        importantMessages.push({
+          channel: m[1].trim(),
+          user: m[2].trim(),
+          text: m[3].trim(),
+          why: m[4].trim(),
+        });
+      }
+    }
+  }
+
+  return {
+    projectName: project.name,
+    overview: overviewMatch ? overviewMatch[1].trim() : project.summary,
+    keyChanges: parseBullets(keyChangesMatch?.[1]),
+    risks: parseBullets(risksMatch?.[1]),
+    decisions: parseBullets(decisionsMatch?.[1]),
+    nextSteps: parseBullets(nextStepsMatch?.[1]),
+    importantMessages,
+    prReports,
+    generatedAt: new Date().toISOString(),
+  };
 }
