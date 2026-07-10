@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>kunj — Git branches, evolved</title>
+  <meta name="description" content="kunj is a fast, AI-powered Git branch management CLI. Auto-stashing, AI commits & PRs, worktrees, subway-map git graphs, work logs, and team dashboards — all from your terminal." />
+  <meta property="og:title" content="kunj — Git branches, evolved" />
+  <meta property="og:description" content="A fast, AI-powered Git branch management CLI. Auto-stashing, AI commits & PRs, worktrees, git graphs, and more." />
+  <meta property="og:type" content="website" />
+  <meta name="theme-color" content="#0a0e14" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <!-- ambient background -->
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <!-- NAV -->
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#top" class="brand">
+        <span class="brand-mark">🌿</span>
+        <span class="brand-name">kunj</span>
+        <span class="brand-caret">_</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#commands">Commands</a>
+        <a href="#ai">AI</a>
+        <a href="#graph">Graph</a>
+        <a href="#install">Install</a>
+      </nav>
+      <a class="btn btn-ghost nav-gh" href="https://github.com/adrianj98/kunj" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+        <span>Star</span>
+      </a>
+      <button class="nav-toggle" aria-label="Toggle menu" id="navToggle"><span></span><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-copy reveal">
+        <div class="badge"><span class="dot"></span> Open source · MIT · powered by Claude on AWS Bedrock</div>
+        <h1>Git branches,<br><span class="grad">evolved.</span></h1>
+        <p class="lede">
+          <strong>kunj</strong> is a terminal-native branch manager that auto-stashes your work,
+          writes your commits &amp; PRs with AI, draws your history as a subway map, and keeps
+          your whole team in sync — without leaving the shell.
+        </p>
+        <div class="hero-cta">
+          <a href="#install" class="btn btn-primary">Get started</a>
+          <a href="#commands" class="btn btn-ghost">Explore commands →</a>
+        </div>
+        <div class="install-pill" data-copy="npm install -g kunj">
+          <span class="prompt">$</span>
+          <code>npm install -g kunj</code>
+          <button class="copy-btn" aria-label="Copy install command">
+            <svg class="ic-copy" viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"></path></svg>
+            <svg class="ic-check" viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg>
+          </button>
+        </div>
+        <div class="hero-stats">
+          <div><span class="num" data-count="24">0</span><label>commands</label></div>
+          <div><span class="num" data-count="1">0</span><label>command to ship a PR</label></div>
+          <div><span class="num" data-count="0" data-suffix="ctx">0</span><label>context switches</label></div>
+        </div>
+      </div>
+
+      <!-- Animated terminal -->
+      <div class="term reveal" id="heroTerm">
+        <div class="term-bar">
+          <span class="tb-dot r"></span><span class="tb-dot y"></span><span class="tb-dot g"></span>
+          <span class="term-title">zsh — kunj</span>
+        </div>
+        <div class="term-body" id="termBody"></div>
+      </div>
+    </section>
+
+    <!-- LOGOS / TRUST STRIP -->
+    <section class="strip reveal">
+      <span>Works with</span>
+      <div class="strip-items">
+        <span>Git</span><i>·</i><span>GitHub</span><i>·</i><span>GitHub Actions</span><i>·</i><span>Jira</span><i>·</i><span>Slack</span><i>·</i><span>AWS Bedrock</span><i>·</i><span>bash / zsh / fish</span>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section class="section" id="features">
+      <div class="section-head reveal">
+        <span class="eyebrow">// why kunj</span>
+        <h2>Everything a branch needs, one keystroke away</h2>
+        <p>Stop juggling <code>git stash</code>, half-remembered branch names, and copy-pasted PR bodies. kunj remembers context so you don't have to.</p>
+      </div>
+      <div class="feature-grid">
+        <article class="card reveal">
+          <div class="card-ic">🔀</div>
+          <h3>Auto-stash &amp; restore</h3>
+          <p>Switching branches stashes your dirty tree and restores the right stash when you come back. Never lose in-progress work again.</p>
+          <code class="tag">kunj switch</code>
+        </article>
+        <article class="card reveal">
+          <div class="card-ic ai">✨</div>
+          <h3>AI commits &amp; PRs</h3>
+          <p>Claude reads your staged diff and history to write conventional commit messages, PR titles, and full descriptions.</p>
+          <code class="tag">kunj commit --auto</code>
+        </article>
+        <article class="card reveal">
+          <div class="card-ic">🌳</div>
+          <h3>Worktrees, done right</h3>
+          <p>Spin up a git worktree per branch and hop your IDE straight into it — parallel work without the checkout dance.</p>
+          <code class="tag">kunj tree</code>
+        </article>
+        <article class="card reveal">
+          <div class="card-ic">🚇</div>
+          <h3>Subway-map git graph</h3>
+          <p>A colorful, Unicode commit graph that actually reads like a map — filter by author, date, or branch.</p>
+          <code class="tag">kunj graph --all</code>
+        </article>
+        <article class="card reveal">
+          <div class="card-ic">🏷️</div>
+          <h3>Branch metadata</h3>
+          <p>Attach descriptions, tags, and notes to any branch. List and filter your work-in-progress at a glance.</p>
+          <code class="tag">kunj list --wip</code>
+        </article>
+        <article class="card reveal">
+          <div class="card-ic">📓</div>
+          <h3>Work logs &amp; standups</h3>
+          <p>Every commit is logged to a daily markdown journal. Generate an AI standup summary in seconds.</p>
+          <code class="tag">kunj log</code>
+        </article>
+        <article class="card reveal">
+          <div class="card-ic">👥</div>
+          <h3>Team dashboard</h3>
+          <p>A web dashboard and Slack reports that roll up PRs and activity across your team.</p>
+          <code class="tag">kunj team</code>
+        </article>
+        <article class="card reveal">
+          <div class="card-ic">🔌</div>
+          <h3>Shell integration</h3>
+          <p>Tab completion, handy aliases, lifecycle hooks, and your current PR# right in your prompt.</p>
+          <code class="tag">kunj completion --install</code>
+        </article>
+      </div>
+    </section>
+
+    <!-- COMMAND EXPLORER -->
+    <section class="section" id="commands">
+      <div class="section-head reveal">
+        <span class="eyebrow">// command explorer</span>
+        <h2>Pick a command, watch it run</h2>
+        <p>A living cheat-sheet. Select a command to see simulated output and its key flags.</p>
+      </div>
+
+      <div class="explorer reveal">
+        <div class="explorer-tabs" id="explorerTabs" role="tablist" aria-label="Commands"></div>
+        <div class="explorer-stage">
+          <div class="term term-lg">
+            <div class="term-bar">
+              <span class="tb-dot r"></span><span class="tb-dot y"></span><span class="tb-dot g"></span>
+              <span class="term-title" id="exTitle">kunj</span>
+            </div>
+            <div class="term-body" id="exBody"></div>
+          </div>
+          <aside class="explorer-side">
+            <h4 id="exName">—</h4>
+            <p id="exDesc">Select a command.</p>
+            <div class="flags" id="exFlags"></div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- AI SECTION -->
+    <section class="section ai-section" id="ai">
+      <div class="section-head reveal">
+        <span class="eyebrow gradient-eyebrow">// AI, on tap</span>
+        <h2>Your diff goes in. A great commit comes out.</h2>
+        <p>kunj sends your staged changes to Claude on AWS Bedrock and gets back messages that read like a senior engineer wrote them — in your chosen style.</p>
+      </div>
+
+      <div class="ai-demo reveal">
+        <div class="ai-col">
+          <div class="ai-label"><span class="dot in"></span> staged diff</div>
+          <pre class="code-block diffblock"><span class="d-meta">diff --git a/src/auth/session.ts</span>
+<span class="d-hunk">@@ -12,6 +12,9 @@ export function createSession(</span>
+<span class="d-add">+  const token = signJwt(user.id, { exp: '15m' });</span>
+<span class="d-add">+  await redis.setex(`sess:${user.id}`, 900, token);</span>
+<span class="d-add">+  logger.info('session.created', { userId: user.id });</span>
+   return token;</pre>
+        </div>
+        <div class="ai-arrow">→</div>
+        <div class="ai-col">
+          <div class="ai-label"><span class="dot ai"></span> generated by kunj</div>
+          <pre class="code-block outblock" id="aiOut"></pre>
+          <div class="ai-styles">
+            <span>style:</span>
+            <button class="chip active" data-style="conventional">conventional</button>
+            <button class="chip" data-style="semantic">semantic</button>
+            <button class="chip" data-style="gitmoji">gitmoji</button>
+            <button class="chip" data-style="simple">simple</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ai-cards">
+        <div class="mini-card reveal"><b>Commit messages</b><span>Analyzes staged diffs, writes the subject + body.</span></div>
+        <div class="mini-card reveal"><b>PR descriptions</b><span>Reads the whole branch diff &amp; commit history.</span></div>
+        <div class="mini-card reveal"><b>Stash messages</b><span>Never see <code>WIP on main</code> again.</span></div>
+        <div class="mini-card reveal"><b>Standup bullets</b><span>Turns your work log into a daily update.</span></div>
+      </div>
+    </section>
+
+    <!-- GIT GRAPH -->
+    <section class="section" id="graph">
+      <div class="section-head reveal">
+        <span class="eyebrow">// kunj graph</span>
+        <h2>History that reads like a map</h2>
+        <p>An animated subway-map view of your commits. This one draws itself — just like the real thing renders in your terminal.</p>
+      </div>
+      <div class="graph-wrap term term-lg reveal">
+        <div class="term-bar">
+          <span class="tb-dot r"></span><span class="tb-dot y"></span><span class="tb-dot g"></span>
+          <span class="term-title">kunj graph --all --pretty</span>
+        </div>
+        <div class="term-body graph-body">
+          <svg id="gitGraph" viewBox="0 0 640 360" role="img" aria-label="Animated git commit graph"></svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- INTEGRATIONS -->
+    <section class="section" id="integrations">
+      <div class="section-head reveal">
+        <span class="eyebrow">// plays well with others</span>
+        <h2>Plugs into the tools you already use</h2>
+      </div>
+      <div class="integ-grid">
+        <div class="integ reveal">
+          <h3>🐙 GitHub</h3>
+          <p>Create &amp; view PRs, open issues, watch GitHub Actions checks, and surface your PR# in the shell prompt.</p>
+          <code class="tag">kunj pr --web · kunj issue</code>
+        </div>
+        <div class="integ reveal">
+          <h3>🧩 Jira</h3>
+          <p>Link branches to issues and generate tickets from your work — right from the CLI.</p>
+          <code class="tag">kunj jira</code>
+        </div>
+        <div class="integ reveal">
+          <h3>💬 Slack</h3>
+          <p>Push activity and PR reports to channels so the team stays in the loop automatically.</p>
+          <code class="tag">kunj team</code>
+        </div>
+        <div class="integ reveal">
+          <h3>🌊 Git Flow</h3>
+          <p>Opinionated feature / release / hotfix workflow management, built in.</p>
+          <code class="tag">kunj flow</code>
+        </div>
+      </div>
+    </section>
+
+    <!-- INSTALL -->
+    <section class="section install-section" id="install">
+      <div class="section-head reveal">
+        <span class="eyebrow">// get started</span>
+        <h2>Up and running in a minute</h2>
+        <p>Node.js ≥ 20, Git, and a terminal. That's it.</p>
+      </div>
+      <div class="steps reveal">
+        <div class="step">
+          <span class="step-n">1</span>
+          <div>
+            <h4>Install globally</h4>
+            <div class="cmd-line" data-copy="npm install -g kunj"><code><span class="prompt">$</span> npm install -g kunj</code><button class="copy-btn sm" aria-label="Copy"><svg class="ic-copy" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"></path></svg><svg class="ic-check" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></button></div>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-n">2</span>
+          <div>
+            <h4>Run the interactive setup</h4>
+            <div class="cmd-line" data-copy="kunj setup"><code><span class="prompt">$</span> kunj setup</code><button class="copy-btn sm" aria-label="Copy"><svg class="ic-copy" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"></path></svg><svg class="ic-check" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></button></div>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-n">3</span>
+          <div>
+            <h4>Create your first branch</h4>
+            <div class="cmd-line" data-copy="kunj create feat/hello-kunj -d 'my first branch'"><code><span class="prompt">$</span> kunj create feat/hello-kunj -d 'my first branch'</code><button class="copy-btn sm" aria-label="Copy"><svg class="ic-copy" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"></path></svg><svg class="ic-check" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></button></div>
+          </div>
+        </div>
+      </div>
+      <p class="install-note reveal">AI features use your standard AWS credential chain to reach Claude on Bedrock. No keys to paste — just <code>aws configure</code> and go.</p>
+      <div class="hero-cta center reveal">
+        <a href="https://github.com/adrianj98/kunj" target="_blank" rel="noopener" class="btn btn-primary">View on GitHub</a>
+        <a href="https://github.com/adrianj98/kunj#readme" target="_blank" rel="noopener" class="btn btn-ghost">Read the docs</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="brand-mark">🌿</span>
+        <span class="brand-name">kunj</span>
+        <p>Git branch management, evolved. Made for people who live in the terminal.</p>
+      </div>
+      <div class="footer-cols">
+        <div>
+          <h5>Product</h5>
+          <a href="#features">Features</a>
+          <a href="#commands">Commands</a>
+          <a href="#ai">AI</a>
+        </div>
+        <div>
+          <h5>Resources</h5>
+          <a href="https://github.com/adrianj98/kunj#readme" target="_blank" rel="noopener">README</a>
+          <a href="https://github.com/adrianj98/kunj" target="_blank" rel="noopener">Source</a>
+          <a href="https://github.com/adrianj98/kunj/issues" target="_blank" rel="noopener">Issues</a>
+        </div>
+        <div>
+          <h5>Legal</h5>
+          <a href="https://github.com/adrianj98/kunj/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span id="year"></span> kunj · MIT Licensed</span>
+      <span class="mono">$ npm install -g kunj</span>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
