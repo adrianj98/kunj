@@ -3,6 +3,7 @@
 ## Quick Links
 
 - [Shell Integration Guide](./SHELL_INTEGRATION.md) - Autocomplete & PR# in prompt
+- [VS Code Extension](../vscode-extension/README.md) - Worktrees view showing which ones are open in other windows
 
 ## Features
 

@@ -1,0 +1,314 @@
+{
+  "name": "kunj-worktrees",
+  "displayName": "Kunj Worktrees",
+  "description": "Browse git worktrees, see which ones are open in other VS Code windows, and open them with one click. Powered by the kunj CLI.",
+  "version": "0.1.0",
+  "publisher": "kunj",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adrianj98/kunj",
+    "directory": "vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "worktree",
+    "branch",
+    "kunj"
+  ],
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kunj",
+          "title": "Kunj",
+          "icon": "media/kunj.svg"
+        }
+      ]
+    },
+    "views": {
+      "kunj": [
+        {
+          "id": "kunjWorktrees",
+          "name": "Worktrees",
+          "contextualTitle": "Kunj Worktrees",
+          "icon": "media/kunj.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "kunjWorktrees",
+        "contents": "Open a folder inside a git repository to see its worktrees.",
+        "when": "workbenchState == empty"
+      },
+      {
+        "view": "kunjWorktrees",
+        "contents": "The kunj CLI was not found.\nInstall it with `npm install -g kunj` or set `kunj.cliPath` in settings.\n[Open Settings](command:workbench.action.openSettings?%5B%22kunj.cliPath%22%5D)\n[Retry](command:kunj.worktrees.refresh)",
+        "when": "kunj.cliMissing"
+      },
+      {
+        "view": "kunjWorktrees",
+        "contents": "No git repository found in this workspace.\n[Refresh](command:kunj.worktrees.refresh)",
+        "when": "workbenchState != empty && kunj.noRepo && !kunj.cliMissing"
+      }
+    ],
+    "commands": [
+      {
+        "command": "kunj.worktrees.refresh",
+        "title": "Refresh Worktrees",
+        "category": "Kunj",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "kunj.worktrees.add",
+        "title": "Add Worktree…",
+        "category": "Kunj",
+        "icon": "$(add)"
+      },
+      {
+        "command": "kunj.worktrees.prune",
+        "title": "Prune Stale Worktrees",
+        "category": "Kunj",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "kunj.worktrees.pick",
+        "title": "Open Worktree…",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.worktrees.open",
+        "title": "Open Worktree",
+        "category": "Kunj",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "kunj.worktrees.openInNewWindow",
+        "title": "Open Worktree in New Window",
+        "category": "Kunj",
+        "icon": "$(empty-window)"
+      },
+      {
+        "command": "kunj.worktrees.openInCurrentWindow",
+        "title": "Open Worktree in Current Window",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.worktrees.addToWorkspace",
+        "title": "Add Worktree to Workspace",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.worktrees.openTerminal",
+        "title": "Open Terminal in Worktree",
+        "category": "Kunj",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "kunj.worktrees.revealInOS",
+        "title": "Reveal Worktree in File Manager",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.worktrees.copyPath",
+        "title": "Copy Worktree Path",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.worktrees.remove",
+        "title": "Remove Worktree…",
+        "category": "Kunj",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "kunj.worktrees.add",
+          "when": "view == kunjWorktrees",
+          "group": "navigation@1"
+        },
+        {
+          "command": "kunj.worktrees.refresh",
+          "when": "view == kunjWorktrees",
+          "group": "navigation@2"
+        },
+        {
+          "command": "kunj.worktrees.prune",
+          "when": "view == kunjWorktrees",
+          "group": "1_actions"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "kunj.worktrees.openInNewWindow",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/",
+          "group": "inline@1"
+        },
+        {
+          "command": "kunj.worktrees.openTerminal",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/",
+          "group": "inline@2"
+        },
+        {
+          "command": "kunj.worktrees.remove",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && !(viewItem =~ /main/) && !(viewItem =~ /current/)",
+          "group": "inline@3"
+        },
+        {
+          "command": "kunj.worktrees.open",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "kunj.worktrees.openInNewWindow",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/",
+          "group": "1_open@2"
+        },
+        {
+          "command": "kunj.worktrees.openInCurrentWindow",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/ && !(viewItem =~ /current/)",
+          "group": "1_open@3"
+        },
+        {
+          "command": "kunj.worktrees.addToWorkspace",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/ && !(viewItem =~ /inworkspace/)",
+          "group": "1_open@4"
+        },
+        {
+          "command": "kunj.worktrees.openTerminal",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/",
+          "group": "2_tools@1"
+        },
+        {
+          "command": "kunj.worktrees.revealInOS",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/",
+          "group": "2_tools@2"
+        },
+        {
+          "command": "kunj.worktrees.copyPath",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/",
+          "group": "2_tools@3"
+        },
+        {
+          "command": "kunj.worktrees.remove",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && !(viewItem =~ /main/) && !(viewItem =~ /current/)",
+          "group": "3_danger@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "kunj.worktrees.open",
+          "when": "false"
+        },
+        {
+          "command": "kunj.worktrees.openInNewWindow",
+          "when": "false"
+        },
+        {
+          "command": "kunj.worktrees.openInCurrentWindow",
+          "when": "false"
+        },
+        {
+          "command": "kunj.worktrees.addToWorkspace",
+          "when": "false"
+        },
+        {
+          "command": "kunj.worktrees.openTerminal",
+          "when": "false"
+        },
+        {
+          "command": "kunj.worktrees.revealInOS",
+          "when": "false"
+        },
+        {
+          "command": "kunj.worktrees.copyPath",
+          "when": "false"
+        },
+        {
+          "command": "kunj.worktrees.remove",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Kunj Worktrees",
+      "properties": {
+        "kunj.cliPath": {
+          "type": "string",
+          "default": "kunj",
+          "markdownDescription": "Path to the `kunj` executable. May include leading arguments, e.g. `node /path/to/kunj/dist/index.js`."
+        },
+        "kunj.worktrees.clickAction": {
+          "type": "string",
+          "enum": [
+            "newWindow",
+            "currentWindow",
+            "ask"
+          ],
+          "enumDescriptions": [
+            "Open the worktree in a new window (or focus the window where it is already open)",
+            "Replace the folder in the current window",
+            "Ask every time"
+          ],
+          "default": "newWindow",
+          "description": "What happens when a worktree is clicked in the Worktrees view."
+        },
+        "kunj.worktrees.refreshInterval": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "Seconds between automatic refreshes of the Worktrees view. Set to 0 to disable."
+        },
+        "kunj.worktrees.showStatus": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show uncommitted-change counts and ahead/behind information for every worktree (runs git status per worktree)."
+        },
+        "kunj.worktrees.showPath": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the worktree path next to the branch name."
+        },
+        "kunj.worktrees.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the current worktree in the status bar."
+        },
+        "kunj.worktrees.trackSessions": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Register this window with `kunj worktree session` so other windows (and the CLI) can see which worktrees are open."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js --sourcemap",
+    "watch": "npm run build -- --watch",
+    "lint": "tsc --noEmit",
+    "package": "vsce package --no-dependencies",
+    "install-local": "npm run package && code --install-extension kunj-worktrees-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.3.3"
+  }
+}

@@ -48,6 +48,10 @@ export interface KunjConfig {
     includeDiffInPR?: boolean;
   };
   flow?: FlowConfig;
+  worktree?: {
+    baseDir?: string;
+    editorCommand?: string;
+  };
   jira?: {
     enabled: boolean;
     baseUrl: string;

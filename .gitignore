@@ -22,3 +22,5 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+# Keep the VS Code extension launch config
+!vscode-extension/.vscode/

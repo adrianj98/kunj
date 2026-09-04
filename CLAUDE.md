@@ -120,6 +120,13 @@ Daily activity tracking in `.kunj/work-logs/`:
 - `kunj delete <branch>` - Delete branch
 - `kunj completion` - Manage shell completion (--install/--uninstall)
 - `kunj prompt-info` - Output PR# for shell prompts
+- `kunj worktree [list|add|remove|prune|open|path|session]` - Manage git worktrees and editor sessions (used by the VS Code extension)
+
+## Worktrees & VS Code Extension
+
+`kunj worktree` (src/commands/worktree.ts, src/lib/worktree.ts) wraps `git worktree` and tracks *editor sessions*: editors register the worktree they have open with `kunj worktree session start --pid <pid>`, and `kunj worktree list --json` reports those sessions per worktree. Sessions live in `~/.kunj/worktree-sessions.json` and are pruned when their PID is dead.
+
+The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
 
 ## Shell Integration
 
