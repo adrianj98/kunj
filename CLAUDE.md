@@ -37,6 +37,8 @@ npm test:coverage
 npm run lint
 ```
 
+also commit and push changes
+
 ## Testing
 
 - Tests are located in `src/**/__tests__/` directories
@@ -74,13 +76,17 @@ Settings are registered via a centralized registry (src/lib/settings-registry.ts
 
 Two-tier config (global + local):
 - Global: `~/.kunj/config.json` (user-wide settings)
-- Local: `.kunj/config.json` (per-repository settings)
+- Local: `~/.kunj/{reponame}/config.json` (per-repository settings, shared by all worktrees of the repo)
 - Local overrides global via deep merge
 - Config loaded via `loadConfig()` in src/lib/config.ts
 
+The per-repository directory is resolved by `getKunjDir()` in src/lib/config.ts. `{reponame}` comes from the
+`origin` remote URL, falling back to the basename of the git common dir. Outside a git repository it falls back
+to `./.kunj`. A legacy `./.kunj` directory is copied to the new location the first time it is seen.
+
 ### Branch Metadata
 
-Per-branch metadata stored in `.kunj/branches.json`:
+Per-branch metadata stored in `~/.kunj/{reponame}/branches.json`:
 - Descriptions, tags, notes, related issues
 - Stash history with timestamps
 - Last switched timestamp
@@ -99,9 +105,17 @@ AWS credentials and region resolved via standard AWS SDK chain (env vars, config
 
 Commit styles (conventional, semantic, simple, gitmoji, custom) are defined in src/lib/commit-styles.ts.
 
+### Worktrees and Keep Files
+
+`kunj tree` (src/commands/tree.ts) wraps `git worktree`:
+- Worktrees live under `worktree.dir` (default `~/.kunj/{reponame}/worktrees`), one folder per branch named with `/` replaced by `_` (src/lib/worktree.ts)
+- If the branch is already checked out in any worktree, that path is reused; otherwise the branch is created from the current branch (or tracked from `origin/<branch>`)
+- After creating or switching, the worktree is opened with `worktree.openCommand` (default `code`). VS Code-like editors get `-r` (reuse window) or `-n` (`--new-window`)
+- Keep files (src/lib/keep.ts) are stored in `~/.kunj/{reponame}/keep/` with their path relative to the worktree root and are applied to every newly created worktree
+
 ### Work Log System
 
-Daily activity tracking in `.kunj/work-logs/`:
+Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - Markdown files named `YYYY-MM-DD.md`
 - Automatically appends commit activity with timestamps
 - AI-generated standup format with bullets
@@ -120,6 +134,8 @@ Daily activity tracking in `.kunj/work-logs/`:
 - `kunj delete <branch>` - Delete branch
 - `kunj completion` - Manage shell completion (--install/--uninstall)
 - `kunj prompt-info` - Output PR# for shell prompts
+- `kunj tree <branch>` - Create or switch to a git worktree for the branch and open it in the editor (`-n` new window, `-p` print path only)
+- `kunj tree keep [file|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 
 ## Shell Integration
 
@@ -158,6 +174,7 @@ Core git operations abstracted in src/lib/git.ts:
 - All git commands use `child_process.exec` wrapped with `promisify`
 - Functions return structured results or throw errors
 - File status parsing handles standard git status codes (M, A, D, R, C, U)
+
 
 ## Release Process
 

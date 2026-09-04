@@ -3,6 +3,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execSync } from 'child_process';
 import { KunjConfig } from '../types';
 import { defaultConfig, KUNJ_DIR, CONFIG_FILE } from '../constants';
 
@@ -16,9 +17,101 @@ export function getGlobalConfigPath(): string {
   return path.join(getGlobalKunjDir(), 'config.json');
 }
 
-// Helper function to get local .kunj directory path
+function gitSync(args: string): string | null {
+  try {
+    return execSync(`git ${args}`, { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// Extract a repository name from a remote URL (ssh, https, or local path)
+export function repoNameFromUrl(url: string): string {
+  let name = url.trim().replace(/[\/\\]+$/, '');
+  name = name.substring(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'), name.lastIndexOf(':')) + 1);
+  return name.replace(/\.git$/, '');
+}
+
+// Get the main (common) directory of the repository, shared across all worktrees
+let commonRootCache: string | null | undefined;
+export function getRepoCommonRoot(): string | null {
+  if (commonRootCache !== undefined) {
+    return commonRootCache;
+  }
+  const commonDir = gitSync('rev-parse --path-format=absolute --git-common-dir');
+  if (!commonDir) {
+    commonRootCache = null;
+    return null;
+  }
+  // Non-bare repos: <root>/.git. Bare repos: the directory itself.
+  commonRootCache = path.basename(commonDir) === '.git' ? path.dirname(commonDir) : commonDir;
+  return commonRootCache;
+}
+
+// Resolve the repository name used to namespace ~/.kunj/{reponame}
+let repoNameCache: string | null | undefined;
+export function getRepoName(): string | null {
+  if (repoNameCache !== undefined) {
+    return repoNameCache;
+  }
+  const origin = gitSync('remote get-url origin');
+  if (origin) {
+    const fromUrl = repoNameFromUrl(origin);
+    if (fromUrl) {
+      repoNameCache = fromUrl;
+      return repoNameCache;
+    }
+  }
+  const root = getRepoCommonRoot();
+  repoNameCache = root ? path.basename(root).replace(/\.git$/, '') : null;
+  return repoNameCache;
+}
+
+// Test/refresh helper: clear cached repo resolution
+export function resetRepoCache(): void {
+  commonRootCache = undefined;
+  repoNameCache = undefined;
+  migrationChecked = false;
+}
+
+// Helper function to get the per-repository kunj directory path.
+// Lives in ~/.kunj/{reponame} so every worktree of a repo shares it.
+// Outside a git repository, falls back to ./.kunj in the current directory.
+let migrationChecked = false;
 export function getKunjDir(): string {
-  return path.join(process.cwd(), KUNJ_DIR);
+  const repoName = getRepoName();
+  if (!repoName) {
+    return path.join(process.cwd(), KUNJ_DIR);
+  }
+  const dir = path.join(getGlobalKunjDir(), repoName);
+  if (!migrationChecked) {
+    migrationChecked = true;
+    migrateLegacyKunjDir(dir);
+  }
+  return dir;
+}
+
+// One-time migration: copy a legacy ./.kunj directory into the new location
+function migrateLegacyKunjDir(newDir: string): void {
+  try {
+    if (fs.existsSync(newDir)) {
+      return;
+    }
+    const candidates = [path.join(process.cwd(), KUNJ_DIR)];
+    const toplevel = gitSync('rev-parse --show-toplevel');
+    if (toplevel) {
+      candidates.push(path.join(toplevel, KUNJ_DIR));
+    }
+    const legacy = candidates.find(c => fs.existsSync(path.join(c, CONFIG_FILE)) || fs.existsSync(path.join(c, 'branches.json')));
+    if (!legacy) {
+      return;
+    }
+    fs.mkdirSync(path.dirname(newDir), { recursive: true });
+    fs.cpSync(legacy, newDir, { recursive: true });
+    console.error(`kunj: migrated ${legacy} -> ${newDir}`);
+  } catch {
+    // Migration is best-effort
+  }
 }
 
 // Helper function to get local config file path
