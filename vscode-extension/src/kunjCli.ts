@@ -34,6 +34,20 @@ export interface WorktreeStatus {
   upstream: string | null;
 }
 
+export interface PullRequest {
+  provider: 'github' | 'gitlab';
+  number: number;
+  title: string;
+  state: 'open' | 'merged' | 'closed';
+  url: string;
+  draft: boolean;
+  baseBranch: string | null;
+  headBranch: string;
+  reviewDecision: string | null;
+  checks: 'success' | 'failure' | 'pending' | null;
+  updatedAt: string | null;
+}
+
 export interface Worktree {
   path: string;
   name: string;
@@ -50,11 +64,13 @@ export interface Worktree {
   isCurrent: boolean;
   sessions: WorktreeSession[];
   status?: WorktreeStatus;
+  pullRequest?: PullRequest | null;
 }
 
 export interface WorktreeListResult {
   repoRoot: string;
   currentPath: string | null;
+  pullRequestLookup?: 'github' | 'gitlab' | 'unavailable' | 'skipped';
   worktrees: Worktree[];
 }
 
@@ -152,10 +168,15 @@ export class KunjCli {
 
   // ---- worktree operations ---------------------------------------------
 
-  listWorktrees(cwd: string, includeStatus: boolean): Promise<WorktreeListResult> {
+  listWorktrees(cwd: string, includeStatus: boolean, includePullRequests = true): Promise<WorktreeListResult> {
     const args = ['worktree', 'list'];
     if (!includeStatus) args.push('--no-status');
+    if (!includePullRequests) args.push('--no-pr');
     return this.run<WorktreeListResult>(args, cwd);
+  }
+
+  getPullRequest(cwd: string, target: string): Promise<{ branch: string; path: string; pullRequest: PullRequest | null }> {
+    return this.run(['worktree', 'pr', target], cwd);
   }
 
   addWorktree(

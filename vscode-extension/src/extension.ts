@@ -8,7 +8,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { KunjCli, KunjCliError, Worktree } from './kunjCli';
 import { SessionManager } from './sessionManager';
-import { RepoEntry, WorktreeNode, WorktreeProvider, describeSession, samePath, shortenPath } from './worktreeProvider';
+import { RepoEntry, WorktreeNode, WorktreeProvider, describeSession, prBadge, samePath, shortenPath } from './worktreeProvider';
 
 let sessions: SessionManager | undefined;
 
@@ -126,9 +126,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         : node.openElsewhere.length
           ? `$(window) ${node.openElsewhere.map(describeSession).join(', ')}`
           : '';
+      const pr = worktree.pullRequest ? `$(git-pull-request) ${prBadge(worktree.pullRequest)}` : '';
       return {
         label: `${node.openElsewhere.length ? '$(window) ' : ''}${worktree.name}`,
-        description: where,
+        description: [where, pr].filter(Boolean).join('  '),
         detail: shortenPath(worktree.path, repo.repoRoot),
         node,
       };
@@ -233,6 +234,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (!node) return;
     await vscode.env.clipboard.writeText(node.worktree.path);
     void vscode.window.setStatusBarMessage(`Copied ${node.worktree.path}`, 3000);
+  });
+
+  register('kunj.worktrees.openPullRequest', async (arg?: unknown) => {
+    const node = nodeFrom(arg) || (await pickWorktree('Select a worktree to open its pull request'));
+    if (!node) return;
+    let pr = node.worktree.pullRequest || null;
+    if (!pr && node.worktree.branch) {
+      // Not in the cached listing (lookup disabled or PR just created): ask the CLI directly
+      const result = await withProgress(`Looking up pull request for ${node.worktree.name}…`, () =>
+        cli.getPullRequest(node.repo.cwd, node.worktree.path)
+      );
+      pr = result?.pullRequest || null;
+    }
+    if (!pr) {
+      const create = await vscode.window.showInformationMessage(
+        `Kunj: no pull request found for ${node.worktree.name}.`,
+        'Create Pull Request'
+      );
+      if (create) await vscode.commands.executeCommand('kunj.worktrees.createPullRequest', node);
+      return;
+    }
+    await vscode.env.openExternal(vscode.Uri.parse(pr.url));
+  });
+
+  register('kunj.worktrees.copyPullRequestUrl', async (arg?: unknown) => {
+    const node = nodeFrom(arg) || (await pickWorktree('Select a worktree'));
+    const pr = node?.worktree.pullRequest;
+    if (!node || !pr) return;
+    await vscode.env.clipboard.writeText(pr.url);
+    void vscode.window.setStatusBarMessage(`Copied ${pr.url}`, 3000);
+  });
+
+  // `kunj pr` is interactive (AI description, prompts), so run it in a terminal
+  register('kunj.worktrees.createPullRequest', async (arg?: unknown) => {
+    const node = nodeFrom(arg) || (await pickWorktree('Select a worktree to create a pull request for'));
+    if (!node) return;
+    const cliPath = (vscode.workspace.getConfiguration('kunj').get<string>('cliPath') || 'kunj').trim();
+    const terminal = vscode.window.createTerminal({ name: `kunj pr: ${node.worktree.name}`, cwd: node.worktree.path });
+    terminal.show();
+    terminal.sendText(`${cliPath} pr`);
   });
 
   register('kunj.worktrees.prune', async () => {

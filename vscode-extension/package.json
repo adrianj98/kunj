@@ -74,7 +74,7 @@
       },
       {
         "command": "kunj.worktrees.add",
-        "title": "Add Worktree…",
+        "title": "Add Worktree\u2026",
         "category": "Kunj",
         "icon": "$(add)"
       },
@@ -86,7 +86,7 @@
       },
       {
         "command": "kunj.worktrees.pick",
-        "title": "Open Worktree…",
+        "title": "Open Worktree\u2026",
         "category": "Kunj"
       },
       {
@@ -129,9 +129,26 @@
       },
       {
         "command": "kunj.worktrees.remove",
-        "title": "Remove Worktree…",
+        "title": "Remove Worktree\u2026",
         "category": "Kunj",
         "icon": "$(trash)"
+      },
+      {
+        "command": "kunj.worktrees.openPullRequest",
+        "title": "Open Pull Request",
+        "category": "Kunj",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "kunj.worktrees.copyPullRequestUrl",
+        "title": "Copy Pull Request URL",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.worktrees.createPullRequest",
+        "title": "Create Pull Request\u2026",
+        "category": "Kunj",
+        "icon": "$(git-pull-request-create)"
       }
     ],
     "menus": {
@@ -153,6 +170,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "kunj.worktrees.openPullRequest",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /pr/",
+          "group": "inline@0"
+        },
         {
           "command": "kunj.worktrees.openInNewWindow",
           "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/",
@@ -207,6 +229,21 @@
           "command": "kunj.worktrees.remove",
           "when": "view == kunjWorktrees && viewItem =~ /worktree/ && !(viewItem =~ /main/) && !(viewItem =~ /current/)",
           "group": "3_danger@1"
+        },
+        {
+          "command": "kunj.worktrees.openPullRequest",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /pr/",
+          "group": "1a_pr@1"
+        },
+        {
+          "command": "kunj.worktrees.copyPullRequestUrl",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /pr/",
+          "group": "1a_pr@2"
+        },
+        {
+          "command": "kunj.worktrees.createPullRequest",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /nopr/ && viewItem =~ /exists/",
+          "group": "1a_pr@3"
         }
       ],
       "commandPalette": [
@@ -240,6 +277,10 @@
         },
         {
           "command": "kunj.worktrees.remove",
+          "when": "false"
+        },
+        {
+          "command": "kunj.worktrees.copyPullRequestUrl",
           "when": "false"
         }
       ]
@@ -292,6 +333,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Register this window with `kunj worktree session` so other windows (and the CLI) can see which worktrees are open."
+        },
+        "kunj.worktrees.showPullRequests": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the pull request for each worktree (looked up through `gh` or `glab` by the kunj CLI)."
         }
       }
     }

@@ -7,6 +7,7 @@ A Worktrees view for VS Code that is driven entirely by the [kunj](https://githu
 - Click a worktree to open it. If it is already open elsewhere, VS Code focuses that window instead of opening a duplicate.
 - Create, remove and prune worktrees, open a terminal in one, reveal it in the file manager, copy its path, or add it to the current workspace.
 - Per-worktree status: uncommitted change count and ahead/behind of upstream.
+- The related pull request for each worktree: number, open/draft/merged/closed state and CI check result. Click the PR icon to open it in the browser, or create one with `kunj pr` from the context menu.
 - Status bar item showing the current worktree; click it to jump to another one.
 
 Everything the extension does is a `kunj worktree … --json` call. The extension never runs git itself, so the CLI stays the single source of truth and the same information is available from your terminal:
@@ -15,6 +16,7 @@ Everything the extension does is a `kunj worktree … --json` call. The extensio
 kunj worktree                # list worktrees, including which editor windows have them open
 kunj worktree add <branch>   # create a worktree (default: ../<repo>-worktrees/<branch>)
 kunj worktree open <branch>  # open in your editor
+kunj worktree pr <branch> -w # show the pull request for a worktree (and open it)
 kunj worktree remove <branch>
 kunj worktree prune
 kunj worktree session list   # editor windows currently registered
@@ -24,6 +26,7 @@ kunj worktree session list   # editor windows currently registered
 
 - The `kunj` CLI on your `PATH` (`npm install -g kunj`), or point `kunj.cliPath` at it, for example `node /path/to/kunj/dist/index.js`.
 - git 2.31 or newer (for `git worktree list --porcelain` and `--path-format`).
+- Optional: the GitHub CLI (`gh`) or GitLab CLI (`glab`), logged in, for pull request information. Without it the view simply omits PRs.
 
 ## How "open in other windows" works
 
@@ -41,6 +44,7 @@ Remote workspaces (SSH, WSL, containers) work as long as `kunj` is installed on 
 | Kunj: Add Worktree… | Pick an existing branch or create a new one, choose a folder, then open it |
 | Kunj: Open Worktree… | Quick pick of all worktrees with their open state |
 | Kunj: Prune Stale Worktrees | `kunj worktree prune` |
+| Open Pull Request, Copy Pull Request URL | From `kunj worktree list --json`; a worktree without one gets Create Pull Request… which runs `kunj pr` in a terminal |
 | Open Worktree / in New Window / in Current Window | Context menu on a worktree |
 | Add Worktree to Workspace | Adds the folder to the multi-root workspace |
 | Open Terminal in Worktree | Integrated terminal with the worktree as cwd |
@@ -55,6 +59,7 @@ Remote workspaces (SSH, WSL, containers) work as long as `kunj` is installed on 
 | `kunj.worktrees.clickAction` | `newWindow` | `newWindow`, `currentWindow` or `ask` |
 | `kunj.worktrees.refreshInterval` | `30` | Seconds between automatic refreshes, `0` to disable |
 | `kunj.worktrees.showStatus` | `true` | Run `git status` per worktree to show change counts |
+| `kunj.worktrees.showPullRequests` | `true` | Look up the pull request for each worktree via `gh`/`glab` |
 | `kunj.worktrees.showPath` | `true` | Show the worktree path next to its branch |
 | `kunj.worktrees.showStatusBar` | `true` | Show the current worktree in the status bar |
 | `kunj.worktrees.trackSessions` | `true` | Register this window so other windows can see it |

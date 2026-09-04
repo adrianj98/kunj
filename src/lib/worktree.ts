@@ -39,6 +39,23 @@ export interface WorktreeStatus {
   upstream: string | null;
 }
 
+export type PullRequestState = 'open' | 'merged' | 'closed';
+export type ChecksState = 'success' | 'failure' | 'pending';
+
+export interface PullRequestInfo {
+  provider: 'github' | 'gitlab';
+  number: number;
+  title: string;
+  state: PullRequestState;
+  url: string;
+  draft: boolean;
+  baseBranch: string | null;
+  headBranch: string;
+  reviewDecision: string | null; // e.g. APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
+  checks: ChecksState | null;
+  updatedAt: string | null;
+}
+
 export interface WorktreeInfo {
   path: string;
   name: string;
@@ -53,6 +70,7 @@ export interface WorktreeInfo {
   isMain: boolean;
   exists: boolean;
   status?: WorktreeStatus;
+  pullRequest?: PullRequestInfo | null;
   sessions: WorktreeSession[];
   isCurrent: boolean;
 }
@@ -119,7 +137,7 @@ export async function getDefaultWorktreePath(branch: string, baseDir?: string, c
 // Parsing `git worktree list --porcelain`
 // ---------------------------------------------------------------------------
 
-export type ParsedWorktree = Omit<WorktreeInfo, 'sessions' | 'isCurrent' | 'exists' | 'status'>;
+export type ParsedWorktree = Omit<WorktreeInfo, 'sessions' | 'isCurrent' | 'exists' | 'status' | 'pullRequest'>;
 
 export function parseWorktreeList(porcelain: string): ParsedWorktree[] {
   const blocks = porcelain.split(/\n\s*\n/).map(b => b.trim()).filter(Boolean);
@@ -214,8 +232,12 @@ export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeS
 
 export interface ListWorktreesOptions {
   includeStatus?: boolean;
+  includePullRequests?: boolean;
   cwd?: string;
 }
+
+// Whether the last listWorktrees call managed to reach a PR provider
+export let lastPullRequestLookup: 'github' | 'gitlab' | 'unavailable' | 'skipped' = 'skipped';
 
 export async function listWorktrees(options: ListWorktreesOptions = {}): Promise<WorktreeInfo[]> {
   const cwd = options.cwd || process.cwd();
@@ -223,6 +245,12 @@ export async function listWorktrees(options: ListWorktreesOptions = {}): Promise
   const parsed = parseWorktreeList(stdout);
   const sessions = loadActiveSessions();
   const currentPath = await getCurrentWorktreePath(cwd);
+  const pullRequests = options.includePullRequests ? await fetchPullRequests(cwd) : null;
+  lastPullRequestLookup = !options.includePullRequests
+    ? 'skipped'
+    : pullRequests
+      ? pullRequests[0]?.provider || (await detectProvider(cwd)) || 'github'
+      : 'unavailable';
 
   const worktrees: WorktreeInfo[] = await Promise.all(
     parsed.map(async wt => {
@@ -235,6 +263,9 @@ export async function listWorktrees(options: ListWorktreesOptions = {}): Promise
       };
       if (options.includeStatus !== false && exists && !wt.bare) {
         info.status = await getWorktreeStatus(wt.path);
+      }
+      if (options.includePullRequests) {
+        info.pullRequest = pullRequests && wt.branch ? pickPullRequest(pullRequests, wt.branch) : null;
       }
       return info;
     })
@@ -250,6 +281,121 @@ export async function findWorktree(target: string, cwd?: string): Promise<Worktr
   if (byBranch) return byBranch;
   const candidate = path.resolve(cwd || process.cwd(), target);
   return worktrees.find(wt => samePath(wt.path, candidate)) || null;
+}
+
+// ---------------------------------------------------------------------------
+// Pull requests
+// ---------------------------------------------------------------------------
+
+// Reduce a GitHub statusCheckRollup array to a single state
+export function summarizeChecks(rollup: any[] | null | undefined): ChecksState | null {
+  if (!Array.isArray(rollup) || rollup.length === 0) return null;
+  let pending = false;
+  for (const check of rollup) {
+    // CheckRun: { status, conclusion }; StatusContext: { state }
+    const conclusion = String(check?.conclusion || check?.state || '').toUpperCase();
+    const status = String(check?.status || '').toUpperCase();
+    if (['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(conclusion)) {
+      return 'failure';
+    }
+    if (status && status !== 'COMPLETED') pending = true;
+    else if (!conclusion || ['PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WAITING'].includes(conclusion)) pending = true;
+  }
+  return pending ? 'pending' : 'success';
+}
+
+// Prefer an open PR; otherwise the most recently updated one for the branch
+export function pickPullRequest(prs: PullRequestInfo[], branch: string): PullRequestInfo | null {
+  const forBranch = prs.filter(pr => pr.headBranch === branch);
+  if (forBranch.length === 0) return null;
+  const open = forBranch.find(pr => pr.state === 'open');
+  if (open) return open;
+  return forBranch.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))[0];
+}
+
+const GH_FIELDS = 'number,title,state,url,isDraft,headRefName,baseRefName,reviewDecision,statusCheckRollup,updatedAt';
+
+async function fetchGitHubPullRequests(cwd: string): Promise<PullRequestInfo[] | null> {
+  try {
+    const { stdout } = await execAsync(`gh pr list --state all --limit 200 --json ${GH_FIELDS}`, {
+      cwd,
+      maxBuffer: 20 * 1024 * 1024,
+      env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' },
+    });
+    const rows = JSON.parse(stdout || '[]');
+    if (!Array.isArray(rows)) return null;
+    return rows.map((r: any) => ({
+      provider: 'github' as const,
+      number: r.number,
+      title: r.title || '',
+      state: String(r.state || '').toLowerCase() as PullRequestState,
+      url: r.url,
+      draft: !!r.isDraft,
+      baseBranch: r.baseRefName || null,
+      headBranch: r.headRefName,
+      reviewDecision: r.reviewDecision || null,
+      checks: summarizeChecks(r.statusCheckRollup),
+      updatedAt: r.updatedAt || null,
+    }));
+  } catch {
+    return null; // gh missing, not authenticated, or not a GitHub remote
+  }
+}
+
+async function fetchGitLabPullRequests(cwd: string): Promise<PullRequestInfo[] | null> {
+  try {
+    const { stdout } = await execAsync('glab mr list --all --per-page 100 --output json', {
+      cwd,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    const rows = JSON.parse(stdout || '[]');
+    if (!Array.isArray(rows)) return null;
+    return rows.map((r: any) => ({
+      provider: 'gitlab' as const,
+      number: r.iid,
+      title: r.title || '',
+      state: (r.state === 'opened' ? 'open' : r.state === 'merged' ? 'merged' : 'closed') as PullRequestState,
+      url: r.web_url,
+      draft: !!(r.draft || r.work_in_progress),
+      baseBranch: r.target_branch || null,
+      headBranch: r.source_branch,
+      reviewDecision: null,
+      checks: r.head_pipeline?.status === 'success' ? 'success'
+        : r.head_pipeline?.status === 'failed' ? 'failure'
+        : r.head_pipeline?.status ? 'pending' : null,
+      updatedAt: r.updated_at || null,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+async function detectProvider(cwd: string): Promise<'github' | 'gitlab' | null> {
+  try {
+    const { stdout } = await execAsync('git remote get-url origin', { cwd });
+    const url = stdout.trim().toLowerCase();
+    if (url.includes('github.com')) return 'github';
+    if (url.includes('gitlab')) return 'gitlab';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Fetch every PR/MR of the repository in one call so listing stays fast.
+// Returns null when no provider CLI is available.
+export async function fetchPullRequests(cwd: string = process.cwd()): Promise<PullRequestInfo[] | null> {
+  const provider = await detectProvider(cwd);
+  if (provider === 'gitlab') return fetchGitLabPullRequests(cwd);
+  if (provider === 'github') return fetchGitHubPullRequests(cwd);
+  // Unknown host (e.g. GitHub Enterprise): try both
+  return (await fetchGitHubPullRequests(cwd)) ?? (await fetchGitLabPullRequests(cwd));
+}
+
+// Look up the PR for a single branch
+export async function getPullRequestForBranch(branch: string, cwd?: string): Promise<PullRequestInfo | null> {
+  const prs = await fetchPullRequests(cwd);
+  return prs ? pickPullRequest(prs, branch) : null;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { parseWorktreeList, branchToDirName, isSessionAlive, WorktreeSession } from '../worktree';
+import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, WorktreeSession, PullRequestInfo } from '../worktree';
 
 describe('worktree utilities', () => {
   describe('parseWorktreeList', () => {
@@ -79,6 +79,48 @@ describe('worktree utilities', () => {
       expect(isSessionAlive(base, now, 'host-b', () => false)).toBe(true);
       const stale = { ...base, lastSeen: '2025-12-01T00:00:00.000Z' };
       expect(isSessionAlive(stale, now, 'host-b', () => true)).toBe(false);
+    });
+  });
+
+  describe('summarizeChecks', () => {
+    it('returns null without checks', () => {
+      expect(summarizeChecks([])).toBeNull();
+      expect(summarizeChecks(undefined)).toBeNull();
+    });
+
+    it('reports failure when any check failed', () => {
+      expect(summarizeChecks([
+        { status: 'COMPLETED', conclusion: 'SUCCESS' },
+        { status: 'COMPLETED', conclusion: 'FAILURE' },
+      ])).toBe('failure');
+      expect(summarizeChecks([{ state: 'ERROR' }])).toBe('failure');
+    });
+
+    it('reports pending while checks are running', () => {
+      expect(summarizeChecks([{ status: 'IN_PROGRESS', conclusion: '' }])).toBe('pending');
+      expect(summarizeChecks([{ state: 'PENDING' }])).toBe('pending');
+    });
+
+    it('reports success when everything passed', () => {
+      expect(summarizeChecks([{ status: 'COMPLETED', conclusion: 'SUCCESS' }, { state: 'SUCCESS' }])).toBe('success');
+    });
+  });
+
+  describe('pickPullRequest', () => {
+    const pr = (n: number, headBranch: string, state: PullRequestInfo['state'], updatedAt: string): PullRequestInfo => ({
+      provider: 'github', number: n, title: `PR ${n}`, state, url: `https://x/pull/${n}`, draft: false,
+      baseBranch: 'main', headBranch, reviewDecision: null, checks: null, updatedAt,
+    });
+
+    it('prefers the open PR for the branch', () => {
+      const prs = [pr(1, 'feat', 'closed', '2026-09-01'), pr(2, 'feat', 'open', '2026-01-01'), pr(3, 'other', 'open', '2026-09-02')];
+      expect(pickPullRequest(prs, 'feat')?.number).toBe(2);
+    });
+
+    it('falls back to the most recently updated PR', () => {
+      const prs = [pr(1, 'feat', 'closed', '2026-09-01'), pr(2, 'feat', 'merged', '2026-09-03')];
+      expect(pickPullRequest(prs, 'feat')?.number).toBe(2);
+      expect(pickPullRequest(prs, 'none')).toBeNull();
     });
   });
 });

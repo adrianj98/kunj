@@ -85,6 +85,7 @@ kunj worktree                    # list worktrees and which editor windows have 
 kunj worktree add feature/login  # create ../<repo>-worktrees/feature-login
 kunj worktree add hotfix -b --base main   # new branch in a new worktree
 kunj worktree open feature/login # open in your editor (worktree.editorCommand, default "code")
+kunj worktree pr feature/login   # show the related pull request (add --web to open it)
 kunj worktree remove feature/login
 kunj worktree prune
 ```
@@ -93,7 +94,7 @@ Add `--json` to any action for machine-readable output.
 
 ### VS Code extension
 
-The `vscode-extension/` folder contains **Kunj Worktrees**, a VS Code extension that lists worktrees, shows which ones are open in other windows, and opens them on click. It uses the kunj CLI for everything. See [vscode-extension/README.md](./vscode-extension/README.md).
+The `vscode-extension/` folder contains **Kunj Worktrees**, a VS Code extension that lists worktrees, shows which ones are open in other windows along with their pull requests, and opens them on click. It uses the kunj CLI for everything. See [vscode-extension/README.md](./vscode-extension/README.md).
 
 ## Development
 

@@ -8,6 +8,7 @@
 //   kunj worktree remove <target>         remove a worktree
 //   kunj worktree prune                   prune stale worktree records
 //   kunj worktree open <target>           open a worktree in your editor
+//   kunj worktree pr <target>             show / open the pull request for a worktree
 //   kunj worktree session start|end|list  editor session tracking
 //
 // Every action supports --json for machine consumption.
@@ -21,6 +22,9 @@ import { loadConfig } from '../lib/config';
 import {
   addWorktree,
   findWorktree,
+  getPullRequestForBranch,
+  lastPullRequestLookup,
+  PullRequestInfo,
   getDefaultWorktreePath,
   getMainWorktreePath,
   getCurrentWorktreePath,
@@ -36,6 +40,8 @@ import {
 
 interface WorktreeOptions {
   status?: boolean;
+  pr?: boolean;
+  web?: boolean;
   newBranch?: boolean;
   base?: string;
   force?: boolean;
@@ -47,7 +53,7 @@ interface WorktreeOptions {
   newWindow?: boolean;
 }
 
-const ACTIONS = ['list', 'add', 'remove', 'prune', 'open', 'session', 'path'];
+const ACTIONS = ['list', 'add', 'remove', 'prune', 'open', 'session', 'path', 'pr'];
 
 export class WorktreeCommand extends BaseCommand {
   constructor() {
@@ -70,10 +76,13 @@ export class WorktreeCommand extends BaseCommand {
           { key: 'isCurrent', label: 'Current' },
           { key: 'openCount', label: 'Open in' },
           { key: 'changedFiles', label: 'Changes' },
+          { key: 'prLabel', label: 'PR' },
         ],
       },
       options: [
         { flags: '--no-status', description: 'Skip per-worktree git status (faster listing)' },
+        { flags: '--no-pr', description: '[list] Skip pull request lookup (gh / glab)' },
+        { flags: '-w, --web', description: '[pr] Open the pull request in the browser' },
         { flags: '-b, --new-branch', description: '[add] Create a new branch for the worktree' },
         { flags: '--base <ref>', description: '[add] Base ref for the new branch (with -b)' },
         { flags: '-p, --path <dir>', description: '[add|session] Explicit worktree path' },
@@ -120,6 +129,8 @@ export class WorktreeCommand extends BaseCommand {
         return this.open(target, options);
       case 'path':
         return this.path(target);
+      case 'pr':
+        return this.pr(target, options);
       case 'session':
         return this.session(target, options);
     }
@@ -130,7 +141,10 @@ export class WorktreeCommand extends BaseCommand {
   // ---------------------------------------------------------------------
 
   private async list(options: WorktreeOptions): Promise<void> {
-    const worktrees = await listWorktrees({ includeStatus: options.status !== false });
+    const worktrees = await listWorktrees({
+      includeStatus: options.status !== false,
+      includePullRequests: options.pr !== false,
+    });
     const mainRoot = await getMainWorktreePath();
     const currentPath = await getCurrentWorktreePath();
 
@@ -138,6 +152,7 @@ export class WorktreeCommand extends BaseCommand {
       this.outputJSON({
         repoRoot: mainRoot,
         currentPath,
+        pullRequestLookup: lastPullRequestLookup,
         worktrees: worktrees.map(wt => this.toJSON(wt)),
       });
       return;
@@ -169,6 +184,10 @@ export class WorktreeCommand extends BaseCommand {
         const labels = wt.sessions.map(s => this.describeSession(s)).join(', ');
         console.log(chalk.cyan(`  │ open in: ${labels}`));
       }
+
+      if (wt.pullRequest) {
+        console.log(`  │ ${this.describePullRequest(wt.pullRequest)}`);
+      }
     }
 
     console.log('');
@@ -186,7 +205,49 @@ export class WorktreeCommand extends BaseCommand {
       ...wt,
       openCount: wt.sessions.length,
       changedFiles: wt.status ? wt.status.changedFiles : null,
+      prLabel: wt.pullRequest ? `#${wt.pullRequest.number} ${wt.pullRequest.state}` : null,
     };
+  }
+
+  private describePullRequest(pr: PullRequestInfo): string {
+    const stateColor = pr.state === 'open' ? chalk.green : pr.state === 'merged' ? chalk.magenta : chalk.red;
+    const parts = [chalk.blue(`PR #${pr.number}`), stateColor(pr.draft && pr.state === 'open' ? 'draft' : pr.state)];
+    if (pr.checks) {
+      parts.push(pr.checks === 'success' ? chalk.green('checks ✓') : pr.checks === 'failure' ? chalk.red('checks ✗') : chalk.yellow('checks …'));
+    }
+    if (pr.reviewDecision) parts.push(chalk.gray(pr.reviewDecision.toLowerCase().replace(/_/g, ' ')));
+    return `${parts.join(' ')} ${chalk.gray('- ' + pr.title)}`;
+  }
+
+  // ---------------------------------------------------------------------
+  // pr
+  // ---------------------------------------------------------------------
+
+  private async pr(target?: string, options: WorktreeOptions = {}): Promise<void> {
+    const wt = await this.resolveTarget(target);
+    if (!wt.branch) {
+      throw new Error(`Worktree ${wt.path} is detached, so it has no pull request`);
+    }
+    const pr = await getPullRequestForBranch(wt.branch, wt.exists ? wt.path : undefined);
+
+    if (this.jsonMode) {
+      this.outputJSON({ branch: wt.branch, path: wt.path, pullRequest: pr });
+      return;
+    }
+
+    if (!pr) {
+      console.log(chalk.yellow(`No pull request found for '${wt.branch}'`));
+      console.log(chalk.gray(`Tip: cd ${wt.path} && kunj pr`));
+      return;
+    }
+
+    console.log(this.describePullRequest(pr));
+    console.log(chalk.gray(`  ${pr.url}`));
+
+    if (options.web) {
+      const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start ""' : 'xdg-open';
+      exec(`${openCmd} '${pr.url.replace(/'/g, "'\\''")}'`);
+    }
   }
 
   // ---------------------------------------------------------------------

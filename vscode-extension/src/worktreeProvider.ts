@@ -4,7 +4,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { KunjCli, KunjCliError, Worktree, WorktreeListResult, WorktreeSession } from './kunjCli';
+import { KunjCli, KunjCliError, PullRequest, Worktree, WorktreeListResult, WorktreeSession } from './kunjCli';
 
 export interface RepoEntry {
   repoRoot: string;
@@ -42,6 +42,8 @@ export class WorktreeNode extends vscode.TreeItem {
     if (worktree.status?.dirty) flags.push('dirty');
     if (worktree.locked) flags.push('locked');
     if (worktree.prunable || !worktree.exists) flags.push('prunable');
+    if (worktree.pullRequest) flags.push('pr');
+    if (worktree.branch && !worktree.pullRequest) flags.push('nopr');
     this.contextValue = flags.join(' ');
 
     this.id = `${repo.repoRoot}::${worktree.path}`;
@@ -99,6 +101,8 @@ export class WorktreeNode extends vscode.TreeItem {
       if (sync.length) parts.push(sync.join(' '));
     }
 
+    if (wt.pullRequest) parts.push(prBadge(wt.pullRequest));
+
     if (!wt.exists) parts.push('missing');
     else if (wt.prunable) parts.push('prunable');
     if (wt.locked) parts.push('locked');
@@ -122,6 +126,15 @@ export class WorktreeNode extends vscode.TreeItem {
         bits.push(`upstream ${wt.status.upstream} (↑${wt.status.ahead ?? 0} ↓${wt.status.behind ?? 0})`);
       }
       md.appendMarkdown(`$(git-compare) ${bits.join(', ')}\n\n`);
+    }
+
+    if (wt.pullRequest) {
+      const pr = wt.pullRequest;
+      const bits = [prState(pr)];
+      if (pr.checks) bits.push(`checks ${pr.checks}`);
+      if (pr.reviewDecision) bits.push(pr.reviewDecision.toLowerCase().replace(/_/g, ' '));
+      md.appendMarkdown(`$(git-pull-request) [#${pr.number} ${escapeMd(pr.title)}](${pr.url}) — ${bits.join(', ')}\n\n`);
+      md.isTrusted = true;
     }
 
     if (inWorkspace || this.openHere) {
@@ -204,7 +217,9 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
 
   private async doLoad(): Promise<RepoEntry[]> {
     const folders = (vscode.workspace.workspaceFolders || []).filter(f => f.uri.scheme === 'file');
-    const includeStatus = vscode.workspace.getConfiguration('kunj.worktrees').get<boolean>('showStatus', true);
+    const config = vscode.workspace.getConfiguration('kunj.worktrees');
+    const includeStatus = config.get<boolean>('showStatus', true);
+    const includePullRequests = config.get<boolean>('showPullRequests', true);
     const repos = new Map<string, RepoEntry>();
     let firstError: KunjCliError | undefined;
     let sawRepo = false;
@@ -212,7 +227,7 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
     for (const folder of folders) {
       const cwd = folder.uri.fsPath;
       try {
-        const result: WorktreeListResult = await this.cli.listWorktrees(cwd, includeStatus);
+        const result: WorktreeListResult = await this.cli.listWorktrees(cwd, includeStatus, includePullRequests);
         sawRepo = true;
         const key = normalize(result.repoRoot);
         if (!repos.has(key)) {
@@ -249,6 +264,21 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
 }
 
 // ---- helpers -----------------------------------------------------------
+
+export function prState(pr: PullRequest): string {
+  return pr.state === 'open' && pr.draft ? 'draft' : pr.state;
+}
+
+// Compact PR badge for the tree description, e.g. "#42 ✓", "#42 ✗", "#42 merged"
+export function prBadge(pr: PullRequest): string {
+  const check = pr.checks === 'success' ? ' ✓' : pr.checks === 'failure' ? ' ✗' : pr.checks === 'pending' ? ' …' : '';
+  if (pr.state === 'open') return `#${pr.number}${pr.draft ? ' draft' : ''}${check}`;
+  return `#${pr.number} ${pr.state}`;
+}
+
+function escapeMd(text: string): string {
+  return text.replace(/[\[\]`*_]/g, m => '\\' + m);
+}
 
 export function describeSession(session: WorktreeSession): string {
   const editor = session.editor === 'vscode' ? 'VS Code' : session.editor;
