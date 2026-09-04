@@ -73,6 +73,8 @@ Manages stashing functionality:
 
 To add a new command, follow these steps:
 
+commands should all work the same with same flags. when possible the flags are a global flag. such as ie: --output json
+
 ### 1. Create Command File
 
 Create a new file in `src/commands/` (e.g., `src/commands/mycommand.ts`):
