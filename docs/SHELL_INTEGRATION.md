@@ -6,6 +6,7 @@ This guide covers setting up autocomplete and showing PR# in your shell prompt.
 
 - [Shell Autocomplete](#shell-autocomplete)
 - [PR# in Shell Prompt](#pr-in-shell-prompt)
+- [cd into a Worktree](#cd-into-a-worktree)
 
 ---
 
@@ -270,12 +271,34 @@ PROMPT='%F{green}%n@%m%f:%F{blue}%~%f$(kunj_prompt_info)
 
 ---
 
+## cd into a Worktree
+
+`kunj tree <branch>` creates or finds the worktree for a branch and opens it in your editor, but a
+CLI cannot change your shell's working directory. Use the `-p` flag, which prints only the path,
+inside a shell function:
+
+```zsh
+# ~/.zshrc or ~/.bashrc
+kt() {
+  local dir
+  dir=$(kunj tree -p "$1") || return
+  cd "$dir"
+}
+```
+
+Then `kt feature/bob` creates the worktree if needed, applies your keep files, and drops you into it
+without opening an editor. Set `worktree.openCommand` to an empty string if you never want the
+editor opened by the plain `kunj tree` command.
+
+---
+
 ## Related Commands
 
 - `kunj pr` - Create or view pull requests
 - `kunj pr --status` - View PR status with checks
 - `kunj list` - List branches with metadata
 - `kunj config` - Configure kunj settings
+- `kunj tree` - Manage git worktrees and keep files
 
 ---
 

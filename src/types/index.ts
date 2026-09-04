@@ -65,6 +65,10 @@ export interface KunjConfig {
     appToken: string;
     channels: string[];
   };
+  worktree?: {
+    dir?: string;
+    openCommand?: string;
+  };
 }
 
 export interface BranchStash {

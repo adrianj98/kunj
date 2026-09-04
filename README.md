@@ -64,6 +64,35 @@ kunj list
 
 Displays all branches with the current branch highlighted.
 
+### Work in a git worktree
+
+```bash
+kunj tree feature/bob        # create (or switch to) a worktree for feature/bob and open it in your editor
+kunj tree feature/bob -n     # open it in a new editor window
+kunj tree -p feature/bob     # print the worktree path only (for `cd "$(kunj tree -p feature/bob)"`)
+kunj tree                    # interactive worktree picker
+kunj tree list               # list worktrees
+kunj tree remove feature/bob # remove a worktree (branch is kept)
+```
+
+Worktrees are created under `~/.kunj/<repo>/worktrees/<branch>` (with `/` replaced by `_`,
+so `feature/bob` becomes `feature_bob`). Change the base directory with
+`kunj config set worktree.dir=~/worktrees/{repo}` and the editor with `worktree.openCommand`.
+
+### Keep files across worktrees
+
+Keep files are local, untracked files (like `.env`) that should exist in every worktree.
+They are stored in `~/.kunj/<repo>/keep/` and copied into each new worktree automatically.
+
+```bash
+kunj tree keep .env               # save a copy of .env
+kunj tree keep apply              # copy all keep files into this worktree
+kunj tree keep apply --all        # ...into every worktree
+kunj tree keep delete .env        # stop keeping .env
+kunj tree keep list               # show keep files
+kunj tree keep                    # interactive menu
+```
+
 ### Delete a branch
 
 ```bash
