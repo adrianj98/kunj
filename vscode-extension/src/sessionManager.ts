@@ -17,6 +17,8 @@ export class SessionManager implements vscode.Disposable {
   private heartbeat: NodeJS.Timeout | undefined;
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChange = this.onDidChangeEmitter.event;
+  // When this window last wrote the sessions file (so its own writes don't trigger a refresh)
+  lastWriteAt = 0;
 
   constructor(private readonly cli: KunjCli, private readonly output: vscode.OutputChannel) {
     this.disposables.push(
@@ -64,6 +66,7 @@ export class SessionManager implements vscode.Disposable {
     for (const folder of folders) {
       const folderPath = folder.uri.fsPath;
       try {
+        this.lastWriteAt = Date.now();
         const result = await this.cli.startSession(folderPath, {
           path: folderPath,
           pid: this.pid,
@@ -87,6 +90,7 @@ export class SessionManager implements vscode.Disposable {
 
   private async end(folderPath: string, id: string): Promise<void> {
     try {
+      this.lastWriteAt = Date.now();
       await this.cli.endSession(folderPath, { id });
     } catch (error) {
       this.output.appendLine(`Failed to end session ${id}: ${(error as Error).message}`);

@@ -169,6 +169,9 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
   private repos: RepoEntry[] = [];
   private lastError: KunjCliError | undefined;
   private loading: Promise<RepoEntry[]> | undefined;
+  private forceFresh = false;
+  // Remembered so folders of the same repository cost one CLI call, not one each
+  private readonly folderRepoRoots = new Map<string, string>();
 
   constructor(private readonly cli: KunjCli, private readonly ownPid: number) {}
 
@@ -180,7 +183,9 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
     return this.repos.flatMap(repo => repo.worktrees.map(worktree => ({ worktree, repo })));
   }
 
-  refresh(): void {
+  // `fresh` bypasses the CLI's pull request cache (used by the manual refresh button)
+  refresh(fresh = false): void {
+    this.forceFresh = this.forceFresh || fresh;
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
@@ -220,16 +225,23 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
     const config = vscode.workspace.getConfiguration('kunj.worktrees');
     const includeStatus = config.get<boolean>('showStatus', true);
     const includePullRequests = config.get<boolean>('showPullRequests', true);
+    const fresh = this.forceFresh;
+    this.forceFresh = false;
     const repos = new Map<string, RepoEntry>();
     let firstError: KunjCliError | undefined;
     let sawRepo = false;
 
     for (const folder of folders) {
       const cwd = folder.uri.fsPath;
+      const knownRoot = this.folderRepoRoots.get(cwd);
+      if (knownRoot && repos.has(knownRoot)) {
+        continue; // same repository as a folder we already listed this round
+      }
       try {
-        const result: WorktreeListResult = await this.cli.listWorktrees(cwd, includeStatus, includePullRequests);
+        const result: WorktreeListResult = await this.cli.listWorktrees(cwd, includeStatus, includePullRequests, fresh);
         sawRepo = true;
         const key = normalize(result.repoRoot);
+        this.folderRepoRoots.set(cwd, key);
         if (!repos.has(key)) {
           repos.set(key, { repoRoot: result.repoRoot, cwd, worktrees: result.worktrees });
         }

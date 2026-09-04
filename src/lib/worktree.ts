@@ -191,39 +191,38 @@ export function parseWorktreeList(porcelain: string): ParsedWorktree[] {
 // Worktree status
 // ---------------------------------------------------------------------------
 
-export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeStatus> {
+// Parse `git status --porcelain=v2 --branch` output: one call gives us the
+// changed-file count, the upstream and the ahead/behind counts.
+export function parseStatusV2(output: string): WorktreeStatus {
   const status: WorktreeStatus = { dirty: false, changedFiles: 0, ahead: null, behind: null, upstream: null };
+  for (const line of output.split('\n')) {
+    if (!line) continue;
+    if (line.startsWith('# branch.upstream ')) {
+      status.upstream = line.slice('# branch.upstream '.length).trim() || null;
+    } else if (line.startsWith('# branch.ab ')) {
+      const m = line.match(/\+(\d+) -(\d+)/);
+      if (m) {
+        status.ahead = parseInt(m[1], 10);
+        status.behind = parseInt(m[2], 10);
+      }
+    } else if (!line.startsWith('#')) {
+      status.changedFiles++;
+    }
+  }
+  status.dirty = status.changedFiles > 0;
+  return status;
+}
 
+export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeStatus> {
   try {
-    const { stdout } = await execAsync('git status --porcelain --untracked-files=normal', {
+    const { stdout } = await execAsync('git status --porcelain=v2 --branch --untracked-files=normal', {
       cwd: worktreePath,
       maxBuffer: 10 * 1024 * 1024,
     });
-    const lines = stdout.split('\n').filter(l => l.trim());
-    status.changedFiles = lines.length;
-    status.dirty = lines.length > 0;
+    return parseStatusV2(stdout);
   } catch {
-    // leave defaults
+    return { dirty: false, changedFiles: 0, ahead: null, behind: null, upstream: null };
   }
-
-  try {
-    const { stdout: upstream } = await execAsync('git rev-parse --abbrev-ref --symbolic-full-name @{upstream}', {
-      cwd: worktreePath,
-    });
-    status.upstream = upstream.trim() || null;
-    if (status.upstream) {
-      const { stdout } = await execAsync('git rev-list --left-right --count HEAD...@{upstream}', {
-        cwd: worktreePath,
-      });
-      const [ahead, behind] = stdout.trim().split(/\s+/).map(n => parseInt(n, 10));
-      status.ahead = Number.isNaN(ahead) ? null : ahead;
-      status.behind = Number.isNaN(behind) ? null : behind;
-    }
-  } catch {
-    // no upstream configured
-  }
-
-  return status;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,24 +232,49 @@ export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeS
 export interface ListWorktreesOptions {
   includeStatus?: boolean;
   includePullRequests?: boolean;
+  // Reuse cached pull request data younger than this (seconds). 0 forces a fresh lookup.
+  pullRequestMaxAge?: number;
   cwd?: string;
 }
 
-// Whether the last listWorktrees call managed to reach a PR provider
-export let lastPullRequestLookup: 'github' | 'gitlab' | 'unavailable' | 'skipped' = 'skipped';
+export type PullRequestLookup = 'github' | 'gitlab' | 'unavailable' | 'skipped';
 
-export async function listWorktrees(options: ListWorktreesOptions = {}): Promise<WorktreeInfo[]> {
+export interface WorktreeListing {
+  repoRoot: string;
+  currentPath: string | null;
+  pullRequestLookup: PullRequestLookup;
+  pullRequestsFromCache: boolean;
+  worktrees: WorktreeInfo[];
+}
+
+// One git call for both the current worktree root and the main worktree root
+async function getRepoPaths(cwd: string): Promise<{ currentPath: string; repoRoot: string }> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execAsync('git rev-parse --path-format=absolute --show-toplevel --git-common-dir', { cwd }));
+  } catch {
+    throw new Error('Not a git repository');
+  }
+  const [currentPath, commonDir] = stdout.trim().split('\n').map(l => l.trim());
+  const repoRoot = path.basename(commonDir) === '.git' ? path.dirname(commonDir) : commonDir;
+  return { currentPath, repoRoot };
+}
+
+export async function listWorktreesDetailed(options: ListWorktreesOptions = {}): Promise<WorktreeListing> {
   const cwd = options.cwd || process.cwd();
-  const { stdout } = await execAsync('git worktree list --porcelain', { cwd, maxBuffer: 10 * 1024 * 1024 });
-  const parsed = parseWorktreeList(stdout);
+  const includePullRequests = options.includePullRequests === true;
+
+  // Independent work runs concurrently: worktree list, repo paths, PR lookup
+  const [porcelain, paths, prResult] = await Promise.all([
+    execAsync('git worktree list --porcelain', { cwd, maxBuffer: 10 * 1024 * 1024 }).then(r => r.stdout),
+    getRepoPaths(cwd),
+    includePullRequests
+      ? fetchPullRequestsCached(cwd, options.pullRequestMaxAge)
+      : Promise.resolve<PullRequestFetchResult>({ provider: null, pullRequests: null, fromCache: false }),
+  ]);
+
+  const parsed = parseWorktreeList(porcelain);
   const sessions = loadActiveSessions();
-  const currentPath = await getCurrentWorktreePath(cwd);
-  const pullRequests = options.includePullRequests ? await fetchPullRequests(cwd) : null;
-  lastPullRequestLookup = !options.includePullRequests
-    ? 'skipped'
-    : pullRequests
-      ? pullRequests[0]?.provider || (await detectProvider(cwd)) || 'github'
-      : 'unavailable';
 
   const worktrees: WorktreeInfo[] = await Promise.all(
     parsed.map(async wt => {
@@ -259,19 +283,29 @@ export async function listWorktrees(options: ListWorktreesOptions = {}): Promise
         ...wt,
         exists,
         sessions: sessions.filter(s => samePath(s.path, wt.path)),
-        isCurrent: currentPath !== null && samePath(currentPath, wt.path),
+        isCurrent: samePath(paths.currentPath, wt.path),
       };
       if (options.includeStatus !== false && exists && !wt.bare) {
         info.status = await getWorktreeStatus(wt.path);
       }
-      if (options.includePullRequests) {
-        info.pullRequest = pullRequests && wt.branch ? pickPullRequest(pullRequests, wt.branch) : null;
+      if (includePullRequests) {
+        info.pullRequest = prResult.pullRequests && wt.branch ? pickPullRequest(prResult.pullRequests, wt.branch) : null;
       }
       return info;
     })
   );
 
-  return worktrees;
+  return {
+    repoRoot: paths.repoRoot,
+    currentPath: paths.currentPath,
+    pullRequestLookup: !includePullRequests ? 'skipped' : prResult.pullRequests ? prResult.provider || 'github' : 'unavailable',
+    pullRequestsFromCache: prResult.fromCache,
+    worktrees,
+  };
+}
+
+export async function listWorktrees(options: ListWorktreesOptions = {}): Promise<WorktreeInfo[]> {
+  return (await listWorktreesDetailed(options)).worktrees;
 }
 
 // Resolve a user supplied target (path, branch name or worktree name) to a worktree
@@ -372,7 +406,7 @@ async function fetchGitLabPullRequests(cwd: string): Promise<PullRequestInfo[] |
 
 async function detectProvider(cwd: string): Promise<'github' | 'gitlab' | null> {
   try {
-    const { stdout } = await execAsync('git remote get-url origin', { cwd });
+    const { stdout } = await execAsync('git config --get remote.origin.url', { cwd });
     const url = stdout.trim().toLowerCase();
     if (url.includes('github.com')) return 'github';
     if (url.includes('gitlab')) return 'gitlab';
@@ -382,20 +416,109 @@ async function detectProvider(cwd: string): Promise<'github' | 'gitlab' | null> 
   }
 }
 
+export interface PullRequestFetchResult {
+  provider: 'github' | 'gitlab' | null;
+  pullRequests: PullRequestInfo[] | null;
+  fromCache: boolean;
+}
+
 // Fetch every PR/MR of the repository in one call so listing stays fast.
-// Returns null when no provider CLI is available.
-export async function fetchPullRequests(cwd: string = process.cwd()): Promise<PullRequestInfo[] | null> {
+// Returns null pullRequests when no provider CLI is available.
+export async function fetchPullRequests(cwd: string = process.cwd()): Promise<PullRequestFetchResult> {
   const provider = await detectProvider(cwd);
-  if (provider === 'gitlab') return fetchGitLabPullRequests(cwd);
-  if (provider === 'github') return fetchGitHubPullRequests(cwd);
+  if (provider === 'gitlab') {
+    return { provider, pullRequests: await fetchGitLabPullRequests(cwd), fromCache: false };
+  }
+  if (provider === 'github') {
+    return { provider, pullRequests: await fetchGitHubPullRequests(cwd), fromCache: false };
+  }
   // Unknown host (e.g. GitHub Enterprise): try both
-  return (await fetchGitHubPullRequests(cwd)) ?? (await fetchGitLabPullRequests(cwd));
+  const github = await fetchGitHubPullRequests(cwd);
+  if (github) return { provider: 'github', pullRequests: github, fromCache: false };
+  const gitlab = await fetchGitLabPullRequests(cwd);
+  return { provider: gitlab ? 'gitlab' : null, pullRequests: gitlab, fromCache: false };
+}
+
+// ---- on-disk cache so repeated listings (editor refreshes) don't hit the network
+
+export const PR_CACHE_FILE = 'pr-cache.json';
+export const DEFAULT_PR_MAX_AGE_SECONDS = 60;
+
+interface PullRequestCacheEntry {
+  fetchedAt: number;
+  provider: 'github' | 'gitlab' | null;
+  pullRequests: PullRequestInfo[] | null;
+}
+
+export function getPullRequestCachePath(): string {
+  return path.join(getGlobalKunjDir(), PR_CACHE_FILE);
+}
+
+function readPullRequestCache(): Record<string, PullRequestCacheEntry> {
+  try {
+    const file = getPullRequestCachePath();
+    if (!fs.existsSync(file)) return {};
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePullRequestCache(cache: Record<string, PullRequestCacheEntry>): void {
+  try {
+    initGlobalKunjDirectory();
+    const file = getPullRequestCachePath();
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(cache));
+    fs.renameSync(tmp, file);
+  } catch {
+    // cache is best effort
+  }
+}
+
+async function pullRequestCacheKey(cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execAsync('git rev-parse --path-format=absolute --git-common-dir', { cwd });
+    return normalizePath(stdout.trim());
+  } catch {
+    return normalizePath(cwd);
+  }
+}
+
+// Exposed for testing: decide whether a cache entry is still usable
+export function isCacheFresh(entry: PullRequestCacheEntry | undefined, maxAgeSeconds: number, now = Date.now()): boolean {
+  if (!entry || maxAgeSeconds <= 0) return false;
+  return now - entry.fetchedAt < maxAgeSeconds * 1000;
+}
+
+export async function fetchPullRequestsCached(
+  cwd: string = process.cwd(),
+  maxAgeSeconds: number = DEFAULT_PR_MAX_AGE_SECONDS
+): Promise<PullRequestFetchResult> {
+  const key = await pullRequestCacheKey(cwd);
+  const cache = readPullRequestCache();
+  const entry = cache[key];
+  if (isCacheFresh(entry, maxAgeSeconds)) {
+    return { provider: entry.provider, pullRequests: entry.pullRequests, fromCache: true };
+  }
+
+  const result = await fetchPullRequests(cwd);
+
+  // Failed lookups are cached too (briefly, via the same TTL) so a missing
+  // gh/glab does not cost a subprocess on every refresh.
+  const pruned: Record<string, PullRequestCacheEntry> = {};
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [k, v] of Object.entries(cache)) if (v.fetchedAt > cutoff) pruned[k] = v;
+  pruned[key] = { fetchedAt: Date.now(), provider: result.provider, pullRequests: result.pullRequests };
+  writePullRequestCache(pruned);
+  return result;
 }
 
 // Look up the PR for a single branch
-export async function getPullRequestForBranch(branch: string, cwd?: string): Promise<PullRequestInfo | null> {
-  const prs = await fetchPullRequests(cwd);
-  return prs ? pickPullRequest(prs, branch) : null;
+export async function getPullRequestForBranch(branch: string, cwd?: string, maxAgeSeconds = 0): Promise<PullRequestInfo | null> {
+  const { pullRequests } = await fetchPullRequestsCached(cwd, maxAgeSeconds);
+  return pullRequests ? pickPullRequest(pullRequests, branch) : null;
 }
 
 // ---------------------------------------------------------------------------

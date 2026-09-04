@@ -71,6 +71,7 @@ export interface WorktreeListResult {
   repoRoot: string;
   currentPath: string | null;
   pullRequestLookup?: 'github' | 'gitlab' | 'unavailable' | 'skipped';
+  pullRequestsFromCache?: boolean;
   worktrees: Worktree[];
 }
 
@@ -168,15 +169,16 @@ export class KunjCli {
 
   // ---- worktree operations ---------------------------------------------
 
-  listWorktrees(cwd: string, includeStatus: boolean, includePullRequests = true): Promise<WorktreeListResult> {
+  listWorktrees(cwd: string, includeStatus: boolean, includePullRequests = true, fresh = false): Promise<WorktreeListResult> {
     const args = ['worktree', 'list'];
     if (!includeStatus) args.push('--no-status');
     if (!includePullRequests) args.push('--no-pr');
+    if (fresh) args.push('--fresh');
     return this.run<WorktreeListResult>(args, cwd);
   }
 
   getPullRequest(cwd: string, target: string): Promise<{ branch: string; path: string; pullRequest: PullRequest | null }> {
-    return this.run(['worktree', 'pr', target], cwd);
+    return this.run(['worktree', 'pr', target, '--fresh'], cwd);
   }
 
   addWorktree(

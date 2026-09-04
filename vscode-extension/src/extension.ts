@@ -71,6 +71,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(sessionsDir, 'worktree-sessions.json'));
     let debounce: NodeJS.Timeout | undefined;
     const onSessionsChanged = () => {
+      // Our own heartbeat writes the file too; only other windows' changes matter
+      if (sessions && Date.now() - sessions.lastWriteAt < 2000) return;
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(refresh, 300);
     };
@@ -187,7 +189,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   register('kunj.worktrees.refresh', () => {
     void sessions?.sync();
-    refresh();
+    provider.refresh(true); // manual refresh also re-fetches pull requests
   });
 
   register('kunj.worktrees.pick', async () => {
@@ -453,9 +455,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (done) void vscode.window.setStatusBarMessage(`Removed worktree ${wt.name}`, 4000);
   });
 
-  // Register this window's folders, then show the tree
+  // Register this window's folders; the tree loads once when the view first asks for children
   await sessions.sync();
-  refresh();
 }
 
 export function deactivate(): void {

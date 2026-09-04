@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, WorktreeSession, PullRequestInfo } from '../worktree';
+import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, WorktreeSession, PullRequestInfo } from '../worktree';
 
 describe('worktree utilities', () => {
   describe('parseWorktreeList', () => {
@@ -121,6 +121,36 @@ describe('worktree utilities', () => {
       const prs = [pr(1, 'feat', 'closed', '2026-09-01'), pr(2, 'feat', 'merged', '2026-09-03')];
       expect(pickPullRequest(prs, 'feat')?.number).toBe(2);
       expect(pickPullRequest(prs, 'none')).toBeNull();
+    });
+  });
+
+  describe('parseStatusV2', () => {
+    it('reads upstream, ahead/behind and changed files from one status call', () => {
+      const out = [
+        '# branch.oid 1234567',
+        '# branch.head feature/one',
+        '# branch.upstream origin/feature/one',
+        '# branch.ab +2 -1',
+        '1 .M N... 100644 100644 100644 abc def src/a.ts',
+        '2 R. N... 100644 100644 100644 abc def R100 src/b.ts\tsrc/c.ts',
+        '? untracked.txt',
+        '',
+      ].join('\n');
+      expect(parseStatusV2(out)).toEqual({ dirty: true, changedFiles: 3, ahead: 2, behind: 1, upstream: 'origin/feature/one' });
+    });
+
+    it('handles a clean branch without upstream', () => {
+      expect(parseStatusV2('# branch.oid abc\n# branch.head main\n')).toEqual({ dirty: false, changedFiles: 0, ahead: null, behind: null, upstream: null });
+    });
+  });
+
+  describe('isCacheFresh', () => {
+    const entry = { fetchedAt: 1_000_000, provider: 'github' as const, pullRequests: [] };
+    it('respects the max age', () => {
+      expect(isCacheFresh(entry, 60, 1_000_000 + 30_000)).toBe(true);
+      expect(isCacheFresh(entry, 60, 1_000_000 + 61_000)).toBe(false);
+      expect(isCacheFresh(entry, 0, 1_000_000)).toBe(false);
+      expect(isCacheFresh(undefined, 60)).toBe(false);
     });
   });
 });

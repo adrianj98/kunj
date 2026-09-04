@@ -4,7 +4,12 @@
 
 import { Command } from 'commander';
 import { CommandRegistry } from './lib/command';
-import { getAllCommands } from './commands';
+import { loadFastCommand } from './commands/fast';
+
+// Loaded lazily: pulling in every command costs close to a second of startup
+async function getAllCommands() {
+  return (await import('./commands')).getAllCommands();
+}
 
 // Main function to handle both completion and normal execution
 async function main() {
@@ -16,7 +21,7 @@ async function main() {
     const { log } = tabtab;
 
     // Get all commands
-    const commands = getAllCommands();
+    const commands = await getAllCommands();
     const completions = commands.map(cmd => {
       const config = cmd.getConfig();
       return {
@@ -39,10 +44,11 @@ async function main() {
     .description('A CLI tool for working with git branches')
     .version('1.0.0');
 
-  // Register all commands
+  // Register commands. Lightweight commands that are invoked frequently by
+  // editors and shell prompts skip loading the heavy AI/Jira/UI modules.
   const registry = new CommandRegistry();
-  const commands = getAllCommands();
-  registry.registerAll(commands);
+  const fastCommand = await loadFastCommand(process.argv[2]);
+  registry.registerAll(fastCommand ? [fastCommand] : await getAllCommands());
   registry.applyTo(program);
 
   // Parse command line arguments

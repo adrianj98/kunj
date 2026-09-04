@@ -17,13 +17,13 @@ import chalk from 'chalk';
 import { exec } from 'child_process';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
-import { checkGitRepo } from '../lib/git';
 import { loadConfig } from '../lib/config';
 import {
   addWorktree,
   findWorktree,
   getPullRequestForBranch,
-  lastPullRequestLookup,
+  listWorktreesDetailed,
+  DEFAULT_PR_MAX_AGE_SECONDS,
   PullRequestInfo,
   getDefaultWorktreePath,
   getMainWorktreePath,
@@ -41,6 +41,7 @@ import {
 interface WorktreeOptions {
   status?: boolean;
   pr?: boolean;
+  fresh?: boolean;
   web?: boolean;
   newBranch?: boolean;
   base?: string;
@@ -82,6 +83,7 @@ export class WorktreeCommand extends BaseCommand {
       options: [
         { flags: '--no-status', description: 'Skip per-worktree git status (faster listing)' },
         { flags: '--no-pr', description: '[list] Skip pull request lookup (gh / glab)' },
+        { flags: '--fresh', description: `[list|pr] Bypass the ${DEFAULT_PR_MAX_AGE_SECONDS}s pull request cache` },
         { flags: '-w, --web', description: '[pr] Open the pull request in the browser' },
         { flags: '-b, --new-branch', description: '[add] Create a new branch for the worktree' },
         { flags: '--base <ref>', description: '[add] Base ref for the new branch (with -b)' },
@@ -106,10 +108,6 @@ export class WorktreeCommand extends BaseCommand {
       args.splice(optIndex);
     }
     [action, target, extra] = args as [string?, string?, string?];
-
-    if (!(await checkGitRepo())) {
-      throw new Error('Not a git repository');
-    }
 
     const verb = (action || 'list').toLowerCase();
     if (!ACTIONS.includes(verb)) {
@@ -141,18 +139,19 @@ export class WorktreeCommand extends BaseCommand {
   // ---------------------------------------------------------------------
 
   private async list(options: WorktreeOptions): Promise<void> {
-    const worktrees = await listWorktrees({
+    const listing = await listWorktreesDetailed({
       includeStatus: options.status !== false,
       includePullRequests: options.pr !== false,
+      pullRequestMaxAge: options.fresh ? 0 : DEFAULT_PR_MAX_AGE_SECONDS,
     });
-    const mainRoot = await getMainWorktreePath();
-    const currentPath = await getCurrentWorktreePath();
+    const { worktrees, repoRoot: mainRoot, currentPath } = listing;
 
     if (this.jsonMode) {
       this.outputJSON({
         repoRoot: mainRoot,
         currentPath,
-        pullRequestLookup: lastPullRequestLookup,
+        pullRequestLookup: listing.pullRequestLookup,
+        pullRequestsFromCache: listing.pullRequestsFromCache,
         worktrees: worktrees.map(wt => this.toJSON(wt)),
       });
       return;
@@ -228,7 +227,7 @@ export class WorktreeCommand extends BaseCommand {
     if (!wt.branch) {
       throw new Error(`Worktree ${wt.path} is detached, so it has no pull request`);
     }
-    const pr = await getPullRequestForBranch(wt.branch, wt.exists ? wt.path : undefined);
+    const pr = await getPullRequestForBranch(wt.branch, wt.exists ? wt.path : undefined, options.fresh ? 0 : DEFAULT_PR_MAX_AGE_SECONDS);
 
     if (this.jsonMode) {
       this.outputJSON({ branch: wt.branch, path: wt.path, pullRequest: pr });

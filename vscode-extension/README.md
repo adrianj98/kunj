@@ -34,6 +34,10 @@ When a window activates the extension, it registers itself with `kunj worktree s
 
 The view watches that file, so opening or closing a worktree in one window updates the other windows within a second. It also refreshes when the window regains focus and every `kunj.worktrees.refreshInterval` seconds.
 
+## Performance
+
+A refresh is a single `kunj worktree list --json` call per repository (folders of the same repository share one call), and the CLI keeps that call cheap: it starts in about 100ms by loading only the worktree command, runs one `git rev-parse`, one `git worktree list` and one `git status` per worktree, and serves pull requests from a 60-second cache so the periodic refresh never waits on the network. The Refresh button passes `--fresh` to re-query `gh`/`glab`. This window's own session heartbeat does not trigger a refresh.
+
 Remote workspaces (SSH, WSL, containers) work as long as `kunj` is installed on the remote side, because the extension host and the CLI both run there.
 
 ## Commands
