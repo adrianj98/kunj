@@ -258,6 +258,8 @@ export class WorktreeCommand extends BaseCommand {
       throw new Error('Usage: kunj worktree add <branch> [path] [-b] [--base <ref>]');
     }
 
+    // Raw config here: getDefaultWorktreePath expands ${...} itself, reusing the
+    // git call it already makes rather than paying for a second one
     const config = loadConfig();
     const targetPath = path.resolve(
       explicitPath || options.path || (await getDefaultWorktreePath(branch, config.worktree?.baseDir))

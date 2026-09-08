@@ -1,6 +1,7 @@
 // Worktree settings - used by the `kunj worktree` command and editor integrations
 
 import { registerSettings } from '../lib/settings-registry';
+import { DEFAULT_WORKTREE_BASE_DIR } from '../lib/worktree-defaults';
 
 export function registerWorktreeSettings(): void {
   registerSettings([
@@ -8,11 +9,16 @@ export function registerWorktreeSettings(): void {
       key: 'worktree.baseDir',
       description: 'Directory where new worktrees are created',
       type: 'string',
-      defaultValue: '',
+      defaultValue: DEFAULT_WORKTREE_BASE_DIR,
       category: 'worktree',
       detailedDescription:
-        'Relative paths are resolved from the main repository root. Leave empty to use a "<repo>-worktrees" folder next to the repository.',
-      examples: ['../my-repo-worktrees', '~/worktrees/my-repo'],
+        'Supports ${repoconfig} (the .git directory, or the repository itself when bare), ${repoRoot}, ${repoName}, ${home} and ${branch}. ' +
+        'Relative paths are resolved from the main repository root. Unless ${branch} appears, the branch directory is appended automatically.',
+      examples: [
+        DEFAULT_WORKTREE_BASE_DIR,
+        '${repoRoot}/../${repoName}-worktrees',
+        '~/worktrees/${repoName}',
+      ],
     },
     {
       key: 'worktree.editorCommand',

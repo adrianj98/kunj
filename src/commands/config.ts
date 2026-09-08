@@ -14,6 +14,7 @@ import {
   getGlobalConfigPath
 } from '../lib/config';
 import { defaultConfig } from '../constants';
+import { CONFIG_VARIABLES, expandVariables, hasVariables, resolveConfigVariables } from '../lib/config-vars';
 import { formatConfigValue, formatBoolValue, parseKeyValue } from '../lib/utils';
 import { settingsRegistry, SettingDefinition } from '../settings';
 import { listBedrockModels, validateBedrockModel } from '../lib/ai-commit';
@@ -83,7 +84,7 @@ export class ConfigCommand extends BaseCommand {
         });
         return;
       }
-      this.listConfig(config, mergedConfig, isGlobal);
+      await this.listConfig(config, mergedConfig, isGlobal);
       return;
     }
 
@@ -110,8 +111,9 @@ export class ConfigCommand extends BaseCommand {
     return value;
   }
 
-  private listConfig(config: any, mergedConfig: any, isGlobal: boolean): void {
+  private async listConfig(config: any, mergedConfig: any, isGlobal: boolean): Promise<void> {
     const scope = isGlobal ? "Global" : "Local";
+    const variables = await resolveConfigVariables();
     const localConfig = isGlobal ? {} : loadLocalConfig();
     const globalConfig = loadGlobalConfig();
 
@@ -196,6 +198,11 @@ export class ConfigCommand extends BaseCommand {
         const paddedSource = color(source.padEnd(10));
 
         console.log(`    ${formattedValue.padEnd(20)} ${paddedKey} ${paddedSource} ${chalk.dim(setting.description)}`);
+
+        // A ${...} template is not much use without showing what it resolves to
+        if (typeof effectiveValue === 'string' && hasVariables(effectiveValue) && !setting.sensitive) {
+          console.log(`      ${chalk.dim('→ ' + expandVariables(effectiveValue, variables))}`);
+        }
       });
     });
 
@@ -216,6 +223,10 @@ export class ConfigCommand extends BaseCommand {
     console.log(`    ${chalk.blue('[local]')}   - Value set in local config (overrides global and default)`);
     console.log(`    ${chalk.magenta('[global]')}  - Value set in global config (overrides default)`);
     console.log(`    ${chalk.dim('[default]')} - Using default value (not configured)`);
+    console.log(chalk.bold("\n  Variables (usable in any string setting):"));
+    CONFIG_VARIABLES.forEach(v => {
+      console.log(`    ${chalk.cyan(('${' + v.name + '}').padEnd(16))} ${chalk.dim(v.description)}`);
+    });
     console.log("");
     console.log(chalk.dim(`  Config file: ${isGlobal ? getGlobalConfigPath() : getConfigPath()}`));
     console.log(chalk.dim(`  Use 'kunj config -i' for interactive editor`));
