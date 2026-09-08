@@ -37,7 +37,11 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const commander_1 = require("commander");
 const command_1 = require("./lib/command");
-const commands_1 = require("./commands");
+const fast_1 = require("./commands/fast");
+// Loaded lazily: pulling in every command costs close to a second of startup
+async function getAllCommands() {
+    return (await Promise.resolve().then(() => __importStar(require('./commands')))).getAllCommands();
+}
 // Main function to handle both completion and normal execution
 async function main() {
     // Handle shell completion first
@@ -47,7 +51,7 @@ async function main() {
         const tabtab = await Promise.resolve().then(() => __importStar(require('tabtab')));
         const { log } = tabtab;
         // Get all commands
-        const commands = (0, commands_1.getAllCommands)();
+        const commands = await getAllCommands();
         const completions = commands.map(cmd => {
             const config = cmd.getConfig();
             return {
@@ -66,10 +70,11 @@ async function main() {
         .name('kunj')
         .description('A CLI tool for working with git branches')
         .version('1.0.0');
-    // Register all commands
+    // Register commands. Lightweight commands that are invoked frequently by
+    // editors and shell prompts skip loading the heavy AI/Jira/UI modules.
     const registry = new command_1.CommandRegistry();
-    const commands = (0, commands_1.getAllCommands)();
-    registry.registerAll(commands);
+    const fastCommand = await (0, fast_1.loadFastCommand)(process.argv[2]);
+    registry.registerAll(fastCommand ? [fastCommand] : await getAllCommands());
     registry.applyTo(program);
     // Parse command line arguments
     program.parse(process.argv);

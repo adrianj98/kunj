@@ -1,178 +1,744 @@
-// Git worktree operations for the `kunj tree` command
+// Git worktree operations and editor session tracking for Kunj CLI
+//
+// Sessions let editors (e.g. the Kunj VS Code extension) register which
+// worktree they have open. They are stored globally in
+// ~/.kunj/worktree-sessions.json and pruned automatically when the owning
+// process is no longer alive.
 
+import { exec, spawn } from 'child_process';
+import { promisify } from 'util';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
-import { KunjConfig } from '../types';
-import { getKunjDir, getRepoCommonRoot, getRepoName } from './config';
+import { getGlobalKunjDir, initGlobalKunjDirectory } from './config';
+import { applyKeptFiles } from './keep';
 
 const execAsync = promisify(exec);
 
+export const WORKTREE_SESSIONS_FILE = 'worktree-sessions.json';
+
+// Sessions that have not been seen for this long are considered stale
+// (only used when we cannot check the owning PID, e.g. a different host).
+const SESSION_STALE_MS = 24 * 60 * 60 * 1000;
+
+export interface WorktreeSession {
+  id: string;
+  path: string;
+  pid: number;
+  host: string;
+  editor: string;
+  label?: string;
+  registeredAt: string;
+  lastSeen: string;
+}
+
+export interface WorktreeStatus {
+  dirty: boolean;
+  changedFiles: number;
+  ahead: number | null;
+  behind: number | null;
+  upstream: string | null;
+}
+
+export type PullRequestState = 'open' | 'merged' | 'closed';
+export type ChecksState = 'success' | 'failure' | 'pending';
+
+export interface PullRequestInfo {
+  provider: 'github' | 'gitlab';
+  number: number;
+  title: string;
+  state: PullRequestState;
+  url: string;
+  draft: boolean;
+  baseBranch: string | null;
+  headBranch: string;
+  reviewDecision: string | null; // e.g. APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
+  checks: ChecksState | null;
+  updatedAt: string | null;
+}
+
 export interface WorktreeInfo {
   path: string;
-  head: string;
-  branch: string | null; // null when detached or bare
+  name: string;
+  head: string | null;
+  branch: string | null;
+  detached: boolean;
   bare: boolean;
   locked: boolean;
+  lockedReason: string | null;
   prunable: boolean;
+  prunableReason: string | null;
+  isMain: boolean;
+  exists: boolean;
+  status?: WorktreeStatus;
+  pullRequest?: PullRequestInfo | null;
+  sessions: WorktreeSession[];
+  isCurrent: boolean;
 }
 
-// Folder name for a branch: feature/bob -> feature_bob
-export function worktreeFolderName(branch: string): string {
+// ---------------------------------------------------------------------------
+// Path helpers
+// ---------------------------------------------------------------------------
+
+// Normalize a path for comparison (resolve symlinks when possible)
+export function normalizePath(p: string): string {
+  const resolved = path.resolve(p);
+  try {
+    return fs.realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+export function samePath(a: string, b: string): boolean {
+  return normalizePath(a) === normalizePath(b);
+}
+
+// Directory of the worktree that contains the current working directory
+export async function getCurrentWorktreePath(cwd: string = process.cwd()): Promise<string | null> {
+  try {
+    const { stdout } = await execAsync('git rev-parse --show-toplevel', { cwd });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// The main worktree (the one holding the real .git directory)
+export async function getMainWorktreePath(cwd: string = process.cwd()): Promise<string> {
+  const { stdout } = await execAsync('git rev-parse --path-format=absolute --git-common-dir', { cwd });
+  const commonDir = stdout.trim();
+  // For a normal repo the common dir is <root>/.git; for a bare repo it is the repo itself
+  if (path.basename(commonDir) === '.git') {
+    return path.dirname(commonDir);
+  }
+  return commonDir;
+}
+
+// Turn a branch name into a safe directory name (feature/foo -> feature-foo)
+export function branchToDirName(branch: string): string {
   return branch
-    .trim()
     .replace(/^refs\/heads\//, '')
-    .replace(/[\/\\]+/g, '_')
-    .replace(/[^A-Za-z0-9._-]/g, '_');
+    .replace(/[\\/:*?"<>|\s]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/\.+$/, '') || 'worktree';
 }
 
-// Expand ~ and {repo} in a configured path
-export function expandWorktreePath(value: string, repoName: string, baseDir: string): string {
-  let p = value.trim();
-  if (p.startsWith('~')) {
-    p = path.join(os.homedir(), p.slice(1));
-  }
+// Expand "~" and the "{repo}" placeholder in a configured worktree directory.
+// Relative paths resolve from the main repository root.
+export function expandWorktreeDir(value: string, repoName: string, mainRoot: string): string {
+  let p = value.trim().replace(/^~(?=$|\/)/, os.homedir());
   p = p.replace(/\{repo\}/g, repoName);
-  return path.isAbsolute(p) ? p : path.resolve(baseDir, p);
+  return path.isAbsolute(p) ? p : path.resolve(mainRoot, p);
 }
 
-// Resolve the base directory where worktrees are created
-export function resolveWorktreeDir(config: KunjConfig): string {
-  const configured = config.worktree?.dir?.trim();
-  if (!configured) {
-    return path.join(getKunjDir(), 'worktrees');
-  }
-  const repoName = getRepoName() || 'repo';
-  const baseDir = getRepoCommonRoot() || process.cwd();
-  return expandWorktreePath(configured, repoName, baseDir);
+// Default location for a new worktree of the given branch
+export async function getDefaultWorktreePath(branch: string, baseDir?: string, cwd?: string): Promise<string> {
+  const mainRoot = await getMainWorktreePath(cwd);
+  const repoName = path.basename(mainRoot);
+  const dir = baseDir && baseDir.trim()
+    ? expandWorktreeDir(baseDir, repoName, mainRoot)
+    : path.join(path.dirname(mainRoot), `${repoName}-worktrees`);
+  return path.join(dir, branchToDirName(branch));
 }
 
-// Target path for a branch's worktree
-export function getWorktreePathForBranch(branch: string, config: KunjConfig): string {
-  return path.join(resolveWorktreeDir(config), worktreeFolderName(branch));
-}
+// ---------------------------------------------------------------------------
+// Parsing `git worktree list --porcelain`
+// ---------------------------------------------------------------------------
 
-// Parse `git worktree list --porcelain`
-export function parseWorktreeList(output: string): WorktreeInfo[] {
-  const result: WorktreeInfo[] = [];
-  let current: WorktreeInfo | null = null;
+export type ParsedWorktree = Omit<WorktreeInfo, 'sessions' | 'isCurrent' | 'exists' | 'status' | 'pullRequest'>;
 
-  for (const rawLine of output.split('\n')) {
-    const line = rawLine.trimEnd();
-    if (!line) {
-      if (current) {
-        result.push(current);
-        current = null;
+export function parseWorktreeList(porcelain: string): ParsedWorktree[] {
+  const blocks = porcelain.split(/\n\s*\n/).map(b => b.trim()).filter(Boolean);
+  const result: ParsedWorktree[] = [];
+
+  blocks.forEach((block, index) => {
+    const wt: ParsedWorktree = {
+      path: '',
+      name: '',
+      head: null,
+      branch: null,
+      detached: false,
+      bare: false,
+      locked: false,
+      lockedReason: null,
+      prunable: false,
+      prunableReason: null,
+      isMain: index === 0,
+    };
+
+    for (const rawLine of block.split('\n')) {
+      const line = rawLine.trimEnd();
+      if (line.startsWith('worktree ')) {
+        wt.path = line.slice('worktree '.length);
+      } else if (line.startsWith('HEAD ')) {
+        wt.head = line.slice('HEAD '.length);
+      } else if (line.startsWith('branch ')) {
+        wt.branch = line.slice('branch '.length).replace(/^refs\/heads\//, '');
+      } else if (line === 'detached') {
+        wt.detached = true;
+      } else if (line === 'bare') {
+        wt.bare = true;
+      } else if (line.startsWith('locked')) {
+        wt.locked = true;
+        wt.lockedReason = line.slice('locked'.length).trim() || null;
+      } else if (line.startsWith('prunable')) {
+        wt.prunable = true;
+        wt.prunableReason = line.slice('prunable'.length).trim() || null;
       }
-      continue;
     }
-    if (line.startsWith('worktree ')) {
-      current = { path: line.slice(9), head: '', branch: null, bare: false, locked: false, prunable: false };
-    } else if (!current) {
-      continue;
-    } else if (line.startsWith('HEAD ')) {
-      current.head = line.slice(5);
-    } else if (line.startsWith('branch ')) {
-      current.branch = line.slice(7).replace(/^refs\/heads\//, '');
-    } else if (line === 'bare') {
-      current.bare = true;
-    } else if (line.startsWith('locked')) {
-      current.locked = true;
-    } else if (line.startsWith('prunable')) {
-      current.prunable = true;
-    }
-  }
-  if (current) {
-    result.push(current);
-  }
+
+    if (!wt.path) return;
+    wt.name = wt.branch || (wt.head ? `detached@${wt.head.slice(0, 7)}` : path.basename(wt.path));
+    result.push(wt);
+  });
+
   return result;
 }
 
-// List all worktrees of the current repository (excluding bare entries)
-export async function listWorktrees(): Promise<WorktreeInfo[]> {
-  const { stdout } = await execAsync('git worktree list --porcelain');
-  return parseWorktreeList(stdout).filter(w => !w.bare);
+// ---------------------------------------------------------------------------
+// Worktree status
+// ---------------------------------------------------------------------------
+
+// Parse `git status --porcelain=v2 --branch` output: one call gives us the
+// changed-file count, the upstream and the ahead/behind counts.
+export function parseStatusV2(output: string): WorktreeStatus {
+  const status: WorktreeStatus = { dirty: false, changedFiles: 0, ahead: null, behind: null, upstream: null };
+  for (const line of output.split('\n')) {
+    if (!line) continue;
+    if (line.startsWith('# branch.upstream ')) {
+      status.upstream = line.slice('# branch.upstream '.length).trim() || null;
+    } else if (line.startsWith('# branch.ab ')) {
+      const m = line.match(/\+(\d+) -(\d+)/);
+      if (m) {
+        status.ahead = parseInt(m[1], 10);
+        status.behind = parseInt(m[2], 10);
+      }
+    } else if (!line.startsWith('#')) {
+      status.changedFiles++;
+    }
+  }
+  status.dirty = status.changedFiles > 0;
+  return status;
 }
 
-// Find the worktree that has a branch checked out, if any
-export async function findWorktreeForBranch(branch: string): Promise<WorktreeInfo | undefined> {
-  const worktrees = await listWorktrees();
-  return worktrees.find(w => w.branch === branch);
+export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeStatus> {
+  try {
+    const { stdout } = await execAsync('git status --porcelain=v2 --branch --untracked-files=normal', {
+      cwd: worktreePath,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return parseStatusV2(stdout);
+  } catch {
+    return { dirty: false, changedFiles: 0, ahead: null, behind: null, upstream: null };
+  }
 }
 
-// Root of the worktree the command was run from
-export async function getCurrentWorktreeRoot(): Promise<string> {
-  const { stdout } = await execAsync('git rev-parse --show-toplevel');
+// ---------------------------------------------------------------------------
+// Listing
+// ---------------------------------------------------------------------------
+
+export interface ListWorktreesOptions {
+  includeStatus?: boolean;
+  includePullRequests?: boolean;
+  // Reuse cached pull request data younger than this (seconds). 0 forces a fresh lookup.
+  pullRequestMaxAge?: number;
+  cwd?: string;
+}
+
+export type PullRequestLookup = 'github' | 'gitlab' | 'unavailable' | 'skipped';
+
+export interface WorktreeListing {
+  repoRoot: string;
+  currentPath: string | null;
+  pullRequestLookup: PullRequestLookup;
+  pullRequestsFromCache: boolean;
+  worktrees: WorktreeInfo[];
+}
+
+// One git call for both the current worktree root and the main worktree root
+async function getRepoPaths(cwd: string): Promise<{ currentPath: string; repoRoot: string }> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execAsync('git rev-parse --path-format=absolute --show-toplevel --git-common-dir', { cwd }));
+  } catch {
+    throw new Error('Not a git repository');
+  }
+  const [currentPath, commonDir] = stdout.trim().split('\n').map(l => l.trim());
+  const repoRoot = path.basename(commonDir) === '.git' ? path.dirname(commonDir) : commonDir;
+  return { currentPath, repoRoot };
+}
+
+export async function listWorktreesDetailed(options: ListWorktreesOptions = {}): Promise<WorktreeListing> {
+  const cwd = options.cwd || process.cwd();
+  const includePullRequests = options.includePullRequests === true;
+
+  // Independent work runs concurrently: worktree list, repo paths, PR lookup
+  const [porcelain, paths, prResult] = await Promise.all([
+    execAsync('git worktree list --porcelain', { cwd, maxBuffer: 10 * 1024 * 1024 }).then(r => r.stdout),
+    getRepoPaths(cwd),
+    includePullRequests
+      ? fetchPullRequestsCached(cwd, options.pullRequestMaxAge)
+      : Promise.resolve<PullRequestFetchResult>({ provider: null, pullRequests: null, fromCache: false }),
+  ]);
+
+  const parsed = parseWorktreeList(porcelain);
+  const sessions = loadActiveSessions();
+
+  const worktrees: WorktreeInfo[] = await Promise.all(
+    parsed.map(async wt => {
+      const exists = fs.existsSync(wt.path);
+      const info: WorktreeInfo = {
+        ...wt,
+        exists,
+        sessions: sessions.filter(s => samePath(s.path, wt.path)),
+        isCurrent: samePath(paths.currentPath, wt.path),
+      };
+      if (options.includeStatus !== false && exists && !wt.bare) {
+        info.status = await getWorktreeStatus(wt.path);
+      }
+      if (includePullRequests) {
+        info.pullRequest = prResult.pullRequests && wt.branch ? pickPullRequest(prResult.pullRequests, wt.branch) : null;
+      }
+      return info;
+    })
+  );
+
+  return {
+    repoRoot: paths.repoRoot,
+    currentPath: paths.currentPath,
+    pullRequestLookup: !includePullRequests ? 'skipped' : prResult.pullRequests ? prResult.provider || 'github' : 'unavailable',
+    pullRequestsFromCache: prResult.fromCache,
+    worktrees,
+  };
+}
+
+export async function listWorktrees(options: ListWorktreesOptions = {}): Promise<WorktreeInfo[]> {
+  return (await listWorktreesDetailed(options)).worktrees;
+}
+
+// Resolve a user supplied target (path, branch name or worktree name) to a worktree
+export async function findWorktree(target: string, cwd?: string): Promise<WorktreeInfo | null> {
+  const worktrees = await listWorktrees({ includeStatus: false, cwd });
+  const byBranch = worktrees.find(wt => wt.branch === target || wt.name === target);
+  if (byBranch) return byBranch;
+  const candidate = path.resolve(cwd || process.cwd(), target);
+  return worktrees.find(wt => samePath(wt.path, candidate)) || null;
+}
+
+// ---------------------------------------------------------------------------
+// Pull requests
+// ---------------------------------------------------------------------------
+
+// Reduce a GitHub statusCheckRollup array to a single state
+export function summarizeChecks(rollup: any[] | null | undefined): ChecksState | null {
+  if (!Array.isArray(rollup) || rollup.length === 0) return null;
+  let pending = false;
+  for (const check of rollup) {
+    // CheckRun: { status, conclusion }; StatusContext: { state }
+    const conclusion = String(check?.conclusion || check?.state || '').toUpperCase();
+    const status = String(check?.status || '').toUpperCase();
+    if (['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(conclusion)) {
+      return 'failure';
+    }
+    if (status && status !== 'COMPLETED') pending = true;
+    else if (!conclusion || ['PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WAITING'].includes(conclusion)) pending = true;
+  }
+  return pending ? 'pending' : 'success';
+}
+
+// Prefer an open PR; otherwise the most recently updated one for the branch
+export function pickPullRequest(prs: PullRequestInfo[], branch: string): PullRequestInfo | null {
+  const forBranch = prs.filter(pr => pr.headBranch === branch);
+  if (forBranch.length === 0) return null;
+  const open = forBranch.find(pr => pr.state === 'open');
+  if (open) return open;
+  return forBranch.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))[0];
+}
+
+const GH_FIELDS = 'number,title,state,url,isDraft,headRefName,baseRefName,reviewDecision,statusCheckRollup,updatedAt';
+
+async function fetchGitHubPullRequests(cwd: string): Promise<PullRequestInfo[] | null> {
+  try {
+    const { stdout } = await execAsync(`gh pr list --state all --limit 200 --json ${GH_FIELDS}`, {
+      cwd,
+      maxBuffer: 20 * 1024 * 1024,
+      env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' },
+    });
+    const rows = JSON.parse(stdout || '[]');
+    if (!Array.isArray(rows)) return null;
+    return rows.map((r: any) => ({
+      provider: 'github' as const,
+      number: r.number,
+      title: r.title || '',
+      state: String(r.state || '').toLowerCase() as PullRequestState,
+      url: r.url,
+      draft: !!r.isDraft,
+      baseBranch: r.baseRefName || null,
+      headBranch: r.headRefName,
+      reviewDecision: r.reviewDecision || null,
+      checks: summarizeChecks(r.statusCheckRollup),
+      updatedAt: r.updatedAt || null,
+    }));
+  } catch {
+    return null; // gh missing, not authenticated, or not a GitHub remote
+  }
+}
+
+async function fetchGitLabPullRequests(cwd: string): Promise<PullRequestInfo[] | null> {
+  try {
+    const { stdout } = await execAsync('glab mr list --all --per-page 100 --output json', {
+      cwd,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    const rows = JSON.parse(stdout || '[]');
+    if (!Array.isArray(rows)) return null;
+    return rows.map((r: any) => ({
+      provider: 'gitlab' as const,
+      number: r.iid,
+      title: r.title || '',
+      state: (r.state === 'opened' ? 'open' : r.state === 'merged' ? 'merged' : 'closed') as PullRequestState,
+      url: r.web_url,
+      draft: !!(r.draft || r.work_in_progress),
+      baseBranch: r.target_branch || null,
+      headBranch: r.source_branch,
+      reviewDecision: null,
+      checks: r.head_pipeline?.status === 'success' ? 'success'
+        : r.head_pipeline?.status === 'failed' ? 'failure'
+        : r.head_pipeline?.status ? 'pending' : null,
+      updatedAt: r.updated_at || null,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+async function detectProvider(cwd: string): Promise<'github' | 'gitlab' | null> {
+  try {
+    const { stdout } = await execAsync('git config --get remote.origin.url', { cwd });
+    const url = stdout.trim().toLowerCase();
+    if (url.includes('github.com')) return 'github';
+    if (url.includes('gitlab')) return 'gitlab';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export interface PullRequestFetchResult {
+  provider: 'github' | 'gitlab' | null;
+  pullRequests: PullRequestInfo[] | null;
+  fromCache: boolean;
+}
+
+// Fetch every PR/MR of the repository in one call so listing stays fast.
+// Returns null pullRequests when no provider CLI is available.
+export async function fetchPullRequests(cwd: string = process.cwd()): Promise<PullRequestFetchResult> {
+  const provider = await detectProvider(cwd);
+  if (provider === 'gitlab') {
+    return { provider, pullRequests: await fetchGitLabPullRequests(cwd), fromCache: false };
+  }
+  if (provider === 'github') {
+    return { provider, pullRequests: await fetchGitHubPullRequests(cwd), fromCache: false };
+  }
+  // Unknown host (e.g. GitHub Enterprise): try both
+  const github = await fetchGitHubPullRequests(cwd);
+  if (github) return { provider: 'github', pullRequests: github, fromCache: false };
+  const gitlab = await fetchGitLabPullRequests(cwd);
+  return { provider: gitlab ? 'gitlab' : null, pullRequests: gitlab, fromCache: false };
+}
+
+// ---- on-disk cache so repeated listings (editor refreshes) don't hit the network
+
+export const PR_CACHE_FILE = 'pr-cache.json';
+export const DEFAULT_PR_MAX_AGE_SECONDS = 60;
+
+interface PullRequestCacheEntry {
+  fetchedAt: number;
+  provider: 'github' | 'gitlab' | null;
+  pullRequests: PullRequestInfo[] | null;
+}
+
+export function getPullRequestCachePath(): string {
+  return path.join(getGlobalKunjDir(), PR_CACHE_FILE);
+}
+
+function readPullRequestCache(): Record<string, PullRequestCacheEntry> {
+  try {
+    const file = getPullRequestCachePath();
+    if (!fs.existsSync(file)) return {};
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePullRequestCache(cache: Record<string, PullRequestCacheEntry>): void {
+  try {
+    initGlobalKunjDirectory();
+    const file = getPullRequestCachePath();
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(cache));
+    fs.renameSync(tmp, file);
+  } catch {
+    // cache is best effort
+  }
+}
+
+async function pullRequestCacheKey(cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execAsync('git rev-parse --path-format=absolute --git-common-dir', { cwd });
+    return normalizePath(stdout.trim());
+  } catch {
+    return normalizePath(cwd);
+  }
+}
+
+// Exposed for testing: decide whether a cache entry is still usable
+export function isCacheFresh(entry: PullRequestCacheEntry | undefined, maxAgeSeconds: number, now = Date.now()): boolean {
+  if (!entry || maxAgeSeconds <= 0) return false;
+  return now - entry.fetchedAt < maxAgeSeconds * 1000;
+}
+
+export async function fetchPullRequestsCached(
+  cwd: string = process.cwd(),
+  maxAgeSeconds: number = DEFAULT_PR_MAX_AGE_SECONDS
+): Promise<PullRequestFetchResult> {
+  const key = await pullRequestCacheKey(cwd);
+  const cache = readPullRequestCache();
+  const entry = cache[key];
+  if (isCacheFresh(entry, maxAgeSeconds)) {
+    return { provider: entry.provider, pullRequests: entry.pullRequests, fromCache: true };
+  }
+
+  const result = await fetchPullRequests(cwd);
+
+  // Failed lookups are cached too (briefly, via the same TTL) so a missing
+  // gh/glab does not cost a subprocess on every refresh.
+  const pruned: Record<string, PullRequestCacheEntry> = {};
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [k, v] of Object.entries(cache)) if (v.fetchedAt > cutoff) pruned[k] = v;
+  pruned[key] = { fetchedAt: Date.now(), provider: result.provider, pullRequests: result.pullRequests };
+  writePullRequestCache(pruned);
+  return result;
+}
+
+// Look up the PR for a single branch
+export async function getPullRequestForBranch(branch: string, cwd?: string, maxAgeSeconds = 0): Promise<PullRequestInfo | null> {
+  const { pullRequests } = await fetchPullRequestsCached(cwd, maxAgeSeconds);
+  return pullRequests ? pickPullRequest(pullRequests, branch) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Mutations
+// ---------------------------------------------------------------------------
+
+function quote(arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+export interface AddWorktreeOptions {
+  branch: string;
+  path: string;
+  newBranch?: boolean;
+  base?: string;
+  force?: boolean;
+  cwd?: string;
+}
+
+export async function addWorktree(options: AddWorktreeOptions): Promise<{ path: string; branch: string; keptFiles: string[] }> {
+  const args = ['git', 'worktree', 'add'];
+  if (options.force) args.push('--force');
+  if (options.newBranch) {
+    args.push('-b', quote(options.branch), quote(options.path));
+    if (options.base) args.push(quote(options.base));
+  } else {
+    args.push(quote(options.path), quote(options.branch));
+  }
+  fs.mkdirSync(path.dirname(options.path), { recursive: true });
+  await execAsync(args.join(' '), { cwd: options.cwd || process.cwd() });
+
+  // Restore files kept outside git (e.g. .env) into the fresh worktree
+  let keptFiles: string[] = [];
+  try {
+    keptFiles = applyKeptFiles(options.path);
+  } catch {
+    // Keep files are a convenience; never fail worktree creation over them
+  }
+
+  return { path: options.path, branch: options.branch, keptFiles };
+}
+
+export async function removeWorktree(worktreePath: string, force = false, cwd?: string): Promise<void> {
+  const args = ['git', 'worktree', 'remove'];
+  if (force) args.push('--force');
+  args.push(quote(worktreePath));
+  await execAsync(args.join(' '), { cwd: cwd || process.cwd() });
+}
+
+export async function pruneWorktrees(cwd?: string): Promise<string> {
+  const { stdout } = await execAsync('git worktree prune -v', { cwd: cwd || process.cwd() });
   return stdout.trim();
 }
 
-async function refExists(ref: string): Promise<boolean> {
+// ---------------------------------------------------------------------------
+// Editor sessions
+// ---------------------------------------------------------------------------
+
+export function getSessionsPath(): string {
+  return path.join(getGlobalKunjDir(), WORKTREE_SESSIONS_FILE);
+}
+
+interface SessionsFile {
+  sessions: WorktreeSession[];
+}
+
+function readSessionsFile(): SessionsFile {
   try {
-    await execAsync(`git show-ref --verify --quiet ${ref}`);
+    const file = getSessionsPath();
+    if (!fs.existsSync(file)) return { sessions: [] };
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { sessions: Array.isArray(data?.sessions) ? data.sessions : [] };
+  } catch {
+    return { sessions: [] };
+  }
+}
+
+function writeSessionsFile(data: SessionsFile): void {
+  initGlobalKunjDirectory();
+  const file = getSessionsPath();
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, file);
+}
+
+export function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error: any) {
+    // EPERM means the process exists but belongs to another user
+    return error?.code === 'EPERM';
   }
 }
 
-export interface CreateWorktreeResult {
-  path: string;
-  createdBranch: boolean;
-  baseBranch?: string;
+// Decide whether a session is still alive. Exposed for testing.
+export function isSessionAlive(
+  session: WorktreeSession,
+  now: number = Date.now(),
+  host: string = os.hostname(),
+  aliveCheck: (pid: number) => boolean = isProcessAlive
+): boolean {
+  if (session.host === host) {
+    return aliveCheck(session.pid);
+  }
+  const lastSeen = Date.parse(session.lastSeen || session.registeredAt);
+  return !Number.isNaN(lastSeen) && now - lastSeen < SESSION_STALE_MS;
 }
 
-// Create a worktree for a branch, creating the branch if needed
-export async function createWorktree(branch: string, targetPath: string): Promise<CreateWorktreeResult> {
-  if (fs.existsSync(targetPath)) {
-    throw new Error(`Target directory already exists: ${targetPath}`);
-  }
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-
-  const quotedPath = JSON.stringify(targetPath);
-  const localExists = await refExists(`refs/heads/${branch}`);
-  const remoteExists = !localExists && (await refExists(`refs/remotes/origin/${branch}`));
-
-  if (localExists) {
-    await execAsync(`git worktree add ${quotedPath} ${JSON.stringify(branch)}`);
-    return { path: targetPath, createdBranch: false };
-  }
-
-  if (remoteExists) {
-    await execAsync(
-      `git worktree add --track -b ${JSON.stringify(branch)} ${quotedPath} ${JSON.stringify(`origin/${branch}`)}`
-    );
-    return { path: targetPath, createdBranch: true, baseBranch: `origin/${branch}` };
-  }
-
-  let base = 'HEAD';
-  try {
-    const { stdout } = await execAsync('git branch --show-current');
-    if (stdout.trim()) {
-      base = stdout.trim();
+// Load sessions, dropping (and persisting the removal of) dead ones
+export function loadActiveSessions(): WorktreeSession[] {
+  const data = readSessionsFile();
+  const alive = data.sessions.filter(s => isSessionAlive(s));
+  if (alive.length !== data.sessions.length) {
+    try {
+      writeSessionsFile({ sessions: alive });
+    } catch {
+      // best effort
     }
-  } catch {
-    // fall back to HEAD
   }
-  await execAsync(`git worktree add -b ${JSON.stringify(branch)} ${quotedPath} ${JSON.stringify(base)}`);
-  return { path: targetPath, createdBranch: true, baseBranch: base };
+  return alive;
 }
 
-// Remove a worktree (and optionally force removal of dirty trees)
-export async function removeWorktree(worktreePath: string, force: boolean = false): Promise<void> {
-  const forceFlag = force ? ' --force' : '';
-  await execAsync(`git worktree remove${forceFlag} ${JSON.stringify(worktreePath)}`);
+export interface RegisterSessionOptions {
+  path: string;
+  pid: number;
+  editor?: string;
+  label?: string;
+  id?: string;
 }
 
-const VSCODE_LIKE = new Set(['code', 'code-insiders', 'cursor', 'codium', 'windsurf']);
+function makeSessionId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Register (or refresh) an editor session. A session is identified by
+// (host, pid, path) so calling this repeatedly acts as a heartbeat.
+export function registerSession(options: RegisterSessionOptions): WorktreeSession {
+  const host = os.hostname();
+  const normalized = normalizePath(options.path);
+  const now = new Date().toISOString();
+  const data = readSessionsFile();
+  const alive = data.sessions.filter(s => isSessionAlive(s));
+
+  let session = alive.find(
+    s => (options.id && s.id === options.id) || (s.host === host && s.pid === options.pid && samePath(s.path, normalized))
+  );
+
+  if (session) {
+    session.lastSeen = now;
+    session.path = normalized;
+    if (options.editor) session.editor = options.editor;
+    if (options.label !== undefined) session.label = options.label;
+  } else {
+    session = {
+      id: options.id || makeSessionId(),
+      path: normalized,
+      pid: options.pid,
+      host,
+      editor: options.editor || 'unknown',
+      label: options.label,
+      registeredAt: now,
+      lastSeen: now,
+    };
+    alive.push(session);
+  }
+
+  writeSessionsFile({ sessions: alive });
+  return session;
+}
+
+export interface UnregisterSessionOptions {
+  id?: string;
+  pid?: number;
+  path?: string;
+}
+
+// Remove sessions matching the given criteria. Returns number removed.
+export function unregisterSession(options: UnregisterSessionOptions): number {
+  const host = os.hostname();
+  const data = readSessionsFile();
+  const before = data.sessions.length;
+  const remaining = data.sessions.filter(s => {
+    if (options.id) return s.id !== options.id;
+    if (options.pid !== undefined) {
+      const pidMatch = s.host === host && s.pid === options.pid;
+      if (!pidMatch) return true;
+      return options.path ? !samePath(s.path, options.path) : false;
+    }
+    if (options.path) return !samePath(s.path, options.path);
+    return true;
+  });
+  writeSessionsFile({ sessions: remaining.filter(s => isSessionAlive(s)) });
+  return before - remaining.length;
+}
+
+// ---------------------------------------------------------------------------
+// Opening a worktree in an editor
+// ---------------------------------------------------------------------------
+
+// Editors that share VS Code's window flags (-r reuse, -n new window)
+const VSCODE_LIKE = new Set(['code', 'code-insiders', 'codium', 'vscodium', 'cursor', 'windsurf']);
 
 export interface OpenOptions {
   newWindow?: boolean;
   existing?: boolean; // worktree already existed; let the editor focus an open window
 }
 
-// Build the argv used to open a worktree in the configured editor
+// Build the argv used to open a worktree in the configured editor.
+// Returns null when the editor command is empty (opening is disabled).
 export function buildOpenCommand(command: string, targetPath: string, options: OpenOptions = {}): string[] | null {
   const trimmed = command.trim();
   if (!trimmed) {
@@ -181,7 +747,8 @@ export function buildOpenCommand(command: string, targetPath: string, options: O
   const parts = trimmed.split(/\s+/);
   const bin = path.basename(parts[0]);
   const args = parts.slice(1);
-  if (VSCODE_LIKE.has(bin)) {
+  const hasWindowFlag = args.some(a => ['-n', '--new-window', '-r', '--reuse-window'].includes(a));
+  if (VSCODE_LIKE.has(bin) && !hasWindowFlag) {
     if (options.newWindow) {
       args.push('-n');
     } else if (!options.existing) {
@@ -193,6 +760,7 @@ export function buildOpenCommand(command: string, targetPath: string, options: O
 }
 
 // Open a worktree in the configured editor. Returns false if nothing was opened.
+// The child is detached so the editor outlives the CLI process.
 export async function openWorktree(command: string, targetPath: string, options: OpenOptions = {}): Promise<boolean> {
   const argv = buildOpenCommand(command, targetPath, options);
   if (!argv) {

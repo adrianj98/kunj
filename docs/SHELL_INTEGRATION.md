@@ -273,22 +273,24 @@ PROMPT='%F{green}%n@%m%f:%F{blue}%~%f$(kunj_prompt_info)
 
 ## cd into a Worktree
 
-`kunj tree <branch>` creates or finds the worktree for a branch and opens it in your editor, but a
-CLI cannot change your shell's working directory. Use the `-p` flag, which prints only the path,
-inside a shell function:
+`kunj worktree path <branch>` prints only the path to a branch's worktree, which lets you `cd` into
+it from a shell function (a CLI cannot change your shell's working directory itself):
 
 ```zsh
 # ~/.zshrc or ~/.bashrc
 kt() {
   local dir
-  dir=$(kunj tree -p "$1") || return
+  # Create the worktree on first use, then jump into it
+  dir=$(kunj worktree path "$1" 2>/dev/null) ||
+    dir=$(kunj worktree add "$1" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktree"]["path"])') ||
+    return
   cd "$dir"
 }
 ```
 
 Then `kt feature/bob` creates the worktree if needed, applies your keep files, and drops you into it
-without opening an editor. Set `worktree.openCommand` to an empty string if you never want the
-editor opened by the plain `kunj tree` command.
+without opening an editor. Set `worktree.editorCommand` to an empty string if you never want
+`kunj worktree open` to launch an editor.
 
 ---
 
@@ -298,7 +300,7 @@ editor opened by the plain `kunj tree` command.
 - `kunj pr --status` - View PR status with checks
 - `kunj list` - List branches with metadata
 - `kunj config` - Configure kunj settings
-- `kunj tree` - Manage git worktrees and keep files
+- `kunj worktree` - Manage git worktrees and keep files
 
 ---
 

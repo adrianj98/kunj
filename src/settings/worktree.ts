@@ -1,36 +1,39 @@
-// Worktree settings - used by the `kunj tree` command
+// Worktree settings - used by the `kunj worktree` command and editor integrations
 
 import { registerSettings } from '../lib/settings-registry';
 
 export function registerWorktreeSettings(): void {
   registerSettings([
     {
-      key: 'worktree.dir',
-      description: 'Directory where worktrees are created',
-      detailedDescription: 'Base directory for worktrees created by `kunj tree`. Each worktree is placed in a folder named after its branch with "/" replaced by "_" (e.g. feature/bob -> feature_bob). Leave empty to use ~/.kunj/{reponame}/worktrees. Supports "~" and a "{repo}" placeholder; relative paths resolve from the repository root.',
+      key: 'worktree.baseDir',
+      description: 'Directory where new worktrees are created',
       type: 'string',
       defaultValue: '',
       category: 'worktree',
+      detailedDescription:
+        'Base directory for worktrees created by `kunj worktree add`. Each worktree is placed in a folder named after its branch (e.g. feature/bob -> feature-bob). Leave empty to use a "<repo>-worktrees" folder next to the repository. Supports "~" and a "{repo}" placeholder; relative paths resolve from the main repository root.',
       examples: [
-        '(empty) - Use ~/.kunj/{reponame}/worktrees (default)',
+        '(empty) - Use <repo>-worktrees next to the repository (default)',
+        '../my-repo-worktrees - Sibling folder next to the repository',
         '~/worktrees/{repo} - One folder per repository under your home',
-        '../{repo}-worktrees - Sibling folder next to the repository'
       ],
-      relatedSettings: ['worktree.openCommand']
+      relatedSettings: ['worktree.editorCommand'],
     },
     {
-      key: 'worktree.openCommand',
-      description: 'Editor command used to open a worktree',
-      detailedDescription: 'Command run to open a worktree after creating or switching to it. For VS Code-style editors (code, cursor, codium) kunj adds -r to reuse the current window or -n with --new-window. Set to an empty string to disable opening an editor.',
+      key: 'worktree.editorCommand',
+      description: 'Command used by `kunj worktree open` to open a worktree',
       type: 'string',
       defaultValue: 'code',
       category: 'worktree',
+      detailedDescription:
+        'The worktree path is appended as the last argument. For VS Code-style editors (code, cursor, codium, windsurf) kunj adds -r to reuse the current window, or -n with --new-window. Set to an empty string to disable opening an editor.',
       examples: [
         'code - Open in Visual Studio Code (default)',
+        'code -n - Always open a new VS Code window',
         'cursor - Open in Cursor',
-        '(empty) - Do not open an editor, just print the path'
+        '(empty) - Do not open an editor',
       ],
-      relatedSettings: ['worktree.dir']
-    }
+      relatedSettings: ['worktree.baseDir'],
+    },
   ]);
 }

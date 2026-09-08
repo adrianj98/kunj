@@ -1,83 +1,201 @@
 import { describe, it, expect } from '@jest/globals';
 import * as os from 'os';
 import * as path from 'path';
-import { worktreeFolderName, parseWorktreeList, expandWorktreePath, buildOpenCommand } from '../worktree';
-import { repoNameFromUrl } from '../config';
+import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, expandWorktreeDir, WorktreeSession, PullRequestInfo } from '../worktree';
 
-describe('worktree helpers', () => {
-  describe('worktreeFolderName', () => {
-    it('replaces slashes with underscores', () => {
-      expect(worktreeFolderName('feature/bob')).toBe('feature_bob');
-      expect(worktreeFolderName('a/b/c')).toBe('a_b_c');
-    });
-
-    it('strips refs/heads prefix and sanitises odd characters', () => {
-      expect(worktreeFolderName('refs/heads/fix/x')).toBe('fix_x');
-      expect(worktreeFolderName('fix bug#1')).toBe('fix_bug_1');
-      expect(worktreeFolderName('release-1.2.3')).toBe('release-1.2.3');
-    });
-  });
-
-  describe('repoNameFromUrl', () => {
-    it('handles ssh, https and local urls', () => {
-      expect(repoNameFromUrl('git@github.com:adrianj98/kunj.git')).toBe('kunj');
-      expect(repoNameFromUrl('https://github.com/adrianj98/kunj.git')).toBe('kunj');
-      expect(repoNameFromUrl('https://github.com/adrianj98/kunj')).toBe('kunj');
-      expect(repoNameFromUrl('/Users/me/projects/kunj.git/')).toBe('kunj');
-      expect(repoNameFromUrl('ssh://git@host:2222/org/my-repo.git')).toBe('my-repo');
-    });
-  });
-
-  describe('expandWorktreePath', () => {
-    it('expands ~ and {repo} and resolves relative paths from the base dir', () => {
-      expect(expandWorktreePath('~/wt/{repo}', 'kunj', '/base')).toBe(path.join(os.homedir(), 'wt', 'kunj'));
-      expect(expandWorktreePath('../{repo}-wt', 'kunj', '/base/repo')).toBe(path.resolve('/base/repo', '../kunj-wt'));
-      expect(expandWorktreePath('/abs/dir', 'kunj', '/base')).toBe('/abs/dir');
-    });
-  });
-
+describe('worktree utilities', () => {
   describe('parseWorktreeList', () => {
-    it('parses porcelain output including bare and detached entries', () => {
-      const output = [
-        'worktree /repo.git',
-        'bare',
-        '',
-        'worktree /repo.git/main',
-        'HEAD abc123',
+    it('parses main, branch, detached, locked and prunable worktrees', () => {
+      const porcelain = [
+        'worktree /repo',
+        'HEAD 1111111111111111111111111111111111111111',
         'branch refs/heads/main',
         '',
-        'worktree /wt/feature_bob',
-        'HEAD def456',
-        'branch refs/heads/feature/bob',
-        'locked',
+        'worktree /repo-worktrees/feature-one',
+        'HEAD 2222222222222222222222222222222222222222',
+        'branch refs/heads/feature/one',
+        'locked because I said so',
         '',
-        'worktree /wt/detached',
-        'HEAD 0123456',
+        'worktree /repo-worktrees/detached',
+        'HEAD 3333333333333333333333333333333333333333',
         'detached',
+        'prunable gitdir file points to non-existent location',
         '',
       ].join('\n');
-      const list = parseWorktreeList(output);
-      expect(list).toHaveLength(4);
-      expect(list[0]).toMatchObject({ path: '/repo.git', bare: true });
-      expect(list[1]).toMatchObject({ path: '/repo.git/main', branch: 'main', head: 'abc123' });
-      expect(list[2]).toMatchObject({ path: '/wt/feature_bob', branch: 'feature/bob', locked: true });
-      expect(list[3]).toMatchObject({ path: '/wt/detached', branch: null });
+
+      const result = parseWorktreeList(porcelain);
+      expect(result).toHaveLength(3);
+
+      expect(result[0]).toMatchObject({ path: '/repo', branch: 'main', name: 'main', isMain: true, detached: false });
+      expect(result[1]).toMatchObject({
+        path: '/repo-worktrees/feature-one',
+        branch: 'feature/one',
+        name: 'feature/one',
+        isMain: false,
+        locked: true,
+        lockedReason: 'because I said so',
+      });
+      expect(result[2]).toMatchObject({
+        path: '/repo-worktrees/detached',
+        branch: null,
+        detached: true,
+        name: 'detached@3333333',
+        prunable: true,
+        prunableReason: 'gitdir file points to non-existent location',
+      });
+    });
+
+    it('handles bare repositories and empty input', () => {
+      expect(parseWorktreeList('')).toEqual([]);
+      const [bare] = parseWorktreeList('worktree /repo.git\nbare\n');
+      expect(bare).toMatchObject({ path: '/repo.git', bare: true, name: 'repo.git' });
     });
   });
 
-  describe('buildOpenCommand', () => {
-    it('adds -r for vscode-like editors on new worktrees', () => {
-      expect(buildOpenCommand('code', '/wt/x')).toEqual(['code', '-r', '/wt/x']);
+  describe('branchToDirName', () => {
+    it('replaces path separators and unsafe characters', () => {
+      expect(branchToDirName('feature/one')).toBe('feature-one');
+      expect(branchToDirName('refs/heads/fix/ABC-123 foo')).toBe('fix-ABC-123-foo');
+      expect(branchToDirName('///')).toBe('worktree');
     });
-    it('adds -n with newWindow', () => {
-      expect(buildOpenCommand('cursor', '/wt/x', { newWindow: true })).toEqual(['cursor', '-n', '/wt/x']);
+  });
+
+  describe('isSessionAlive', () => {
+    const base: WorktreeSession = {
+      id: 's1',
+      path: '/repo',
+      pid: 123,
+      host: 'host-a',
+      editor: 'vscode',
+      registeredAt: '2026-01-01T00:00:00.000Z',
+      lastSeen: '2026-01-01T00:00:00.000Z',
+    };
+    const now = Date.parse('2026-01-01T01:00:00.000Z');
+
+    it('uses the pid check on the same host', () => {
+      expect(isSessionAlive(base, now, 'host-a', () => true)).toBe(true);
+      expect(isSessionAlive(base, now, 'host-a', () => false)).toBe(false);
     });
-    it('uses no flag for existing worktrees so the editor focuses its window', () => {
-      expect(buildOpenCommand('code', '/wt/x', { existing: true })).toEqual(['code', '/wt/x']);
+
+    it('falls back to staleness on a different host', () => {
+      expect(isSessionAlive(base, now, 'host-b', () => false)).toBe(true);
+      const stale = { ...base, lastSeen: '2025-12-01T00:00:00.000Z' };
+      expect(isSessionAlive(stale, now, 'host-b', () => true)).toBe(false);
     });
-    it('leaves other commands untouched and returns null when empty', () => {
-      expect(buildOpenCommand('open -a Terminal', '/wt/x')).toEqual(['open', '-a', 'Terminal', '/wt/x']);
-      expect(buildOpenCommand('  ', '/wt/x')).toBeNull();
+  });
+
+  describe('summarizeChecks', () => {
+    it('returns null without checks', () => {
+      expect(summarizeChecks([])).toBeNull();
+      expect(summarizeChecks(undefined)).toBeNull();
     });
+
+    it('reports failure when any check failed', () => {
+      expect(summarizeChecks([
+        { status: 'COMPLETED', conclusion: 'SUCCESS' },
+        { status: 'COMPLETED', conclusion: 'FAILURE' },
+      ])).toBe('failure');
+      expect(summarizeChecks([{ state: 'ERROR' }])).toBe('failure');
+    });
+
+    it('reports pending while checks are running', () => {
+      expect(summarizeChecks([{ status: 'IN_PROGRESS', conclusion: '' }])).toBe('pending');
+      expect(summarizeChecks([{ state: 'PENDING' }])).toBe('pending');
+    });
+
+    it('reports success when everything passed', () => {
+      expect(summarizeChecks([{ status: 'COMPLETED', conclusion: 'SUCCESS' }, { state: 'SUCCESS' }])).toBe('success');
+    });
+  });
+
+  describe('pickPullRequest', () => {
+    const pr = (n: number, headBranch: string, state: PullRequestInfo['state'], updatedAt: string): PullRequestInfo => ({
+      provider: 'github', number: n, title: `PR ${n}`, state, url: `https://x/pull/${n}`, draft: false,
+      baseBranch: 'main', headBranch, reviewDecision: null, checks: null, updatedAt,
+    });
+
+    it('prefers the open PR for the branch', () => {
+      const prs = [pr(1, 'feat', 'closed', '2026-09-01'), pr(2, 'feat', 'open', '2026-01-01'), pr(3, 'other', 'open', '2026-09-02')];
+      expect(pickPullRequest(prs, 'feat')?.number).toBe(2);
+    });
+
+    it('falls back to the most recently updated PR', () => {
+      const prs = [pr(1, 'feat', 'closed', '2026-09-01'), pr(2, 'feat', 'merged', '2026-09-03')];
+      expect(pickPullRequest(prs, 'feat')?.number).toBe(2);
+      expect(pickPullRequest(prs, 'none')).toBeNull();
+    });
+  });
+
+  describe('parseStatusV2', () => {
+    it('reads upstream, ahead/behind and changed files from one status call', () => {
+      const out = [
+        '# branch.oid 1234567',
+        '# branch.head feature/one',
+        '# branch.upstream origin/feature/one',
+        '# branch.ab +2 -1',
+        '1 .M N... 100644 100644 100644 abc def src/a.ts',
+        '2 R. N... 100644 100644 100644 abc def R100 src/b.ts\tsrc/c.ts',
+        '? untracked.txt',
+        '',
+      ].join('\n');
+      expect(parseStatusV2(out)).toEqual({ dirty: true, changedFiles: 3, ahead: 2, behind: 1, upstream: 'origin/feature/one' });
+    });
+
+    it('handles a clean branch without upstream', () => {
+      expect(parseStatusV2('# branch.oid abc\n# branch.head main\n')).toEqual({ dirty: false, changedFiles: 0, ahead: null, behind: null, upstream: null });
+    });
+  });
+
+  describe('isCacheFresh', () => {
+    const entry = { fetchedAt: 1_000_000, provider: 'github' as const, pullRequests: [] };
+    it('respects the max age', () => {
+      expect(isCacheFresh(entry, 60, 1_000_000 + 30_000)).toBe(true);
+      expect(isCacheFresh(entry, 60, 1_000_000 + 61_000)).toBe(false);
+      expect(isCacheFresh(entry, 0, 1_000_000)).toBe(false);
+      expect(isCacheFresh(undefined, 60)).toBe(false);
+    });
+  });
+});
+
+describe('buildOpenCommand', () => {
+  it('returns null when the editor command is empty', () => {
+    expect(buildOpenCommand('', '/tmp/wt')).toBeNull();
+    expect(buildOpenCommand('   ', '/tmp/wt')).toBeNull();
+  });
+
+  it('reuses the window for VS Code-like editors by default', () => {
+    expect(buildOpenCommand('code', '/tmp/wt')).toEqual(['code', '-r', '/tmp/wt']);
+    expect(buildOpenCommand('cursor', '/tmp/wt')).toEqual(['cursor', '-r', '/tmp/wt']);
+  });
+
+  it('opens a new window when asked', () => {
+    expect(buildOpenCommand('code', '/tmp/wt', { newWindow: true })).toEqual(['code', '-n', '/tmp/wt']);
+  });
+
+  it('adds no window flag for an existing worktree', () => {
+    expect(buildOpenCommand('code', '/tmp/wt', { existing: true })).toEqual(['code', '/tmp/wt']);
+  });
+
+  it('respects a window flag the user configured', () => {
+    expect(buildOpenCommand('code -n', '/tmp/wt')).toEqual(['code', '-n', '/tmp/wt']);
+  });
+
+  it('leaves non-VS-Code editors alone', () => {
+    expect(buildOpenCommand('idea', '/tmp/wt')).toEqual(['idea', '/tmp/wt']);
+    expect(buildOpenCommand('vim', '/tmp/wt', { newWindow: true })).toEqual(['vim', '/tmp/wt']);
+  });
+});
+
+describe('expandWorktreeDir', () => {
+  it('substitutes the {repo} placeholder', () => {
+    expect(expandWorktreeDir('/srv/{repo}-trees', 'kunj', '/repo')).toBe('/srv/kunj-trees');
+  });
+
+  it('expands a leading ~ to the home directory', () => {
+    expect(expandWorktreeDir('~/worktrees', 'kunj', '/repo')).toBe(path.join(os.homedir(), 'worktrees'));
+  });
+
+  it('resolves relative paths from the main repository root', () => {
+    expect(expandWorktreeDir('../trees', 'kunj', '/repo/main')).toBe('/repo/trees');
   });
 });

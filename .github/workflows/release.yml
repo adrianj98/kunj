@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (without the v prefix), e.g. 1.2.3. The tag is created on the selected ref.'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -27,10 +33,15 @@ jobs:
       - name: Extract version from tag
         id: extract_version
         run: |
-          # Get the tag name and remove the 'v' prefix
-          VERSION=${GITHUB_REF#refs/tags/v}
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            # Manual run: version comes from the input; the release step creates the tag
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Tag push: remove the 'v' prefix
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version from tag: $VERSION"
+          echo "Version: $VERSION"
 
       - name: Install dependencies
         run: npm ci
@@ -47,16 +58,29 @@ jobs:
           npm version ${{ steps.extract_version.outputs.version }} --no-git-tag-version --allow-same-version
           echo "Updated package.json to version ${{ steps.extract_version.outputs.version }}"
 
+      # A broken NPM_TOKEN must not stop the GitHub release; the job is
+      # failed at the end instead so the problem stays visible.
       - name: Publish to NPM
+        id: npm_publish
+        continue-on-error: true
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Build VS Code extension
+        working-directory: vscode-extension
+        run: |
+          npm ci
+          npm version ${{ steps.extract_version.outputs.version }} --no-git-tag-version --allow-same-version
+          npm run package
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: v${{ steps.extract_version.outputs.version }}
           name: Release v${{ steps.extract_version.outputs.version }}
           generate_release_notes: true
+          files: vscode-extension/*.vsix
           body: |
             ## 🚀 Release v${{ steps.extract_version.outputs.version }}
 
@@ -65,4 +89,16 @@ jobs:
             npm install -g kunj@${{ steps.extract_version.outputs.version }}
             ```
 
+            ### VS Code extension
+            Download `kunj-worktrees-${{ steps.extract_version.outputs.version }}.vsix` from the assets below and run:
+            ```bash
+            code --install-extension kunj-worktrees-${{ steps.extract_version.outputs.version }}.vsix
+            ```
+
             See the changelog below for details.
+
+      - name: Report NPM publish failure
+        if: steps.npm_publish.outcome == 'failure'
+        run: |
+          echo "::error::npm publish failed (check the NPM_TOKEN secret). The GitHub release was still created."
+          exit 1

@@ -10,8 +10,8 @@ Simple CI/CD setup for Kunj CLI with tag-based releases.
 - **Purpose**: Ensure code quality
 
 ### Release (`release.yml`)
-- **Runs on**: Version tags (v*.*.*)
-- **Does**: Build → Test → Publish to NPM → Create GitHub Release
+- **Runs on**: Version tags (v*.*.*), or manually from the Actions tab ("Run workflow" with a version), which creates the tag for you
+- **Does**: Build → Test → Publish to NPM → Package VS Code extension → Create GitHub Release (with the `.vsix` attached)
 - **Purpose**: Automated publishing when you push a version tag
 
 ## How to Release

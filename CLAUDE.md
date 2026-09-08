@@ -105,14 +105,6 @@ AWS credentials and region resolved via standard AWS SDK chain (env vars, config
 
 Commit styles (conventional, semantic, simple, gitmoji, custom) are defined in src/lib/commit-styles.ts.
 
-### Worktrees and Keep Files
-
-`kunj tree` (src/commands/tree.ts) wraps `git worktree`:
-- Worktrees live under `worktree.dir` (default `~/.kunj/{reponame}/worktrees`), one folder per branch named with `/` replaced by `_` (src/lib/worktree.ts)
-- If the branch is already checked out in any worktree, that path is reused; otherwise the branch is created from the current branch (or tracked from `origin/<branch>`)
-- After creating or switching, the worktree is opened with `worktree.openCommand` (default `code`). VS Code-like editors get `-r` (reuse window) or `-n` (`--new-window`)
-- Keep files (src/lib/keep.ts) are stored in `~/.kunj/{reponame}/keep/` with their path relative to the worktree root and are applied to every newly created worktree
-
 ### Work Log System
 
 Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
@@ -134,8 +126,20 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj delete <branch>` - Delete branch
 - `kunj completion` - Manage shell completion (--install/--uninstall)
 - `kunj prompt-info` - Output PR# for shell prompts
-- `kunj tree <branch>` - Create or switch to a git worktree for the branch and open it in the editor (`-n` new window, `-p` print path only)
-- `kunj tree keep [file|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
+- `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees, their pull requests and editor sessions (used by the VS Code extension)
+- `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
+
+## Worktrees & VS Code Extension
+
+`kunj worktree` (src/commands/worktree.ts, src/lib/worktree.ts) wraps `git worktree` and tracks *editor sessions*: editors register the worktree they have open with `kunj worktree session start --pid <pid>`, and `kunj worktree list --json` reports those sessions per worktree. Sessions live in `~/.kunj/worktree-sessions.json` and are pruned when their PID is dead. Pull requests are fetched in one `gh pr list` (or `glab mr list`) call and cached for 60s in `~/.kunj/pr-cache.json`; pass `--no-pr` to skip or `--fresh` to bypass the cache.
+
+**Performance:** `src/index.ts` has a fast path (`src/commands/fast.ts`) that loads only the requested command for `worktree` and `prompt-info`, because importing the full registry pulls in AWS, LangChain and Jira and costs ~1s. A listing makes one `git rev-parse`, one `git worktree list` and one `git status --porcelain=v2 --branch` per worktree. Keep it that way: don't add per-worktree subprocesses or heavy top-level imports to these modules.
+
+**Keep files:** files deliberately left out of git (e.g. `.env`) can be stored per repository in `~/.kunj/{reponame}/keep/` under their path relative to the worktree root (src/lib/keep.ts). `addWorktree()` applies them to every newly created worktree, and `kunj worktree keep apply [-a]` re-applies them to the current worktree (or all of them).
+
+**Opening an editor:** `buildOpenCommand()`/`openWorktree()` in src/lib/worktree.ts launch `worktree.editorCommand` (default `code`) detached. VS Code-like editors (code, cursor, codium, windsurf) get `-r` to reuse the window, or `-n` with `--new-window`, unless the configured command already sets a window flag. An empty command disables opening.
+
+The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
 
 ## Shell Integration
 
@@ -174,7 +178,6 @@ Core git operations abstracted in src/lib/git.ts:
 - All git commands use `child_process.exec` wrapped with `promisify`
 - Functions return structured results or throw errors
 - File status parsing handles standard git status codes (M, A, D, R, C, U)
-
 
 ## Release Process
 

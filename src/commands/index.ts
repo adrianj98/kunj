@@ -19,7 +19,7 @@ export { CompletionCommand } from './completion';
 export { PromptInfoCommand } from './prompt-info';
 export { IssueCommand } from './issue';
 export { TeamCommand } from './team';
-export { TreeCommand } from './tree';
+export { WorktreeCommand } from './worktree';
 export { UICommand } from '../ui';
 
 // Import all command classes here as they are created
@@ -45,7 +45,7 @@ import { CompletionCommand } from './completion';
 import { PromptInfoCommand } from './prompt-info';
 import { IssueCommand } from './issue';
 import { TeamCommand } from './team';
-import { TreeCommand } from './tree';
+import { WorktreeCommand } from './worktree';
 import { UICommand } from '../ui';
 
 // Export a function that returns all command instances
@@ -72,7 +72,7 @@ export function getAllCommands(): BaseCommand[] {
     new PromptInfoCommand(),
     new IssueCommand(),
     new TeamCommand(),
-    new TreeCommand(),
+    new WorktreeCommand(),
     new UICommand(),
   ];
 }

@@ -48,6 +48,10 @@ export interface KunjConfig {
     includeDiffInPR?: boolean;
   };
   flow?: FlowConfig;
+  worktree?: {
+    baseDir?: string;
+    editorCommand?: string;
+  };
   jira?: {
     enabled: boolean;
     baseUrl: string;
@@ -64,10 +68,6 @@ export interface KunjConfig {
     signingSecret: string;
     appToken: string;
     channels: string[];
-  };
-  worktree?: {
-    dir?: string;
-    openCommand?: string;
   };
 }
 
