@@ -15,7 +15,6 @@
 // Every action supports --json for machine consumption.
 
 import chalk from 'chalk';
-import inquirer from 'inquirer';
 import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -620,6 +619,9 @@ export class WorktreeCommand extends BaseCommand {
       this.keepList();
       return;
     }
+    // Loaded here, not at the top: inquirer costs ~0.2s to import and this is
+    // the only interactive path in a module the editor calls many times a minute
+    const inquirer = (await import('inquirer')).default;
     // Loop until the user cancels
     while (true) {
       const files = listKeptFiles();
