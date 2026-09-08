@@ -42,6 +42,16 @@ const fast_1 = require("./commands/fast");
 async function getAllCommands() {
     return (await Promise.resolve().then(() => __importStar(require('./commands')))).getAllCommands();
 }
+// The release workflow rewrites package.json *after* the build, so the version
+// has to be read at runtime -- anything inlined at compile time is stale.
+function getVersion() {
+    try {
+        return require('../package.json').version || '0.0.0';
+    }
+    catch {
+        return '0.0.0';
+    }
+}
 // Main function to handle both completion and normal execution
 async function main() {
     // Handle shell completion first
@@ -63,13 +73,19 @@ async function main() {
         log(completions);
         return;
     }
+    // Printing the version needs nothing but package.json, so answer it before
+    // the registry pulls in the AWS/LangChain/Jira modules (see commands/fast.ts)
+    if (process.argv.length === 3 && (process.argv[2] === '-V' || process.argv[2] === '--version')) {
+        console.log(getVersion());
+        return;
+    }
     // Create the main program
     const program = new commander_1.Command();
     // Configure the program
     program
         .name('kunj')
         .description('A CLI tool for working with git branches')
-        .version('1.0.0');
+        .version(getVersion());
     // Register commands. Lightweight commands that are invoked frequently by
     // editors and shell prompts skip loading the heavy AI/Jira/UI modules.
     const registry = new command_1.CommandRegistry();

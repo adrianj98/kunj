@@ -84,6 +84,15 @@ The per-repository directory is resolved by `getKunjDir()` in src/lib/config.ts.
 `origin` remote URL, falling back to the basename of the git common dir. Outside a git repository it falls back
 to `./.kunj`. A legacy `./.kunj` directory is copied to the new location the first time it is seen.
 
+Any string value may reference repository variables with `${name}` (src/lib/config-vars.ts):
+`${repoconfig}` (the `.git` directory, or the repository itself when bare), `${repoRoot}`,
+`${repoName}`, `${home}`, and `${branch}` where a branch is in scope. Names match
+case-insensitively, and an unknown name is left verbatim so a literal `${...}` in a prompt or
+commit template survives. `loadConfig()` returns the raw templates so `kunj config` can display
+them; `loadResolvedConfig()` returns expanded values and only makes the git call when something
+actually references a variable. Resolve variables from a git call you already made
+(`repoVariables()`) rather than adding a subprocess.
+
 ### Branch Metadata
 
 Per-branch metadata stored in `~/.kunj/{reponame}/branches.json`:
@@ -131,7 +140,11 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 
 ## Worktrees & VS Code Extension
 
-`kunj worktree` (src/commands/worktree.ts, src/lib/worktree.ts) wraps `git worktree` and tracks *editor sessions*: editors register the worktree they have open with `kunj worktree session start --pid <pid>`, and `kunj worktree list --json` reports those sessions per worktree. Sessions live in `~/.kunj/worktree-sessions.json` and are pruned when their PID is dead. Pull requests are fetched in one `gh pr list` (or `glab mr list`) call and cached for 60s in `~/.kunj/pr-cache.json`; pass `--no-pr` to skip or `--fresh` to bypass the cache.
+`kunj worktree` (src/commands/worktree.ts, src/lib/worktree.ts) wraps `git worktree` and tracks *editor sessions*: editors register the worktree they have open with `kunj worktree session start --pid <pid>`, and `kunj worktree list --json` reports those sessions per worktree. Sessions live in `~/.kunj/worktree-sessions.json` and are pruned when their PID is dead.
+New worktrees default to `${repoconfig}/kunj/worktrees/<branch>` (`worktree.baseDir`, default in
+src/lib/worktree-defaults.ts), which keeps them out of the working tree in a normal repo and inside
+the repository directory in a bare one. Bare repositories are supported throughout: `--show-toplevel`
+fatals there, so ask git for `--git-common-dir` first. Pull requests are fetched in one `gh pr list` (or `glab mr list`) call and cached for 60s in `~/.kunj/pr-cache.json`; pass `--no-pr` to skip or `--fresh` to bypass the cache.
 
 **Performance:** `src/index.ts` has a fast path (`src/commands/fast.ts`) that loads only the requested command for `worktree` and `prompt-info`, because importing the full registry pulls in AWS, LangChain and Jira and costs ~1s. A listing makes one `git rev-parse`, one `git worktree list` and one `git status --porcelain=v2 --branch` per worktree. Keep it that way: don't add per-worktree subprocesses or heavy top-level imports to these modules.
 
@@ -187,6 +200,10 @@ Tag-based automatic releases via GitHub Actions:
 2. Create version tag: `git tag v1.2.3`
 3. Push tag: `git push origin v1.2.3`
 4. Workflow automatically publishes to NPM and creates GitHub release
+
+The workflow rewrites package.json *after* the build, so the CLI reads its version from
+package.json at runtime (`getVersion()` in src/index.ts) - never inline a version at build time.
+`-V` is answered before the command registry loads, for the same reason as the fast path.
 
 See `.github/workflows/README.md` for details. Requires `NPM_TOKEN` secret.
 

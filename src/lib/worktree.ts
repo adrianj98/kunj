@@ -12,6 +12,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { getGlobalKunjDir, initGlobalKunjDirectory } from './config';
 import { applyKeptFiles } from './keep';
+import { expandVariables, repoVariables } from './config-vars';
+import { DEFAULT_WORKTREE_BASE_DIR } from './worktree-defaults';
 
 const execAsync = promisify(exec);
 
@@ -104,15 +106,15 @@ export async function getCurrentWorktreePath(cwd: string = process.cwd()): Promi
   }
 }
 
+// The repository's git data directory: <root>/.git normally, the repo itself when bare
+export async function getGitCommonDir(cwd: string = process.cwd()): Promise<string> {
+  const { stdout } = await execAsync('git rev-parse --path-format=absolute --git-common-dir', { cwd });
+  return stdout.trim();
+}
+
 // The main worktree (the one holding the real .git directory)
 export async function getMainWorktreePath(cwd: string = process.cwd()): Promise<string> {
-  const { stdout } = await execAsync('git rev-parse --path-format=absolute --git-common-dir', { cwd });
-  const commonDir = stdout.trim();
-  // For a normal repo the common dir is <root>/.git; for a bare repo it is the repo itself
-  if (path.basename(commonDir) === '.git') {
-    return path.dirname(commonDir);
-  }
-  return commonDir;
+  return repoVariables(await getGitCommonDir(cwd)).repoRoot;
 }
 
 // Turn a branch name into a safe directory name (feature/foo -> feature-foo)
@@ -124,22 +126,17 @@ export function branchToDirName(branch: string): string {
     .replace(/\.+$/, '') || 'worktree';
 }
 
-// Expand "~" and the "{repo}" placeholder in a configured worktree directory.
-// Relative paths resolve from the main repository root.
-export function expandWorktreeDir(value: string, repoName: string, mainRoot: string): string {
-  let p = value.trim().replace(/^~(?=$|\/)/, os.homedir());
-  p = p.replace(/\{repo\}/g, repoName);
-  return path.isAbsolute(p) ? p : path.resolve(mainRoot, p);
-}
-
-// Default location for a new worktree of the given branch
+// Default location for a new worktree of the given branch. baseDir may use the
+// ${...} config variables; when it names ${branch} itself the result is the full
+// worktree path, otherwise the branch directory is appended.
 export async function getDefaultWorktreePath(branch: string, baseDir?: string, cwd?: string): Promise<string> {
-  const mainRoot = await getMainWorktreePath(cwd);
-  const repoName = path.basename(mainRoot);
-  const dir = baseDir && baseDir.trim()
-    ? expandWorktreeDir(baseDir, repoName, mainRoot)
-    : path.join(path.dirname(mainRoot), `${repoName}-worktrees`);
-  return path.join(dir, branchToDirName(branch));
+  const dirName = branchToDirName(branch);
+  // One git call covers every repo variable, so expansion costs no extra subprocess
+  const vars = { ...repoVariables(await getGitCommonDir(cwd)), branch: dirName };
+  const template = (baseDir || '').trim() || DEFAULT_WORKTREE_BASE_DIR;
+  const expanded = expandVariables(template, vars).replace(/^~(?=$|\/)/, os.homedir());
+  const dir = path.resolve(vars.repoRoot, expanded);
+  return /\$\{branch\}/i.test(template) ? dir : path.join(dir, dirName);
 }
 
 // ---------------------------------------------------------------------------
@@ -258,15 +255,21 @@ export interface WorktreeListing {
 
 // One git call for both the current worktree root and the main worktree root
 async function getRepoPaths(cwd: string): Promise<{ currentPath: string; repoRoot: string }> {
+  // --show-toplevel fatals in a bare repo, but git prints the earlier results
+  // first, so keep stdout and treat a missing toplevel as "not in a worktree"
   let stdout: string;
   try {
-    ({ stdout } = await execAsync('git rev-parse --path-format=absolute --show-toplevel --git-common-dir', { cwd }));
-  } catch {
+    ({ stdout } = await execAsync('git rev-parse --path-format=absolute --git-common-dir --show-toplevel', { cwd }));
+  } catch (error) {
+    stdout = (error as { stdout?: string }).stdout || '';
+  }
+  const [commonDir, currentPath] = stdout.trim().split('\n').map(l => l.trim());
+  if (!commonDir) {
     throw new Error('Not a git repository');
   }
-  const [currentPath, commonDir] = stdout.trim().split('\n').map(l => l.trim());
-  const repoRoot = path.basename(commonDir) === '.git' ? path.dirname(commonDir) : commonDir;
-  return { currentPath, repoRoot };
+  const repoRoot = repoVariables(commonDir).repoRoot;
+  // Standing in a bare repo counts as being in its (bare) worktree entry
+  return { currentPath: currentPath || repoRoot, repoRoot };
 }
 
 export async function listWorktreesDetailed(options: ListWorktreesOptions = {}): Promise<WorktreeListing> {

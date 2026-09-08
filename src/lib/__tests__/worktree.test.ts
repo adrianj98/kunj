@@ -1,7 +1,7 @@
 import { describe, it, expect } from '@jest/globals';
 import * as os from 'os';
 import * as path from 'path';
-import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, expandWorktreeDir, WorktreeSession, PullRequestInfo } from '../worktree';
+import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, WorktreeSession, PullRequestInfo } from '../worktree';
 
 describe('worktree utilities', () => {
   describe('parseWorktreeList', () => {
@@ -183,19 +183,5 @@ describe('buildOpenCommand', () => {
   it('leaves non-VS-Code editors alone', () => {
     expect(buildOpenCommand('idea', '/tmp/wt')).toEqual(['idea', '/tmp/wt']);
     expect(buildOpenCommand('vim', '/tmp/wt', { newWindow: true })).toEqual(['vim', '/tmp/wt']);
-  });
-});
-
-describe('expandWorktreeDir', () => {
-  it('substitutes the {repo} placeholder', () => {
-    expect(expandWorktreeDir('/srv/{repo}-trees', 'kunj', '/repo')).toBe('/srv/kunj-trees');
-  });
-
-  it('expands a leading ~ to the home directory', () => {
-    expect(expandWorktreeDir('~/worktrees', 'kunj', '/repo')).toBe(path.join(os.homedir(), 'worktrees'));
-  });
-
-  it('resolves relative paths from the main repository root', () => {
-    expect(expandWorktreeDir('../trees', 'kunj', '/repo/main')).toBe('/repo/trees');
   });
 });

@@ -6,6 +6,7 @@ import * as os from 'os';
 import { execSync } from 'child_process';
 import { KunjConfig } from '../types';
 import { defaultConfig, KUNJ_DIR, CONFIG_FILE } from '../constants';
+import { expandConfigStrings, resolveConfigVariables, treeHasVariables } from './config-vars';
 
 // Helper function to get global .kunj directory path
 export function getGlobalKunjDir(): string {
@@ -206,6 +207,15 @@ export function loadConfig(): KunjConfig {
   } catch {
     return defaultConfig;
   }
+}
+
+// Config with ${...} variables expanded. Kept separate from loadConfig() so the
+// raw templates stay visible to `kunj config`, and so the git call that resolves
+// the variables only happens when something actually references one.
+export async function loadResolvedConfig(cwd?: string): Promise<KunjConfig> {
+  const config = loadConfig();
+  if (!treeHasVariables(config)) return config;
+  return expandConfigStrings(config, await resolveConfigVariables(cwd));
 }
 
 // Save global configuration

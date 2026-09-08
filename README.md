@@ -90,8 +90,8 @@ kunj worktree remove feature/login
 kunj worktree prune
 ```
 
-Worktrees are created under `../<repo>-worktrees/<branch>` by default. Change the base directory
-with `kunj config set worktree.baseDir=~/worktrees/{repo}` and the editor with
+Worktrees are created under `${repoconfig}/kunj/worktrees/<branch>` by default. Change the base
+directory with `kunj config set worktree.baseDir='~/worktrees/${repoName}'` and the editor with
 `worktree.editorCommand`.
 
 ### Keep files across worktrees
