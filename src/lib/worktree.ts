@@ -130,9 +130,14 @@ export function branchToDirName(branch: string): string {
 // ${...} config variables; when it names ${branch} itself the result is the full
 // worktree path, otherwise the branch directory is appended.
 export async function getDefaultWorktreePath(branch: string, baseDir?: string, cwd?: string): Promise<string> {
-  const dirName = branchToDirName(branch);
   // One git call covers every repo variable, so expansion costs no extra subprocess
-  const vars = { ...repoVariables(await getGitCommonDir(cwd)), branch: dirName };
+  return defaultWorktreePathFor(branch, baseDir, await getGitCommonDir(cwd));
+}
+
+// Same as getDefaultWorktreePath for callers that already know the git common dir
+export function defaultWorktreePathFor(branch: string, baseDir: string | undefined, commonDir: string): string {
+  const dirName = branchToDirName(branch);
+  const vars = { ...repoVariables(commonDir), branch: dirName };
   const template = (baseDir || '').trim() || DEFAULT_WORKTREE_BASE_DIR;
   const expanded = expandVariables(template, vars).replace(/^~(?=$|\/)/, os.homedir());
   const dir = path.resolve(vars.repoRoot, expanded);
@@ -247,6 +252,8 @@ export type PullRequestLookup = 'github' | 'gitlab' | 'unavailable' | 'skipped';
 
 export interface WorktreeListing {
   repoRoot: string;
+  // The .git directory (the repository itself when bare); feeds repoVariables()
+  gitCommonDir: string;
   currentPath: string | null;
   pullRequestLookup: PullRequestLookup;
   pullRequestsFromCache: boolean;
@@ -254,7 +261,7 @@ export interface WorktreeListing {
 }
 
 // One git call for both the current worktree root and the main worktree root
-async function getRepoPaths(cwd: string): Promise<{ currentPath: string; repoRoot: string }> {
+async function getRepoPaths(cwd: string): Promise<{ currentPath: string; repoRoot: string; commonDir: string }> {
   // --show-toplevel fatals in a bare repo, but git prints the earlier results
   // first, so keep stdout and treat a missing toplevel as "not in a worktree"
   let stdout: string;
@@ -269,7 +276,7 @@ async function getRepoPaths(cwd: string): Promise<{ currentPath: string; repoRoo
   }
   const repoRoot = repoVariables(commonDir).repoRoot;
   // Standing in a bare repo counts as being in its (bare) worktree entry
-  return { currentPath: currentPath || repoRoot, repoRoot };
+  return { currentPath: currentPath || repoRoot, repoRoot, commonDir };
 }
 
 export async function listWorktreesDetailed(options: ListWorktreesOptions = {}): Promise<WorktreeListing> {
@@ -309,6 +316,7 @@ export async function listWorktreesDetailed(options: ListWorktreesOptions = {}):
 
   return {
     repoRoot: paths.repoRoot,
+    gitCommonDir: paths.commonDir,
     currentPath: paths.currentPath,
     pullRequestLookup: !includePullRequests ? 'skipped' : prResult.pullRequests ? prResult.provider || 'github' : 'unavailable',
     pullRequestsFromCache: prResult.fromCache,
@@ -322,7 +330,11 @@ export async function listWorktrees(options: ListWorktreesOptions = {}): Promise
 
 // Resolve a user supplied target (path, branch name or worktree name) to a worktree
 export async function findWorktree(target: string, cwd?: string): Promise<WorktreeInfo | null> {
-  const worktrees = await listWorktrees({ includeStatus: false, cwd });
+  return findWorktreeIn(await listWorktrees({ includeStatus: false, cwd }), target, cwd);
+}
+
+// findWorktree over an already fetched listing
+export function findWorktreeIn(worktrees: WorktreeInfo[], target: string, cwd?: string): WorktreeInfo | null {
   const byBranch = worktrees.find(wt => wt.branch === target || wt.name === target);
   if (byBranch) return byBranch;
   const candidate = path.resolve(cwd || process.cwd(), target);

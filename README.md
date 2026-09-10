@@ -110,6 +110,36 @@ kunj worktree keep                    # interactive menu
 
 Add `--json` to any action for machine-readable output.
 
+### Hooks
+
+Like git hooks, kunj can run your own scripts at well-defined points. Today the hooks are
+`pre-worktree-create`, `post-worktree-create`, `pre-worktree-delete` and `post-worktree-delete`.
+A `pre-*` hook that exits non-zero aborts the operation; a failing `post-*` hook is reported only.
+
+```bash
+kunj hooks                                # list hooks and what is installed for each
+kunj hooks add post-worktree-create       # create ~/.kunj/<repo>/hooks/post-worktree-create from a template
+kunj hooks add pre-worktree-delete -g     # ...or a global one in ~/.kunj/hooks (runs for every repo)
+kunj hooks run post-worktree-create       # run a hook by hand against the current worktree
+kunj worktree add feature/x --no-hooks    # skip hooks for one command
+```
+
+A hook is an executable file named after the hook, or a directory `<hook>.d/` of executables that run
+in sorted order. Scripts get the worktree path and branch as `$1` and `$2`, plus `KUNJ_HOOK`,
+`KUNJ_REPO_ROOT`, `KUNJ_REPO_CONFIG`, `KUNJ_REPO_NAME`, `KUNJ_WORKTREE_PATH` and `KUNJ_BRANCH` in the
+environment. `post-worktree-create` and `pre-worktree-delete` run inside the worktree (after keep
+files were copied in), the others from the main worktree.
+
+Short commands can live in config instead of a script. They run through the shell and may use
+`${worktree}`, `${branch}`, `${repoRoot}` and the other config variables:
+
+```bash
+kunj config --set hooks.post-worktree-create="npm install"
+kunj config --set hooks.pre-worktree-delete="docker compose down"
+```
+
+Edit `config.json` by hand to give a hook a JSON array of several commands.
+
 ### VS Code extension
 
 The `vscode-extension/` folder contains **Kunj Worktrees**, a VS Code extension that lists worktrees, shows which ones are open in other windows along with their pull requests, and opens them on click. It uses the kunj CLI for everything. See [vscode-extension/README.md](./vscode-extension/README.md).

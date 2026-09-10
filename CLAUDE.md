@@ -137,6 +137,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj prompt-info` - Output PR# for shell prompts
 - `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees, their pull requests and editor sessions (used by the VS Code extension)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
+- `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 
 ## Worktrees & VS Code Extension
 
@@ -153,6 +154,31 @@ fatals there, so ask git for `--git-common-dir` first. Pull requests are fetched
 **Opening an editor:** `buildOpenCommand()`/`openWorktree()` in src/lib/worktree.ts launch `worktree.editorCommand` (default `code`) detached. VS Code-like editors (code, cursor, codium, windsurf) get `-r` to reuse the window, or `-n` with `--new-window`, unless the configured command already sets a window flag. An empty command disables opening.
 
 The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
+
+## Hooks
+
+Git-style hooks (src/lib/hooks.ts) let users run their own scripts around kunj operations. The
+hook names, arguments and pre/post behaviour are declared in src/lib/hook-defs.ts, which has no
+imports so the settings registry and the types can use it without an import cycle through
+config.ts. Current hooks: `pre-worktree-create`, `post-worktree-create`, `pre-worktree-delete`,
+`post-worktree-delete`.
+
+For each hook, `runHook()` runs, in order: executables in `~/.kunj/hooks/` (global), executables
+in `~/.kunj/{reponame}/hooks/` (repo) - either a file named after the hook or a `<hook>.d/`
+directory of scripts in sorted order, skipping `*.sample`, dotfiles and non-executable files -
+and then the commands in the `hooks.<name>` config setting (a string or an array, run via the
+shell with `${...}` variables expanded, including `${branch}` and `${worktree}`). Scripts get the
+hook's positional arguments and a `KUNJ_*` environment (`KUNJ_HOOK`, `KUNJ_REPO_ROOT`,
+`KUNJ_REPO_CONFIG`, `KUNJ_REPO_NAME`, plus `KUNJ_WORKTREE_PATH`/`KUNJ_BRANCH` for worktree hooks).
+A failing `pre-*` hook throws `HookError` and aborts the command; `post-*` failures come back in
+the `HookRunResult` and are printed as warnings. In `--json` mode hook stdout is redirected to
+stderr and stdin is closed so the JSON output stays clean; `--no-hooks` skips them, and the run
+results are included in the `hooks` array of the JSON output.
+
+To add a hook to another command: add its definition to `HOOKS` in src/lib/hook-defs.ts (the
+`hooks.<name>` setting is registered automatically from that list), build a `HookContext` (see
+`worktreeHookContext()` for the worktree one; pass in `repoVariables()` from a git call you
+already made) and call `runHook()` at the right point.
 
 ## Shell Integration
 

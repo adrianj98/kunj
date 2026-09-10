@@ -12,6 +12,9 @@
 //   kunj worktree session start|end|list  editor session tracking
 //   kunj worktree keep [add|apply|delete|list]  files copied into every worktree
 //
+// add and remove fire the pre/post-worktree-create and pre/post-worktree-delete
+// hooks (src/lib/hooks.ts); --no-hooks skips them.
+//
 // Every action supports --json for machine consumption.
 
 import chalk from 'chalk';
@@ -20,14 +23,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { loadConfig } from '../lib/config';
+import { repoVariables } from '../lib/config-vars';
+import { HookRunResult, failedExecutions, runHook, worktreeHookContext } from '../lib/hooks';
 import {
   addWorktree,
   findWorktree,
+  findWorktreeIn,
   getPullRequestForBranch,
   listWorktreesDetailed,
   DEFAULT_PR_MAX_AGE_SECONDS,
   PullRequestInfo,
-  getDefaultWorktreePath,
+  defaultWorktreePathFor,
   getMainWorktreePath,
   getCurrentWorktreePath,
   listWorktrees,
@@ -64,6 +70,7 @@ interface WorktreeOptions {
   label?: string;
   id?: string;
   newWindow?: boolean;
+  hooks?: boolean;
 }
 
 const ACTIONS = ['list', 'add', 'remove', 'prune', 'open', 'session', 'path', 'pr', 'keep'];
@@ -101,6 +108,7 @@ export class WorktreeCommand extends BaseCommand {
         { flags: '--base <ref>', description: '[add] Base ref for the new branch (with -b)' },
         { flags: '-p, --path <dir>', description: '[add|session] Explicit worktree path' },
         { flags: '-f, --force', description: '[add|remove] Force the git operation' },
+        { flags: '--no-hooks', description: '[add|remove] Skip the kunj hooks' },
         { flags: '-n, --new-window', description: '[open] Open in a new editor window' },
         { flags: '-a, --all', description: '[keep apply] Apply keep files to every worktree' },
         { flags: '--pid <pid>', description: '[session] Owning process id' },
@@ -273,18 +281,28 @@ export class WorktreeCommand extends BaseCommand {
       throw new Error('Usage: kunj worktree add <branch> [path] [-b] [--base <ref>]');
     }
 
-    // Raw config here: getDefaultWorktreePath expands ${...} itself, reusing the
-    // git call it already makes rather than paying for a second one
+    // Raw config: ${...} in baseDir is expanded from the listing's git call
+    // below, and hook commands expand their own variables when they run
     const config = loadConfig();
+
+    // One listing gives us the existing worktrees and the repo variables
+    const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
+    const repo = repoVariables(listing.gitCommonDir);
     const targetPath = path.resolve(
-      explicitPath || options.path || (await getDefaultWorktreePath(branch, config.worktree?.baseDir))
+      explicitPath || options.path || defaultWorktreePathFor(branch, config.worktree?.baseDir, listing.gitCommonDir)
     );
 
     // Refuse to create a second worktree for a branch that already has one
-    const existing = await findWorktree(branch);
+    const existing = findWorktreeIn(listing.worktrees, branch);
     if (existing && !options.newBranch) {
       throw new Error(`Branch '${branch}' is already checked out in worktree ${existing.path}`);
     }
+
+    const hookOptions = { hooks: config.hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+    const hooks: HookRunResult[] = [];
+
+    // A failing pre hook throws and nothing is created
+    hooks.push(await runHook('pre-worktree-create', worktreeHookContext(repo, targetPath, branch), hookOptions));
 
     this.log(chalk.blue(`Creating worktree for '${branch}' at ${targetPath}...`));
 
@@ -301,6 +319,11 @@ export class WorktreeCommand extends BaseCommand {
       throw new Error(this.cleanGitError(error));
     }
 
+    // Runs inside the new worktree, after keep files are in place
+    const post = await runHook('post-worktree-create', worktreeHookContext(repo, targetPath, branch), hookOptions);
+    hooks.push(post);
+    this.warnHookFailures(post);
+
     const created = await findWorktree(targetPath);
 
     if (this.jsonMode) {
@@ -308,6 +331,7 @@ export class WorktreeCommand extends BaseCommand {
         success: true,
         worktree: created ? this.toJSON(created) : { path: targetPath, branch },
         keptFiles,
+        hooks,
       });
       return;
     }
@@ -316,7 +340,29 @@ export class WorktreeCommand extends BaseCommand {
     if (keptFiles.length > 0) {
       console.log(chalk.gray(`  Restored ${keptFiles.length} keep file(s): ${keptFiles.join(', ')}`));
     }
+    this.describeHooks(hooks);
     console.log(chalk.gray(`Tip: kunj worktree open ${branch}`));
+  }
+
+  // Post hooks cannot undo anything, so their failures are warnings
+  private warnHookFailures(result: HookRunResult): void {
+    for (const failed of failedExecutions(result)) {
+      const how = failed.signal ? `killed by ${failed.signal}` : failed.exitCode !== null ? `exit code ${failed.exitCode}` : failed.reason || 'could not run';
+      console.error(chalk.yellow(`⚠ ${result.hook} hook failed (${how}): ${failed.source}`));
+    }
+    for (const skipped of result.executions.filter(e => e.status === 'skipped')) {
+      console.error(chalk.yellow(`⚠ ${result.hook} hook ignored: ${skipped.source} is ${skipped.reason}`));
+    }
+  }
+
+  private describeHooks(results: HookRunResult[]): void {
+    for (const result of results) {
+      const ran = result.executions.filter(e => e.status !== 'skipped');
+      if (ran.length === 0) continue;
+      const failed = ran.filter(e => e.status === 'failed').length;
+      const summary = failed ? chalk.yellow(`${ran.length} ran, ${failed} failed`) : `${ran.length} ran`;
+      console.log(chalk.gray(`  ${result.hook}: ${summary}`));
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -328,7 +374,8 @@ export class WorktreeCommand extends BaseCommand {
       throw new Error('Usage: kunj worktree remove <branch|path> [--force]');
     }
 
-    const wt = await findWorktree(target);
+    const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
+    const wt = findWorktreeIn(listing.worktrees, target);
     if (!wt) {
       throw new Error(`No worktree found for '${target}'`);
     }
@@ -342,6 +389,13 @@ export class WorktreeCommand extends BaseCommand {
       const where = wt.sessions.map(s => this.describeSession(s)).join(', ');
       throw new Error(`Worktree is open in ${where}. Close it first or use --force`);
     }
+
+    const repo = repoVariables(listing.gitCommonDir);
+    const hookOptions = { hooks: loadConfig().hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+    const hooks: HookRunResult[] = [];
+
+    // Runs inside the worktree while it still exists; a failure throws and keeps it
+    hooks.push(await runHook('pre-worktree-delete', worktreeHookContext(repo, wt.path, wt.branch), hookOptions));
 
     this.log(chalk.blue(`Removing worktree ${wt.path}...`));
 
@@ -357,11 +411,17 @@ export class WorktreeCommand extends BaseCommand {
 
     unregisterSession({ path: wt.path });
 
+    // The directory is gone, so this runs from the main worktree
+    const post = await runHook('post-worktree-delete', worktreeHookContext(repo, wt.path, wt.branch), hookOptions);
+    hooks.push(post);
+    this.warnHookFailures(post);
+
     if (this.jsonMode) {
-      this.outputJSON({ success: true, path: wt.path, branch: wt.branch });
+      this.outputJSON({ success: true, path: wt.path, branch: wt.branch, hooks });
       return;
     }
     console.log(chalk.green(`✓ Removed worktree ${wt.path}`));
+    this.describeHooks(hooks);
   }
 
   // ---------------------------------------------------------------------

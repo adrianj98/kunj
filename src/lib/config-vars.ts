@@ -29,6 +29,7 @@ export const CONFIG_VARIABLES: Array<{ name: string; description: string }> = [
   { name: 'repoName', description: 'Basename of the main worktree directory' },
   { name: 'home', description: 'Home directory' },
   { name: 'branch', description: 'Branch name, where a branch is in scope' },
+  { name: 'worktree', description: 'Worktree path, where a worktree is in scope (hooks)' },
 ];
 
 const VARIABLE_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;

@@ -8,6 +8,7 @@ import { registerFlowSettings } from './flow';
 import { registerJiraSettings } from './jira';
 import { registerSlackSettings } from './slack';
 import { registerWorktreeSettings } from './worktree';
+import { registerHookSettings } from './hooks';
 import { settingsRegistry } from '../lib/settings-registry';
 
 let initialized = false;
@@ -27,6 +28,7 @@ export function initializeSettings(): void {
   registerJiraSettings();
   registerSlackSettings();
   registerWorktreeSettings();
+  registerHookSettings();
 
   initialized = true;
 }

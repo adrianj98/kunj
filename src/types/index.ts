@@ -1,5 +1,7 @@
 // Type definitions for Kunj CLI
 
+import type { HookName } from '../lib/hook-defs';
+
 export interface FlowConfig {
   enabled: boolean;
   mainBranch: string;
@@ -52,6 +54,8 @@ export interface KunjConfig {
     baseDir?: string;
     editorCommand?: string;
   };
+  // Commands run by kunj hooks, keyed by hook name (see src/lib/hook-defs.ts)
+  hooks?: Partial<Record<HookName, string | string[]>>;
   jira?: {
     enabled: boolean;
     baseUrl: string;

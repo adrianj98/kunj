@@ -114,7 +114,10 @@ export function getRelativeTime(date: Date): string {
 
 // Parse key-value string for configuration set operations
 export function parseKeyValue(input: string): { keys: string[]; value: any } | null {
-  const [keyPath, rawValue] = input.split("=");
+  // Split on the first "=" only: values (e.g. hook commands) may contain "="
+  const separator = input.indexOf("=");
+  const keyPath = separator === -1 ? input : input.slice(0, separator);
+  const rawValue = separator === -1 ? "" : input.slice(separator + 1);
   if (!rawValue) {
     return null;
   }
