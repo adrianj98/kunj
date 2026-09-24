@@ -63,6 +63,11 @@ function wrap(text: string, width: number, indent: string): string {
 function hooksHelp(): string {
   const width = Math.max(...HOOKS.map(h => h.name.length)) + 2;
   const indent = ' '.repeat(width + 2);
+  // Only computed when --help is shown; getHooksDir('repo') resolves the repository name
+  const home = os.homedir();
+  const tilde = (p: string) => (p.startsWith(home) ? '~' + p.slice(home.length) : p);
+  const repoDir = tilde(getHooksDir('repo'));
+  const globalDir = tilde(getHooksDir('global'));
   const hookLines = HOOKS.map(h => {
     const aborts = h.abortsOnFailure ? ' Can abort.' : '';
     const description = h.description.replace(/ A non-zero exit aborts[^.]*\./, '') + aborts;
@@ -74,8 +79,15 @@ git hooks, but around kunj commands (create, switch, commit, pr, ...) rather tha
 
 Actions:
   list (default)          Show every hook, what it receives and what is installed for it
-  add <hook> [-g] [-f]    Create an executable script for <hook> from a commented template,
-                          in this repo's hooks directory (or the global one with -g)
+  add <hook> [-g] [-f]    Create a starter script for <hook>, ready for you to edit:
+                          a commented /bin/sh template listing the hook's arguments and
+                          KUNJ_* variables, already executable (chmod +x).
+                          Written to this repository's hooks directory:
+                            ${repoDir}/<hook>
+                          or, with -g/--global, the one used by every repository:
+                            ${globalDir}/<hook>
+                          An existing script is left alone unless -f/--force is given.
+                          For a one-line command, set hooks.<hook> in the config instead.
   run <hook> [target]     Run a hook now, to test it. [target] is a worktree for the worktree
                           hooks and a branch for the others (default: the current one)
   path [-g]               Print the repo (or global) hooks directory
