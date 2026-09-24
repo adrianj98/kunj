@@ -84,6 +84,7 @@ kunj delete <branch-name> --force
 kunj worktree                    # list worktrees and which editor windows have them open
 kunj worktree add feature/login  # create ../<repo>-worktrees/feature-login
 kunj worktree add hotfix -b --base main   # new branch in a new worktree
+kunj worktree add feature/y -c           # check out feature/y, creating it if it does not exist
 kunj worktree open feature/login # open in your editor (worktree.editorCommand, default "code")
 kunj worktree pr feature/login   # show the related pull request (add --web to open it)
 kunj worktree remove feature/login

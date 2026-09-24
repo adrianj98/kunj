@@ -557,15 +557,30 @@ export interface AddWorktreeOptions {
   branch: string;
   path: string;
   newBranch?: boolean;
+  // Create the branch only when it does not exist locally or on a remote
+  createBranch?: boolean;
   base?: string;
   force?: boolean;
   cwd?: string;
 }
 
-export async function addWorktree(options: AddWorktreeOptions): Promise<{ path: string; branch: string; keptFiles: string[] }> {
+// True when `branch` exists locally or as a remote-tracking branch, which
+// `git worktree add <path> <branch>` checks out (tracking the remote) itself
+export async function branchExists(branch: string, cwd?: string): Promise<boolean> {
+  const { stdout } = await execAsync(
+    `git for-each-ref --count=1 --format='%(refname)' ${quote(`refs/heads/${branch}`)} ${quote(`refs/remotes/*/${branch}`)}`,
+    { cwd: cwd || process.cwd() }
+  );
+  return stdout.trim().length > 0;
+}
+
+export async function addWorktree(
+  options: AddWorktreeOptions
+): Promise<{ path: string; branch: string; keptFiles: string[]; createdBranch: boolean }> {
+  const newBranch = !!options.newBranch || (!!options.createBranch && !(await branchExists(options.branch, options.cwd)));
   const args = ['git', 'worktree', 'add'];
   if (options.force) args.push('--force');
-  if (options.newBranch) {
+  if (newBranch) {
     args.push('-b', quote(options.branch), quote(options.path));
     if (options.base) args.push(quote(options.base));
   } else {
@@ -582,7 +597,7 @@ export async function addWorktree(options: AddWorktreeOptions): Promise<{ path: 
     // Keep files are a convenience; never fail worktree creation over them
   }
 
-  return { path: options.path, branch: options.branch, keptFiles };
+  return { path: options.path, branch: options.branch, keptFiles, createdBranch: newBranch };
 }
 
 export async function removeWorktree(worktreePath: string, force = false, cwd?: string): Promise<void> {

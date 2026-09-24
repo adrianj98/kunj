@@ -4,7 +4,7 @@
 // can show which worktrees are currently open in other windows.
 //
 //   kunj worktree                         list worktrees
-//   kunj worktree add <branch> [path]     create a worktree
+//   kunj worktree add <branch> [path]     create a worktree (-c creates a missing branch)
 //   kunj worktree remove <target>         remove a worktree
 //   kunj worktree prune                   prune stale worktree records
 //   kunj worktree open <target>           open a worktree in your editor
@@ -62,6 +62,7 @@ interface WorktreeOptions {
   fresh?: boolean;
   web?: boolean;
   newBranch?: boolean;
+  create?: boolean;
   base?: string;
   force?: boolean;
   path?: string;
@@ -105,7 +106,8 @@ export class WorktreeCommand extends BaseCommand {
         { flags: '--fresh', description: `[list|pr] Bypass the ${DEFAULT_PR_MAX_AGE_SECONDS}s pull request cache` },
         { flags: '-w, --web', description: '[pr] Open the pull request in the browser' },
         { flags: '-b, --new-branch', description: '[add] Create a new branch for the worktree' },
-        { flags: '--base <ref>', description: '[add] Base ref for the new branch (with -b)' },
+        { flags: '-c, --create', description: '[add] Create the branch if it does not exist' },
+        { flags: '--base <ref>', description: '[add] Base ref for a new branch (with -b or -c)' },
         { flags: '-p, --path <dir>', description: '[add|session] Explicit worktree path' },
         { flags: '-f, --force', description: '[add|remove] Force the git operation' },
         { flags: '--no-hooks', description: '[add|remove] Skip the kunj hooks' },
@@ -278,7 +280,7 @@ export class WorktreeCommand extends BaseCommand {
 
   private async add(branch?: string, explicitPath?: string, options: WorktreeOptions = {}): Promise<void> {
     if (!branch) {
-      throw new Error('Usage: kunj worktree add <branch> [path] [-b] [--base <ref>]');
+      throw new Error('Usage: kunj worktree add <branch> [path] [-b|-c] [--base <ref>]');
     }
 
     // Raw config: ${...} in baseDir is expanded from the listing's git call
@@ -307,11 +309,13 @@ export class WorktreeCommand extends BaseCommand {
     this.log(chalk.blue(`Creating worktree for '${branch}' at ${targetPath}...`));
 
     let keptFiles: string[] = [];
+    let createdBranch = false;
     try {
-      ({ keptFiles } = await addWorktree({
+      ({ keptFiles, createdBranch } = await addWorktree({
         branch,
         path: targetPath,
         newBranch: options.newBranch,
+        createBranch: options.create,
         base: options.base,
         force: options.force,
       }));
@@ -330,12 +334,16 @@ export class WorktreeCommand extends BaseCommand {
       this.outputJSON({
         success: true,
         worktree: created ? this.toJSON(created) : { path: targetPath, branch },
+        createdBranch,
         keptFiles,
         hooks,
       });
       return;
     }
 
+    if (createdBranch) {
+      console.log(chalk.green(`✓ Created branch '${branch}'${options.base ? ` from ${options.base}` : ''}`));
+    }
     console.log(chalk.green(`✓ Worktree created at ${targetPath}`));
     if (keptFiles.length > 0) {
       console.log(chalk.gray(`  Restored ${keptFiles.length} keep file(s): ${keptFiles.join(', ')}`));

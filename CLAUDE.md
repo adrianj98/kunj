@@ -135,7 +135,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj delete <branch>` - Delete branch
 - `kunj completion` - Manage shell completion (--install/--uninstall)
 - `kunj prompt-info` - Output PR# for shell prompts
-- `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees, their pull requests and editor sessions (used by the VS Code extension)
+- `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 
