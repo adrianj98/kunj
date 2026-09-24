@@ -2,21 +2,28 @@
 //
 //   kunj hooks                         list known hooks and what is installed for each
 //   kunj hooks add <hook> [--global]   create an executable hook script from a template
-//   kunj hooks run <hook> [target]     run a hook by hand against a worktree (default: current)
+//   kunj hooks run <hook> [target]     run a hook by hand: target is a worktree for the worktree
+//                                      hooks, a branch for the others (default: current)
 //   kunj hooks path [--global]         print the hooks directory
 
 import chalk from 'chalk';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { loadConfig } from '../lib/config';
-import { repoVariables } from '../lib/config-vars';
+import { repoVariables, resolveConfigVariables } from '../lib/config-vars';
+import { getCurrentBranch } from '../lib/git';
 import {
   HOOKS,
+  HookContext,
   HookName,
   HookRunResult,
   HookScope,
   createHookScript,
   getHooksDir,
   isHookName,
+  actionHookContext,
   listHookSources,
   runHook,
   worktreeHookContext,
@@ -65,7 +72,7 @@ export class HooksCommand extends BaseCommand {
       case 'add':
         return this.add(this.requireHook(hook, 'kunj hooks add <hook> [--global]'), scope, !!options.force);
       case 'run':
-        return this.run(this.requireHook(hook, 'kunj hooks run <hook> [worktree]'), target);
+        return this.run(this.requireHook(hook, 'kunj hooks run <hook> [worktree|branch]'), target);
       case 'path':
         return this.path(scope);
     }
@@ -151,21 +158,20 @@ export class HooksCommand extends BaseCommand {
   // ---------------------------------------------------------------------
 
   private async run(hook: HookName, target?: string): Promise<void> {
-    const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
-    const wt = target
-      ? findWorktreeIn(listing.worktrees, target)
-      : listing.worktrees.find(w => w.isCurrent) || listing.worktrees.find(w => w.isMain) || null;
-    if (!wt) {
-      throw new Error(`No worktree found for '${target}'`);
+    const { context, label, subject, cleanup } = hook.includes('-worktree-')
+      ? await this.worktreeRunContext(target)
+      : await this.actionRunContext(hook, target);
+    this.log(chalk.blue(`Running ${hook} for ${label}...`));
+
+    let result: HookRunResult;
+    try {
+      result = await runHook(hook, context, { hooks: loadConfig().hooks, jsonMode: this.jsonMode });
+    } finally {
+      cleanup();
     }
 
-    const context = worktreeHookContext(repoVariables(listing.gitCommonDir), wt.path, wt.branch);
-    this.log(chalk.blue(`Running ${hook} for ${wt.name} (${wt.path})...`));
-
-    const result: HookRunResult = await runHook(hook, context, { hooks: loadConfig().hooks, jsonMode: this.jsonMode });
-
     if (this.jsonMode) {
-      this.outputJSON({ success: result.ok, worktree: { path: wt.path, branch: wt.branch }, result });
+      this.outputJSON({ success: result.ok, ...subject, result });
       return;
     }
     if (result.executions.length === 0) {
@@ -182,5 +188,51 @@ export class HooksCommand extends BaseCommand {
             : chalk.yellow(execution.reason || 'skipped');
       console.log(`${mark} ${execution.source} ${detail}`);
     }
+  }
+
+  private async worktreeRunContext(target?: string) {
+    const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
+    const wt = target
+      ? findWorktreeIn(listing.worktrees, target)
+      : listing.worktrees.find(w => w.isCurrent) || listing.worktrees.find(w => w.isMain) || null;
+    if (!wt) {
+      throw new Error(`No worktree found for '${target}'`);
+    }
+    return {
+      context: worktreeHookContext(repoVariables(listing.gitCommonDir), wt.path, wt.branch),
+      label: `${wt.name} (${wt.path})`,
+      subject: { worktree: { path: wt.path, branch: wt.branch } },
+      cleanup: () => {},
+    };
+  }
+
+  // The branch hooks get the target branch (default: current) and sample
+  // values for the rest; commit-msg gets a throwaway message file
+  private async actionRunContext(hook: HookName, target?: string) {
+    const current = await getCurrentBranch();
+    const branch = target || current;
+    let dir: string | null = null;
+    const values: Record<string, string> = {
+      branch,
+      'previous-branch': current,
+      'base-branch': 'main',
+      title: 'kunj hooks run',
+      message: 'kunj hooks run',
+      'pr-url': '',
+    };
+    if (hook === 'commit-msg') {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-hooks-run-'));
+      values['message-file'] = path.join(dir, 'COMMIT_EDITMSG');
+      fs.writeFileSync(values['message-file'], 'kunj hooks run test message\n');
+    }
+    const context: HookContext = actionHookContext(hook, await resolveConfigVariables(), process.cwd(), values);
+    return {
+      context,
+      label: `branch ${branch}`,
+      subject: { branch },
+      cleanup: () => {
+        if (dir) fs.rmSync(dir, { recursive: true, force: true });
+      },
+    };
   }
 }

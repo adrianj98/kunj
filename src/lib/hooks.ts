@@ -17,6 +17,8 @@
 //
 // This module is imported by the worktree fast path: keep it free of heavy
 // imports and of git subprocesses (callers pass the repository variables in).
+// runActionHook() is the exception: it resolves them itself, and only when
+// something is installed for the hook.
 // The hook names and descriptions live in hook-defs.ts, which has no imports,
 // so the settings registry (loaded by config.ts) can use them without a cycle.
 
@@ -24,8 +26,17 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getGlobalKunjDir, getKunjDir } from './config';
-import { ConfigVariables, RepoVariables, expandVariables } from './config-vars';
-import { HOOKS_DIR, HOOK_NAMES, HookName, HookDefinition, getHookDefinition } from './hook-defs';
+import chalk from 'chalk';
+import { ConfigVariables, RepoVariables, expandVariables, resolveConfigVariables } from './config-vars';
+import {
+  HOOKS_DIR,
+  HOOK_NAMES,
+  HookName,
+  HookDefinition,
+  argEnvName,
+  argVariableName,
+  getHookDefinition,
+} from './hook-defs';
 
 export * from './hook-defs';
 
@@ -162,6 +173,35 @@ export function worktreeHookContext(repo: RepoVariables, worktreePath: string, b
     },
     vars: { ...repo, branch: branchName, worktree: worktreePath },
   };
+}
+
+// Context for every other hook: `values` are keyed by the hook's argument
+// names (see HOOKS) and become the positional arguments, KUNJ_* variables and
+// ${...} variables. Runs in `cwd`, the directory kunj was started in.
+export function actionHookContext(
+  name: HookName,
+  repo: ConfigVariables,
+  cwd: string,
+  values: Record<string, string | null | undefined>
+): HookContext {
+  const definition = getHookDefinition(name);
+  const argNames = definition ? definition.args : Object.keys(values);
+  const args = argNames.map(a => values[a] || '');
+  const env: Record<string, string> = {};
+  if (repo.repoRoot) env.KUNJ_REPO_ROOT = repo.repoRoot;
+  if (repo.repoconfig) env.KUNJ_REPO_CONFIG = repo.repoconfig;
+  if (repo.repoName) env.KUNJ_REPO_NAME = repo.repoName;
+  const vars: ConfigVariables = { ...repo };
+  argNames.forEach((arg, i) => {
+    env[argEnvName(arg)] = args[i];
+    vars[argVariableName(arg)] = args[i];
+  });
+  return { args, cwd, env, vars };
+}
+
+// True when a script or configured command exists for the hook
+export function hasHookSources(name: HookName, hooks: HooksConfig | undefined): boolean {
+  return listHookSources(name, hooks).length > 0;
 }
 
 export interface RunHookOptions {
@@ -311,6 +351,34 @@ export async function runHook(name: HookName, context: HookContext, options: Run
     }
   }
   return result;
+}
+
+// Run a hook for a kunj action outside the worktree commands. Resolves the
+// repository variables (one git call) only when something is installed.
+export async function runActionHook(
+  name: HookName,
+  values: Record<string, string | null | undefined>,
+  options: RunHookOptions & { cwd?: string } = {}
+): Promise<HookRunResult> {
+  if (options.skip || !hasHookSources(name, options.hooks)) {
+    return { hook: name, enabled: !options.skip, executions: [], ok: true };
+  }
+  const cwd = options.cwd || process.cwd();
+  const repo = await resolveConfigVariables(cwd);
+  const result = await runHook(name, actionHookContext(name, repo, cwd, values), options);
+  warnHookFailures(result);
+  return result;
+}
+
+// Post hooks cannot undo anything, so their failures are printed as warnings
+export function warnHookFailures(result: HookRunResult): void {
+  for (const failed of failedExecutions(result)) {
+    const how = failed.signal ? `killed by ${failed.signal}` : failed.exitCode !== null ? `exit code ${failed.exitCode}` : failed.reason || 'could not run';
+    console.error(chalk.yellow(`⚠ ${result.hook} hook failed (${how}): ${failed.source}`));
+  }
+  for (const skipped of result.executions.filter(e => e.status === 'skipped')) {
+    console.error(chalk.yellow(`⚠ ${result.hook} hook ignored: ${skipped.source} is ${skipped.reason}`));
+  }
 }
 
 // ---------------------------------------------------------------------------

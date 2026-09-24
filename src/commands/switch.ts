@@ -9,6 +9,7 @@ import { loadBranchMetadata, updateBranchMetadata } from '../lib/metadata';
 import { loadConfig } from '../lib/config';
 import { isBranchWIP } from '../lib/utils';
 import { BranchInfo } from '../types';
+import { runActionHook } from '../lib/hooks';
 
 interface SwitchOptions {
   stash?: boolean;
@@ -18,6 +19,7 @@ interface SwitchOptions {
   create?: boolean;
   desc?: string;
   tag?: string[];
+  hooks?: boolean;
 }
 
 export class SwitchCommand extends BaseCommand {
@@ -33,7 +35,8 @@ export class SwitchCommand extends BaseCommand {
         { flags: '-c, --create', description: 'Create new branch if it doesn\'t exist' },
         { flags: '-d, --desc <description>', description: 'Set description when creating branch' },
         { flags: '-t, --tag <tags...>', description: 'Add tags when creating branch' },
-        { flags: '--configured', description: 'Show only configured branches' }
+        { flags: '--configured', description: 'Show only configured branches' },
+        { flags: '--no-hooks', description: 'Skip the kunj hooks' }
       ]
     });
   }
@@ -98,12 +101,18 @@ export class SwitchCommand extends BaseCommand {
     }
 
     const config = loadConfig();
+    const hookOptions = { hooks: config.hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+    const hookValues = { branch: targetBranch, 'previous-branch': currentBranch };
+
+    // A failing pre hook throws and the branch is left alone
+    await runActionHook('pre-branch-switch', hookValues, hookOptions);
+
     console.log(chalk.blue(`Switching to branch '${targetBranch}'...`));
 
     // Use config autoStash preference unless explicitly overridden
     const shouldStash = options.stash !== false && config.preferences.autoStash;
     if (shouldStash && currentBranch) {
-      await createStash(currentBranch);
+      await createStash(currentBranch, hookOptions);
     }
 
     // Switch to the target branch
@@ -129,6 +138,8 @@ export class SwitchCommand extends BaseCommand {
       if (shouldStash) {
         await popStashForBranch(targetBranch);
       }
+
+      await runActionHook('post-branch-switch', hookValues, hookOptions);
     } else {
       console.error(chalk.red(`✗ Failed to switch: ${result.message}`));
       process.exit(1);
@@ -288,13 +299,18 @@ export class SwitchCommand extends BaseCommand {
     options: SwitchOptions
   ): Promise<void> {
     const config = loadConfig();
+    const hookOptions = { hooks: config.hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+    const hookValues = { branch: branchName, 'previous-branch': currentBranch };
+
+    // A failing pre hook throws and nothing is created
+    await runActionHook('pre-branch-create', hookValues, hookOptions);
 
     console.log(chalk.blue(`Creating branch '${branchName}' and switching to it...`));
 
     // Use config autoStash preference unless explicitly overridden
     const shouldStash = options.stash !== false && config.preferences.autoStash;
     if (shouldStash && currentBranch) {
-      await createStash(currentBranch);
+      await createStash(currentBranch, hookOptions);
     }
 
     // Create and checkout the branch
@@ -333,6 +349,8 @@ export class SwitchCommand extends BaseCommand {
       if (shouldStash) {
         await popStashForBranch(branchName);
       }
+
+      await runActionHook('post-branch-create', hookValues, hookOptions);
 
       console.log(chalk.gray("\nTip: Add notes with 'kunj branch-note'"));
     } else {

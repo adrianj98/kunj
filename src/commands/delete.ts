@@ -3,9 +3,12 @@
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
 import { checkGitRepo, getCurrentBranch, executeGitCommand } from '../lib/git';
+import { loadConfig } from '../lib/config';
+import { runActionHook } from '../lib/hooks';
 
 interface DeleteOptions {
   force?: boolean;
+  hooks?: boolean;
 }
 
 export class DeleteCommand extends BaseCommand {
@@ -15,7 +18,8 @@ export class DeleteCommand extends BaseCommand {
       description: 'Delete a branch',
       ui: { category: 'action', widget: 'form-only', label: 'Delete Branch', icon: 'trash', order: 21 },
       options: [
-        { flags: '-f, --force', description: 'Force delete the branch' }
+        { flags: '-f, --force', description: 'Force delete the branch' },
+        { flags: '--no-hooks', description: 'Skip the kunj hooks' }
       ]
     });
   }
@@ -39,6 +43,12 @@ export class DeleteCommand extends BaseCommand {
       process.exit(1);
     }
 
+    const hookOptions = { hooks: loadConfig().hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+    const hookValues = { branch: branchName };
+
+    // A failing pre hook throws and nothing is deleted
+    await runActionHook('pre-branch-delete', hookValues, hookOptions);
+
     const deleteFlag = options.force ? "-D" : "-d";
     console.log(chalk.blue(`Deleting branch '${branchName}'...`));
 
@@ -47,6 +57,8 @@ export class DeleteCommand extends BaseCommand {
     );
 
     if (result.success) {
+      await runActionHook('post-branch-delete', hookValues, hookOptions);
+
       if (this.jsonMode) {
         this.outputJSON({ success: true, branch: branchName, force: !!options.force });
         return;

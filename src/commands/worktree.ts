@@ -24,7 +24,7 @@ import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { loadConfig } from '../lib/config';
 import { repoVariables } from '../lib/config-vars';
-import { HookRunResult, failedExecutions, runHook, worktreeHookContext } from '../lib/hooks';
+import { HookRunResult, runHook, warnHookFailures, worktreeHookContext } from '../lib/hooks';
 import {
   addWorktree,
   findWorktree,
@@ -326,7 +326,7 @@ export class WorktreeCommand extends BaseCommand {
     // Runs inside the new worktree, after keep files are in place
     const post = await runHook('post-worktree-create', worktreeHookContext(repo, targetPath, branch), hookOptions);
     hooks.push(post);
-    this.warnHookFailures(post);
+    warnHookFailures(post);
 
     const created = await findWorktree(targetPath);
 
@@ -350,17 +350,6 @@ export class WorktreeCommand extends BaseCommand {
     }
     this.describeHooks(hooks);
     console.log(chalk.gray(`Tip: kunj worktree open ${branch}`));
-  }
-
-  // Post hooks cannot undo anything, so their failures are warnings
-  private warnHookFailures(result: HookRunResult): void {
-    for (const failed of failedExecutions(result)) {
-      const how = failed.signal ? `killed by ${failed.signal}` : failed.exitCode !== null ? `exit code ${failed.exitCode}` : failed.reason || 'could not run';
-      console.error(chalk.yellow(`⚠ ${result.hook} hook failed (${how}): ${failed.source}`));
-    }
-    for (const skipped of result.executions.filter(e => e.status === 'skipped')) {
-      console.error(chalk.yellow(`⚠ ${result.hook} hook ignored: ${skipped.source} is ${skipped.reason}`));
-    }
   }
 
   private describeHooks(results: HookRunResult[]): void {
@@ -422,7 +411,7 @@ export class WorktreeCommand extends BaseCommand {
     // The directory is gone, so this runs from the main worktree
     const post = await runHook('post-worktree-delete', worktreeHookContext(repo, wt.path, wt.branch), hookOptions);
     hooks.push(post);
-    this.warnHookFailures(post);
+    warnHookFailures(post);
 
     if (this.jsonMode) {
       this.outputJSON({ success: true, path: wt.path, branch: wt.branch, hooks });

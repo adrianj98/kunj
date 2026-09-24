@@ -20,7 +20,9 @@ import {
   findHookScripts,
   getHooksDir,
   hookTemplate,
+  actionHookContext,
   listHookSources,
+  runActionHook,
   runHook,
   worktreeHookContext,
 } from '../hooks';
@@ -65,6 +67,43 @@ describe('hooks', () => {
 
   afterEach(() => {
     fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('maps action hook values to arguments, KUNJ_* variables and ${...} variables', () => {
+    const context = actionHookContext('post-pr-create', repo, worktree, {
+      branch: 'feature/x',
+      'base-branch': 'main',
+      title: 'Add x',
+      'pr-url': 'https://example.com/pull/1',
+    });
+    expect(context.args).toEqual(['feature/x', 'main', 'Add x', 'https://example.com/pull/1']);
+    expect(context.cwd).toBe(worktree);
+    expect(context.env).toMatchObject({
+      KUNJ_REPO_ROOT: repo.repoRoot,
+      KUNJ_BRANCH: 'feature/x',
+      KUNJ_BASE_BRANCH: 'main',
+      KUNJ_PR_URL: 'https://example.com/pull/1',
+    });
+    expect(context.vars).toMatchObject({ branch: 'feature/x', baseBranch: 'main', prUrl: 'https://example.com/pull/1' });
+  });
+
+  it('passes missing action hook values as empty arguments', () => {
+    const context = actionHookContext('pre-branch-switch', repo, worktree, { branch: 'main' });
+    expect(context.args).toEqual(['main', '']);
+    expect(context.env.KUNJ_PREVIOUS_BRANCH).toBe('');
+  });
+
+  it('runs nothing and resolves nothing when no action hook is installed', async () => {
+    const result = await runActionHook('pre-commit', { branch: 'main' }, { cwd: worktree });
+    expect(result).toEqual({ hook: 'pre-commit', enabled: true, executions: [], ok: true });
+  });
+
+  posixOnly('aborts on a failing pre action hook', async () => {
+    const dir = getHooksDir('repo');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'pre-branch-delete'), recordingScript(logFile, 1), { mode: 0o755 });
+    await expect(runActionHook('pre-branch-delete', { branch: 'old' }, { cwd: worktree })).rejects.toBeInstanceOf(HookError);
+    expect(fs.readFileSync(logFile, 'utf8')).toContain('KUNJ_BRANCH=old');
   });
 
   it('keeps global and repo hooks under <kunjDir>/hooks', () => {

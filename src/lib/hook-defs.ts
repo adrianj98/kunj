@@ -10,7 +10,20 @@ export type HookName =
   | 'pre-worktree-create'
   | 'post-worktree-create'
   | 'pre-worktree-delete'
-  | 'post-worktree-delete';
+  | 'post-worktree-delete'
+  | 'pre-branch-create'
+  | 'post-branch-create'
+  | 'pre-branch-switch'
+  | 'post-branch-switch'
+  | 'pre-branch-delete'
+  | 'post-branch-delete'
+  | 'pre-commit'
+  | 'commit-msg'
+  | 'post-commit'
+  | 'pre-pr-create'
+  | 'post-pr-create'
+  | 'pre-stash'
+  | 'post-stash';
 
 export interface HookDefinition {
   name: HookName;
@@ -23,8 +36,30 @@ export interface HookDefinition {
   abortsOnFailure: boolean;
 }
 
+// Every argument is also exported as KUNJ_<ARG> (worktree-path -> KUNJ_WORKTREE_PATH)
+export function argEnvName(arg: string): string {
+  return `KUNJ_${arg.toUpperCase().replace(/-/g, '_')}`;
+}
+
+// ...and, for configured commands, as the ${camelCase} variable (previous-branch -> ${previousBranch})
+export function argVariableName(arg: string): string {
+  return arg.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
+function define(
+  name: HookName,
+  args: string[],
+  description: string,
+  abortsOnFailure = name.startsWith('pre-') || name === 'commit-msg'
+): HookDefinition {
+  return { name, description, args, env: args.map(argEnvName), abortsOnFailure };
+}
+
 const WORKTREE_ARGS = ['worktree-path', 'branch'];
-const WORKTREE_ENV = ['KUNJ_WORKTREE_PATH', 'KUNJ_BRANCH'];
+const WORKTREE_ENV = WORKTREE_ARGS.map(argEnvName);
+const BRANCH_CHANGE_ARGS = ['branch', 'previous-branch'];
+const PR_ARGS = ['branch', 'base-branch', 'title'];
+const STASH_ARGS = ['branch', 'message'];
 
 export const HOOKS: HookDefinition[] = [
   {
@@ -55,6 +90,27 @@ export const HOOKS: HookDefinition[] = [
     env: WORKTREE_ENV,
     abortsOnFailure: false,
   },
+  define(
+    'pre-branch-create',
+    BRANCH_CHANGE_ARGS,
+    'Runs before `kunj create` or `kunj switch -c` creates a branch. A non-zero exit aborts the creation.'
+  ),
+  define('post-branch-create', BRANCH_CHANGE_ARGS, 'Runs after `kunj create` or `kunj switch -c` has created and switched to a branch.'),
+  define('pre-branch-switch', BRANCH_CHANGE_ARGS, 'Runs before `kunj switch` changes branch. A non-zero exit aborts the switch.'),
+  define('post-branch-switch', BRANCH_CHANGE_ARGS, 'Runs after `kunj switch` has changed branch and restored its stash (e.g. to install dependencies).'),
+  define('pre-branch-delete', ['branch'], 'Runs before `kunj delete` deletes a branch. A non-zero exit aborts the deletion.'),
+  define('post-branch-delete', ['branch'], 'Runs after `kunj delete` has deleted a branch.'),
+  define('pre-commit', ['branch'], 'Runs after `kunj commit` has staged the files, before the message is written. A non-zero exit aborts the commit.'),
+  define(
+    'commit-msg',
+    ['message-file', 'branch'],
+    'Runs with the (AI-generated or typed) message in a file before `kunj commit` commits; it may edit the file. A non-zero exit aborts the commit.'
+  ),
+  define('post-commit', ['branch'], 'Runs after `kunj commit` has created a commit, before pushing.'),
+  define('pre-pr-create', PR_ARGS, 'Runs before `kunj pr` pushes the branch and opens a pull request. A non-zero exit aborts the pull request.'),
+  define('post-pr-create', [...PR_ARGS, 'pr-url'], 'Runs after `kunj pr` has opened a pull request.'),
+  define('pre-stash', STASH_ARGS, 'Runs before kunj stashes changes (`kunj stash` or the auto-stash on create/switch). A non-zero exit aborts the operation.'),
+  define('post-stash', STASH_ARGS, 'Runs after kunj has stashed changes.'),
 ];
 
 export const HOOK_NAMES: HookName[] = HOOKS.map(h => h.name);

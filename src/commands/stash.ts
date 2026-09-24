@@ -5,8 +5,10 @@ import inquirer from 'inquirer';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { BaseCommand } from '../lib/command';
-import { checkGitRepo, getFileStatuses } from '../lib/git';
+import { checkGitRepo, getCurrentBranch, getFileStatuses } from '../lib/git';
 import { generateStashMessage } from '../lib/ai-commit';
+import { loadConfig } from '../lib/config';
+import { runActionHook } from '../lib/hooks';
 
 const execAsync = promisify(exec);
 
@@ -17,6 +19,7 @@ interface StashOptions {
   drop?: number;
   message?: string;
   includeUntracked?: boolean;
+  hooks?: boolean;
 }
 
 export class StashCommand extends BaseCommand {
@@ -62,6 +65,10 @@ export class StashCommand extends BaseCommand {
         {
           flags: '-u, --include-untracked',
           description: 'Include untracked files in stash',
+        },
+        {
+          flags: '--no-hooks',
+          description: 'Skip the kunj hooks',
         },
       ],
     });
@@ -167,6 +174,12 @@ export class StashCommand extends BaseCommand {
         return;
       }
 
+      const hookOptions = { hooks: loadConfig().hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+      const hookValues = { branch: await getCurrentBranch(), message: stashMessage };
+
+      // A failing pre hook throws and nothing is stashed
+      await runActionHook('pre-stash', hookValues, hookOptions);
+
       // Create the stash
       const includeUntrackedFlag = options.includeUntracked ? ' --include-untracked' : '';
       const { stdout } = await execAsync(
@@ -177,6 +190,8 @@ export class StashCommand extends BaseCommand {
       if (stdout.trim()) {
         console.log(chalk.gray(stdout.trim()));
       }
+
+      await runActionHook('post-stash', hookValues, hookOptions);
 
       // Show stash list
       console.log(chalk.cyan('\n📋 Current stashes:'));

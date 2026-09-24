@@ -8,11 +8,13 @@ import { updateBranchMetadata } from '../lib/metadata';
 import { loadConfig } from '../lib/config';
 import { BranchMetadata } from '../types';
 import { extractJiraKey, getIssue } from '../lib/jira';
+import { runActionHook } from '../lib/hooks';
 
 interface CreateOptions {
   stash?: boolean;
   desc?: string;
   tag?: string[];
+  hooks?: boolean;
 }
 
 export class CreateCommand extends BaseCommand {
@@ -24,7 +26,8 @@ export class CreateCommand extends BaseCommand {
       options: [
         { flags: '--no-stash', description: 'Disable automatic stashing of changes' },
         { flags: '-d, --desc <description>', description: 'Set a description for the new branch' },
-        { flags: '-t, --tag <tags...>', description: 'Add tags to the new branch' }
+        { flags: '-t, --tag <tags...>', description: 'Add tags to the new branch' },
+        { flags: '--no-hooks', description: 'Skip the kunj hooks' }
       ]
     });
   }
@@ -47,10 +50,16 @@ export class CreateCommand extends BaseCommand {
     // Get current branch before creating new one
     const currentBranch = await getCurrentBranch();
 
+    const hookOptions = { hooks: config.hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+    const hookValues = { branch: branchName, 'previous-branch': currentBranch };
+
+    // A failing pre hook throws and nothing is created
+    await runActionHook('pre-branch-create', hookValues, hookOptions);
+
     // Use config autoStash preference unless explicitly overridden
     const shouldStash = options.stash !== false && config.preferences.autoStash;
     if (shouldStash) {
-      await createStash(currentBranch);
+      await createStash(currentBranch, hookOptions);
     }
 
     // Create and checkout the branch
@@ -104,6 +113,8 @@ export class CreateCommand extends BaseCommand {
           lastSwitched: new Date().toISOString()
         });
       }
+
+      await runActionHook('post-branch-create', hookValues, hookOptions);
 
       if (this.jsonMode) {
         this.outputJSON({

@@ -81,6 +81,11 @@ export abstract class BaseCommand {
           );
           process.exit(1);
         }
+        // A failing pre-* hook is an expected outcome, not a crash: no stack trace
+        if (error instanceof Error && error.name === "HookError") {
+          console.error(`✗ ${error.message}`);
+          process.exit(1);
+        }
         console.error("Command failed:", error);
         process.exit(1);
       }

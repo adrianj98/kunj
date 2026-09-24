@@ -16,6 +16,7 @@ import { loadConfig } from "../lib/config";
 import { generateAIPRDescription, getPRDiff } from "../lib/ai-pr";
 import { checkAWSCredentials, generatePRLogEntry } from "../lib/ai-commit";
 import { appendToWorkLog } from "../lib/work-log";
+import { runActionHook } from "../lib/hooks";
 
 const execAsync = promisify(exec);
 
@@ -28,6 +29,7 @@ interface PrOptions {
   status?: boolean;
   list?: boolean;
   detailed?: boolean;
+  hooks?: boolean;
 }
 
 export class PrCommand extends BaseCommand {
@@ -64,6 +66,7 @@ export class PrCommand extends BaseCommand {
         { flags: "-s, --status", description: "View status of current branch's PR" },
         { flags: "-l, --list", description: "List all open PRs" },
         { flags: "--detailed", description: "Show detailed GitHub Actions steps" },
+        { flags: "--no-hooks", description: "Skip the kunj hooks" },
       ],
     });
   }
@@ -249,6 +252,12 @@ export class PrCommand extends BaseCommand {
       body = answers.body;
     }
 
+    const hookOptions = { hooks: loadConfig().hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+    const hookValues: Record<string, string> = { branch: currentBranch, "base-branch": baseBranch!, title: title! };
+
+    // A failing pre hook throws before anything is pushed
+    await runActionHook("pre-pr-create", hookValues, hookOptions);
+
     // Create the PR
     try {
       console.log(chalk.blue("\nCreating pull request..."));
@@ -281,6 +290,8 @@ export class PrCommand extends BaseCommand {
         // Save PR URL to branch metadata
         const { updateBranchMetadata } = await import('../lib/metadata');
         await updateBranchMetadata(currentBranch, { prUrl });
+
+        await runActionHook("post-pr-create", { ...hookValues, "pr-url": prUrl }, hookOptions);
 
         // Extract PR number from URL (e.g., https://github.com/user/repo/pull/123)
         const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);

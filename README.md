@@ -113,30 +113,51 @@ Add `--json` to any action for machine-readable output.
 
 ### Hooks
 
-Like git hooks, kunj can run your own scripts at well-defined points. Today the hooks are
-`pre-worktree-create`, `post-worktree-create`, `pre-worktree-delete` and `post-worktree-delete`.
-A `pre-*` hook that exits non-zero aborts the operation; a failing `post-*` hook is reported only.
+Like git hooks, kunj can run your own scripts around its own actions. They fire when kunj does
+something, not on every git operation (git's own hooks still run as usual):
+
+| Hook | Fires around | Arguments (`$1`, `$2`, ...) |
+| --- | --- | --- |
+| `pre-/post-worktree-create` | `kunj worktree add` | worktree path, branch |
+| `pre-/post-worktree-delete` | `kunj worktree remove` | worktree path, branch |
+| `pre-/post-branch-create` | `kunj create`, `kunj switch -c` | branch, previous branch |
+| `pre-/post-branch-switch` | `kunj switch` | branch, previous branch |
+| `pre-/post-branch-delete` | `kunj delete` | branch |
+| `pre-commit` | `kunj commit`, after staging, before the message | branch |
+| `commit-msg` | `kunj commit`, before committing; may edit the message file | message file, branch |
+| `post-commit` | `kunj commit`, after committing, before pushing | branch |
+| `pre-/post-pr-create` | `kunj pr` (`post` also gets the PR URL) | branch, base branch, title[, PR url] |
+| `pre-/post-stash` | `kunj stash` and the auto-stash on create/switch | branch, stash message |
+
+A `pre-*` or `commit-msg` hook that exits non-zero aborts the action; a failing `post-*` hook is
+reported only. Every kunj command that fires hooks takes `--no-hooks`.
 
 ```bash
 kunj hooks                                # list hooks and what is installed for each
 kunj hooks add post-worktree-create       # create ~/.kunj/<repo>/hooks/post-worktree-create from a template
 kunj hooks add pre-worktree-delete -g     # ...or a global one in ~/.kunj/hooks (runs for every repo)
 kunj hooks run post-worktree-create       # run a hook by hand against the current worktree
+kunj hooks run post-branch-switch main    # ...or, for the other hooks, a branch
 kunj worktree add feature/x --no-hooks    # skip hooks for one command
 ```
 
 A hook is an executable file named after the hook, or a directory `<hook>.d/` of executables that run
-in sorted order. Scripts get the worktree path and branch as `$1` and `$2`, plus `KUNJ_HOOK`,
-`KUNJ_REPO_ROOT`, `KUNJ_REPO_CONFIG`, `KUNJ_REPO_NAME`, `KUNJ_WORKTREE_PATH` and `KUNJ_BRANCH` in the
-environment. `post-worktree-create` and `pre-worktree-delete` run inside the worktree (after keep
-files were copied in), the others from the main worktree.
+in sorted order. Scripts get the arguments above, and the same values in the environment as
+`KUNJ_<ARGUMENT>` (`KUNJ_BRANCH`, `KUNJ_PREVIOUS_BRANCH`, `KUNJ_MESSAGE_FILE`, `KUNJ_PR_URL`, ...),
+plus `KUNJ_HOOK`, `KUNJ_REPO_ROOT`, `KUNJ_REPO_CONFIG` and `KUNJ_REPO_NAME`.
+`post-worktree-create` and `pre-worktree-delete` run inside the worktree (after keep files were
+copied in), the other worktree hooks from the main worktree, and all other hooks in the directory
+kunj was run from.
 
 Short commands can live in config instead of a script. They run through the shell and may use
-`${worktree}`, `${branch}`, `${repoRoot}` and the other config variables:
+the arguments as camelCase variables (`${branch}`, `${previousBranch}`, `${prUrl}`, `${worktree}`, ...)
+and `${repoRoot}` and the other config variables:
 
 ```bash
 kunj config --set hooks.post-worktree-create="npm install"
 kunj config --set hooks.pre-worktree-delete="docker compose down"
+kunj config --set hooks.post-branch-switch="npm install"
+kunj config --set hooks.pre-pr-create="npm test"
 ```
 
 Edit `config.json` by hand to give a hook a JSON array of several commands.

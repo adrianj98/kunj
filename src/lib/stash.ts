@@ -6,11 +6,14 @@ import chalk from 'chalk';
 import { BranchStash } from '../types';
 import { getBranchMetadataItem, updateBranchMetadata } from './metadata';
 import { executeGitCommand, hasUncommittedChanges } from './git';
+import { HookError, RunHookOptions, runActionHook } from './hooks';
 
 const execAsync = promisify(exec);
 
-// Create a stash for a branch with metadata tracking
-export async function createStash(branchName: string): Promise<boolean> {
+// Create a stash for a branch with metadata tracking. Runs the pre/post-stash
+// hooks; a failing pre-stash hook throws HookError so the caller stops rather
+// than carrying the changes onto another branch.
+export async function createStash(branchName: string, hookOptions: RunHookOptions = {}): Promise<boolean> {
   try {
     const hasChanges = await hasUncommittedChanges();
     if (!hasChanges) {
@@ -37,6 +40,9 @@ export async function createStash(branchName: string): Promise<boolean> {
 
     const timestamp = Date.now();
     const stashMessage = `kunj-auto-stash-${branchName}-${timestamp}`;
+    const hookValues = { branch: branchName, message: stashMessage };
+
+    await runActionHook('pre-stash', hookValues, hookOptions);
 
     const result = await executeGitCommand(
       `git stash push --include-untracked -m "${stashMessage}"`
@@ -61,10 +67,12 @@ export async function createStash(branchName: string): Promise<boolean> {
       console.log(
         chalk.yellow(`📦 Stashed changes from branch '${branchName}'`)
       );
+      await runActionHook('post-stash', hookValues, hookOptions);
       return true;
     }
     return false;
-  } catch {
+  } catch (error) {
+    if (error instanceof HookError) throw error;
     return false;
   }
 }

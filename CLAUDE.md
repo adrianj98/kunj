@@ -157,28 +157,34 @@ The VS Code extension in `vscode-extension/` is a separate npm package (own `pac
 
 ## Hooks
 
-Git-style hooks (src/lib/hooks.ts) let users run their own scripts around kunj operations. The
-hook names, arguments and pre/post behaviour are declared in src/lib/hook-defs.ts, which has no
-imports so the settings registry and the types can use it without an import cycle through
-config.ts. Current hooks: `pre-worktree-create`, `post-worktree-create`, `pre-worktree-delete`,
-`post-worktree-delete`.
+Git-style hooks (src/lib/hooks.ts) let users run their own scripts around kunj actions (not around
+every git operation). The hook names, arguments and pre/post behaviour are declared in
+src/lib/hook-defs.ts, which has no imports so the settings registry and the types can use it
+without an import cycle through config.ts. Current hooks: `pre/post-worktree-create`,
+`pre/post-worktree-delete`, `pre/post-branch-create` (create, switch -c), `pre/post-branch-switch`,
+`pre/post-branch-delete`, `pre-commit`, `commit-msg` (may edit the message file), `post-commit`,
+`pre/post-pr-create`, `pre/post-stash` (kunj stash and the auto-stash in src/lib/stash.ts).
 
 For each hook, `runHook()` runs, in order: executables in `~/.kunj/hooks/` (global), executables
 in `~/.kunj/{reponame}/hooks/` (repo) - either a file named after the hook or a `<hook>.d/`
 directory of scripts in sorted order, skipping `*.sample`, dotfiles and non-executable files -
 and then the commands in the `hooks.<name>` config setting (a string or an array, run via the
-shell with `${...}` variables expanded, including `${branch}` and `${worktree}`). Scripts get the
-hook's positional arguments and a `KUNJ_*` environment (`KUNJ_HOOK`, `KUNJ_REPO_ROOT`,
-`KUNJ_REPO_CONFIG`, `KUNJ_REPO_NAME`, plus `KUNJ_WORKTREE_PATH`/`KUNJ_BRANCH` for worktree hooks).
-A failing `pre-*` hook throws `HookError` and aborts the command; `post-*` failures come back in
-the `HookRunResult` and are printed as warnings. In `--json` mode hook stdout is redirected to
-stderr and stdin is closed so the JSON output stays clean; `--no-hooks` skips them, and the run
-results are included in the `hooks` array of the JSON output.
+shell with `${...}` variables expanded). Each hook argument is passed positionally, as
+`KUNJ_<ARG>` in the environment and as a camelCase `${var}` (`previous-branch` ->
+`KUNJ_PREVIOUS_BRANCH`, `${previousBranch}`), alongside `KUNJ_HOOK`, `KUNJ_REPO_ROOT`,
+`KUNJ_REPO_CONFIG` and `KUNJ_REPO_NAME`. A failing `pre-*` (or `commit-msg`) hook throws
+`HookError` and aborts the command (BaseCommand prints it without a stack trace); `post-*`
+failures come back in the `HookRunResult` and are printed as warnings. In `--json` mode hook
+stdout is redirected to stderr and stdin is closed so the JSON output stays clean; `--no-hooks`
+skips them.
 
 To add a hook to another command: add its definition to `HOOKS` in src/lib/hook-defs.ts (the
-`hooks.<name>` setting is registered automatically from that list), build a `HookContext` (see
-`worktreeHookContext()` for the worktree one; pass in `repoVariables()` from a git call you
-already made) and call `runHook()` at the right point.
+`hooks.<name>` setting is registered automatically from that list), then call
+`runActionHook(name, { <arg>: value }, { hooks: config.hooks, jsonMode, skip: options.hooks === false })`
+at the right point and give the command a `--no-hooks` option. `runActionHook()` returns
+immediately when nothing is installed, so it costs no git call. The worktree hooks instead build
+a `HookContext` with `worktreeHookContext()` and call `runHook()`, passing in `repoVariables()`
+from a git call they already made, because they sit on the fast path.
 
 ## Shell Integration
 

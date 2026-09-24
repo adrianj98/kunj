@@ -21,6 +21,11 @@ import { generateAICommitMessage, checkAWSCredentials, getAWSConfigInfo, generat
 import { updateBranchMetadata } from "../lib/metadata";
 import { appendToWorkLog } from "../lib/work-log";
 import { formatDiff, formatSideBySideDiff } from "../lib/diff-formatter";
+import { loadConfig } from "../lib/config";
+import { hasHookSources, runActionHook, RunHookOptions } from "../lib/hooks";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
 
@@ -31,6 +36,7 @@ interface CommitOptions {
   message?: string;
   amend?: boolean;
   auto?: boolean;
+  hooks?: boolean;
 }
 
 export class CommitCommand extends BaseCommand {
@@ -53,6 +59,7 @@ export class CommitCommand extends BaseCommand {
           flags: "--auto",
           description: "Auto mode: use AI for commit message and auto-push",
         },
+        { flags: "--no-hooks", description: "Skip the kunj hooks (git's own hooks still run)" },
       ],
     });
   }
@@ -138,6 +145,11 @@ export class CommitCommand extends BaseCommand {
         return;
       }
 
+      const hookOptions: RunHookOptions = { hooks: loadConfig().hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+
+      // A failing pre hook throws; the files stay staged, as with git
+      await runActionHook("pre-commit", { branch: currentBranch }, hookOptions);
+
       // Get commit message
       let commitMessage: string;
       let usedAI = false;
@@ -170,12 +182,16 @@ export class CommitCommand extends BaseCommand {
         }
       }
 
+      commitMessage = await this.runCommitMsgHook(commitMessage, currentBranch, hookOptions);
+
       // Create the commit
       console.log(chalk.blue("Creating commit..."));
       const commitResult = await createCommit(commitMessage);
 
       if (commitResult.success) {
         console.log(chalk.green("✓ Commit created successfully"));
+
+        await runActionHook("post-commit", { branch: currentBranch }, hookOptions);
 
         // Generate work log entry if AI was used
         if (usedAI) {
@@ -293,6 +309,30 @@ export class CommitCommand extends BaseCommand {
     } finally {
       // Remove SIGINT handler
       process.off("SIGINT", sigintHandler);
+    }
+  }
+
+  // Hand the message to the commit-msg hook in a file it may edit, like git's
+  // commit-msg hook, and return what the file holds afterwards
+  private async runCommitMsgHook(message: string, branch: string, hookOptions: RunHookOptions): Promise<string> {
+    if (hookOptions.skip || !hasHookSources("commit-msg", hookOptions.hooks)) {
+      return message;
+    }
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kunj-commit-"));
+    const file = path.join(dir, "COMMIT_EDITMSG");
+    try {
+      fs.writeFileSync(file, message.endsWith("\n") ? message : message + "\n");
+      await runActionHook("commit-msg", { "message-file": file, branch }, hookOptions);
+      const edited = fs.readFileSync(file, "utf8").trim();
+      if (!edited) {
+        throw new Error("commit-msg hook left an empty commit message");
+      }
+      if (edited !== message.trim()) {
+        console.log(chalk.cyan("✎ Commit message updated by the commit-msg hook"));
+      }
+      return edited;
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   }
 
