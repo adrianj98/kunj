@@ -24,6 +24,8 @@ export interface CommandConfig {
     defaultValue?: any;
   }>;
   ui?: UIWidgetConfig;
+  // Extra text printed after the options in --help (a function is only called when help is shown)
+  helpText?: string | (() => string);
 }
 
 export abstract class BaseCommand {
@@ -48,6 +50,11 @@ export abstract class BaseCommand {
     }
 
     cmd.description(this.config.description);
+
+    const helpText = this.config.helpText;
+    if (helpText) {
+      cmd.addHelpText("after", () => "\n" + (typeof helpText === "function" ? helpText() : helpText));
+    }
 
     // Add global --json option
     cmd.option("--json", "Output result as JSON");

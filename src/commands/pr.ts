@@ -66,7 +66,7 @@ export class PrCommand extends BaseCommand {
         { flags: "-s, --status", description: "View status of current branch's PR" },
         { flags: "-l, --list", description: "List all open PRs" },
         { flags: "--detailed", description: "Show detailed GitHub Actions steps" },
-        { flags: "--no-hooks", description: "Skip the kunj hooks" },
+        { flags: "--no-hooks", description: "Skip kunj hooks (see 'kunj hooks --help')" },
       ],
     });
   }

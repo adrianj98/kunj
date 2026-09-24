@@ -27,7 +27,7 @@ export class CreateCommand extends BaseCommand {
         { flags: '--no-stash', description: 'Disable automatic stashing of changes' },
         { flags: '-d, --desc <description>', description: 'Set a description for the new branch' },
         { flags: '-t, --tag <tags...>', description: 'Add tags to the new branch' },
-        { flags: '--no-hooks', description: 'Skip the kunj hooks' }
+        { flags: '--no-hooks', description: "Skip kunj hooks (see 'kunj hooks --help')" }
       ]
     });
   }

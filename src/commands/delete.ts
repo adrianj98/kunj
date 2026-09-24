@@ -19,7 +19,7 @@ export class DeleteCommand extends BaseCommand {
       ui: { category: 'action', widget: 'form-only', label: 'Delete Branch', icon: 'trash', order: 21 },
       options: [
         { flags: '-f, --force', description: 'Force delete the branch' },
-        { flags: '--no-hooks', description: 'Skip the kunj hooks' }
+        { flags: '--no-hooks', description: "Skip kunj hooks (see 'kunj hooks --help')" }
       ]
     });
   }

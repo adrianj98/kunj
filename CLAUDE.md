@@ -52,7 +52,7 @@ also commit and push changes
 
 Commands inherit from `BaseCommand` (src/lib/command.ts) and are registered via `CommandRegistry`:
 
-1. Each command extends `BaseCommand` with a `CommandConfig` (name, description, options)
+1. Each command extends `BaseCommand` with a `CommandConfig` (name, description, options, and optional `helpText` shown after the options in `--help`)
 2. Commands implement the `execute()` method
 3. All commands are exported from `src/commands/index.ts` via `getAllCommands()`
 4. The registry applies commands to the Commander.js program in `src/index.ts`

@@ -36,7 +36,7 @@ export class SwitchCommand extends BaseCommand {
         { flags: '-d, --desc <description>', description: 'Set description when creating branch' },
         { flags: '-t, --tag <tags...>', description: 'Add tags when creating branch' },
         { flags: '--configured', description: 'Show only configured branches' },
-        { flags: '--no-hooks', description: 'Skip the kunj hooks' }
+        { flags: '--no-hooks', description: "Skip kunj hooks (see 'kunj hooks --help')" }
       ]
     });
   }

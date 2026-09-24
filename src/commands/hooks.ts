@@ -16,6 +16,7 @@ import { repoVariables, resolveConfigVariables } from '../lib/config-vars';
 import { getCurrentBranch } from '../lib/git';
 import {
   HOOKS,
+  HookDefinition,
   HookContext,
   HookName,
   HookRunResult,
@@ -37,12 +38,91 @@ interface HooksOptions {
 
 const ACTIONS = ['list', 'add', 'run', 'path'];
 
+// "$1 branch, $2 previous-branch"
+function describeArgs(hook: HookDefinition): string {
+  return hook.args.map((a, i) => `$${i + 1} ${a}`).join(', ');
+}
+
+// Word-wrap text to `width` columns, indenting continuation lines
+function wrap(text: string, width: number, indent: string): string {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/)) {
+    if (line && line.length + 1 + word.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.join(`\n${indent}`);
+}
+
+// Long --help text, built from HOOKS so it never drifts from the definitions
+function hooksHelp(): string {
+  const width = Math.max(...HOOKS.map(h => h.name.length)) + 2;
+  const indent = ' '.repeat(width + 2);
+  const hookLines = HOOKS.map(h => {
+    const aborts = h.abortsOnFailure ? ' Can abort.' : '';
+    const description = h.description.replace(/ A non-zero exit aborts[^.]*\./, '') + aborts;
+    return [`  ${h.name.padEnd(width)}${wrap(description, 92 - indent.length, indent)}`, `${indent}args: ${describeArgs(h)}`].join('\n');
+  }).join('\n');
+
+  return `Hooks are your own scripts or commands that kunj runs before and after its actions, like
+git hooks, but around kunj commands (create, switch, commit, pr, ...) rather than git itself.
+
+Actions:
+  list (default)          Show every hook, what it receives and what is installed for it
+  add <hook> [-g] [-f]    Create an executable script for <hook> from a commented template,
+                          in this repo's hooks directory (or the global one with -g)
+  run <hook> [target]     Run a hook now, to test it. [target] is a worktree for the worktree
+                          hooks and a branch for the others (default: the current one)
+  path [-g]               Print the repo (or global) hooks directory
+
+Hooks:
+${hookLines}
+
+Where hooks come from (all of them run, in this order):
+  1. ~/.kunj/hooks/<hook>            global, every repository
+  2. ~/.kunj/<repo>/hooks/<hook>     this repository only
+     Either may also be a directory <hook>.d/ whose scripts run in name order.
+     Scripts must be executable (chmod +x); *.sample files and dotfiles are ignored.
+  3. The hooks.<hook> config setting: a shell command, or a JSON array of commands
+
+What a hook receives:
+  Arguments      as listed above, as $1, $2, ...
+  Environment    each argument as KUNJ_<ARG> (KUNJ_BRANCH, KUNJ_PREVIOUS_BRANCH, KUNJ_PR_URL, ...),
+                 plus KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_REPO_CONFIG and KUNJ_REPO_NAME
+  Config vars    config commands can use each argument as a camelCase \${...} variable
+                 (\${branch}, \${previousBranch}, \${prUrl}, \${worktree}) and \${repoRoot}, \${repoName}, ...
+  Directory      the worktree for post-worktree-create and pre-worktree-delete, the main
+                 worktree for the other worktree hooks, otherwise where kunj was run
+
+Exit status:
+  A pre-* or commit-msg hook that exits non-zero stops the action and later hooks do not run.
+  A post-* hook cannot undo anything; a failure is shown as a warning.
+  commit-msg may rewrite the message file ($1); kunj commits whatever the file holds afterwards.
+  Pass --no-hooks to create, switch, delete, commit, pr, stash or worktree to skip hooks once.
+  With --json, hook output goes to stderr so the JSON on stdout stays clean.
+
+Examples:
+  kunj hooks                                   list hooks and what is installed
+  kunj hooks add post-branch-switch            scaffold ~/.kunj/<repo>/hooks/post-branch-switch
+  kunj hooks add pre-commit -g                 scaffold a global pre-commit hook
+  kunj hooks run commit-msg                    try commit-msg against a sample message
+  kunj config --set hooks.post-worktree-create="npm install"
+  kunj config --set hooks.pre-pr-create="npm run lint && npm test"
+  kunj commit --no-hooks                       commit without running kunj hooks`;
+}
+
 export class HooksCommand extends BaseCommand {
   constructor() {
     super({
       name: 'hooks',
-      description: 'Manage hook scripts that run around kunj operations (like git hooks)',
+      description: 'Manage hooks: your scripts that run before and after kunj actions (like git hooks)',
       arguments: '[action] [hook] [target]',
+      helpText: hooksHelp,
       options: [
         { flags: '-g, --global', description: '[add|path] Use the global hooks directory (~/.kunj/hooks)' },
         { flags: '-f, --force', description: '[add] Overwrite an existing hook script' },
@@ -99,6 +179,7 @@ export class HooksCommand extends BaseCommand {
       description: definition.description,
       abortsOnFailure: definition.abortsOnFailure,
       args: definition.args,
+      env: definition.env,
       sources: listHookSources(definition.name, config.hooks),
     }));
 
@@ -116,6 +197,7 @@ export class HooksCommand extends BaseCommand {
       const installed = hook.sources.length > 0;
       console.log(`${installed ? chalk.green('●') : chalk.gray('○')} ${chalk.bold(hook.name)}${hook.abortsOnFailure ? chalk.gray('  (a non-zero exit aborts)') : ''}`);
       console.log(chalk.gray(`  │ ${hook.description}`));
+      console.log(chalk.gray(`  │ args: ${describeArgs(hook)}`));
       for (const source of hook.sources) {
         const label = source.kind === 'config' ? 'config' : source.scope;
         const warn = source.executable ? '' : chalk.yellow('  (not executable, ignored)');

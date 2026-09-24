@@ -59,7 +59,7 @@ export class CommitCommand extends BaseCommand {
           flags: "--auto",
           description: "Auto mode: use AI for commit message and auto-push",
         },
-        { flags: "--no-hooks", description: "Skip the kunj hooks (git's own hooks still run)" },
+        { flags: "--no-hooks", description: "Skip kunj hooks; git's own hooks still run (see 'kunj hooks --help')" },
       ],
     });
   }

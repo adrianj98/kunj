@@ -110,7 +110,7 @@ export class WorktreeCommand extends BaseCommand {
         { flags: '--base <ref>', description: '[add] Base ref for a new branch (with -b or -c)' },
         { flags: '-p, --path <dir>', description: '[add|session] Explicit worktree path' },
         { flags: '-f, --force', description: '[add|remove] Force the git operation' },
-        { flags: '--no-hooks', description: '[add|remove] Skip the kunj hooks' },
+        { flags: '--no-hooks', description: "[add|remove] Skip kunj hooks (see 'kunj hooks --help')" },
         { flags: '-n, --new-window', description: '[open] Open in a new editor window' },
         { flags: '-a, --all', description: '[keep apply] Apply keep files to every worktree' },
         { flags: '--pid <pid>', description: '[session] Owning process id' },

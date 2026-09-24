@@ -68,7 +68,7 @@ export class StashCommand extends BaseCommand {
         },
         {
           flags: '--no-hooks',
-          description: 'Skip the kunj hooks',
+          description: "Skip kunj hooks (see 'kunj hooks --help')",
         },
       ],
     });
