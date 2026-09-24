@@ -392,7 +392,9 @@ export function hookTemplate(definition: HookDefinition): string {
     .join('\n');
   return [
     '#!/bin/sh',
-    `# kunj ${definition.name} hook`,
+    `# ${definition.name}: a hook script that kunj runs for you. It is not a kunj`,
+    '# command; see `kunj hooks --help` for when each hook fires.',
+    '#',
     `# ${definition.description}`,
     '#',
     '# Arguments:',
@@ -406,7 +408,8 @@ export function hookTemplate(definition: HookDefinition): string {
       : '# The exit status is reported but does not undo the operation.',
     'set -e',
     '',
-    `echo "kunj ${definition.name}: $1 ($2)"`,
+    '# Placeholder so you can see the hook fire; replace it with your own commands.',
+    `echo "[${definition.name} hook] ${definition.args.map((a, i) => `${a}=$${i + 1}`).join(' ')}"`,
     '',
   ].join('\n');
 }
