@@ -31,6 +31,7 @@ export interface KunjConfig {
     graphUnicode?: boolean;
     graphStyle?: "default" | "light" | "dark";
     defaultBaseBranch?: string;
+    baseFromOrigin?: boolean;
   };
   aliases: Record<string, string>;
   ai?: {

@@ -9,12 +9,15 @@ import { loadConfig } from '../lib/config';
 import { BranchMetadata } from '../types';
 import { extractJiraKey, getIssue } from '../lib/jira';
 import { runActionHook } from '../lib/hooks';
+import { resolveBaseRef, describeBase } from '../lib/base-branch';
 
 interface CreateOptions {
   stash?: boolean;
   desc?: string;
   tag?: string[];
   hooks?: boolean;
+  base?: string;
+  origin?: boolean;
 }
 
 export class CreateCommand extends BaseCommand {
@@ -27,6 +30,8 @@ export class CreateCommand extends BaseCommand {
         { flags: '--no-stash', description: 'Disable automatic stashing of changes' },
         { flags: '-d, --desc <description>', description: 'Set a description for the new branch' },
         { flags: '-t, --tag <tags...>', description: 'Add tags to the new branch' },
+        { flags: '--base <branch>', description: 'Branch to create from (default: preferences.defaultBaseBranch, else the repo default)' },
+        { flags: '--no-origin', description: 'Create from the local base branch instead of fetching origin/<base>' },
         { flags: '--no-hooks', description: "Skip kunj hooks (see 'kunj hooks --help')" }
       ]
     });
@@ -43,10 +48,6 @@ export class CreateCommand extends BaseCommand {
     // Load configuration
     const config = loadConfig();
 
-    console.log(
-      chalk.blue(`Creating branch '${branchName}' and switching to it...`)
-    );
-
     // Get current branch before creating new one
     const currentBranch = await getCurrentBranch();
 
@@ -56,6 +57,20 @@ export class CreateCommand extends BaseCommand {
     // A failing pre hook throws and nothing is created
     await runActionHook('pre-branch-create', hookValues, hookOptions);
 
+    // Resolved before stashing so a missing base leaves the working tree alone
+    const base = await resolveBaseRef({
+      base: options.base,
+      defaultBase: config.preferences.defaultBaseBranch,
+      fromOrigin: options.origin !== false && config.preferences.baseFromOrigin !== false,
+    });
+    if (base?.warning) {
+      console.log(chalk.yellow(`  ${base.warning}`));
+    }
+
+    console.log(
+      chalk.blue(`Creating branch '${branchName}'${describeBase(base)} and switching to it...`)
+    );
+
     // Use config autoStash preference unless explicitly overridden
     const shouldStash = options.stash !== false && config.preferences.autoStash;
     if (shouldStash) {
@@ -63,7 +78,10 @@ export class CreateCommand extends BaseCommand {
     }
 
     // Create and checkout the branch
-    const result = await executeGitCommand(`git switch -c ${branchName}`);
+    // --no-track: the new branch should not treat its base as its upstream
+    const result = await executeGitCommand(
+      base ? `git switch --no-track -c ${branchName} ${base.ref}` : `git switch -c ${branchName}`
+    );
 
     if (result.success) {
       console.log(
@@ -121,6 +139,7 @@ export class CreateCommand extends BaseCommand {
           success: true,
           branch: branchName,
           previousBranch: currentBranch,
+          base: base?.ref || null,
           description: metadata.description || null,
           tags: metadata.tags || [],
         });

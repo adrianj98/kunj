@@ -139,6 +139,17 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 
+## New Branches
+
+`kunj create`, `kunj switch -c` and `kunj worktree add -b/-c` all start a new branch from the same
+base, resolved by `resolveBaseRef()` in src/lib/base-branch.ts: `--base <ref>`, else
+`preferences.defaultBaseBranch`, else the repo default (origin/HEAD, then main/master). With
+`preferences.baseFromOrigin` (default true) the base is fetched and the branch is made from
+`origin/<base>`; `--no-origin` uses the local branch for one command. A ref that is not a branch
+(a commit, tag, `HEAD~2`) is used as given. New branches are created with `--no-track` so they do
+not treat the base as their upstream. base-branch.ts only imports child_process because the
+worktree fast path uses it.
+
 ## Worktrees & VS Code Extension
 
 `kunj worktree` (src/commands/worktree.ts, src/lib/worktree.ts) wraps `git worktree` and tracks *editor sessions*: editors register the worktree they have open with `kunj worktree session start --pid <pid>`, and `kunj worktree list --json` reports those sessions per worktree. Sessions live in `~/.kunj/worktree-sessions.json` and are pruned when their PID is dead.

@@ -75,8 +75,8 @@ export function registerCoreSettings(): void {
     },
     {
       key: 'preferences.defaultBaseBranch',
-      description: 'Default base branch for PRs',
-      detailedDescription: 'The default branch to target when creating pull requests. Common values are "main", "master", or "develop". If not set, will attempt to detect the main branch automatically.',
+      description: 'Default base branch for new branches and PRs',
+      detailedDescription: 'The branch new branches are created from (kunj create, switch -c, worktree add -b/-c) and that pull requests target. Common values are "main", "master", or "develop". If not set, the repository default (origin/HEAD, else main or master) is used. --base overrides it for one command.',
       type: 'string',
       defaultValue: '',
       category: 'general',
@@ -85,7 +85,21 @@ export function registerCoreSettings(): void {
         'master - Use master as the default base branch',
         'develop - Use develop as the default base branch',
         '(empty) - Auto-detect from repository (default)'
-      ]
+      ],
+      relatedSettings: ['preferences.baseFromOrigin']
+    },
+    {
+      key: 'preferences.baseFromOrigin',
+      description: 'Create new branches from origin',
+      detailedDescription: 'Fetch the base branch from origin and create new branches from origin/<base> rather than the local copy, so they start from the latest remote commit. Falls back to the local branch when the repository has no origin or the branch is not on it. --no-origin turns it off for one command. New branches never track the base; push them with -u as usual.',
+      type: 'boolean',
+      defaultValue: true,
+      category: 'general',
+      examples: [
+        'true - Fetch and branch from origin/<base> (default)',
+        'false - Branch from the local <base> without fetching'
+      ],
+      relatedSettings: ['preferences.defaultBaseBranch']
     }
   ]);
 }

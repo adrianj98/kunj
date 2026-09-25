@@ -45,6 +45,7 @@ import {
   WorktreeInfo,
   WorktreeSession,
   openWorktree,
+  branchExists,
 } from '../lib/worktree';
 import {
   applyKeptFiles,
@@ -54,6 +55,7 @@ import {
   listKeptFiles,
   toRelativeKeepPath,
 } from '../lib/keep';
+import { resolveBaseRef } from '../lib/base-branch';
 
 interface WorktreeOptions {
   all?: boolean;
@@ -64,6 +66,7 @@ interface WorktreeOptions {
   newBranch?: boolean;
   create?: boolean;
   base?: string;
+  origin?: boolean;
   force?: boolean;
   path?: string;
   pid?: string;
@@ -107,7 +110,8 @@ export class WorktreeCommand extends BaseCommand {
         { flags: '-w, --web', description: '[pr] Open the pull request in the browser' },
         { flags: '-b, --new-branch', description: '[add] Create a new branch for the worktree' },
         { flags: '-c, --create', description: '[add] Create the branch if it does not exist' },
-        { flags: '--base <ref>', description: '[add] Base ref for a new branch (with -b or -c)' },
+        { flags: '--base <ref>', description: '[add] Base for a new branch (default: preferences.defaultBaseBranch, else the repo default)' },
+        { flags: '--no-origin', description: '[add] Create a new branch from the local base instead of fetching origin/<base>' },
         { flags: '-p, --path <dir>', description: '[add|session] Explicit worktree path' },
         { flags: '-f, --force', description: '[add|remove] Force the git operation' },
         { flags: '--no-hooks', description: "[add|remove] Skip kunj hooks (see 'kunj hooks --help')" },
@@ -308,15 +312,27 @@ export class WorktreeCommand extends BaseCommand {
 
     this.log(chalk.blue(`Creating worktree for '${branch}' at ${targetPath}...`));
 
+    // A new branch starts from the default base (origin/<base> unless turned off)
+    const creating = !!options.newBranch || (!!options.create && !(await branchExists(branch)));
+    const base = creating
+      ? await resolveBaseRef({
+          base: options.base,
+          defaultBase: config.preferences?.defaultBaseBranch,
+          fromOrigin: options.origin !== false && config.preferences?.baseFromOrigin !== false,
+        })
+      : null;
+    if (base?.warning) {
+      this.log(chalk.yellow(`  ${base.warning}`));
+    }
+
     let keptFiles: string[] = [];
     let createdBranch = false;
     try {
       ({ keptFiles, createdBranch } = await addWorktree({
         branch,
         path: targetPath,
-        newBranch: options.newBranch,
-        createBranch: options.create,
-        base: options.base,
+        newBranch: creating,
+        base: base?.ref,
         force: options.force,
       }));
     } catch (error: any) {
@@ -335,6 +351,7 @@ export class WorktreeCommand extends BaseCommand {
         success: true,
         worktree: created ? this.toJSON(created) : { path: targetPath, branch },
         createdBranch,
+        base: base?.ref || null,
         keptFiles,
         hooks,
       });
@@ -342,7 +359,7 @@ export class WorktreeCommand extends BaseCommand {
     }
 
     if (createdBranch) {
-      console.log(chalk.green(`✓ Created branch '${branch}'${options.base ? ` from ${options.base}` : ''}`));
+      console.log(chalk.green(`✓ Created branch '${branch}'${base ? ` from ${base.ref}` : ''}`));
     }
     console.log(chalk.green(`✓ Worktree created at ${targetPath}`));
     if (keptFiles.length > 0) {

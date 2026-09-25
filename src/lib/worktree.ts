@@ -581,6 +581,8 @@ export async function addWorktree(
   const args = ['git', 'worktree', 'add'];
   if (options.force) args.push('--force');
   if (newBranch) {
+    // --no-track: a branch made from origin/<base> should not treat the base as its upstream
+    if (options.base) args.push('--no-track');
     args.push('-b', quote(options.branch), quote(options.path));
     if (options.base) args.push(quote(options.base));
   } else {

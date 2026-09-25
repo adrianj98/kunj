@@ -88,8 +88,8 @@ export abstract class BaseCommand {
           );
           process.exit(1);
         }
-        // A failing pre-* hook is an expected outcome, not a crash: no stack trace
-        if (error instanceof Error && error.name === "HookError") {
+        // A failing pre-* hook or a missing base branch is an expected outcome, not a crash: no stack trace
+        if (error instanceof Error && (error.name === "HookError" || error.name === "BaseBranchError")) {
           console.error(`✗ ${error.message}`);
           process.exit(1);
         }
