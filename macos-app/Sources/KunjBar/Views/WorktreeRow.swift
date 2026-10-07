@@ -25,11 +25,14 @@ struct WorktreeRow: View {
                     }
                 }
                 if worktree.isActive {
-                    Text(openIn)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.accentColor)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Text(openIn)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
                 if !details.isEmpty {
                     Text(details)
@@ -60,14 +63,15 @@ struct WorktreeRow: View {
 
     // MARK: - Pieces
 
-    // Worktrees open in an editor get a tinted card with an accent bar
+    // Worktrees open in an editor get a neutral card with a green bar; the
+    // card is not tinted so text on it keeps full contrast
     @ViewBuilder private var background: some View {
         let shape = RoundedRectangle(cornerRadius: 6)
         if worktree.isActive {
             shape
-                .fill(Color.accentColor.opacity(hovering ? 0.22 : 0.14))
+                .fill(Color.primary.opacity(hovering ? 0.12 : 0.07))
                 .overlay(alignment: .leading) {
-                    Capsule().fill(Color.accentColor).frame(width: 3).padding(.vertical, 4)
+                    Capsule().fill(Color.green).frame(width: 3).padding(.vertical, 4)
                 }
         } else {
             shape.fill(hovering ? Color.primary.opacity(0.08) : .clear)
@@ -83,7 +87,7 @@ struct WorktreeRow: View {
         if !worktree.exists || worktree.prunable {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
         } else if worktree.isActive {
-            Image(systemName: "macwindow").foregroundStyle(Color.accentColor).fontWeight(.semibold)
+            Image(systemName: "macwindow").foregroundStyle(.green).fontWeight(.semibold)
         } else if worktree.locked {
             Image(systemName: "lock")
         } else if worktree.detached {
@@ -182,26 +186,29 @@ struct PullRequestBadge: View {
             Launcher.openURL(pr.url)
         } label: {
             Text(pr.badge)
-                .font(.caption.monospacedDigit())
+                .font(.caption.weight(.semibold).monospacedDigit())
                 .padding(.horizontal, 6)
                 .padding(.vertical, 1)
-                .background(Capsule().fill(color.opacity(0.18)))
-                .foregroundStyle(color)
+                .background {
+                    if let fill { Capsule().fill(fill) } else { Capsule().strokeBorder(Color.secondary) }
+                }
+                .foregroundStyle(fill == nil ? Color.primary : Color.white)
         }
         .buttonStyle(.plain)
         .help("#\(pr.number) \(pr.title)")
     }
 
-    private var color: Color {
+    // Solid colours dark enough for white text; nil draws an outline instead
+    private var fill: Color? {
         switch pr.state {
-        case "merged": return .purple
-        case "closed": return .secondary
+        case "merged": return Color(red: 0.51, green: 0.31, blue: 0.85)
+        case "closed": return nil
         default:
-            if pr.draft { return .secondary }
+            if pr.draft { return nil }
             switch pr.checks {
-            case "failure": return .red
-            case "pending": return .orange
-            default: return .green
+            case "failure": return Color(red: 0.80, green: 0.16, blue: 0.16)
+            case "pending": return Color(red: 0.72, green: 0.42, blue: 0.0)
+            default: return Color(red: 0.12, green: 0.53, blue: 0.24)
             }
         }
     }

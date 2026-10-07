@@ -182,7 +182,7 @@ struct PanelView: View {
                 if let last = store.lastRefresh {
                     Text(last, style: .relative)
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Menu {
