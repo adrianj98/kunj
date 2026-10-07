@@ -51,6 +51,7 @@ struct KunjBarApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { Snapshot.runIfRequested() }
         // Menu bar only: no Dock icon (also set by LSUIElement in the bundle)
         NSApp.setActivationPolicy(.accessory)
         if Bundle.main.bundleIdentifier != nil {

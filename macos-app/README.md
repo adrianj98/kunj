@@ -57,3 +57,6 @@ The app is not notarized. If macOS refuses to open it, right-click it and choose
 `xattr -dr com.apple.quarantine /Applications/Kunj.app`.
 
 For development, `swift build` and run `.build/debug/KunjBar` (notifications need the bundled app).
+`KUNJBAR_SNAPSHOT=<dir> .build/debug/KunjBar` renders sample rows to `<dir>/rows-light.png` and
+`rows-dark.png` and exits, for checking colours without opening the menu. The few colours the panel
+uses are in `Palette` (Views/WorktreeRow.swift).

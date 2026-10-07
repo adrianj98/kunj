@@ -20,6 +20,7 @@ struct PanelView: View {
             footer
         }
         .frame(width: 420)
+        .background(Palette.panel)
         .onAppear { store.refresh() }
     }
 

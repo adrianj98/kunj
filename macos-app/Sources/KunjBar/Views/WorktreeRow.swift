@@ -1,6 +1,7 @@
 // One worktree in the panel: icon, name, badges, inline actions and a
 // context menu with everything the VS Code extension offers.
 
+import AppKit
 import SwiftUI
 
 struct WorktreeRow: View {
@@ -18,7 +19,7 @@ struct WorktreeRow: View {
                 HStack(spacing: 6) {
                     Text(worktree.name)
                         .fontWeight(worktree.isActive ? .semibold : .regular)
-                        .foregroundStyle(worktree.isActive ? Color.blue : Color.primary)
+                        .foregroundStyle(worktree.isActive ? Palette.open : Color.primary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if worktree.isMain {
@@ -27,10 +28,10 @@ struct WorktreeRow: View {
                 }
                 if worktree.isActive {
                     HStack(spacing: 4) {
-                        Circle().fill(Color.blue).frame(width: 6, height: 6)
+                        Circle().fill(Palette.open).frame(width: 6, height: 6)
                         Text(openIn)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.primary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -51,7 +52,7 @@ struct WorktreeRow: View {
                 inlineActions
             }
         }
-        .padding(.vertical, worktree.isActive ? 6 : 4)
+        .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .background(background)
         .contentShape(Rectangle())
@@ -64,19 +65,16 @@ struct WorktreeRow: View {
 
     // MARK: - Pieces
 
-    // Worktrees open in an editor get a neutral card with a blue bar and blue name; the
-    // card is not tinted so text on it keeps full contrast
+    // Every row shares the same hover highlight; worktrees open in an editor
+    // add a bar in the "open" blue rather than a card of their own
     @ViewBuilder private var background: some View {
-        let shape = RoundedRectangle(cornerRadius: 6)
-        if worktree.isActive {
-            shape
-                .fill(Color.primary.opacity(hovering ? 0.12 : 0.07))
-                .overlay(alignment: .leading) {
-                    Capsule().fill(Color.blue).frame(width: 3).padding(.vertical, 4)
+        RoundedRectangle(cornerRadius: 6)
+            .fill(hovering ? Color.primary.opacity(0.08) : .clear)
+            .overlay(alignment: .leading) {
+                if worktree.isActive {
+                    Capsule().fill(Palette.open).frame(width: 3).padding(.vertical, 4)
                 }
-        } else {
-            shape.fill(hovering ? Color.primary.opacity(0.08) : .clear)
-        }
+            }
     }
 
     private var openIn: String {
@@ -88,7 +86,7 @@ struct WorktreeRow: View {
         if !worktree.exists || worktree.prunable {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
         } else if worktree.isActive {
-            Image(systemName: "macwindow").foregroundStyle(.blue).fontWeight(.semibold)
+            Image(systemName: "macwindow").foregroundStyle(Palette.open).fontWeight(.semibold)
         } else if worktree.locked {
             Image(systemName: "lock")
         } else if worktree.detached {
@@ -199,17 +197,17 @@ struct PullRequestBadge: View {
         .help("#\(pr.number) \(pr.title)")
     }
 
-    // Solid colours dark enough for white text; nil draws an outline instead
+    // Solid fills with white text; nil draws an outline instead
     private var fill: Color? {
         switch pr.state {
-        case "merged": return Color(red: 0.51, green: 0.31, blue: 0.85)
+        case "merged": return Palette.merged
         case "closed": return nil
         default:
             if pr.draft { return nil }
             switch pr.checks {
-            case "failure": return Color(red: 0.80, green: 0.16, blue: 0.16)
-            case "pending": return Color(red: 0.72, green: 0.42, blue: 0.0)
-            default: return Color(red: 0.12, green: 0.53, blue: 0.24)
+            case "failure": return Palette.failure
+            case "pending": return Palette.pending
+            default: return Palette.success
             }
         }
     }
@@ -235,4 +233,27 @@ func shortenHome(_ path: String) -> String {
     let home = NSHomeDirectory()
     if path == home || path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
     return path
+}
+
+// The panel's few colours. Everything else is .primary/.secondary so it
+// follows the system. Each colour keeps at least 4.5:1 contrast for its use:
+// `open` as text on the window background (darker in light mode, lighter in
+// dark mode), the badge fills under white text in both modes.
+enum Palette {
+    // Solid panel background: white in light mode, near-black in dark mode,
+    // instead of the translucent menu material that lets the desktop through
+    static let panel = Color(nsColor: .textBackgroundColor)
+    static let open = adaptive(light: (0.00, 0.35, 0.80), dark: (0.40, 0.67, 1.00))
+    static let success = Color(red: 0.10, green: 0.50, blue: 0.22)
+    static let failure = Color(red: 0.78, green: 0.15, blue: 0.15)
+    static let pending = Color(red: 0.62, green: 0.36, blue: 0.00)
+    static let merged = Color(red: 0.47, green: 0.27, blue: 0.80)
+
+    private static func adaptive(light: (CGFloat, CGFloat, CGFloat), dark: (CGFloat, CGFloat, CGFloat)) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let c = isDark ? dark : light
+            return NSColor(srgbRed: c.0, green: c.1, blue: c.2, alpha: 1)
+        })
+    }
 }
