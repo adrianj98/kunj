@@ -13,6 +13,7 @@ enum Pref {
     static let notifyPullRequests = "notifyPullRequests"
     static let badgeFailingChecks = "badgeFailingChecks"
     static let collapsedRepos = "collapsedRepos"
+    static let onlyOpenWorktrees = "onlyOpenWorktrees"
 
     static func register() {
         UserDefaults.standard.register(defaults: [

@@ -14,7 +14,7 @@ repository kunj knows about rather than one editor window:
 - Remove with the same force confirmation as the extension, prune stale worktrees
 - Notifications when a pull request's checks fail or pass, or it is approved or merged; failing
   checks count in the menu bar
-- Filter field, launch at login, settings for the CLI path, refresh interval and terminal app
+- Filter field and an **Open only** toggle (just the worktrees open in an editor), launch at login, settings for the CLI path, refresh interval and terminal app
 
 Everything goes through the kunj CLI (`kunj ... --json`); the app never runs git itself.
 

@@ -9,6 +9,7 @@ struct PanelView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var query = ""
     @AppStorage(Pref.collapsedRepos) private var collapsedRaw = ""
+    @AppStorage(Pref.onlyOpenWorktrees) private var onlyOpen = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,6 +33,12 @@ struct PanelView: View {
             if store.isRefreshing {
                 ProgressView().controlSize(.small)
             }
+            Toggle(isOn: $onlyOpen) {
+                Label("Open only", systemImage: "macwindow")
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .help("Only show worktrees that are open in an editor")
             IconButton(symbol: "arrow.clockwise", help: "Refresh (re-fetches pull requests)") { store.refresh(fresh: true) }
         }
         .padding(10)
@@ -57,6 +64,14 @@ struct PanelView: View {
                 ) {
                     Button("Add Repository…") { addRepository() }
                 }
+            } else if onlyOpen && query.isEmpty && !store.repos.contains(where: { $0.worktrees.contains(where: \.isActive) }) {
+                EmptyStateView(
+                    symbol: "macwindow",
+                    title: "No open worktrees",
+                    message: "None of your worktrees is open in an editor right now."
+                ) {
+                    Button("Show All") { onlyOpen = false }
+                }
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
@@ -74,8 +89,8 @@ struct PanelView: View {
 
     @ViewBuilder private func repoSection(_ state: RepoState) -> some View {
         let worktrees = filtered(state.worktrees)
-        if query.isEmpty || !worktrees.isEmpty {
-            let collapsed = isCollapsed(state.repo) && query.isEmpty
+        if !isFiltering || !worktrees.isEmpty {
+            let collapsed = isCollapsed(state.repo) && !isFiltering
             HStack(spacing: 6) {
                 Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                     .font(.caption2.weight(.semibold))
@@ -189,6 +204,9 @@ struct PanelView: View {
 
     // MARK: - Helpers
 
+    // Filtering hides repositories with no match and expands collapsed ones
+    private var isFiltering: Bool { onlyOpen || !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
     // Repositories with a worktree open in an editor first, otherwise most recently used
     private var sortedRepos: [RepoState] {
         stableSorted(store.repos) { $0.worktrees.contains(where: \.isActive) && !$1.worktrees.contains(where: \.isActive) }
@@ -196,7 +214,8 @@ struct PanelView: View {
 
     // Worktrees open in an editor first, in the CLI's order otherwise
     private func filtered(_ worktrees: [Worktree]) -> [Worktree] {
-        let sorted = stableSorted(worktrees) { $0.isActive && !$1.isActive }
+        var sorted = stableSorted(worktrees) { $0.isActive && !$1.isActive }
+        if onlyOpen { sorted = sorted.filter(\.isActive) }
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !needle.isEmpty else { return sorted }
         return sorted.filter { wt in
