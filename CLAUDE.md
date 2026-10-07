@@ -138,6 +138,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
+- `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
 
 ## New Branches
 
@@ -158,13 +159,30 @@ src/lib/worktree-defaults.ts), which keeps them out of the working tree in a nor
 the repository directory in a bare one. Bare repositories are supported throughout: `--show-toplevel`
 fatals there, so ask git for `--git-common-dir` first. Pull requests are fetched in one `gh pr list` (or `glab mr list`) call and cached for 60s in `~/.kunj/pr-cache.json`; pass `--no-pr` to skip or `--fresh` to bypass the cache.
 
-**Performance:** `src/index.ts` has a fast path (`src/commands/fast.ts`) that loads only the requested command for `worktree` and `prompt-info`, because importing the full registry pulls in AWS, LangChain and Jira and costs ~1s. A listing makes one `git rev-parse`, one `git worktree list` and one `git status --porcelain=v2 --branch` per worktree. Keep it that way: don't add per-worktree subprocesses or heavy top-level imports to these modules.
+**Performance:** `src/index.ts` has a fast path (`src/commands/fast.ts`) that loads only the requested command for `worktree`, `repos` and `prompt-info`, because importing the full registry pulls in AWS, LangChain and Jira and costs ~1s. A listing makes one `git rev-parse`, one `git worktree list` and one `git status --porcelain=v2 --branch` per worktree. Keep it that way: don't add per-worktree subprocesses or heavy top-level imports to these modules.
 
 **Keep files:** files deliberately left out of git (e.g. `.env`) can be stored per repository in `~/.kunj/{reponame}/keep/` under their path relative to the worktree root (src/lib/keep.ts). `addWorktree()` applies them to every newly created worktree, and `kunj worktree keep apply [-a]` re-applies them to the current worktree (or all of them).
 
 **Opening an editor:** `buildOpenCommand()`/`openWorktree()` in src/lib/worktree.ts launch `worktree.editorCommand` (default `code`) detached. VS Code-like editors (code, cursor, codium, windsurf) get `-r` to reuse the window, or `-n` with `--new-window`, unless the configured command already sets a window flag. An empty command disables opening.
 
 The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
+
+## Repository Registry & macOS App
+
+`~/.kunj/{reponame}/` does not record where a repository lives, so src/lib/repos.ts keeps
+`~/.kunj/repos.json` (root, git common dir, name, bare, hidden, lastSeen). A repository is recorded
+when `getKunjDir()` first resolves it, by `kunj worktree list` and by `kunj worktree session start`
+(how editor windows reach the list). Recording only reads the file unless the entry is new or over an
+hour old, because it sits on the fast path. `kunj repos remove` hides an entry rather than deleting it,
+so running kunj there again does not bring it back; `kunj repos add` un-hides it.
+
+The menu bar app in `macos-app/` (SwiftUI `MenuBarExtra`, macOS 14+, SwiftPM, no Xcode project) is the
+second consumer of the CLI's JSON: it reads `kunj repos --json`, runs `kunj worktree list --json` per
+repository, and uses `worktree open|add|remove|prune|pr`, `list --all` and `repos add|remove`. It
+resolves `PATH` from a login shell because apps launched from Finder do not get one. Build it with
+`macos-app/scripts/bundle.sh` (`--install` copies it to /Applications); the script retries with an
+older SDK because the Command Line Tools' newest SDK lacks the SwiftUI macro plugin. It is ad-hoc
+signed, not notarized.
 
 ## Hooks
 

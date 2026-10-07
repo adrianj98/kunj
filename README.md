@@ -166,6 +166,18 @@ Edit `config.json` by hand to give a hook a JSON array of several commands.
 
 The `vscode-extension/` folder contains **Kunj Worktrees**, a VS Code extension that lists worktrees, shows which ones are open in other windows along with their pull requests, and opens them on click. It uses the kunj CLI for everything. See [vscode-extension/README.md](./vscode-extension/README.md).
 
+### macOS menu bar app
+
+The `macos-app/` folder contains **Kunj**, a menu bar app with the same features as the VS Code
+extension, across every repository kunj knows about (`kunj repos`). See
+[macos-app/README.md](./macos-app/README.md).
+
+```bash
+kunj repos                 # repositories kunj has been used in, most recent first
+kunj repos add ~/src/app   # add one by hand
+kunj repos remove ~/src/x  # hide one from the list
+```
+
 ## Development
 
 ### Setup
