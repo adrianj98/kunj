@@ -36,6 +36,7 @@ import {
   defaultWorktreePathFor,
   getMainWorktreePath,
   getCurrentWorktreePath,
+  getGitCommonDir,
   listWorktrees,
   loadActiveSessions,
   pruneWorktrees,
@@ -56,6 +57,7 @@ import {
   toRelativeKeepPath,
 } from '../lib/keep';
 import { resolveBaseRef } from '../lib/base-branch';
+import { recordRepo } from '../lib/repos';
 
 interface WorktreeOptions {
   all?: boolean;
@@ -174,6 +176,7 @@ export class WorktreeCommand extends BaseCommand {
       pullRequestMaxAge: options.fresh ? 0 : DEFAULT_PR_MAX_AGE_SECONDS,
     });
     const { worktrees, repoRoot: mainRoot, currentPath } = listing;
+    recordRepo(listing.gitCommonDir);
 
     if (this.jsonMode) {
       this.outputJSON({
@@ -536,6 +539,13 @@ export class WorktreeCommand extends BaseCommand {
         label: options.label,
         id: options.id,
       });
+      // Editors register every folder they open, which makes this the main
+      // way repositories reach `kunj repos`
+      try {
+        recordRepo(await getGitCommonDir(sessionPath));
+      } catch {
+        // not a git repository: nothing to record
+      }
       if (this.jsonMode) {
         this.outputJSON({ success: true, session });
         return;

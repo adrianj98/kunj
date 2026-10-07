@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import { KunjConfig } from '../types';
 import { defaultConfig, KUNJ_DIR, CONFIG_FILE } from '../constants';
 import { expandConfigStrings, resolveConfigVariables, treeHasVariables } from './config-vars';
+import { recordRepo } from './repos';
 
 // Helper function to get global .kunj directory path
 export function getGlobalKunjDir(): string {
@@ -35,11 +36,13 @@ export function repoNameFromUrl(url: string): string {
 
 // Get the main (common) directory of the repository, shared across all worktrees
 let commonRootCache: string | null | undefined;
+let commonDirCache: string | null = null;
 export function getRepoCommonRoot(): string | null {
   if (commonRootCache !== undefined) {
     return commonRootCache;
   }
   const commonDir = gitSync('rev-parse --path-format=absolute --git-common-dir');
+  commonDirCache = commonDir;
   if (!commonDir) {
     commonRootCache = null;
     return null;
@@ -71,6 +74,7 @@ export function getRepoName(): string | null {
 // Test/refresh helper: clear cached repo resolution
 export function resetRepoCache(): void {
   commonRootCache = undefined;
+  commonDirCache = null;
   repoNameCache = undefined;
   migrationChecked = false;
 }
@@ -88,6 +92,9 @@ export function getKunjDir(): string {
   if (!migrationChecked) {
     migrationChecked = true;
     migrateLegacyKunjDir(dir);
+    // Remember where the repository lives for `kunj repos` (the menu bar app)
+    getRepoCommonRoot();
+    if (commonDirCache) recordRepo(commonDirCache);
   }
   return dir;
 }
