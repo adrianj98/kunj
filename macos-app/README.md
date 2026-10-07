@@ -26,7 +26,14 @@ and hide one with **Remove from List** in its ⋯ menu (or `kunj repos remove <p
 
 ## Install from a release
 
-Each [GitHub release](https://github.com/adrianj98/kunj/releases) has `Kunj-macos-<version>.zip`. Unzip it,
+```bash
+kunj install macos
+```
+
+downloads the app from the newest release, installs it to /Applications (or ~/Applications), clears
+the quarantine and launches it. Run it again to update.
+
+By hand: each [GitHub release](https://github.com/adrianj98/kunj/releases) has `Kunj-macos-<version>.zip`. Unzip it,
 move `Kunj.app` to /Applications and, because the app is not signed or notarized, clear the quarantine
 before the first launch:
 

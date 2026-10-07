@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import { InstallCommand } from './install';
 
 export class SetupCommand extends BaseCommand {
   constructor() {
@@ -129,7 +130,24 @@ export class SetupCommand extends BaseCommand {
     // Ask about Jira integration
     await this.setupJiraIntegration();
 
+    await this.offerCompanionApps();
+
     console.log(chalk.blue('\n🎉 Setup complete! Happy coding with kunj!'));
+  }
+
+  private async offerCompanionApps(): Promise<void> {
+    const installer = new InstallCommand();
+    console.log(chalk.blue('\n\n🧩 Companion apps (Optional)'));
+    console.log(chalk.gray('See your worktrees, which ones are open and their pull requests in VS Code or the macOS menu bar\n'));
+    const apps = await installer.ask();
+    for (const app of apps) {
+      try {
+        await installer.installOne(app);
+      } catch (error) {
+        console.log(chalk.yellow(`⚠ ${error instanceof Error ? error.message : String(error)}`));
+        console.log(chalk.gray(`  Try again later with: kunj install ${app}`));
+      }
+    }
   }
 
   private async setupJiraIntegration(): Promise<void> {

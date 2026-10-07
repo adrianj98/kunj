@@ -139,6 +139,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
+- `kunj install [vscode|macos|all]` - Download the VS Code extension / macOS app from the GitHub release and install them (also offered at the end of `kunj setup`)
 
 ## New Branches
 
@@ -182,7 +183,9 @@ repository, and uses `worktree open|add|remove|prune|pr`, `list --all` and `repo
 resolves `PATH` from a login shell because apps launched from Finder do not get one. Build it with
 `macos-app/scripts/bundle.sh` (`--install` copies it to /Applications); the script retries with an
 older SDK because the Command Line Tools' newest SDK lacks the SwiftUI macro plugin. It is ad-hoc
-signed, not notarized.
+signed, not notarized. The release workflow's `macos-app` job attaches `Kunj-macos-<version>.zip`
+next to the `.vsix`; `kunj install` (src/lib/apps.ts) finds those assets by name pattern, preferring
+the release matching the CLI version, so keep the asset names in step with it.
 
 ## Hooks
 

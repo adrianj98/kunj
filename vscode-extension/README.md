@@ -22,6 +22,16 @@ kunj worktree prune
 kunj worktree session list   # editor windows currently registered
 ```
 
+## Install
+
+```bash
+kunj install vscode                  # downloads the .vsix from the GitHub release and installs it
+kunj install vscode --editor cursor  # or another VS Code-like editor
+```
+
+Or download `kunj-worktrees-<version>.vsix` from the [releases](https://github.com/adrianj98/kunj/releases)
+and run `code --install-extension kunj-worktrees-<version>.vsix`.
+
 ## Requirements
 
 - The `kunj` CLI on your `PATH` (`npm install -g kunj`), or point `kunj.cliPath` at it, for example `node /path/to/kunj/dist/index.js`.

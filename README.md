@@ -4,18 +4,41 @@ A simple and intuitive command-line tool for managing Git branches.
 
 ## Installation
 
-### Local Installation (for development)
-
-```bash
-npm install
-npm run build
-npm link
-```
-
-### Global Installation (from npm - if published stash)
+### 1. The CLI
 
 ```bash
 npm install -g kunj
+```
+
+Requires Node.js 20+ and git 2.31+. Pull request features also need the GitHub CLI (`gh`) or GitLab
+CLI (`glab`), logged in. Then run `kunj setup` for shell aliases, optional Jira and the apps below.
+
+### 2. The apps (optional)
+
+```bash
+kunj install          # asks which to install
+kunj install vscode   # VS Code extension (Kunj Worktrees); --editor cursor for Cursor & co.
+kunj install macos    # macOS menu bar app, into /Applications (or ~/Applications)
+kunj install all -y   # everything available, no questions
+```
+
+Both are downloaded from the [GitHub release](https://github.com/adrianj98/kunj/releases) matching
+your CLI version (or the newest one that has them). Running `kunj install` again updates them.
+
+To install by hand instead, download from the release:
+
+- **VS Code**: `kunj-worktrees-<version>.vsix`, then `code --install-extension kunj-worktrees-<version>.vsix`
+  (or *Extensions: Install from VSIX…* in the command palette).
+- **macOS** (14+): `Kunj-macos-<version>.zip`, unzip it, move `Kunj.app` to /Applications and, because
+  the app is not signed or notarized yet, clear the quarantine before opening it:
+  `xattr -dr com.apple.quarantine /Applications/Kunj.app`
+
+### From source (development)
+
+```bash
+npm install && npm run build && npm link              # the CLI
+cd vscode-extension && npm install && npm run install-local   # the VS Code extension
+cd macos-app && scripts/bundle.sh --install           # the menu bar app
 ```
 
 ## Usage
@@ -164,13 +187,13 @@ Edit `config.json` by hand to give a hook a JSON array of several commands.
 
 ### VS Code extension
 
-The `vscode-extension/` folder contains **Kunj Worktrees**, a VS Code extension that lists worktrees, shows which ones are open in other windows along with their pull requests, and opens them on click. It uses the kunj CLI for everything. See [vscode-extension/README.md](./vscode-extension/README.md).
+The `vscode-extension/` folder contains **Kunj Worktrees**, a VS Code extension that lists worktrees, shows which ones are open in other windows along with their pull requests, and opens them on click. It uses the kunj CLI for everything. Install it with `kunj install vscode`; see [vscode-extension/README.md](./vscode-extension/README.md).
 
 ### macOS menu bar app
 
 The `macos-app/` folder contains **Kunj**, a menu bar app with the same features as the VS Code
-extension, across every repository kunj knows about (`kunj repos`). See
-[macos-app/README.md](./macos-app/README.md).
+extension, across every repository kunj knows about (`kunj repos`). Install it with
+`kunj install macos`; see [macos-app/README.md](./macos-app/README.md).
 
 ```bash
 kunj repos                 # repositories kunj has been used in, most recent first

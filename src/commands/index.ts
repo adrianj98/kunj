@@ -22,6 +22,7 @@ export { TeamCommand } from './team';
 export { WorktreeCommand } from './worktree';
 export { HooksCommand } from './hooks';
 export { ReposCommand } from './repos';
+export { InstallCommand } from './install';
 export { UICommand } from '../ui';
 
 // Import all command classes here as they are created
@@ -50,6 +51,7 @@ import { TeamCommand } from './team';
 import { WorktreeCommand } from './worktree';
 import { HooksCommand } from './hooks';
 import { ReposCommand } from './repos';
+import { InstallCommand } from './install';
 import { UICommand } from '../ui';
 
 // Export a function that returns all command instances
@@ -79,6 +81,7 @@ export function getAllCommands(): BaseCommand[] {
     new WorktreeCommand(),
     new HooksCommand(),
     new ReposCommand(),
+    new InstallCommand(),
     new UICommand(),
   ];
 }
