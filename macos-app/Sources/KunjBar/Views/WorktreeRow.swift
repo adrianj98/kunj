@@ -18,6 +18,7 @@ struct WorktreeRow: View {
                 HStack(spacing: 6) {
                     Text(worktree.name)
                         .fontWeight(worktree.isActive ? .semibold : .regular)
+                        .foregroundStyle(worktree.isActive ? Color.blue : Color.primary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if worktree.isMain {
@@ -26,7 +27,7 @@ struct WorktreeRow: View {
                 }
                 if worktree.isActive {
                     HStack(spacing: 4) {
-                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Circle().fill(Color.blue).frame(width: 6, height: 6)
                         Text(openIn)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.primary)
@@ -63,7 +64,7 @@ struct WorktreeRow: View {
 
     // MARK: - Pieces
 
-    // Worktrees open in an editor get a neutral card with a green bar; the
+    // Worktrees open in an editor get a neutral card with a blue bar and blue name; the
     // card is not tinted so text on it keeps full contrast
     @ViewBuilder private var background: some View {
         let shape = RoundedRectangle(cornerRadius: 6)
@@ -71,7 +72,7 @@ struct WorktreeRow: View {
             shape
                 .fill(Color.primary.opacity(hovering ? 0.12 : 0.07))
                 .overlay(alignment: .leading) {
-                    Capsule().fill(Color.green).frame(width: 3).padding(.vertical, 4)
+                    Capsule().fill(Color.blue).frame(width: 3).padding(.vertical, 4)
                 }
         } else {
             shape.fill(hovering ? Color.primary.opacity(0.08) : .clear)
@@ -87,7 +88,7 @@ struct WorktreeRow: View {
         if !worktree.exists || worktree.prunable {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
         } else if worktree.isActive {
-            Image(systemName: "macwindow").foregroundStyle(.green).fontWeight(.semibold)
+            Image(systemName: "macwindow").foregroundStyle(.blue).fontWeight(.semibold)
         } else if worktree.locked {
             Image(systemName: "lock")
         } else if worktree.detached {
