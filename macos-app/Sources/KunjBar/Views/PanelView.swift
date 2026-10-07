@@ -21,6 +21,7 @@ struct PanelView: View {
         }
         .frame(width: 420)
         .background(Palette.panel)
+        .background(MenuBarAnchor())
         .onAppear { store.refresh() }
     }
 
