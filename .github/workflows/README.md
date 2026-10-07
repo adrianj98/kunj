@@ -11,7 +11,7 @@ Simple CI/CD setup for Kunj CLI with tag-based releases.
 
 ### Release (`release.yml`)
 - **Runs on**: Version tags (v*.*.*), or manually from the Actions tab ("Run workflow" with a version), which creates the tag for you
-- **Does**: Build → Test → Publish to NPM → Package VS Code extension → Create GitHub Release (with the `.vsix` attached)
+- **Does**: Build → Test → Publish to NPM → Package VS Code extension → Create GitHub Release (with the `.vsix` attached), then a `macos-15` job builds the menu bar app and attaches `Kunj-macos-<version>.zip` (unsigned)
 - **Purpose**: Automated publishing when you push a version tag
 
 ## How to Release

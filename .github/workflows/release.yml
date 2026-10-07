@@ -19,6 +19,9 @@ jobs:
   release:
     name: Build and Release
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract_version.outputs.version }}
+      released: ${{ steps.gh_release.outcome }}
 
     steps:
       - name: Checkout
@@ -75,6 +78,7 @@ jobs:
           npm run package
 
       - name: Create GitHub Release
+        id: gh_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.extract_version.outputs.version }}
@@ -95,6 +99,14 @@ jobs:
             code --install-extension kunj-worktrees-${{ steps.extract_version.outputs.version }}.vsix
             ```
 
+            ### macOS menu bar app
+            Download `Kunj-macos-${{ steps.extract_version.outputs.version }}.zip` from the assets below (it is added a few
+            minutes after the release), unzip it and move `Kunj.app` to /Applications. It needs macOS 14 and the
+            kunj CLI above. The app is not signed or notarized, so clear the download quarantine before opening it:
+            ```bash
+            xattr -dr com.apple.quarantine /Applications/Kunj.app
+            ```
+
             See the changelog below for details.
 
       - name: Report NPM publish failure
@@ -102,3 +114,31 @@ jobs:
         run: |
           echo "::error::npm publish failed (check the NPM_TOKEN secret). The GitHub release was still created."
           exit 1
+
+  # Runs after the release exists and adds the app to it, so a failing macOS
+  # build never holds up the npm package or the release itself
+  macos-app:
+    name: Build macOS app
+    needs: release
+    # The release job fails at the end when only npm publishing failed; the
+    # GitHub release still exists then, so build the app for it anyway
+    if: ${{ !cancelled() && needs.release.outputs.released == 'success' }}
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Kunj.app (unsigned)
+        working-directory: macos-app
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          scripts/bundle.sh
+          ditto -c -k --keepParent build/Kunj.app "Kunj-macos-$VERSION.zip"
+
+      - name: Attach to the GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.release.outputs.version }}
+          files: macos-app/Kunj-macos-${{ needs.release.outputs.version }}.zip

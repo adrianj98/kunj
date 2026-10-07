@@ -24,6 +24,16 @@ Everything goes through the kunj CLI (`kunj ... --json`); the app never runs git
 extension has open. Add others with **Add Repository…** in the ⚙ menu (or `kunj repos add <path>`),
 and hide one with **Remove from List** in its ⋯ menu (or `kunj repos remove <path>`).
 
+## Install from a release
+
+Each [GitHub release](https://github.com/adrianj98/kunj/releases) has `Kunj-macos-<version>.zip`. Unzip it,
+move `Kunj.app` to /Applications and, because the app is not signed or notarized, clear the quarantine
+before the first launch:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Kunj.app
+```
+
 ## Build and install
 
 Requires macOS 14, the Swift toolchain (Xcode or the Command Line Tools) and the kunj CLI on your
