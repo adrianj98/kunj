@@ -91,6 +91,9 @@ struct Worktree: Codable, Hashable, Identifiable {
     let pullRequest: PullRequest?
 
     var id: String { path }
+
+    // Open in an editor window right now
+    var isActive: Bool { !sessions.isEmpty }
 }
 
 struct WorktreeListResult: Codable {

@@ -17,12 +17,19 @@ struct WorktreeRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(worktree.name)
-                        .fontWeight(worktree.sessions.isEmpty ? .regular : .semibold)
+                        .fontWeight(worktree.isActive ? .semibold : .regular)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if worktree.isMain {
                         Text("main").font(.caption2).foregroundStyle(.secondary)
                     }
+                }
+                if worktree.isActive {
+                    Text(openIn)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 if !details.isEmpty {
                     Text(details)
@@ -40,9 +47,9 @@ struct WorktreeRow: View {
                 inlineActions
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, worktree.isActive ? 6 : 4)
         .padding(.horizontal, 8)
-        .background(RoundedRectangle(cornerRadius: 6).fill(hovering ? Color.primary.opacity(0.08) : .clear))
+        .background(background)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { store.open(worktree, in: repo) }
@@ -53,11 +60,30 @@ struct WorktreeRow: View {
 
     // MARK: - Pieces
 
+    // Worktrees open in an editor get a tinted card with an accent bar
+    @ViewBuilder private var background: some View {
+        let shape = RoundedRectangle(cornerRadius: 6)
+        if worktree.isActive {
+            shape
+                .fill(Color.accentColor.opacity(hovering ? 0.22 : 0.14))
+                .overlay(alignment: .leading) {
+                    Capsule().fill(Color.accentColor).frame(width: 3).padding(.vertical, 4)
+                }
+        } else {
+            shape.fill(hovering ? Color.primary.opacity(0.08) : .clear)
+        }
+    }
+
+    private var openIn: String {
+        let names = worktree.sessions.map(\.displayName)
+        return names.count == 1 ? "Open in \(names[0])" : "Open in \(names.count) windows: \(names.joined(separator: ", "))"
+    }
+
     @ViewBuilder private var icon: some View {
         if !worktree.exists || worktree.prunable {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-        } else if !worktree.sessions.isEmpty {
-            Image(systemName: "macwindow").foregroundStyle(.blue)
+        } else if worktree.isActive {
+            Image(systemName: "macwindow").foregroundStyle(Color.accentColor).fontWeight(.semibold)
         } else if worktree.locked {
             Image(systemName: "lock")
         } else if worktree.detached {
@@ -70,11 +96,6 @@ struct WorktreeRow: View {
 
     private var details: String {
         var parts: [String] = []
-        if worktree.sessions.count == 1 {
-            parts.append("open: \(worktree.sessions[0].displayName)")
-        } else if worktree.sessions.count > 1 {
-            parts.append("open in \(worktree.sessions.count) windows")
-        }
         if let status = worktree.status {
             if status.dirty { parts.append("✎ \(status.changedFiles)") }
             var sync: [String] = []

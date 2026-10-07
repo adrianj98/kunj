@@ -60,7 +60,7 @@ struct PanelView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(store.repos) { state in
+                        ForEach(sortedRepos) { state in
                             repoSection(state)
                         }
                     }
@@ -189,10 +189,17 @@ struct PanelView: View {
 
     // MARK: - Helpers
 
+    // Repositories with a worktree open in an editor first, otherwise most recently used
+    private var sortedRepos: [RepoState] {
+        stableSorted(store.repos) { $0.worktrees.contains(where: \.isActive) && !$1.worktrees.contains(where: \.isActive) }
+    }
+
+    // Worktrees open in an editor first, in the CLI's order otherwise
     private func filtered(_ worktrees: [Worktree]) -> [Worktree] {
+        let sorted = stableSorted(worktrees) { $0.isActive && !$1.isActive }
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !needle.isEmpty else { return worktrees }
-        return worktrees.filter { wt in
+        guard !needle.isEmpty else { return sorted }
+        return sorted.filter { wt in
             [wt.name, wt.branch ?? "", wt.path, wt.pullRequest?.title ?? "", wt.pullRequest.map { "#\($0.number)" } ?? ""]
                 .contains { $0.lowercased().contains(needle) }
         }
@@ -232,6 +239,16 @@ struct PanelView: View {
             for url in panel.urls { store.addRepository(path: url.path) }
         }
     }
+}
+
+private func stableSorted<T>(_ items: [T], by areInIncreasingOrder: (T, T) -> Bool) -> [T] {
+    items.enumerated()
+        .sorted { a, b in
+            if areInIncreasingOrder(a.element, b.element) { return true }
+            if areInIncreasingOrder(b.element, a.element) { return false }
+            return a.offset < b.offset
+        }
+        .map(\.element)
 }
 
 struct EmptyStateView<Actions: View>: View {
