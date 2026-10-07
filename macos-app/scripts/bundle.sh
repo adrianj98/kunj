@@ -45,6 +45,8 @@ echo "Built $APP ($VERSION)"
 
 if [ "${1:-}" = "--install" ]; then
   pkill -x KunjBar 2>/dev/null || true
+  # open fails (-600) if the old copy is still shutting down
+  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x KunjBar >/dev/null || break; sleep 0.2; done
   rm -rf /Applications/Kunj.app
   cp -R "$APP" /Applications/
   open /Applications/Kunj.app
