@@ -12,6 +12,9 @@ Changes made with Claude, and why.
   spinner until the open finishes (at least 0.6s so it is visible). Repeat clicks while opening are ignored.
   A first version also tracked the mouse-down with a `DragGesture(minimumDistance: 0)`; that swallowed the
   row's tap so clicking opened nothing, and it was removed.
+- The spinner replaces the row's icon and stays until the editor registers its session (the worktree turns
+  "open"), up to 15s, instead of disappearing as soon as the CLI returns.
+- Released as v1.1.1.
 
 ## 2026-10-07 — Release v1.1.0
 

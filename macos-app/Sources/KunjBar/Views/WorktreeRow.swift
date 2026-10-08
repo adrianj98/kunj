@@ -51,9 +51,6 @@ struct WorktreeRow: View {
                 }
             }
             Spacer(minLength: 4)
-            if busy {
-                ProgressView().controlSize(.small)
-            }
             if let pr = worktree.pullRequest {
                 PullRequestBadge(pr: pr)
             }
@@ -93,7 +90,9 @@ struct WorktreeRow: View {
     }
 
     @ViewBuilder private var icon: some View {
-        if !worktree.exists || worktree.prunable {
+        if busy {
+            ProgressView().controlSize(.mini)
+        } else if !worktree.exists || worktree.prunable {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
         } else if worktree.isActive {
             Image(systemName: "macwindow").foregroundStyle(Palette.open).fontWeight(.semibold)

@@ -200,17 +200,29 @@ final class AppStore {
         guard !busyWorktrees.contains(worktree.path) else { return }
         busyWorktrees.insert(worktree.path)
         let started = Date()
-        perform("Opening \(worktree.name)", refreshAfter: false) { [cli, weak self] in
-            defer {
-                // Keep the spinner up long enough to be seen; the CLI returns almost at once
-                let remaining = 0.6 - Date().timeIntervalSince(started)
-                Task { @MainActor in
-                    if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
-                    self?.busyWorktrees.remove(worktree.path)
+        Task {
+            do {
+                try await cli.openWorktree(repo: repo.root, worktreePath: worktree.path, newWindow: newWindow)
+                // The CLI returns as soon as the editor is launched. When the worktree was not open
+                // yet, keep the spinner until the editor registers its session (the watcher refreshes
+                // the listing when it does), or give up after a while.
+                if !worktree.isActive {
+                    while !isActive(worktree.path), Date().timeIntervalSince(started) < 15 {
+                        try? await Task.sleep(for: .milliseconds(250))
+                    }
                 }
+            } catch {
+                flash = "Opening \(worktree.name) failed: \(error.localizedDescription)"
             }
-            try await cli.openWorktree(repo: repo.root, worktreePath: worktree.path, newWindow: newWindow)
+            // Keep the spinner up long enough to be seen
+            let remaining = 0.6 - Date().timeIntervalSince(started)
+            if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+            busyWorktrees.remove(worktree.path)
         }
+    }
+
+    private func isActive(_ path: String) -> Bool {
+        repos.contains { $0.worktrees.contains { $0.path == path && $0.isActive } }
     }
 
     func openPullRequest(_ worktree: Worktree, in repo: KnownRepo) {
