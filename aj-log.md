@@ -15,6 +15,11 @@ Changes made with Claude, and why.
 - The spinner replaces the row's icon and stays until the editor registers its session (the worktree turns
   "open"), up to 15s, instead of disappearing as soon as the CLI returns.
 - Released as v1.1.1.
+- macOS app: the panel closes after clicking a worktree, "Open in New Window" or "Open Terminal"
+  (`MenuBarAnchor.closePanel()`). Released as v1.1.2.
+- Colour was still missing in a window opened at 10:51: the installed VS Code extension was the old build,
+  which still set NO_COLOR when it ran `kunj worktree open`. Reinstalled it from the repo. VS Code itself
+  doesn't need restarting (its main process never had the variables); only windows opened before the fix do.
 
 ## 2026-10-07 — Release v1.1.0
 

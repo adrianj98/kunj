@@ -7,6 +7,13 @@ import AppKit
 import SwiftUI
 
 struct MenuBarAnchor: NSViewRepresentable {
+    // The panel's window, so actions can close it after a click
+    @MainActor private static weak var panel: NSWindow?
+
+    @MainActor static func closePanel() {
+        panel?.close()
+    }
+
     func makeNSView(context: Context) -> AnchorView { AnchorView() }
     func updateNSView(_ nsView: AnchorView, context: Context) {}
 
@@ -18,6 +25,7 @@ struct MenuBarAnchor: NSViewRepresentable {
             if let observer { NotificationCenter.default.removeObserver(observer) }
             observer = nil
             guard let window else { return }
+            MenuBarAnchor.panel = window
             observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak window] _ in
                 guard let window else { return }
                 MainActor.assumeIsolated { Self.pinToMenuBar(window) }

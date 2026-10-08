@@ -64,7 +64,10 @@ struct WorktreeRow: View {
         .contentShape(Rectangle())
         .animation(.easeOut(duration: 0.12), value: busy)
         .onHover { hovering = $0 }
-        .onTapGesture { store.open(worktree, in: repo) }
+        .onTapGesture {
+            store.open(worktree, in: repo)
+            MenuBarAnchor.closePanel()
+        }
         .help(tooltip)
         .contextMenu { contextMenu }
         .opacity(worktree.exists ? 1 : 0.6)
@@ -147,8 +150,14 @@ struct WorktreeRow: View {
     @ViewBuilder private var inlineActions: some View {
         HStack(spacing: 2) {
             if worktree.exists {
-                IconButton(symbol: "macwindow.badge.plus", help: "Open in New Window") { store.open(worktree, in: repo, newWindow: true) }
-                IconButton(symbol: "terminal", help: "Open Terminal") { Launcher.openTerminal(at: worktree.path) }
+                IconButton(symbol: "macwindow.badge.plus", help: "Open in New Window") {
+                    store.open(worktree, in: repo, newWindow: true)
+                    MenuBarAnchor.closePanel()
+                }
+                IconButton(symbol: "terminal", help: "Open Terminal") {
+                    Launcher.openTerminal(at: worktree.path)
+                    MenuBarAnchor.closePanel()
+                }
             }
             if !worktree.isMain {
                 IconButton(symbol: "trash", help: "Remove Worktree…") { store.remove(worktree, in: repo) }
