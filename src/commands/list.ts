@@ -64,7 +64,11 @@ export class ListCommand extends BaseCommand {
     let branches = await getBranchesWithActivity(config.preferences.branchSort);
 
     if (branches.length === 0) {
-      console.log(chalk.yellow("No branches found"));
+      if (this.jsonMode) {
+        this.outputJSON({ branches: [] });
+      } else {
+        console.log(chalk.yellow("No branches found"));
+      }
       return;
     }
 

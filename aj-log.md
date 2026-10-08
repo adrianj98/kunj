@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-08 — New Worktree in a bare repository: "Could not list branches"
+
+- `getGitRoot()` (src/lib/git.ts) used `git rev-parse --show-toplevel`, which fails in a bare repository, so
+  `kunj list` found no branches and the macOS app's New Worktree sheet showed "No branches found". It now falls
+  back to the repository directory (`--absolute-git-dir`) when the repository is bare.
+- `kunj list --json` printed plain text when there were no branches; it now prints `{"branches": []}`.
+
 ## 2026-10-08 — Colour in editors opened by KunjBar, click feedback
 
 - The macOS app and VS Code extension no longer run kunj with `NO_COLOR=1 FORCE_COLOR=0`. `kunj worktree open`

@@ -20,7 +20,18 @@ export async function getGitRoot(): Promise<string> {
     const { stdout } = await execAsync('git rev-parse --show-toplevel');
     gitRootCache = stdout.trim();
     return gitRootCache;
-  } catch (error) {
+  } catch {
+    // --show-toplevel fatals in a bare repository; run from the repository itself there
+    try {
+      const { stdout } = await execAsync('git rev-parse --is-bare-repository --absolute-git-dir');
+      const [bare, gitDir] = stdout.trim().split('\n');
+      if (bare === 'true' && gitDir) {
+        gitRootCache = gitDir;
+        return gitRootCache;
+      }
+    } catch {
+      // fall through
+    }
     throw new Error('Not in a git repository');
   }
 }
