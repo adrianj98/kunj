@@ -8,6 +8,7 @@ Changes made with Claude, and why.
   `kunj list` found no branches and the macOS app's New Worktree sheet showed "No branches found". It now falls
   back to the repository directory (`--absolute-git-dir`) when the repository is bare.
 - `kunj list --json` printed plain text when there were no branches; it now prints `{"branches": []}`.
+- Released as v1.1.3.
 
 ## 2026-10-08 — Colour in editors opened by KunjBar, click feedback
 
