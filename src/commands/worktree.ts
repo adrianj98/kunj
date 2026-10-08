@@ -313,25 +313,33 @@ export class WorktreeCommand extends BaseCommand {
     // A failing pre hook throws and nothing is created
     hooks.push(await runHook('pre-worktree-create', worktreeHookContext(repo, targetPath, branch), hookOptions));
 
-    this.log(chalk.blue(`Creating worktree for '${branch}' at ${targetPath}...`));
+    this.progress(chalk.blue(`Creating worktree for '${branch}' at ${targetPath}...`));
 
     // A new branch starts from the default base (origin/<base> unless turned off)
     const creating = !!options.newBranch || (!!options.create && !(await branchExists(branch)));
+    const fromOrigin = options.origin !== false && config.preferences?.baseFromOrigin !== false;
+    if (creating) {
+      this.progress(chalk.gray(fromOrigin ? 'Fetching the base branch from origin...' : 'Resolving the base branch...'));
+    }
     const base = creating
       ? await resolveBaseRef({
           base: options.base,
           defaultBase: config.preferences?.defaultBaseBranch,
-          fromOrigin: options.origin !== false && config.preferences?.baseFromOrigin !== false,
+          fromOrigin,
         })
       : null;
     if (base?.warning) {
-      this.log(chalk.yellow(`  ${base.warning}`));
+      this.progress(chalk.yellow(`  ${base.warning}`));
+    }
+    if (base) {
+      this.progress(chalk.gray(`Branching from ${base.ref}`));
     }
 
     let keptFiles: string[] = [];
     let createdBranch = false;
+    let gitOutput = '';
     try {
-      ({ keptFiles, createdBranch } = await addWorktree({
+      ({ keptFiles, createdBranch, output: gitOutput } = await addWorktree({
         branch,
         path: targetPath,
         newBranch: creating,
@@ -341,7 +349,12 @@ export class WorktreeCommand extends BaseCommand {
     } catch (error: any) {
       throw new Error(this.cleanGitError(error));
     }
-
+    if (gitOutput) {
+      this.progress(chalk.gray(gitOutput));
+    }
+    if (keptFiles.length > 0) {
+      this.progress(chalk.gray(`Restored ${keptFiles.length} keep file(s): ${keptFiles.join(', ')}`));
+    }
     // Runs inside the new worktree, after keep files are in place
     const post = await runHook('post-worktree-create', worktreeHookContext(repo, targetPath, branch), hookOptions);
     hooks.push(post);
@@ -365,11 +378,18 @@ export class WorktreeCommand extends BaseCommand {
       console.log(chalk.green(`✓ Created branch '${branch}'${base ? ` from ${base.ref}` : ''}`));
     }
     console.log(chalk.green(`✓ Worktree created at ${targetPath}`));
-    if (keptFiles.length > 0) {
-      console.log(chalk.gray(`  Restored ${keptFiles.length} keep file(s): ${keptFiles.join(', ')}`));
-    }
     this.describeHooks(hooks);
     console.log(chalk.gray(`Tip: kunj worktree open ${branch}`));
+  }
+
+  // Progress for long-running actions. In --json mode it goes to stderr, where the
+  // macOS app shows it live, so stdout stays a single JSON document.
+  private progress(message: string): void {
+    if (this.jsonMode) {
+      process.stderr.write(message + '\n');
+    } else {
+      console.log(message);
+    }
   }
 
   private describeHooks(results: HookRunResult[]): void {

@@ -22,6 +22,8 @@ struct NewWorktreeView: View {
     @State private var working = false
     @State private var error: String?
     @State private var created: AddWorktreeResult.Created?
+    // What the CLI printed while creating (progress, git and hook output)
+    @State private var output = ""
 
     private var repoState: RepoState? { store.repos.first { $0.repo.root == repoRoot } }
     private var repoName: String { repoState?.repo.name ?? (repoRoot as NSString).lastPathComponent }
@@ -81,6 +83,10 @@ struct NewWorktreeView: View {
             }
             .formStyle(.columns)
 
+            if working || !output.isEmpty {
+                OutputView(text: output)
+            }
+
             if let error {
                 Text(error)
                     .font(.callout)
@@ -109,6 +115,9 @@ struct NewWorktreeView: View {
             Text(created.path)
                 .font(.callout.monospaced())
                 .textSelection(.enabled)
+            if !output.isEmpty {
+                OutputView(text: output)
+            }
             HStack {
                 Button("Open Terminal") {
                     Launcher.openTerminal(at: created.path)
@@ -144,6 +153,7 @@ struct NewWorktreeView: View {
     private func create() async {
         working = true
         error = nil
+        output = "$ kunj worktree add \(branchName)\n"
         defer { working = false }
         do {
             let result = try await store.cli.addWorktree(
@@ -152,12 +162,35 @@ struct NewWorktreeView: View {
                 path: customPath.trimmingCharacters(in: .whitespaces),
                 newBranch: mode == .new,
                 base: mode == .new ? base : nil,
-                fromOrigin: fromOrigin
+                fromOrigin: fromOrigin,
+                onOutput: { chunk in Task { @MainActor in output += chunk } }
             )
             created = result.worktree
             store.refresh()
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+// A terminal-like box that shows CLI output and follows it as it grows
+struct OutputView: View {
+    let text: String
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Text(text.isEmpty ? " " : text)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Color(white: 0.9))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                Color.clear.frame(height: 1).id("end")
+            }
+            .frame(height: 140)
+            .background(Color.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 6))
+            .onChange(of: text) { proxy.scrollTo("end", anchor: .bottom) }
         }
     }
 }

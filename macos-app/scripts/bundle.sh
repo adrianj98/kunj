@@ -49,6 +49,8 @@ if [ "${1:-}" = "--install" ]; then
   for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x KunjBar >/dev/null || break; sleep 0.2; done
   rm -rf /Applications/Kunj.app
   cp -R "$APP" /Applications/
-  open /Applications/Kunj.app
+  # open passes our environment on; the app would hand NO_COLOR & co. down to the
+  # editors it opens, so don't launch it with a terminal's colour settings
+  env -u NO_COLOR -u FORCE_COLOR open /Applications/Kunj.app
   echo "Installed /Applications/Kunj.app"
 fi

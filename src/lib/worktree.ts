@@ -576,7 +576,7 @@ export async function branchExists(branch: string, cwd?: string): Promise<boolea
 
 export async function addWorktree(
   options: AddWorktreeOptions
-): Promise<{ path: string; branch: string; keptFiles: string[]; createdBranch: boolean }> {
+): Promise<{ path: string; branch: string; keptFiles: string[]; createdBranch: boolean; output: string }> {
   const newBranch = !!options.newBranch || (!!options.createBranch && !(await branchExists(options.branch, options.cwd)));
   const args = ['git', 'worktree', 'add'];
   if (options.force) args.push('--force');
@@ -589,7 +589,7 @@ export async function addWorktree(
     args.push(quote(options.path), quote(options.branch));
   }
   fs.mkdirSync(path.dirname(options.path), { recursive: true });
-  await execAsync(args.join(' '), { cwd: options.cwd || process.cwd() });
+  const { stdout, stderr } = await execAsync(args.join(' '), { cwd: options.cwd || process.cwd() });
 
   // Restore files kept outside git (e.g. .env) into the fresh worktree
   let keptFiles: string[] = [];
@@ -599,7 +599,8 @@ export async function addWorktree(
     // Keep files are a convenience; never fail worktree creation over them
   }
 
-  return { path: options.path, branch: options.branch, keptFiles, createdBranch: newBranch };
+  const output = [stderr, stdout].map(s => s.trim()).filter(Boolean).join('\n');
+  return { path: options.path, branch: options.branch, keptFiles, createdBranch: newBranch, output };
 }
 
 export async function removeWorktree(worktreePath: string, force = false, cwd?: string): Promise<void> {

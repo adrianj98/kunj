@@ -71,8 +71,9 @@ final class KunjCLI: @unchecked Sendable {
     }
 
     // Run `kunj <args> --json` in the given directory and decode the result.
-    func run<T: Decodable>(_ args: [String], cwd: String, timeout: TimeInterval = 120) async throws -> T {
-        let data = try await runRaw(args + ["--json"], cwd: cwd, timeout: timeout)
+    // `onOutput` receives stderr as it arrives (progress and hook output).
+    func run<T: Decodable>(_ args: [String], cwd: String, timeout: TimeInterval = 120, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> T {
+        let data = try await runRaw(args + ["--json"], cwd: cwd, timeout: timeout, onOutput: onOutput)
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
@@ -81,7 +82,7 @@ final class KunjCLI: @unchecked Sendable {
         }
     }
 
-    private func runRaw(_ args: [String], cwd: String, timeout: TimeInterval) async throws -> Data {
+    private func runRaw(_ args: [String], cwd: String, timeout: TimeInterval, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> Data {
         let parts = commandParts
         let fullArgs = Array(parts.dropFirst()) + args
         log("\(parts[0]) \(fullArgs.joined(separator: " "))  (cwd: \(cwd))")
@@ -95,6 +96,10 @@ final class KunjCLI: @unchecked Sendable {
                 process.currentDirectoryURL = URL(fileURLWithPath: cwd)
                 var env = ProcessInfo.processInfo.environment
                 env["PATH"] = ShellEnvironment.path
+                // Never hand these on: kunj passes its environment to the editor it opens, and
+                // the editor to every terminal in its window. The CLI drops colour for --json itself.
+                env.removeValue(forKey: "NO_COLOR")
+                env.removeValue(forKey: "FORCE_COLOR")
                 process.environment = env
 
                 let stdoutPipe = Pipe()
@@ -123,7 +128,13 @@ final class KunjCLI: @unchecked Sendable {
                 let group = DispatchGroup()
                 group.enter()
                 DispatchQueue.global().async {
-                    stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                    let handle = stderrPipe.fileHandleForReading
+                    while true {
+                        let chunk = handle.availableData
+                        if chunk.isEmpty { break }
+                        stderrData.append(chunk)
+                        onOutput?(String(decoding: chunk, as: UTF8.self))
+                    }
                     group.leave()
                 }
                 let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
@@ -212,13 +223,13 @@ final class KunjCLI: @unchecked Sendable {
         return result.pullRequest
     }
 
-    func addWorktree(repo: String, branch: String, path: String?, newBranch: Bool, base: String?, fromOrigin: Bool) async throws -> AddWorktreeResult {
+    func addWorktree(repo: String, branch: String, path: String?, newBranch: Bool, base: String?, fromOrigin: Bool, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> AddWorktreeResult {
         var args = ["worktree", "add", branch]
         if let path, !path.isEmpty { args.append(path) }
         if newBranch { args.append("--new-branch") }
         if let base, !base.isEmpty { args += ["--base", base] }
         if newBranch && !fromOrigin { args.append("--no-origin") }
-        return try await run(args, cwd: repo, timeout: 300)
+        return try await run(args, cwd: repo, timeout: 300, onOutput: onOutput)
     }
 
     func removeWorktree(repo: String, worktreePath: String, force: Bool) async throws {

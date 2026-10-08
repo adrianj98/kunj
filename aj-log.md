@@ -2,6 +2,19 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-08 — Still no colour; live CLI output in New Worktree
+
+- A brand-new window still had `NO_COLOR=1 FORCE_COLOR=0`. Cause: the Kunj app itself had them. It was
+  relaunched by `bundle.sh --install` from a Claude Code session in a window that still had them, and `open`
+  passes its environment to the app, which passed it to kunj, then to VS Code, then to the terminals.
+  Fixes: the app removes both variables from kunj's environment (KunjCLI.swift), and `bundle.sh` relaunches
+  the app without them.
+- New Worktree window shows a terminal-style box with what the CLI is doing, live. `kunj worktree add` now
+  reports progress (creating, fetching the base, branching from, git's own output, keep files restored) - on
+  stderr in `--json` mode so stdout stays one JSON document; hook output already went to stderr there. The app
+  streams stderr through a new `onOutput` callback on `run()`.
+- Released as v1.1.4.
+
 ## 2026-10-08 — New Worktree in a bare repository: "Could not list branches"
 
 - `getGitRoot()` (src/lib/git.ts) used `git rev-parse --show-toplevel`, which fails in a bare repository, so
