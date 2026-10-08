@@ -8,9 +8,10 @@ Changes made with Claude, and why.
   inherited them and VS Code handed them on to every terminal in the window, so tools there (e.g. Claude Code)
   lost all colour. Instead the CLI turns chalk off itself whenever `--json` is passed (src/index.ts), which
   also covers an inherited `FORCE_COLOR=1` - chalk already skips colour when output is piped.
-- macOS app: clicking a worktree row now shows it was clicked — the row tints blue while pressed and shows
-  "Opening…" with a spinner until the open finishes (at least 0.6s so it is visible). Repeat clicks while
-  opening are ignored.
+- macOS app: clicking a worktree row now shows it was clicked — the row tints blue and shows "Opening…" with a
+  spinner until the open finishes (at least 0.6s so it is visible). Repeat clicks while opening are ignored.
+  A first version also tracked the mouse-down with a `DragGesture(minimumDistance: 0)`; that swallowed the
+  row's tap so clicking opened nothing, and it was removed.
 
 ## 2026-10-07 — Release v1.1.0
 
