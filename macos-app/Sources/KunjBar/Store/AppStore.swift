@@ -30,6 +30,8 @@ final class AppStore {
     private(set) var logLines: [String] = []
     // Transient message shown at the bottom of the panel
     var flash: String?
+    // Worktree paths with an action in flight, so their row can show it
+    private(set) var busyWorktrees: Set<String> = []
 
     @ObservationIgnored let cli: KunjCLI
     @ObservationIgnored let notifier = Notifier()
@@ -195,7 +197,18 @@ final class AppStore {
             flash = "Worktree directory is missing: \(worktree.path)"
             return
         }
-        perform("Opening \(worktree.name)", refreshAfter: false) { [cli] in
+        guard !busyWorktrees.contains(worktree.path) else { return }
+        busyWorktrees.insert(worktree.path)
+        let started = Date()
+        perform("Opening \(worktree.name)", refreshAfter: false) { [cli, weak self] in
+            defer {
+                // Keep the spinner up long enough to be seen; the CLI returns almost at once
+                let remaining = 0.6 - Date().timeIntervalSince(started)
+                Task { @MainActor in
+                    if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+                    self?.busyWorktrees.remove(worktree.path)
+                }
+            }
             try await cli.openWorktree(repo: repo.root, worktreePath: worktree.path, newWindow: newWindow)
         }
     }

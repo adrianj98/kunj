@@ -10,6 +10,9 @@ struct WorktreeRow: View {
     @Environment(AppStore.self) private var store
     @AppStorage(Pref.showPath) private var showPath = false
     @State private var hovering = false
+    @State private var pressed = false
+
+    private var busy: Bool { store.busyWorktrees.contains(worktree.path) }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -26,7 +29,11 @@ struct WorktreeRow: View {
                         Text("main").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
-                if worktree.isActive {
+                if busy {
+                    Text("Opening…")
+                        .font(.caption)
+                        .foregroundStyle(Palette.open)
+                } else if worktree.isActive {
                     HStack(spacing: 4) {
                         Circle().fill(Palette.open).frame(width: 6, height: 6)
                         Text(openIn)
@@ -45,6 +52,9 @@ struct WorktreeRow: View {
                 }
             }
             Spacer(minLength: 4)
+            if busy {
+                ProgressView().controlSize(.small)
+            }
             if let pr = worktree.pullRequest {
                 PullRequestBadge(pr: pr)
             }
@@ -56,7 +66,15 @@ struct WorktreeRow: View {
         .padding(.horizontal, 8)
         .background(background)
         .contentShape(Rectangle())
+        .scaleEffect(pressed ? 0.98 : 1)
+        .animation(.easeOut(duration: 0.12), value: pressed)
         .onHover { hovering = $0 }
+        // Tracks the press so the row darkens while the mouse is down
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in pressed = true }
+                .onEnded { _ in pressed = false }
+        )
         .onTapGesture { store.open(worktree, in: repo) }
         .help(tooltip)
         .contextMenu { contextMenu }
@@ -69,7 +87,7 @@ struct WorktreeRow: View {
     // add a bar in the "open" blue rather than a card of their own
     @ViewBuilder private var background: some View {
         RoundedRectangle(cornerRadius: 6)
-            .fill(hovering ? Color.primary.opacity(0.08) : .clear)
+            .fill(pressed || busy ? Palette.open.opacity(0.18) : hovering ? Color.primary.opacity(0.08) : .clear)
             .overlay(alignment: .leading) {
                 if worktree.isActive {
                     Capsule().fill(Palette.open).frame(width: 3).padding(.vertical, 4)

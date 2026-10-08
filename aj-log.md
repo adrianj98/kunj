@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-08 — Colour in editors opened by KunjBar, click feedback
+
+- `openWorktree()` (src/lib/worktree.ts) no longer passes `NO_COLOR`/`FORCE_COLOR` to the editor it launches.
+  The macOS app and VS Code extension set them so the CLI prints plain JSON, and VS Code handed them on to
+  every terminal in the window, so tools there (e.g. Claude Code) lost all colour.
+- macOS app: clicking a worktree row now shows it was clicked — the row tints blue while pressed and shows
+  "Opening…" with a spinner until the open finishes (at least 0.6s so it is visible). Repeat clicks while
+  opening are ignored.
+
 ## 2026-10-07 — Release v1.1.0
 
 Released everything since v1.0.1 so `kunj repos` / `kunj install` reach npm and the release carries the
