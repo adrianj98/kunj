@@ -799,11 +799,7 @@ export async function openWorktree(command: string, targetPath: string, options:
     return false;
   }
   return new Promise<boolean>(resolve => {
-    // Callers that want plain JSON (the VS Code extension, the macOS app) run kunj with
-    // NO_COLOR/FORCE_COLOR set. The editor would pass them on to every terminal it opens,
-    // so drop them here.
-    const { NO_COLOR, FORCE_COLOR, ...env } = process.env;
-    const child = spawn(argv[0], argv.slice(1), { stdio: 'ignore', detached: true, env });
+    const child = spawn(argv[0], argv.slice(1), { stdio: 'ignore', detached: true });
     child.on('error', () => resolve(false));
     child.on('spawn', () => {
       child.unref();

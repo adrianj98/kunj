@@ -95,8 +95,6 @@ final class KunjCLI: @unchecked Sendable {
                 process.currentDirectoryURL = URL(fileURLWithPath: cwd)
                 var env = ProcessInfo.processInfo.environment
                 env["PATH"] = ShellEnvironment.path
-                env["NO_COLOR"] = "1"
-                env["FORCE_COLOR"] = "0"
                 process.environment = env
 
                 let stdoutPipe = Pipe()

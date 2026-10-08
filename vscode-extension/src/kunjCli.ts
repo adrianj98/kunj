@@ -106,7 +106,6 @@ export class KunjCli {
 
       const child = spawn(command, fullArgs, {
         cwd,
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
         shell: process.platform === 'win32',
         windowsHide: true,
       });

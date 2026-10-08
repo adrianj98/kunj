@@ -3,6 +3,7 @@
 // Modular CLI entry point using pluggable command architecture
 
 import { Command } from 'commander';
+import chalk from 'chalk';
 import { CommandRegistry } from './lib/command';
 import { loadFastCommand } from './commands/fast';
 
@@ -23,6 +24,13 @@ function getVersion(): string {
 
 // Main function to handle both completion and normal execution
 async function main() {
+  // --json output is read by the VS Code extension and the macOS app; never colour it,
+  // even when FORCE_COLOR is inherited. Callers don't set NO_COLOR themselves because
+  // the editor kunj opens would hand it on to every terminal in its window.
+  if (process.argv.includes('--json')) {
+    chalk.level = 0;
+  }
+
   // Handle shell completion first
   const env = process.env;
   if (env.COMP_LINE || env.COMP_POINT) {
