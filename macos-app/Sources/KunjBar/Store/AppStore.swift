@@ -3,6 +3,7 @@
 // when ~/.kunj/worktree-sessions.json or repos.json change.
 
 import AppKit
+import KunjBarCore
 import Observation
 
 struct RepoState: Identifiable {
@@ -32,6 +33,7 @@ final class AppStore {
     var flash: String?
     // Worktree paths with an action in flight, so their row can show it
     private(set) var busyWorktrees: Set<String> = []
+    private(set) var isOrganizing = false
 
     @ObservationIgnored let cli: KunjCLI
     @ObservationIgnored let notifier = Notifier()
@@ -218,6 +220,55 @@ final class AppStore {
             let remaining = 0.6 - Date().timeIntervalSince(started)
             if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
             busyWorktrees.remove(worktree.path)
+        }
+    }
+
+    // Organize Windows: one desktop per worktree on the chosen screen, windows tiled
+    func organizeWindows() {
+        guard !isOrganizing else { return }
+        guard AXWindows.isTrusted(prompt: true) else {
+            flash = "Grant Kunj Accessibility access in System Settings, then run Organize again"
+            return
+        }
+        let defaults = UserDefaults.standard
+        let kinds = defaults.kunjOrganizeKinds
+        guard !kinds.isEmpty else { return }
+        let worktrees = repos.flatMap { state in
+            state.worktrees.filter(\.exists).map { WorktreeRef(path: $0.path, name: $0.name) }
+        }
+        let screen = defaults.kunjOrganizeScreen
+        let layout = defaults.kunjOrganizeLayout
+        let remembered = defaults.kunjOrganizeDesktops
+        let terminalApps = Launcher.terminalApps
+        let log = cli.log
+        isOrganizing = true
+        Task.detached {
+            let result = Result { try Organizer(log: log).run(worktrees: worktrees, screenName: screen, layout: layout, kinds: kinds,
+                                                             remembered: remembered, terminalApps: terminalApps) }
+            await MainActor.run { self.finishOrganizing(result) }
+        }
+    }
+
+    private func finishOrganizing(_ result: Result<Organizer.Outcome, Error>) {
+        isOrganizing = false
+        switch result {
+        case .success(let outcome):
+            UserDefaults.standard.kunjOrganizeDesktops = outcome.remembered
+            guard outcome.worktrees > 0 else {
+                flash = "Nothing to organize"
+                return
+            }
+            var text = "Organized \(outcome.worktrees) worktree\(outcome.worktrees == 1 ? "" : "s") on \(outcome.worktrees) desktop\(outcome.worktrees == 1 ? "" : "s")"
+            if outcome.windowsFailed > 0 { text += ", \(outcome.windowsFailed) window\(outcome.windowsFailed == 1 ? "" : "s") could not be moved" }
+            if outcome.screenFellBack { text += " on \(outcome.screenName) (\(outcome.wantedScreen) is not attached)" }
+            flash = text
+        case .failure(let error as Spaces.MissingSymbol):
+            flash = error.description
+        case .failure(let error as MissionControl.Failure):
+            let v = ProcessInfo.processInfo.operatingSystemVersion
+            flash = "Could not drive Mission Control (macOS \(v.majorVersion).\(v.minorVersion)): \(error.step)"
+        case .failure(let error):
+            flash = "Organize failed: \(error.localizedDescription)"
         }
     }
 

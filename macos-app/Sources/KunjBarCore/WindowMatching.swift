@@ -36,8 +36,9 @@ public struct WorktreeRef: Hashable, Sendable {
 }
 
 // Windows per worktree path. A window lands in at most one bucket: its document path
-// decides when present, else its title; longer names are tried first so `feature-2`
-// beats `feature`, and of two worktrees with the same name the first listed wins.
+// decides when it lies in a worktree (VS Code's is the open file, Terminal's the working
+// directory), else its title; longer names are tried first so `feature-2` beats
+// `feature`, and of two worktrees with the same name the first listed wins.
 public func matchWindows(_ windows: [FoundWindow], worktrees: [WorktreeRef]) -> [String: [FoundWindow]] {
     let byLongestName = worktrees.enumerated().sorted {
         $0.element.name.count != $1.element.name.count
@@ -46,12 +47,10 @@ public func matchWindows(_ windows: [FoundWindow], worktrees: [WorktreeRef]) -> 
     }.map(\.element)
     var result: [String: [FoundWindow]] = [:]
     for window in windows {
-        let owner: WorktreeRef?
-        if let document = window.documentPath {
-            owner = worktrees.first { document == $0.path || document.hasPrefix($0.path + "/") }
-        } else {
-            owner = byLongestName.first { titleMatches(window.title, name: $0.name) }
+        let byDocument = window.documentPath.flatMap { document in
+            byLongestName.first { document == $0.path || document.hasPrefix($0.path + "/") }
         }
+        let owner = byDocument ?? byLongestName.first { titleMatches(window.title, name: $0.name) }
         if let owner { result[owner.path, default: []].append(window) }
     }
     return result

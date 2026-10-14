@@ -63,3 +63,9 @@ private func window(_ id: UInt32, _ kind: WindowKind, title: String, document: S
     #expect(!titleMatches("feature2", name: "feature"))
     #expect(!titleMatches("myfeature", name: "feature"))
 }
+
+@Test func aDocumentOutsideEveryWorktreeFallsBackToTheTitle() {
+    // VS Code sets AXDocument to the open file, which may live outside the worktree
+    let w = window(1, .editor, title: "settings.json — feature — Visual Studio Code", document: "/Users/me/Library/Application Support/Code/User/settings.json")
+    #expect(matchWindows([w], worktrees: [feature])["/r/wt/feature"] == [w])
+}

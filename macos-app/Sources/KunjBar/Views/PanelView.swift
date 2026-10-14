@@ -189,6 +189,11 @@ struct PanelView: View {
                 }
                 Menu {
                     Button("Add Repository…") { addRepository() }
+                    Button(store.isOrganizing ? "Organizing Windows…" : "Organize Windows") {
+                        store.organizeWindows()
+                        MenuBarAnchor.closePanel()
+                    }
+                    .disabled(store.isOrganizing || UserDefaults.standard.kunjOrganizeKinds.isEmpty)
                     Button("Settings…") { show("settings") }
                     Button("Show Log") { show("log") }
                     Divider()
