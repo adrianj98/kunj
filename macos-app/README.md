@@ -17,7 +17,8 @@ repository kunj knows about rather than one editor window:
 - Filter field and an **Open only** toggle (just the worktrees open in an editor), launch at login, settings for the CLI path, refresh interval and terminal app
 - **Organize Windows** (⚙ menu): the worktrees' editor and terminal windows, two per desktop on a
   chosen screen, one on each half. A worktree's editor and terminal share a desktop; worktrees left
-  with a single window are paired up with each other. Settings choose the screen, the layout (editor
+  with a single window are paired up with each other, and so is any editor window of a folder kunj
+  does not list. Settings choose the screen, the layout (editor
   left, editor right, or editor above) and whether editor and/or terminal windows take part.
   Full-screen windows are taken out of full screen first. Windows already in place stay; each
   worktree's desktop is remembered, so running it again reuses it. A terminal counts when its working

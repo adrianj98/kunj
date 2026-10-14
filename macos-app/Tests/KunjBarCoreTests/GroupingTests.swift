@@ -39,3 +39,20 @@ private let c = WorktreeRef(path: "/c", name: "c")
     let groups = groupWindows([(a, [window(1, .terminal), window(2, .terminal), window(3, .editor)])])
     #expect(groups.map { $0.windows.map(\.id) } == [[3, 1], [2]])
 }
+
+@Test func anEditorWindowOfNoListedWorktreeStillTakesPart() {
+    let listed = window(1, .editor)
+    let stray = FoundWindow(id: 2, pid: 1, kind: .editor, title: "Welcome — other-branch", documentPath: nil,
+                            frame: CGRect(x: 0, y: 0, width: 10, height: 10), minimized: false)
+    let strayTerminal = FoundWindow(id: 3, pid: 1, kind: .terminal, title: "adrian — -zsh", documentPath: "/Users/me", frame: .zero, minimized: false)
+    let entries = worktreeEntries(matched: ["/a": [listed]], worktrees: [a], windows: [listed, stray, strayTerminal])
+    #expect(entries.map(\.0.path) == ["/a", "window:2"])
+    #expect(entries.map { $0.1.map(\.id) } == [[1], [2]])
+    #expect(entries[1].0.name == "Welcome — other-branch")
+}
+
+@Test func worktreeEntriesKeepPanelOrderAndSkipWorktreesWithoutWindows() {
+    let e = window(1, .editor)
+    let entries = worktreeEntries(matched: ["/b": [e]], worktrees: [a, b], windows: [e])
+    #expect(entries.map(\.0.path) == ["/b"])
+}

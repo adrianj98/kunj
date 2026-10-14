@@ -45,6 +45,9 @@ Changes made with Claude, and why.
   organizer works per pair (keep / remembered / new desktop, each worktree in the pair remembers it)
   and the flash counts windows and desktops. Why: asked for two per desktop, several times; the
   per-worktree rule left one window per desktop when a worktree had no terminal.
+- `worktreeEntries()`: editor windows that match no listed worktree take part as their own entry
+  (keyed `window:<id>`), so they pair up too; terminals outside every worktree are still left alone.
+  Why: a VS Code window for an unlisted folder sat alone on its desktop.
 - Verified by hand on this Mac (macOS 26, two displays): a desktop added on the external screen,
   switching, one worktree kept its desktop and the other got a new one with its editor dragged there
   and placed on the left half; a second run moved nothing.

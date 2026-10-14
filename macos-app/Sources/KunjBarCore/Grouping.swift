@@ -32,3 +32,17 @@ public func groupWindows(_ matched: [(WorktreeRef, [FoundWindow])]) -> [WindowGr
     }
     return pairs
 }
+
+// The worktrees that have windows, in panel order, followed by one entry per editor
+// window that matched no listed worktree, so every editor window takes part. Terminals
+// outside every worktree are left alone.
+public func worktreeEntries(matched: [String: [FoundWindow]], worktrees: [WorktreeRef], windows: [FoundWindow]) -> [(WorktreeRef, [FoundWindow])] {
+    var entries: [(WorktreeRef, [FoundWindow])] = worktrees.compactMap { worktree in
+        matched[worktree.path].map { (worktree, $0) }
+    }
+    let matchedIDs = Set(matched.values.flatMap { $0 }.map(\.id))
+    for window in windows where window.kind == .editor && !matchedIDs.contains(window.id) {
+        entries.append((WorktreeRef(path: "window:\(window.id)", name: window.title), [window]))
+    }
+    return entries
+}

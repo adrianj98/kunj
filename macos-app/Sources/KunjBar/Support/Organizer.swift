@@ -46,13 +46,13 @@ final class Organizer {
         let all = candidates.filter { spaceOf[$0.0.id] != nil }
         let elements = Dictionary(all.map { ($0.0.id, $0.1) }, uniquingKeysWith: { a, _ in a })
         let matched = matchWindows(all.map(\.0), worktrees: worktrees)
-        log("organize: \(all.count) candidate windows, \(matched.values.map(\.count).reduce(0, +)) belong to \(matched.count) worktrees")
-        let todo = worktrees.filter { matched[$0.path] != nil }
-        if todo.isEmpty { return outcome }
+        let entries = worktreeEntries(matched: matched, worktrees: worktrees, windows: all.map(\.0))
+        log("organize: \(all.count) candidate windows, \(matched.values.map(\.count).reduce(0, +)) belong to \(matched.count) worktrees, \(entries.count - matched.count) editor windows of other folders")
+        if entries.isEmpty { return outcome }
 
-        // Full-screen windows of those worktrees come back to a desktop first
-        for worktree in todo {
-            for window in matched[worktree.path] ?? [] where !desktops.contains(spaceOf[window.id] ?? 0) {
+        // Full-screen windows come back to a desktop first
+        for (_, windows) in entries {
+            for window in windows where !desktops.contains(spaceOf[window.id] ?? 0) {
                 guard let element = elements[window.id] else { continue }
                 AXWindows.exitFullScreen(element)
                 if (try? poll(timeout: 6) {
@@ -69,7 +69,7 @@ final class Organizer {
         desktops = Set(displays.flatMap(\.spaces))
 
         func screenSpaces() -> [SpaceID] { displays.first { $0.displayUUID == displayUUID }?.spaces ?? [] }
-        let groups = groupWindows(todo.map { ($0, matched[$0.path] ?? []) })
+        let groups = groupWindows(entries)
         func name(_ group: WindowGroup) -> String { group.worktrees.map(\.name).joined(separator: " + ") }
 
         // Desktops holding some group's windows, so another group cannot keep them
