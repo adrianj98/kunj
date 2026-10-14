@@ -40,6 +40,11 @@ Changes made with Claude, and why.
   present; a lone window fills the desktop). `fits()` allows a character cell (16 pt) of slack
   because Terminal snaps to whole cells and was re-placed on every run. Why: the first run left one
   window per desktop and skipped the full-screen ones, which was not what was wanted.
+- Two windows per desktop, not one worktree per desktop: `groupWindows()` cuts each worktree's
+  windows (editors first) into pairs and pairs the leftover single windows across worktrees; the
+  organizer works per pair (keep / remembered / new desktop, each worktree in the pair remembers it)
+  and the flash counts windows and desktops. Why: asked for two per desktop, several times; the
+  per-worktree rule left one window per desktop when a worktree had no terminal.
 - Verified by hand on this Mac (macOS 26, two displays): a desktop added on the external screen,
   switching, one worktree kept its desktop and the other got a new one with its editor dragged there
   and placed on the left half; a second run moved nothing.

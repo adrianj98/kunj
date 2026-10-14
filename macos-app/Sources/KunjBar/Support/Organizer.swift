@@ -1,13 +1,14 @@
-// One Organize Windows run: find the worktrees' windows, give each worktree a
-// desktop on the chosen screen, bring its windows there and tile them.
+// One Organize Windows run: find the worktrees' windows, pair them up two per
+// desktop on the chosen screen, bring each pair there and tile it.
 
 import AppKit
 import KunjBarCore
 
 final class Organizer {
     struct Outcome {
-        var worktrees = 0
-        var worktreesFailed = 0
+        var desktops = 0
+        var windows = 0
+        var groupsFailed = 0
         var desktopsCreated = 0
         var windowsMoved = 0
         var windowsFailed = 0
@@ -68,11 +69,14 @@ final class Organizer {
         desktops = Set(displays.flatMap(\.spaces))
 
         func screenSpaces() -> [SpaceID] { displays.first { $0.displayUUID == displayUUID }?.spaces ?? [] }
-        // Desktops holding some listed worktree's windows, so another worktree cannot keep them
-        var occupied: [SpaceID: String] = [:]
-        for worktree in todo {
-            for window in matched[worktree.path] ?? [] {
-                if let space = spaceOf[window.id], occupied[space] == nil { occupied[space] = worktree.path }
+        let groups = groupWindows(todo.map { ($0, matched[$0.path] ?? []) })
+        func name(_ group: WindowGroup) -> String { group.worktrees.map(\.name).joined(separator: " + ") }
+
+        // Desktops holding some group's windows, so another group cannot keep them
+        var occupied: [SpaceID: Int] = [:]
+        for (i, group) in groups.enumerated() {
+            for window in group.windows {
+                if let space = spaceOf[window.id], occupied[space] == nil { occupied[space] = i }
             }
         }
         // Drop remembered desktops that no longer exist
@@ -81,37 +85,38 @@ final class Organizer {
 
         var taken: Set<SpaceID> = []
         let visible = screen.visibleFrame
-        let slotRects = slots(for: layout, kinds: kinds, in: visible)
+        let halves = slots(for: layout, kinds: [.editor, .terminal], in: visible)
 
-        for worktree in todo {
-            let windows = matched[worktree.path] ?? []
-            let takenByOthers = taken.union(occupied.filter { $0.value != worktree.path }.keys)
+        for (i, group) in groups.enumerated() {
+            let windows = group.windows
+            let takenByOthers = taken.union(occupied.filter { $0.value != i }.keys)
+            // A pair's desktop is the one remembered for its first worktree
+            let remembered = group.worktrees.lazy.compactMap { outcome.remembered[$0.path] }.first
             let choice = chooseDesktop(windows: windows, spaceOf: spaceOf, screenSpaces: screenSpaces(),
-                                       remembered: outcome.remembered[worktree.path], takenSpaces: takenByOthers)
-            // A worktree whose desktop cannot be made or reached is skipped, not the whole run,
+                                       remembered: remembered, takenSpaces: takenByOthers)
+            // A pair whose desktop cannot be made or reached is skipped, not the whole run,
             // so what was done so far (and which desktop is whose) is kept
             let space: SpaceID
             do {
                 switch choice {
                 case .keep(let id):
                     space = id
-                    log("organize: \(worktree.name) keeps desktop \(index(of: id))")
+                    log("organize: \(name(group)) keeps desktop \(index(of: id))")
                 case .remember(let id):
                     space = id
-                    log("organize: \(worktree.name) goes to its remembered desktop \(index(of: id))")
+                    log("organize: \(name(group)) goes to its remembered desktop \(index(of: id))")
                 case .create:
                     space = try MissionControl.addDesktop(on: screen)
                     displays = try Spaces.displays()
                     outcome.desktopsCreated += 1
-                    outcome.remembered[worktree.path] = space
-                    log("organize: \(worktree.name) gets new desktop \(index(of: space))")
+                    log("organize: \(name(group)) gets new desktop \(index(of: space))")
                 }
                 taken.insert(space)
-                outcome.remembered[worktree.path] = space
+                for worktree in group.worktrees { outcome.remembered[worktree.path] = space }
                 try MissionControl.switchTo(space, on: screen)
             } catch {
-                outcome.worktreesFailed += 1
-                log("organize: skipping \(worktree.name): \(error)")
+                outcome.groupsFailed += 1
+                log("organize: skipping \(name(group)): \(error)")
                 continue
             }
 
@@ -122,7 +127,7 @@ final class Organizer {
                     let onThisDisplay = screenSpaces().contains(spaceOf[window.id] ?? 0)
                     if !onThisDisplay {
                         // Another display: a frame on this screen puts it on this screen's current desktop
-                        AXWindows.setFrame(element, cocoa: slotRects[window.kind] ?? visible)
+                        AXWindows.setFrame(element, cocoa: halves[window.kind] ?? visible)
                         try poll { (try? Spaces.space(of: [window.id]))?[window.id] == space }
                         log("organize: moved “\(window.title)” across displays")
                     } else {
@@ -149,7 +154,8 @@ final class Organizer {
                 AXWindows.setFrame(element, cocoa: placement.slot)
                 log("organize: placed “\(placement.window.title)” at \(Int(placement.slot.minX)),\(Int(placement.slot.minY)) \(Int(placement.slot.width))×\(Int(placement.slot.height))")
             }
-            outcome.worktrees += 1
+            outcome.desktops += 1
+            outcome.windows += present.count
         }
         return outcome
 

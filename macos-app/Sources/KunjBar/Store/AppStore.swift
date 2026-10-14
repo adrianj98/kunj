@@ -254,13 +254,13 @@ final class AppStore {
         switch result {
         case .success(let outcome):
             UserDefaults.standard.kunjOrganizeDesktops = outcome.remembered
-            guard outcome.worktrees > 0 || outcome.worktreesFailed > 0 else {
+            guard outcome.desktops > 0 || outcome.groupsFailed > 0 else {
                 flash = "Nothing to organize"
                 return
             }
-            var text = "Organized \(outcome.worktrees) worktree\(outcome.worktrees == 1 ? "" : "s") on \(outcome.worktrees) desktop\(outcome.worktrees == 1 ? "" : "s")"
+            var text = "Organized \(outcome.windows) window\(outcome.windows == 1 ? "" : "s") on \(outcome.desktops) desktop\(outcome.desktops == 1 ? "" : "s")"
             if outcome.windowsFailed > 0 { text += ", \(outcome.windowsFailed) window\(outcome.windowsFailed == 1 ? "" : "s") could not be moved" }
-            if outcome.worktreesFailed > 0 { text += ", \(outcome.worktreesFailed) worktree\(outcome.worktreesFailed == 1 ? "" : "s") skipped (see the log)" }
+            if outcome.groupsFailed > 0 { text += ", \(outcome.groupsFailed) desktop\(outcome.groupsFailed == 1 ? "" : "s") skipped (see the log)" }
             if outcome.screenFellBack { text += " on \(outcome.screenName) (\(outcome.wantedScreen) is not attached)" }
             flash = text
         case .failure(let error as Spaces.MissingSymbol):

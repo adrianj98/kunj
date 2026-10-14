@@ -15,13 +15,13 @@ repository kunj knows about rather than one editor window:
 - Notifications when a pull request's checks fail or pass, or it is approved or merged; failing
   checks count in the menu bar
 - Filter field and an **Open only** toggle (just the worktrees open in an editor), launch at login, settings for the CLI path, refresh interval and terminal app
-- **Organize Windows** (⚙ menu): one desktop per worktree on a chosen screen, with the worktree's
-  editor window on one half and its terminal window on the other. Settings choose the screen, the
-  layout (editor left, editor right, or editor above) and whether editor and/or terminal windows take
-  part. A worktree with two windows of one kind gets one on each half; a lone window fills the
-  desktop. Full-screen windows are taken out of full screen first. Windows already in place stay; a
+- **Organize Windows** (⚙ menu): the worktrees' editor and terminal windows, two per desktop on a
+  chosen screen, one on each half. A worktree's editor and terminal share a desktop; worktrees left
+  with a single window are paired up with each other. Settings choose the screen, the layout (editor
+  left, editor right, or editor above) and whether editor and/or terminal windows take part.
+  Full-screen windows are taken out of full screen first. Windows already in place stay; each
   worktree's desktop is remembered, so running it again reuses it. A terminal counts when its working
-  directory is inside the worktree. Needs Accessibility access (System Settings > Privacy & Security >
+  directory is inside the worktree. Desktops are never removed. Needs Accessibility access (System Settings > Privacy & Security >
   Accessibility); the first run asks for it. It works by driving Mission Control, so leave the
   keyboard and mouse alone for the seconds it runs.
 
