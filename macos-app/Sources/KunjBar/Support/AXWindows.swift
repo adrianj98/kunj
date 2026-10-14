@@ -6,8 +6,8 @@ import AppKit
 import ApplicationServices
 import KunjBarCore
 
-// Private but long-stable: the window id behind an AXUIElement, which SkyLight
-// and CGWindowList use.
+// Private but long-stable (AltTab, yabai and Hammerspoon use it): the window id
+// behind an AXUIElement, which SkyLight and CGWindowList use.
 @_silgen_name("_AXUIElementGetWindow")
 private func _AXUIElementGetWindow(_ element: AXUIElement, _ out: UnsafeMutablePointer<CGWindowID>) -> AXError
 
@@ -24,20 +24,40 @@ enum AXWindows {
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    // Every standard window of the editor apps and of the terminal apps given by name.
-    static func candidateWindows(terminalApps: [String]) -> [(FoundWindow, AXUIElement)] {
-        var found: [(FoundWindow, AXUIElement)] = []
+    // The editor and terminal apps running now, by pid
+    static func candidateApps(terminalApps: [String]) -> [pid_t: WindowKind] {
+        var kinds: [pid_t: WindowKind] = [:]
         for app in NSWorkspace.shared.runningApplications {
-            let kind: WindowKind
             if let bundle = app.bundleIdentifier, editorBundleIDs.contains(bundle) {
-                kind = .editor
+                kinds[app.processIdentifier] = .editor
             } else if let name = app.localizedName, terminalApps.contains(name) {
-                kind = .terminal
-            } else {
-                continue
+                kinds[app.processIdentifier] = .terminal
             }
-            let appElement = AXUIElementCreateApplication(app.processIdentifier)
-            guard let windows: [AXUIElement] = attribute(appElement, kAXWindowsAttribute) else { continue }
+        }
+        return kinds
+    }
+
+    // Ids of every ordinary window of those apps on any desktop, from the window server.
+    // Accessibility lists only the windows on each display's current desktop, so the
+    // caller visits the other desktops until these are all accounted for.
+    static func allWindowIDs(of apps: [pid_t: WindowKind]) -> Set<CGWindowID> {
+        guard let list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
+        var ids: Set<CGWindowID> = []
+        for info in list {
+            guard let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, apps[pid] != nil,
+                  let id = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  ((info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0 else { continue }
+            ids.insert(id)
+        }
+        return ids
+    }
+
+    // Every standard window of those apps that Accessibility lists right now.
+    static func visibleWindows(of apps: [pid_t: WindowKind]) -> [(FoundWindow, AXUIElement)] {
+        var found: [(FoundWindow, AXUIElement)] = []
+        for (pid, kind) in apps {
+            let windows: [AXUIElement] = attribute(AXUIElementCreateApplication(pid), kAXWindowsAttribute) ?? []
             for window in windows {
                 guard let subrole: String = attribute(window, kAXSubroleAttribute), subrole == kAXStandardWindowSubrole else { continue }
                 var id: CGWindowID = 0
@@ -47,11 +67,14 @@ enum AXWindows {
                     .flatMap { URL(string: $0) }
                     .flatMap { $0.isFileURL ? $0.path : nil }
                 let minimized: Bool = attribute(window, kAXMinimizedAttribute) ?? false
-                found.append((FoundWindow(id: id, pid: app.processIdentifier, kind: kind, title: title,
-                                          documentPath: document, frame: frame, minimized: minimized), window))
+                found.append((FoundWindow(id: id, pid: pid, kind: kind, title: title, documentPath: document, frame: frame, minimized: minimized), window))
             }
         }
         return found
+    }
+
+    static func candidateWindows(terminalApps: [String]) -> [(FoundWindow, AXUIElement)] {
+        visibleWindows(of: candidateApps(terminalApps: terminalApps))
     }
 
     // Cocoa coordinates

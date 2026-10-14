@@ -12,6 +12,8 @@ enum Spaces {
         let current: SpaceID
         // User desktops in Spaces-bar order (full-screen apps' spaces left out)
         let spaces: [SpaceID]
+        // Every space in Spaces-bar order, one per button in Mission Control
+        let allSpaces: [SpaceID]
     }
 
     struct MissingSymbol: Error, CustomStringConvertible {
@@ -41,11 +43,12 @@ enum Spaces {
             guard let uuid = display["Display Identifier"] as? String,
                   let current = (display["Current Space"] as? [String: Any])?["ManagedSpaceID"] as? NSNumber,
                   let spaces = display["Spaces"] as? [[String: Any]] else { return nil }
-            let user = spaces.compactMap { space -> SpaceID? in
-                guard (space["type"] as? NSNumber)?.intValue == 0, let id = space["ManagedSpaceID"] as? NSNumber else { return nil }
-                return id.uint64Value
+            let all = spaces.compactMap { space -> (SpaceID, Int)? in
+                guard let id = space["ManagedSpaceID"] as? NSNumber else { return nil }
+                return (id.uint64Value, (space["type"] as? NSNumber)?.intValue ?? -1)
             }
-            return DisplaySpaces(displayUUID: uuid, current: current.uint64Value, spaces: user)
+            return DisplaySpaces(displayUUID: uuid, current: current.uint64Value,
+                                 spaces: all.filter { $0.1 == 0 }.map(\.0), allSpaces: all.map(\.0))
         }
     }
 

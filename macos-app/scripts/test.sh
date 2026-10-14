@@ -12,7 +12,7 @@ export SDKROOT="${SDKROOT:-/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.s
 out="$(swift test "$@" 2>&1)"; status=$?
 if [ $status -ne 0 ] && grep -q "plugin for module" <<<"$out"; then
   echo "Macro plugin not found; clearing module caches and retrying" >&2
-  rm -rf .build/out/ModuleCache.noindex .build/out/Intermediates.noindex/SwiftExplicitPrecompiledModules .build/out/SDKExplicitPrecompiledModules
+  rm -rf .build/out
   out="$(swift test "$@" 2>&1)"; status=$?
 fi
 printf '%s\n' "$out"
