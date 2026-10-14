@@ -103,14 +103,14 @@ enum MissionControl {
 
     // Drag the thumbnail of a window on the current desktop onto another desktop's
     // button. The window must be on its display's current desktop to have a thumbnail.
-    static func drag(window: UInt32, title: String, to space: SpaceID, on screen: NSScreen) throws {
+    static func drag(window: UInt32, title: String, frame windowFrame: CGRect, to space: SpaceID, on screen: NSScreen) throws {
         let uuid = try displayUUID(of: screen)
         guard let index = try display(uuid).allSpaces.firstIndex(of: space) else { throw Failure(step: "desktop \(space) is not on \(screen.localizedName)") }
         try open()
         defer { close() }
         let buttons = try spaceButtons(on: screen)
         guard index < buttons.count, let target = frame(of: buttons[index]) else { throw Failure(step: "desktop \(index + 1) has no button") }
-        guard let thumbnail = windowThumbnail(window: window, title: title, on: screen), let from = frame(of: thumbnail) else {
+        guard let thumbnail = try windowThumbnail(window: window, title: title, frame: windowFrame, on: screen), let from = frame(of: thumbnail) else {
             throw Failure(step: "no thumbnail for “\(title)” in Mission Control")
         }
         dragMouse(from: CGPoint(x: from.midX, y: from.midY), to: CGPoint(x: target.midX, y: target.midY))
@@ -125,7 +125,7 @@ enum MissionControl {
         return group
     }
 
-    private static func spacesBar(on screen: NSScreen) throws -> AXUIElement {
+    private static func displayGroup(on screen: NSScreen) throws -> AXUIElement {
         let mc = try missionControlGroup()
         let displays = children(of: mc).filter { identifier(of: $0) == "mc.display" }
         let primaryHeight = AXWindows.primaryHeight
@@ -136,7 +136,11 @@ enum MissionControl {
         guard let display = onScreen ?? (displays.count == 1 ? displays.first : nil) else {
             throw Failure(step: "no Mission Control display group on \(screen.localizedName) (\(displays.count) groups)")
         }
-        guard let bar = find(identifier: "mc.spaces", under: display) else { throw Failure(step: "no Spaces bar on \(screen.localizedName)") }
+        return display
+    }
+
+    private static func spacesBar(on screen: NSScreen) throws -> AXUIElement {
+        guard let bar = find(identifier: "mc.spaces", under: try displayGroup(on: screen)) else { throw Failure(step: "no Spaces bar on \(screen.localizedName)") }
         return bar
     }
 
@@ -147,14 +151,23 @@ enum MissionControl {
         return children(of: list).filter { role(of: $0) == kAXButtonRole }
     }
 
-    private static func windowThumbnail(window: UInt32, title: String, on screen: NSScreen) -> AXUIElement? {
-        guard let mc = try? missionControlGroup() else { return nil }
-        let displays = children(of: mc).filter { identifier(of: $0) == "mc.display" }
-        let candidates = displays.compactMap { find(identifier: "mc.windows", under: $0, depth: 1) }
-            .flatMap { children(of: $0).filter { role(of: $0) == kAXButtonRole } }
-        // Prefer an exact title, then a thumbnail whose window id matches (when exposed)
-        if let exact = candidates.first(where: { title == (description(of: $0) ?? "") || title == (self.title(of: $0) ?? "") }) { return exact }
-        return candidates.first { $0.windowID == window }
+    // The thumbnail of a window on the screen's current desktop: by window id when the
+    // thumbnail exposes one, else by title, and of several with the same title the one
+    // laid out nearest the window's own position (the window's frame is in Accessibility
+    // coordinates, like the thumbnails').
+    private static func windowThumbnail(window: UInt32, title: String, frame windowFrame: CGRect, on screen: NSScreen) throws -> AXUIElement? {
+        let display = try displayGroup(on: screen)
+        guard let area = find(identifier: "mc.windows", under: display, depth: 1) else { return nil }
+        let candidates = children(of: area).filter { role(of: $0) == kAXButtonRole }
+        if let byID = candidates.first(where: { $0.windowID == window }) { return byID }
+        guard !title.isEmpty else { return nil }
+        let titled = candidates.filter { title == self.title(of: $0) || title == description(of: $0) }
+        if titled.count <= 1 { return titled.first }
+        let primaryHeight = AXWindows.primaryHeight
+        let screenAX = CGRect(x: screen.frame.minX, y: primaryHeight - screen.frame.maxY, width: screen.frame.width, height: screen.frame.height)
+        let frames = titled.map { frame(of: $0) ?? .zero }
+        guard let areaFrame = frame(of: area), let index = nearestThumbnail(to: windowFrame, in: screenAX, among: frames, within: areaFrame) else { return titled.first }
+        return titled[index]
     }
 
     // MARK: - Events

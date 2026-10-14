@@ -7,6 +7,7 @@ import KunjBarCore
 final class Organizer {
     struct Outcome {
         var worktrees = 0
+        var worktreesFailed = 0
         var desktopsCreated = 0
         var windowsMoved = 0
         var windowsFailed = 0
@@ -69,23 +70,32 @@ final class Organizer {
             let takenByOthers = taken.union(occupied.filter { $0.value != worktree.path }.keys)
             let choice = chooseDesktop(windows: windows, spaceOf: spaceOf, screenSpaces: screenSpaces(),
                                        remembered: outcome.remembered[worktree.path], takenSpaces: takenByOthers)
+            // A worktree whose desktop cannot be made or reached is skipped, not the whole run,
+            // so what was done so far (and which desktop is whose) is kept
             let space: SpaceID
-            switch choice {
-            case .keep(let id):
-                space = id
-                log("organize: \(worktree.name) keeps desktop \(index(of: id))")
-            case .remember(let id):
-                space = id
-                log("organize: \(worktree.name) goes to its remembered desktop \(index(of: id))")
-            case .create:
-                space = try MissionControl.addDesktop(on: screen)
-                displays = try Spaces.displays()
-                outcome.desktopsCreated += 1
-                log("organize: \(worktree.name) gets new desktop \(index(of: space))")
+            do {
+                switch choice {
+                case .keep(let id):
+                    space = id
+                    log("organize: \(worktree.name) keeps desktop \(index(of: id))")
+                case .remember(let id):
+                    space = id
+                    log("organize: \(worktree.name) goes to its remembered desktop \(index(of: id))")
+                case .create:
+                    space = try MissionControl.addDesktop(on: screen)
+                    displays = try Spaces.displays()
+                    outcome.desktopsCreated += 1
+                    outcome.remembered[worktree.path] = space
+                    log("organize: \(worktree.name) gets new desktop \(index(of: space))")
+                }
+                taken.insert(space)
+                outcome.remembered[worktree.path] = space
+                try MissionControl.switchTo(space, on: screen)
+            } catch {
+                outcome.worktreesFailed += 1
+                log("organize: skipping \(worktree.name): \(error)")
+                continue
             }
-            taken.insert(space)
-            outcome.remembered[worktree.path] = space
-            try MissionControl.switchTo(space, on: screen)
 
             // Bring windows that are elsewhere
             for window in windows where spaceOf[window.id] != space {
@@ -100,7 +110,8 @@ final class Organizer {
                     } else {
                         AXWindows.raise(element, pid: window.pid)
                         try poll { (try? Spaces.displays())?.first { $0.displayUUID == displayUUID }?.current == spaceOf[window.id] }
-                        try MissionControl.drag(window: window.id, title: window.title, to: space, on: screen)
+                        guard let current = AXWindows.frame(of: element) else { throw MissionControl.Failure(step: "window has no frame") }
+                        try MissionControl.drag(window: window.id, title: window.title, frame: axRect(current), to: space, on: screen)
                         try MissionControl.switchTo(space, on: screen)
                         log("organize: dragged “\(window.title)” to desktop \(index(of: space))")
                     }
@@ -129,6 +140,11 @@ final class Organizer {
         }
     }
 
+    private func axRect(_ cocoa: CGRect) -> CGRect {
+        let f = axFrame(cocoa, primaryHeight: AXWindows.primaryHeight)
+        return CGRect(origin: f.origin, size: f.size)
+    }
+
     // Accessibility only lists the windows on each display's current desktop. Collect
     // those, and while the window server knows of more, visit the other desktops of
     // each display (switching back afterwards) and collect there too.
@@ -148,13 +164,14 @@ final class Organizer {
         for display in displays where !missing.isEmpty {
             guard let screen = Spaces.screen(forDisplayUUID: display.displayUUID) else { continue }
             let toVisit = display.spaces.filter { space in space != display.current && missing.contains { spaceOf[$0] == space } }
+            if toVisit.isEmpty { continue }
+            defer { _ = try? MissionControl.switchTo(display.current, on: screen) }
             for space in toVisit {
                 try MissionControl.switchTo(space, on: screen)
                 collect()
                 missing = missing.filter { found[$0] == nil }
                 if missing.isEmpty { break }
             }
-            if !toVisit.isEmpty { try MissionControl.switchTo(display.current, on: screen) }
         }
         return Array(found.values).sorted { $0.0.id < $1.0.id }
     }

@@ -69,3 +69,14 @@ private func window(_ id: UInt32, _ kind: WindowKind, title: String, document: S
     let w = window(1, .editor, title: "settings.json — feature — Visual Studio Code", document: "/Users/me/Library/Application Support/Code/User/settings.json")
     #expect(matchWindows([w], worktrees: [feature])["/r/wt/feature"] == [w])
 }
+
+@Test func aDocumentInsideANestedWorktreeMatchesTheInnerOne() {
+    let outer = WorktreeRef(path: "/p/kunj-app", name: "kunj-app")
+    let inner = WorktreeRef(path: "/p/kunj-app/worktrees/feature", name: "feature")
+    let w = window(1, .terminal, title: "src", document: "/p/kunj-app/worktrees/feature/src")
+    for order in [[outer, inner], [inner, outer]] {
+        let m = matchWindows([w], worktrees: order)
+        #expect(m[inner.path] == [w])
+        #expect(m[outer.path] == nil)
+    }
+}
