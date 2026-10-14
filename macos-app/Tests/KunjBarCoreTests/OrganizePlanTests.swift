@@ -63,9 +63,11 @@ private let visible = CGRect(x: 0, y: 30, width: 1000, height: 600)
     #expect(p.map(\.slot) == [editorSlot, terminalSlot, editorSlot])
 }
 
-@Test func aLoneWindowFillsTheScreen() {
-    let a = window(1, .terminal, CGRect(x: 0, y: 0, width: 10, height: 10))
-    #expect(arrange(windows: [a], layout: .editorLeft, kinds: [.editor, .terminal], in: visible).map(\.slot) == [visible])
+@Test func aLoneWindowTakesItsOwnHalf() {
+    let t = window(1, .terminal, CGRect(x: 0, y: 0, width: 10, height: 10))
+    #expect(arrange(windows: [t], layout: .editorLeft, kinds: [.editor, .terminal], in: visible).map(\.slot) == [terminalSlot])
+    let e = window(2, .editor, CGRect(x: 0, y: 0, width: 10, height: 10))
+    #expect(arrange(windows: [e], layout: .editorLeft, kinds: [.editor, .terminal], in: visible).map(\.slot) == [editorSlot])
 }
 
 @Test func editorAndTerminalKeepTheirOwnHalves() {
@@ -81,5 +83,5 @@ private let visible = CGRect(x: 0, y: 30, width: 1000, height: 600)
     let t = window(2, .terminal, CGRect(x: 0, y: 0, width: 10, height: 10))
     let p = arrange(windows: [e, t], layout: .editorLeft, kinds: [.editor], in: visible)
     #expect(p.map(\.window.id) == [1])
-    #expect(p.map(\.slot) == [visible])
+    #expect(p.map(\.slot) == [editorSlot])
 }
