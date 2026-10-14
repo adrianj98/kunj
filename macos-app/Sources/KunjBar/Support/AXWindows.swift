@@ -96,6 +96,11 @@ enum AXWindows {
         if let value = AXValueCreate(.cgPoint, &origin) { AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value) }
     }
 
+    // Take a window out of full screen; macOS puts it back on a desktop.
+    static func exitFullScreen(_ window: AXUIElement) {
+        AXUIElementSetAttributeValue(window, "AXFullScreen" as CFString, kCFBooleanFalse)
+    }
+
     // Bring the window to the front; macOS switches to its desktop when it is on another one.
     static func raise(_ window: AXUIElement, pid: pid_t) {
         AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)

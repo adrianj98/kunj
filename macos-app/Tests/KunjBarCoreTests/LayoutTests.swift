@@ -37,11 +37,13 @@ private let both: Set<WindowKind> = [.editor, .terminal]
     #expect(slots(for: .editorLeft, kinds: [], in: visible).isEmpty)
 }
 
-@Test func fitsAllowsAFewPointsOfSlack() {
+// Terminal windows snap to whole character cells, so a window up to a cell short
+// of its slot is still in place.
+@Test func fitsAllowsACharacterCellOfSlack() {
     let slot = CGRect(x: 0, y: 30, width: 500, height: 600)
     #expect(fits(slot, slot))
-    #expect(fits(CGRect(x: 3, y: 30, width: 497, height: 600), slot))
-    #expect(!fits(CGRect(x: 5, y: 30, width: 495, height: 600), slot))
+    #expect(fits(CGRect(x: 3, y: 30, width: 490, height: 585), slot))
+    #expect(!fits(CGRect(x: 20, y: 30, width: 480, height: 600), slot))
 }
 
 @Test func axFrameFlipsYFromThePrimaryScreensTop() {

@@ -37,17 +37,35 @@ final class Organizer {
         guard let displayUUID = Spaces.displayUUID(of: screen) else { throw MissionControl.Failure(step: "no display id for \(screen.localizedName)") }
         log("organize: screen \(screen.localizedName)\(resolved.fellBack ? " (\(wanted) is not attached)" : ""), layout \(layout.rawValue), kinds \(kinds.map(\.rawValue).sorted())")
 
-        // Windows, leaving out full-screen ones (each is its own Space, not a desktop)
+        // Windows on any desktop or full-screen space (a Terminal tab has no space of its own)
         var displays = try Spaces.displays()
-        let desktops = Set(displays.flatMap(\.spaces))
-        let candidates = try discoverWindows(kinds: kinds, terminalApps: terminalApps, displays: displays, desktops: desktops)
+        var desktops = Set(displays.flatMap(\.spaces))
+        let candidates = try discoverWindows(kinds: kinds, terminalApps: terminalApps, displays: displays)
         var spaceOf = try Spaces.space(of: candidates.map(\.0.id))
-        let all = candidates.filter { spaceOf[$0.0.id].map(desktops.contains) ?? false }
+        let all = candidates.filter { spaceOf[$0.0.id] != nil }
         let elements = Dictionary(all.map { ($0.0.id, $0.1) }, uniquingKeysWith: { a, _ in a })
         let matched = matchWindows(all.map(\.0), worktrees: worktrees)
-        log("organize: \(all.count) candidate windows (\(candidates.count - all.count) full-screen left alone), \(matched.values.map(\.count).reduce(0, +)) belong to \(matched.count) worktrees")
+        log("organize: \(all.count) candidate windows, \(matched.values.map(\.count).reduce(0, +)) belong to \(matched.count) worktrees")
         let todo = worktrees.filter { matched[$0.path] != nil }
         if todo.isEmpty { return outcome }
+
+        // Full-screen windows of those worktrees come back to a desktop first
+        for worktree in todo {
+            for window in matched[worktree.path] ?? [] where !desktops.contains(spaceOf[window.id] ?? 0) {
+                guard let element = elements[window.id] else { continue }
+                AXWindows.exitFullScreen(element)
+                if (try? poll(timeout: 6) {
+                    if let space = (try? Spaces.space(of: [window.id]))?[window.id], desktops.contains(space) { spaceOf[window.id] = space; return true }
+                    return false
+                }) != nil {
+                    log("organize: took “\(window.title)” out of full screen")
+                } else {
+                    log("organize: “\(window.title)” did not leave full screen")
+                }
+            }
+        }
+        displays = try Spaces.displays()
+        desktops = Set(displays.flatMap(\.spaces))
 
         func screenSpaces() -> [SpaceID] { displays.first { $0.displayUUID == displayUUID }?.spaces ?? [] }
         // Desktops holding some listed worktree's windows, so another worktree cannot keep them
@@ -126,7 +144,7 @@ final class Organizer {
 
             // Tile
             let present = windows.filter { spaceOf[$0.id] == space }
-            for placement in placements(windows: present, slots: slotRects) where placement.needsMove {
+            for placement in arrange(windows: present, layout: layout, kinds: kinds, in: visible) where placement.needsMove {
                 guard let element = elements[placement.window.id] else { continue }
                 AXWindows.setFrame(element, cocoa: placement.slot)
                 log("organize: placed “\(placement.window.title)” at \(Int(placement.slot.minX)),\(Int(placement.slot.minY)) \(Int(placement.slot.width))×\(Int(placement.slot.height))")
@@ -145,25 +163,26 @@ final class Organizer {
         return CGRect(origin: f.origin, size: f.size)
     }
 
-    // Accessibility only lists the windows on each display's current desktop. Collect
-    // those, and while the window server knows of more, visit the other desktops of
-    // each display (switching back afterwards) and collect there too.
-    private func discoverWindows(kinds: Set<WindowKind>, terminalApps: [String], displays: [Spaces.DisplaySpaces],
-                                 desktops: Set<SpaceID>) throws -> [(FoundWindow, AXUIElement)] {
+    // Accessibility only lists the windows on each display's current space. Collect
+    // those, and while the window server knows of more, visit the other spaces of each
+    // display (desktops and full-screen apps, switching back afterwards) and collect there.
+    private func discoverWindows(kinds: Set<WindowKind>, terminalApps: [String],
+                                 displays: [Spaces.DisplaySpaces]) throws -> [(FoundWindow, AXUIElement)] {
         let apps = AXWindows.candidateApps(terminalApps: terminalApps).filter { kinds.contains($0.value) }
         var found: [CGWindowID: (FoundWindow, AXUIElement)] = [:]
         func collect() {
             for (window, element) in AXWindows.visibleWindows(of: apps) where found[window.id] == nil { found[window.id] = (window, element) }
         }
         collect()
-        // Only windows on desktops matter; full-screen spaces are never visited
+        // Only windows with a space of their own matter (a Terminal tab has none)
         let wanted = AXWindows.allWindowIDs(of: apps)
         let spaceOf = try Spaces.space(of: Array(wanted))
-        var missing = wanted.filter { desktops.contains(spaceOf[$0] ?? 0) && found[$0] == nil }
-        if !missing.isEmpty { log("organize: \(missing.count) windows are on other desktops, visiting them") }
+        let known = Set(displays.flatMap(\.allSpaces))
+        var missing = wanted.filter { known.contains(spaceOf[$0] ?? 0) && found[$0] == nil }
+        if !missing.isEmpty { log("organize: \(missing.count) windows are on other spaces, visiting them") }
         for display in displays where !missing.isEmpty {
             guard let screen = Spaces.screen(forDisplayUUID: display.displayUUID) else { continue }
-            let toVisit = display.spaces.filter { space in space != display.current && missing.contains { spaceOf[$0] == space } }
+            let toVisit = display.allSpaces.filter { space in space != display.current && missing.contains { spaceOf[$0] == space } }
             if toVisit.isEmpty { continue }
             defer { _ = try? MissionControl.switchTo(display.current, on: screen) }
             for space in toVisit {
@@ -176,8 +195,8 @@ final class Organizer {
         return Array(found.values).sorted { $0.0.id < $1.0.id }
     }
 
-    private func poll(_ condition: () -> Bool) throws {
-        let deadline = Date().addingTimeInterval(3)
+    private func poll(timeout: TimeInterval = 3, _ condition: () -> Bool) throws {
+        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() { return }
             usleep(100_000)

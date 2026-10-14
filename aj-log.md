@@ -34,6 +34,12 @@ Changes made with Claude, and why.
   grant survives rebuilds (ad-hoc signatures change every build; a stale TCC row for the bundle id
   had to be cleared with `tccutil reset Accessibility dev.kunj.KunjBar`). A self-signed "Kunj Dev"
   identity lives in `~/Library/Keychains/kunj-dev.keychain-db` on this Mac.
+- Full-screen windows are organized too: discovery visits full-screen spaces as well, a matched
+  window gets `AXFullScreen` set false and is moved once it is back on a desktop. `arrange()` puts
+  two windows of one kind on the two halves (editors and terminals keep their own half when both are
+  present; a lone window fills the desktop). `fits()` allows a character cell (16 pt) of slack
+  because Terminal snaps to whole cells and was re-placed on every run. Why: the first run left one
+  window per desktop and skipped the full-screen ones, which was not what was wanted.
 - Verified by hand on this Mac (macOS 26, two displays): a desktop added on the external screen,
   switching, one worktree kept its desktop and the other got a new one with its editor dragged there
   and placed on the left half; a second run moved nothing.

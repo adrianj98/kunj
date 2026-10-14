@@ -25,8 +25,9 @@ public func slots(for layout: Layout, kinds: Set<WindowKind>, in visible: CGRect
     return [.editor: editor, .terminal: terminal]
 }
 
-// Whether a window frame is already close enough to its slot to leave alone.
-public func fits(_ frame: CGRect, _ slot: CGRect, tolerance: CGFloat = 4) -> Bool {
+// Whether a window frame is already close enough to its slot to leave alone. Terminal
+// windows snap to whole character cells, so the slack is about one cell.
+public func fits(_ frame: CGRect, _ slot: CGRect, tolerance: CGFloat = 16) -> Bool {
     abs(frame.minX - slot.minX) <= tolerance
         && abs(frame.minY - slot.minY) <= tolerance
         && abs(frame.maxX - slot.maxX) <= tolerance

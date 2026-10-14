@@ -47,3 +47,39 @@ private let terminalSlot = CGRect(x: 500, y: 30, width: 500, height: 600)
     let a = window(1, .terminal, CGRect(x: 0, y: 0, width: 10, height: 10))
     #expect(placements(windows: [a], slots: [.editor: editorSlot]).isEmpty)
 }
+
+private let visible = CGRect(x: 0, y: 30, width: 1000, height: 600)
+
+@Test func twoEditorsAndNoTerminalTakeOneHalfEach() {
+    let a = window(1, .editor, CGRect(x: 0, y: 0, width: 10, height: 10))
+    let b = window(2, .editor, CGRect(x: 0, y: 0, width: 10, height: 10))
+    let p = arrange(windows: [a, b], layout: .editorLeft, kinds: [.editor, .terminal], in: visible)
+    #expect(p.map(\.slot) == [editorSlot, terminalSlot])
+}
+
+@Test func threeTerminalsAlternateHalves() {
+    let ws = (1...3).map { window(UInt32($0), .terminal, CGRect(x: 0, y: 0, width: 10, height: 10)) }
+    let p = arrange(windows: ws, layout: .editorLeft, kinds: [.editor, .terminal], in: visible)
+    #expect(p.map(\.slot) == [editorSlot, terminalSlot, editorSlot])
+}
+
+@Test func aLoneWindowFillsTheScreen() {
+    let a = window(1, .terminal, CGRect(x: 0, y: 0, width: 10, height: 10))
+    #expect(arrange(windows: [a], layout: .editorLeft, kinds: [.editor, .terminal], in: visible).map(\.slot) == [visible])
+}
+
+@Test func editorAndTerminalKeepTheirOwnHalves() {
+    let e = window(1, .editor, CGRect(x: 0, y: 0, width: 10, height: 10))
+    let t = window(2, .terminal, CGRect(x: 0, y: 0, width: 10, height: 10))
+    let e2 = window(3, .editor, CGRect(x: 0, y: 0, width: 10, height: 10))
+    let p = arrange(windows: [t, e, e2], layout: .editorLeft, kinds: [.editor, .terminal], in: visible)
+    #expect(p.map(\.slot) == [terminalSlot, editorSlot, editorSlot])
+}
+
+@Test func aDisabledKindIsLeftOutOfTheArrangement() {
+    let e = window(1, .editor, CGRect(x: 0, y: 0, width: 10, height: 10))
+    let t = window(2, .terminal, CGRect(x: 0, y: 0, width: 10, height: 10))
+    let p = arrange(windows: [e, t], layout: .editorLeft, kinds: [.editor], in: visible)
+    #expect(p.map(\.window.id) == [1])
+    #expect(p.map(\.slot) == [visible])
+}
