@@ -1,5 +1,6 @@
 // Settings window and log window.
 
+import KunjBarCore
 import ServiceManagement
 import SwiftUI
 
@@ -12,6 +13,10 @@ struct SettingsView: View {
     @AppStorage(Pref.terminalApp) private var terminalApp = "Terminal"
     @AppStorage(Pref.notifyPullRequests) private var notifyPullRequests = true
     @AppStorage(Pref.badgeFailingChecks) private var badgeFailingChecks = true
+    @AppStorage(Pref.organizeScreen) private var organizeScreen = ""
+    @AppStorage(Pref.organizeLayout) private var organizeLayout = Layout.editorLeft.rawValue
+    @AppStorage(Pref.organizeEditor) private var organizeEditor = true
+    @AppStorage(Pref.organizeTerminal) private var organizeTerminal = true
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
 
@@ -38,6 +43,25 @@ struct SettingsView: View {
                     ForEach(Launcher.terminalApps, id: \.self) { Text($0).tag($0) }
                 }
                 Text("Worktrees open in the editor set by `kunj config` (worktree.editorCommand).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Organize") {
+                Picker("Screen", selection: $organizeScreen) {
+                    Text("Main screen").tag("")
+                    ForEach(NSScreen.screens, id: \.localizedName) { screen in
+                        Text(screen.localizedName).tag(screen.localizedName)
+                    }
+                }
+                Picker("Layout", selection: $organizeLayout) {
+                    Text("Editor left, terminal right").tag(Layout.editorLeft.rawValue)
+                    Text("Terminal left, editor right").tag(Layout.editorRight.rawValue)
+                    Text("Editor above terminal").tag(Layout.editorAbove.rawValue)
+                }
+                Toggle("Editor windows", isOn: $organizeEditor)
+                Toggle("Terminal windows", isOn: $organizeTerminal)
+                Text("Organize Windows (⚙ menu) gives each worktree a desktop on this screen and tiles its windows. Needs Accessibility access.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
