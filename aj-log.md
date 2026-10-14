@@ -2,6 +2,16 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-14 — Organize Windows design spec
+
+- `docs/superpowers/specs/2026-10-14-organize-windows-design.md`: design for an **Organize Windows**
+  action in the menu bar app: one desktop per worktree on a chosen screen, editor on one half and
+  terminal on the other, with Settings for the screen, the layout and which kinds to include.
+  Windows already in place stay put; desktops are remembered per worktree so a rerun reuses them.
+  Driven through the Accessibility API and Mission Control, with read-only SkyLight calls to learn
+  which desktop a window is on. Why: asked for the mac app to create desktops and organize the
+  windows, as a separate action from opening a worktree. No code yet; the plan comes next.
+
 ## 2026-10-08 — Still no colour; live CLI output in New Worktree
 
 - A brand-new window still had `NO_COLOR=1 FORCE_COLOR=0`. Cause: the Kunj app itself had them. It was
