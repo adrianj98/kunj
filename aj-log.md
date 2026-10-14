@@ -2,6 +2,42 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-14 — Organize Windows in the menu bar app
+
+- `macos-app/Package.swift`: a `KunjBarCore` library target for the pure decisions and a
+  `KunjBarCoreTests` target (swift-testing; the Command Line Tools have no XCTest). `scripts/test.sh`
+  runs them with the SDK that has the macro plugins and clears the module caches when a failed
+  compile leaves "plugin for module 'TestingMacros' not found" behind.
+- `Sources/KunjBarCore/`: `Layout`/`WindowKind` and `slots()` (left/right or above/below halves,
+  one kind fills the screen), `fits()` (4 pt tolerance), `axFrame()` (Cocoa → Accessibility
+  coordinates); `matchWindows()` (document path first, then the title as a whole path component,
+  longest worktree name first); `chooseDesktop()` (keep / remember / create); `resolveScreenName()`
+  and `placements()`. 30 tests.
+- `Sources/KunjBar/Support/AXWindows.swift`: the editor (VS Code, Cursor, VSCodium, Windsurf) and
+  terminal apps' windows through Accessibility, frames, raise, un-minimize. `Spaces.swift`: desktops
+  per display, the current one, and which desktop a window is on, through SkyLight's read-only
+  `CGSCopyManagedDisplaySpaces` / `CGSCopySpacesForWindows` (dlsym). `MissionControl.swift`: add a
+  desktop, switch to a space and drag a window thumbnail onto a desktop by driving Mission Control's
+  Accessibility tree in the Dock (probed on macOS 26: `mc > mc.display > mc.spaces > mc.spaces.list`,
+  `mc.spaces.add`, `mc.windows`), with a mouse-click fallback when a press changes nothing.
+- `Organizer.swift`: the run. Accessibility lists only each display's current desktop, and the
+  remote-token trick (`_AXUIElementCreateWithRemoteToken`) answers nothing on macOS 26, so when the
+  window server knows of more windows the organizer visits the other desktops and switches back.
+  Full-screen windows are left alone. Per worktree: keep its desktop when its windows already share
+  one, else the remembered one, else a new one; windows on another display get a frame on the chosen
+  screen, windows on another desktop of the same display are raised and dragged in Mission Control;
+  then each window gets its slot unless it already fits. `AppStore.organizeWindows()` runs it off the
+  main actor and flashes the outcome; the ⚙ menu has **Organize Windows**; Settings has an Organize
+  section (screen, layout, editor/terminal toggles). Why: asked for the mac app to create desktops
+  and organize the windows, as a separate action from opening, keeping windows that already fit.
+- `scripts/bundle.sh`: `CODESIGN_IDENTITY` signs with a named certificate so the Accessibility
+  grant survives rebuilds (ad-hoc signatures change every build; a stale TCC row for the bundle id
+  had to be cleared with `tccutil reset Accessibility dev.kunj.KunjBar`). A self-signed "Kunj Dev"
+  identity lives in `~/Library/Keychains/kunj-dev.keychain-db` on this Mac.
+- Verified by hand on this Mac (macOS 26, two displays): a desktop added on the external screen,
+  switching, one worktree kept its desktop and the other got a new one with its editor dragged there
+  and placed on the left half; a second run moved nothing.
+
 ## 2026-10-14 — Organize Windows design spec
 
 - `docs/superpowers/specs/2026-10-14-organize-windows-design.md`: design for an **Organize Windows**

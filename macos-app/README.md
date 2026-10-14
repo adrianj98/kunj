@@ -15,6 +15,13 @@ repository kunj knows about rather than one editor window:
 - Notifications when a pull request's checks fail or pass, or it is approved or merged; failing
   checks count in the menu bar
 - Filter field and an **Open only** toggle (just the worktrees open in an editor), launch at login, settings for the CLI path, refresh interval and terminal app
+- **Organize Windows** (⚙ menu): one desktop per worktree on a chosen screen, with the worktree's
+  editor window on one half and its terminal window on the other. Settings choose the screen, the
+  layout (editor left, editor right, or editor above) and whether editor and/or terminal windows take
+  part. Windows already in place stay; a worktree's desktop is remembered, so running it again reuses
+  it. Full-screen windows are left alone. Needs Accessibility access (System Settings > Privacy &
+  Security > Accessibility); the first run asks for it. It works by driving Mission Control, so leave
+  the keyboard and mouse alone for the few seconds it runs.
 
 Everything goes through the kunj CLI (`kunj ... --json`); the app never runs git itself.
 
@@ -57,6 +64,14 @@ The app is not notarized. If macOS refuses to open it, right-click it and choose
 `xattr -dr com.apple.quarantine /Applications/Kunj.app`.
 
 For development, `swift build` and run `.build/debug/KunjBar` (notifications need the bundled app).
+Tests: `scripts/test.sh` (it picks the SDK that has the macro plugins and clears the module caches
+when a failed compile leaves them reporting "plugin for module 'TestingMacros' not found").
+
+macOS ties the Accessibility grant that Organize Windows needs to the app's code signature, and an
+ad-hoc signature changes with every build, so the grant is lost after each `bundle.sh --install`.
+To keep it, sign with your own certificate: make a self-signed code signing certificate in Keychain
+Access (Certificate Assistant > Create a Certificate…, type Code Signing) and build with
+`CODESIGN_IDENTITY="<its name>" scripts/bundle.sh --install`. The grant then survives rebuilds.
 `KUNJBAR_SNAPSHOT=<dir> .build/debug/KunjBar` renders sample rows to `<dir>/rows-light.png` and
 `rows-dark.png` and exits, for checking colours without opening the menu. The few colours the panel
 uses are in `Palette` (Views/WorktreeRow.swift).
