@@ -75,9 +75,9 @@ struct SwitcherView: View {
             }
             Spacer(minLength: 4)
             if let pr = worktree.pullRequest {
-                Text(pr.badge)
-                    .font(.caption)
-                    .foregroundStyle(selected ? Color.white.opacity(0.8) : .secondary)
+                // Same colours as the menu bar panel: checks passing, failing, pending, merged
+                PullRequestBadge(pr: pr)
+                    .overlay(selected ? Capsule().strokeBorder(Color.white.opacity(0.9)) : nil)
             }
         }
         .foregroundStyle(selected ? Color.white : Color.primary)

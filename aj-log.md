@@ -18,6 +18,9 @@ Changes made with Claude, and why.
 - Settings: "Open worktree switcher" section with an on/off toggle and a shortcut recorder (click, press
   a shortcut with ⌘/⌥/⌃; esc cancels; Reset returns to ⌥⌘K). The hotkey is suspended while recording.
   If another app owns the shortcut, the panel flashes a message instead of failing silently.
+- The switcher's PR badge uses the panel's `PullRequestBadge`, so it is coloured the same way (green checks
+  passing, red failing, amber pending, purple merged, outlined for drafts/closed), with a white outline on
+  the selected row; clicking it opens the PR. Why: asked to show the PR colour in the switcher.
 - `Support/Snapshot.swift` also renders `switcher-light/dark.png`; `SwitcherView(scrolls: false)` exists
   because ImageRenderer draws nothing inside a ScrollView.
 - Verified: builds, snapshots render in light and dark mode, app reinstalled. The hotkey itself could
