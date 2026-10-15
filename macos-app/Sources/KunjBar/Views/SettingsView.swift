@@ -17,6 +17,7 @@ struct SettingsView: View {
     @AppStorage(Pref.organizeLayout) private var organizeLayout = Layout.editorLeft.rawValue
     @AppStorage(Pref.organizeEditor) private var organizeEditor = true
     @AppStorage(Pref.organizeTerminal) private var organizeTerminal = true
+    @AppStorage(Pref.switcherEnabled) private var switcherEnabled = true
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
 
@@ -43,6 +44,16 @@ struct SettingsView: View {
                     ForEach(Launcher.terminalApps, id: \.self) { Text($0).tag($0) }
                 }
                 Text("Worktrees open in the editor set by `kunj config` (worktree.editorCommand).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Open worktree switcher") {
+                Toggle("Global shortcut", isOn: $switcherEnabled)
+                if switcherEnabled {
+                    LabeledContent("Shortcut") { ShortcutRecorder() }
+                }
+                Text("Shows the worktrees open in an editor in the middle of the screen. ↑/↓ pick one, ↩ or a click brings it to the front.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -96,6 +107,55 @@ struct SettingsView: View {
             loginError = error.localizedDescription
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
+    }
+}
+
+// Click, then press the new shortcut (⎋ cancels). Needs ⌘, ⌥ or ⌃.
+struct ShortcutRecorder: View {
+    @State private var shortcut = UserDefaults.standard.kunjSwitcherShortcut
+    @State private var recording = false
+    @State private var monitor: Any?
+
+    var body: some View {
+        HStack {
+            Button(recording ? "Press a shortcut…" : shortcut.display) {
+                recording ? stop() : start()
+            }
+            .frame(minWidth: 120)
+            if !recording && shortcut != .defaultSwitcher {
+                Button("Reset") { save(.defaultSwitcher) }
+                    .buttonStyle(.link)
+            }
+        }
+        .onDisappear { stop() }
+    }
+
+    private func start() {
+        recording = true
+        Switcher.shared.suspended = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 { // escape
+                stop()
+                return nil
+            }
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            guard !modifiers.intersection([.command, .option, .control]).isEmpty else { return nil }
+            save(Shortcut(keyCode: UInt32(event.keyCode), modifiers: modifiers))
+            stop()
+            return nil
+        }
+    }
+
+    private func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        if recording { Switcher.shared.suspended = false }
+        recording = false
+    }
+
+    private func save(_ new: Shortcut) {
+        shortcut = new
+        UserDefaults.standard.kunjSwitcherShortcut = new
     }
 }
 

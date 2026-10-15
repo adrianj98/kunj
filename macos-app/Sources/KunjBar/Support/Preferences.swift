@@ -1,7 +1,7 @@
 // UserDefaults keys and defaults. Mirrors the VS Code extension's settings
 // where they make sense outside an editor.
 
-import Foundation
+import AppKit
 import KunjBarCore
 
 enum Pref {
@@ -21,6 +21,10 @@ enum Pref {
     static let organizeEditor = "organizeEditor"
     static let organizeTerminal = "organizeTerminal"
     static let organizeDesktops = "organizeDesktops"   // worktree path -> SpaceID as a decimal string
+    // Global shortcut for the open worktree switcher
+    static let switcherEnabled = "switcherEnabled"
+    static let switcherKeyCode = "switcherKeyCode"     // virtual key code
+    static let switcherModifiers = "switcherModifiers" // NSEvent.ModifierFlags raw value
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -36,6 +40,9 @@ enum Pref {
             organizeLayout: Layout.editorLeft.rawValue,
             organizeEditor: true,
             organizeTerminal: true,
+            switcherEnabled: true,
+            switcherKeyCode: Int(Shortcut.defaultSwitcher.keyCode),
+            switcherModifiers: Int(Shortcut.defaultSwitcher.modifiers.rawValue),
         ])
     }
 }
@@ -54,6 +61,17 @@ extension UserDefaults {
         if bool(forKey: Pref.organizeEditor) { kinds.insert(.editor) }
         if bool(forKey: Pref.organizeTerminal) { kinds.insert(.terminal) }
         return kinds
+    }
+    var kunjSwitcherEnabled: Bool { bool(forKey: Pref.switcherEnabled) }
+    var kunjSwitcherShortcut: Shortcut {
+        get {
+            Shortcut(keyCode: UInt32(integer(forKey: Pref.switcherKeyCode)),
+                     modifiers: NSEvent.ModifierFlags(rawValue: UInt(integer(forKey: Pref.switcherModifiers))))
+        }
+        set {
+            set(Int(newValue.keyCode), forKey: Pref.switcherKeyCode)
+            set(Int(newValue.modifiers.rawValue), forKey: Pref.switcherModifiers)
+        }
     }
     var kunjOrganizeDesktops: [String: SpaceID] {
         get {

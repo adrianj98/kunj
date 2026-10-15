@@ -3,7 +3,8 @@
 //
 //   KUNJBAR_SNAPSHOT=/tmp/out .build/debug/KunjBar
 //
-// writes /tmp/out/rows-light.png and rows-dark.png and exits.
+// writes /tmp/out/rows-light.png and rows-dark.png (and switcher-*.png, the
+// open worktree switcher) and exits.
 
 import AppKit
 import SwiftUI
@@ -32,19 +33,33 @@ enum Snapshot {
             .environment(store)
             .environment(\.colorScheme, scheme)
 
+            let model = SwitcherModel()
+            model.items = rows.filter(\.isActive).map { (repo: repo, worktree: $0) }
+            model.selection = 1
+            let switcher = SwitcherView(model: model, choose: { _ in }, scrolls: false)
+                .padding(20)
+                .environment(store)
+                .environment(\.colorScheme, scheme)
+
             // NSColor-backed colours resolve against the current drawing appearance
             let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)!
             appearance.performAsCurrentDrawingAppearance {
-                let renderer = ImageRenderer(content: view)
-                renderer.scale = 2
-                if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
-                   let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-                    let file = URL(fileURLWithPath: dir).appendingPathComponent("rows-\(scheme == .dark ? "dark" : "light").png")
-                    try? png.write(to: file)
-                }
+                write(view, to: "rows", scheme: scheme, dir: dir)
+                write(switcher, to: "switcher", scheme: scheme, dir: dir)
             }
         }
         exit(0)
+    }
+
+    @MainActor
+    private static func write(_ view: some View, to name: String, scheme: ColorScheme, dir: String) {
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            let file = URL(fileURLWithPath: dir).appendingPathComponent("\(name)-\(scheme == .dark ? "dark" : "light").png")
+            try? png.write(to: file)
+        }
     }
 
     private static func sampleWorktrees() -> [Worktree] {

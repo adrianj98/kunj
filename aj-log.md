@@ -2,6 +2,27 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-15 — Open worktree switcher (global hotkey) in the menu bar app
+
+- `macos-app/Sources/KunjBar/Support/HotKey.swift`: system-wide shortcut through Carbon's
+  `RegisterEventHotKey` (no Accessibility / Input Monitoring permission needed) and a `Shortcut` type
+  that displays itself (e.g. "⌥⌘K") using the current keyboard layout.
+- `Support/Switcher.swift` + `Views/SwitcherView.swift`: the shortcut (default **⌥⌘K**) toggles a
+  borderless, non-activating panel centred on the screen with the mouse (a little above the middle,
+  like Spotlight), on the current desktop or full-screen space. It lists only worktrees open in an
+  editor, across every repository; ↑/↓ move the selection (wrapping), ↩ or a click opens it
+  (`AppStore.open`, which brings the existing editor window forward), esc or clicking elsewhere closes
+  it, and pressing the shortcut again hides it. It refreshes the listing when shown and follows the store
+  while visible. Why: asked for a hotkey that lists only open worktrees in the middle of the screen,
+  usable with arrow keys + Enter or the mouse.
+- Settings: "Open worktree switcher" section with an on/off toggle and a shortcut recorder (click, press
+  a shortcut with ⌘/⌥/⌃; esc cancels; Reset returns to ⌥⌘K). The hotkey is suspended while recording.
+  If another app owns the shortcut, the panel flashes a message instead of failing silently.
+- `Support/Snapshot.swift` also renders `switcher-light/dark.png`; `SwitcherView(scrolls: false)` exists
+  because ImageRenderer draws nothing inside a ScrollView.
+- Verified: builds, snapshots render in light and dark mode, app reinstalled. The hotkey itself could
+  not be pressed from the agent (osascript has no permission to send keystrokes) — needs a manual try.
+
 ## 2026-10-14 — Organize Windows in the menu bar app
 
 - `macos-app/Package.swift`: a `KunjBarCore` library target for the pure decisions and a

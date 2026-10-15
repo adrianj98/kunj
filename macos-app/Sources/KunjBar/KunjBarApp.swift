@@ -25,7 +25,10 @@ struct KunjBarApp: App {
                     Text("\(failing)")
                 }
             }
-            .task { store.start() }
+            .task {
+                store.start()
+                Switcher.shared.install(store: store)
+            }
         }
         .menuBarExtraStyle(.window)
 
