@@ -2,6 +2,12 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-15 — Release v1.2.0
+
+- Tagged v1.2.0: the macOS app's Organize Windows (desktops per worktree pair, tiled editor/terminal
+  windows) and the open worktree switcher (⌥⌘K, coloured PR badges). Minor bump because both are new
+  features. Why: asked to push and create a new release.
+
 ## 2026-10-15 — Open worktree switcher (global hotkey) in the menu bar app
 
 - `macos-app/Sources/KunjBar/Support/HotKey.swift`: system-wide shortcut through Carbon's
