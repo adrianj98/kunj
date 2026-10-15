@@ -79,6 +79,35 @@ enum MissionControl {
         return new
     }
 
+    // Remove a desktop through Mission Control: the desktop button's remove action when
+    // it has one, else the close button that appears on it while the mouse is over it.
+    static func removeDesktop(_ space: SpaceID, on screen: NSScreen) throws {
+        let uuid = try displayUUID(of: screen)
+        guard let index = try display(uuid).allSpaces.firstIndex(of: space) else { return }
+        let gone = { (try? display(uuid).allSpaces.contains(space)) == false }
+        try open()
+        defer { close() }
+        let buttons = try spaceButtons(on: screen)
+        guard index < buttons.count, let target = frame(of: buttons[index]) else { throw Failure(step: "desktop \(index + 1) has no button") }
+        hover(buttons[index])
+        if let remove = actions(of: buttons[index]).first(where: { $0.range(of: "remove", options: .caseInsensitive) != nil }) {
+            AXUIElementPerformAction(buttons[index], remove as CFString)
+            if (try? poll("", gone, timeout: 1.5)) != nil { return }
+        }
+        var closeButton: AXUIElement?
+        try poll("no close button on desktop \(index + 1)") {
+            closeButton = (try? spacesBar(on: screen)).flatMap { bar in
+                descendants(of: bar, depth: 4).first { element in
+                    guard role(of: element) == kAXButtonRole, let f = frame(of: element), f.intersects(target.insetBy(dx: -12, dy: -12)) else { return false }
+                    let label = [title(of: element), description(of: element), subrole(of: element)].compactMap { $0 }.joined(separator: " ")
+                    return label.range(of: "close|remove|delete", options: [.regularExpression, .caseInsensitive]) != nil
+                }
+            }
+            return closeButton != nil
+        }
+        try pressUntil(closeButton!, "desktop \(index + 1) was not removed", gone)
+    }
+
     // Switch a screen to any of its spaces, a desktop or a full-screen app.
     static func switchTo(_ space: SpaceID, on screen: NSScreen) throws {
         let uuid = try displayUUID(of: screen)
@@ -265,6 +294,13 @@ enum MissionControl {
     static func role(of element: AXUIElement) -> String? { attribute(element, kAXRoleAttribute) }
     static func description(of element: AXUIElement) -> String? { attribute(element, kAXDescriptionAttribute) }
     static func title(of element: AXUIElement) -> String? { attribute(element, kAXTitleAttribute) }
+    static func subrole(of element: AXUIElement) -> String? { attribute(element, kAXSubroleAttribute) }
+
+    static func actions(of element: AXUIElement) -> [String] {
+        var names: CFArray?
+        guard AXUIElementCopyActionNames(element, &names) == .success else { return [] }
+        return names as? [String] ?? []
+    }
 
     // Screen-space frame (top-left origin), as the Accessibility API reports it
     static func frame(of element: AXUIElement) -> CGRect? {

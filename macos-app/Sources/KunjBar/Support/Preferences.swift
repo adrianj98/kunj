@@ -20,6 +20,7 @@ enum Pref {
     static let organizeLayout = "organizeLayout"       // Layout raw value
     static let organizeEditor = "organizeEditor"
     static let organizeTerminal = "organizeTerminal"
+    static let organizeRemoveEmpty = "organizeRemoveEmpty"
     static let organizeDesktops = "organizeDesktops"   // worktree path -> SpaceID as a decimal string
     // Global shortcut for the open worktree switcher
     static let switcherEnabled = "switcherEnabled"
@@ -40,6 +41,7 @@ enum Pref {
             organizeLayout: Layout.editorLeft.rawValue,
             organizeEditor: true,
             organizeTerminal: true,
+            organizeRemoveEmpty: true,
             switcherEnabled: true,
             switcherKeyCode: Int(Shortcut.defaultSwitcher.keyCode),
             switcherModifiers: Int(Shortcut.defaultSwitcher.modifiers.rawValue),
@@ -73,6 +75,7 @@ extension UserDefaults {
             set(Int(newValue.modifiers.rawValue), forKey: Pref.switcherModifiers)
         }
     }
+    var kunjOrganizeRemoveEmptyDesktops: Bool { bool(forKey: Pref.organizeRemoveEmpty) }
     var kunjOrganizeDesktops: [String: SpaceID] {
         get {
             (dictionary(forKey: Pref.organizeDesktops) as? [String: String] ?? [:])

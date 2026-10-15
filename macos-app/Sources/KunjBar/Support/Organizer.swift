@@ -10,6 +10,7 @@ final class Organizer {
         var windows = 0
         var groupsFailed = 0
         var desktopsCreated = 0
+        var desktopsRemoved = 0
         var windowsMoved = 0
         var windowsFailed = 0
         var remembered: [String: SpaceID]
@@ -25,7 +26,7 @@ final class Organizer {
     }
 
     func run(worktrees: [WorktreeRef], screenName wanted: String, layout: Layout, kinds: Set<WindowKind>,
-             remembered: [String: SpaceID], terminalApps: [String]) throws -> Outcome {
+             remembered: [String: SpaceID], terminalApps: [String], removeEmptyDesktops: Bool) throws -> Outcome {
         var outcome = Outcome(remembered: remembered, wantedScreen: wanted)
 
         // Screen
@@ -157,10 +158,36 @@ final class Organizer {
             outcome.desktops += 1
             outcome.windows += present.count
         }
+        if removeEmptyDesktops { removeEmpty(&outcome) }
         return outcome
 
         func index(of space: SpaceID) -> String {
             screenSpaces().firstIndex(of: space).map { String($0 + 1) } ?? "?"
+        }
+    }
+
+    // Desktops left without any window, on every display, removed last to first so
+    // the others keep their place in the Spaces bar; each display's current one stays
+    private func removeEmpty(_ outcome: inout Outcome) {
+        do {
+            let windowSpaces = try Spaces.spacesOfAllWindows()
+            for display in try Spaces.displays() {
+                guard let screen = Spaces.screen(forDisplayUUID: display.displayUUID) else { continue }
+                for space in emptyDesktops(display.spaces, current: display.current, windowSpaces: windowSpaces).reversed() {
+                    do {
+                        try MissionControl.removeDesktop(space, on: screen)
+                        outcome.desktopsRemoved += 1
+                        log("organize: removed an empty desktop on \(screen.localizedName)")
+                    } catch {
+                        log("organize: could not remove an empty desktop on \(screen.localizedName): \(error)")
+                        break
+                    }
+                }
+            }
+            let existing = Set(try Spaces.displays().flatMap(\.spaces))
+            outcome.remembered = outcome.remembered.filter { existing.contains($0.value) }
+        } catch {
+            log("organize: could not look for empty desktops: \(error)")
         }
     }
 

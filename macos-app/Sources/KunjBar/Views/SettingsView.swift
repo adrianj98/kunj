@@ -17,6 +17,7 @@ struct SettingsView: View {
     @AppStorage(Pref.organizeLayout) private var organizeLayout = Layout.editorLeft.rawValue
     @AppStorage(Pref.organizeEditor) private var organizeEditor = true
     @AppStorage(Pref.organizeTerminal) private var organizeTerminal = true
+    @AppStorage(Pref.organizeRemoveEmpty) private var organizeRemoveEmpty = true
     @AppStorage(Pref.switcherEnabled) private var switcherEnabled = true
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
@@ -72,6 +73,7 @@ struct SettingsView: View {
                 }
                 Toggle("Editor windows", isOn: $organizeEditor)
                 Toggle("Terminal windows", isOn: $organizeTerminal)
+                Toggle("Remove empty desktops afterwards", isOn: $organizeRemoveEmpty)
                 Text("Organize Windows (⚙ menu) gives each worktree a desktop on this screen and tiles its windows. Needs Accessibility access.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

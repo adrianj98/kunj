@@ -2,6 +2,26 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-15 — Organize Windows removes empty desktops
+
+- After arranging, Organize Windows removes every desktop that has no window on it, on every attached
+  display, last to first; each display's current desktop always stays. Why: asked for the rearrange to
+  delete the empty desktops it leaves behind.
+- "Empty" (`emptyDesktops()` in `KunjBarCore/EmptyDesktops.swift`, 4 tests): no ordinary (layer 0)
+  window of any app is on it, minimized and off-screen windows included, read with
+  `CGWindowListCopyWindowInfo` + `CGSCopySpacesForWindows` (`Spaces.spacesOfAllWindows()`). A window on
+  several spaces (assigned to all desktops) keeps none of them alive.
+- `MissionControl.removeDesktop()`: opens Mission Control, hovers the desktop's button and uses its
+  remove action when it has one, else presses the close button that appears on hover (found near the
+  button by its title/description/subrole), then polls until the space is gone. A failure is logged and
+  stops removal on that display; the rest of the run is unaffected. Remembered desktops that were removed
+  are forgotten.
+- Settings → Organize: "Remove empty desktops afterwards" (on by default). The finish message adds
+  "removed N empty desktops".
+- Not verified live: running Organize moves the user's windows and needs a click in the menu, so the
+  Mission Control removal (which button/action macOS 26 exposes) still has to be tried by hand; the log
+  window shows what happened.
+
 ## 2026-10-15 — Release v1.2.0
 
 - Tagged v1.2.0: the macOS app's Organize Windows (desktops per worktree pair, tiled editor/terminal

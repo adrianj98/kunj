@@ -240,11 +240,12 @@ final class AppStore {
         let layout = defaults.kunjOrganizeLayout
         let remembered = defaults.kunjOrganizeDesktops
         let terminalApps = Launcher.terminalApps
+        let removeEmpty = defaults.kunjOrganizeRemoveEmptyDesktops
         let log = cli.log
         isOrganizing = true
         Task.detached {
             let result = Result { try Organizer(log: log).run(worktrees: worktrees, screenName: screen, layout: layout, kinds: kinds,
-                                                             remembered: remembered, terminalApps: terminalApps) }
+                                                             remembered: remembered, terminalApps: terminalApps, removeEmptyDesktops: removeEmpty) }
             await MainActor.run { self.finishOrganizing(result) }
         }
     }
@@ -260,6 +261,7 @@ final class AppStore {
             }
             var text = "Organized \(outcome.windows) window\(outcome.windows == 1 ? "" : "s") on \(outcome.desktops) desktop\(outcome.desktops == 1 ? "" : "s")"
             if outcome.windowsFailed > 0 { text += ", \(outcome.windowsFailed) window\(outcome.windowsFailed == 1 ? "" : "s") could not be moved" }
+            if outcome.desktopsRemoved > 0 { text += ", removed \(outcome.desktopsRemoved) empty desktop\(outcome.desktopsRemoved == 1 ? "" : "s")" }
             if outcome.groupsFailed > 0 { text += ", \(outcome.groupsFailed) desktop\(outcome.groupsFailed == 1 ? "" : "s") skipped (see the log)" }
             if outcome.screenFellBack { text += " on \(outcome.screenName) (\(outcome.wantedScreen) is not attached)" }
             flash = text

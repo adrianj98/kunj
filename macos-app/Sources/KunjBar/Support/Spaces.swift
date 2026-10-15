@@ -54,15 +54,31 @@ enum Spaces {
 
     // The desktop each window is on; windows on no desktop (or unknown) are absent.
     static func space(of windowIDs: [UInt32]) throws -> [UInt32: SpaceID] {
+        try spaces(of: windowIDs).compactMapValues(\.first)
+    }
+
+    // Every space each window is on (several for a window assigned to all desktops).
+    static func spaces(of windowIDs: [UInt32]) throws -> [UInt32: [SpaceID]] {
         let copy = try symbol("CGSCopySpacesForWindows", as: CopySpacesForWindows.self)
         let cid = try connection()
-        var result: [UInt32: SpaceID] = [:]
+        var result: [UInt32: [SpaceID]] = [:]
         for id in windowIDs {
             guard let spaces = copy(cid, 7, [NSNumber(value: id)] as CFArray)?.takeRetainedValue() as? [NSNumber],
-                  let first = spaces.first else { continue }
-            result[id] = first.uint64Value
+                  !spaces.isEmpty else { continue }
+            result[id] = spaces.map(\.uint64Value)
         }
         return result
+    }
+
+    // The spaces of every ordinary (layer 0) window of every app, minimized and
+    // off-screen ones included, so a desktop holding anything at all counts as used.
+    static func spacesOfAllWindows() throws -> [[SpaceID]] {
+        let info = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let ids = info.compactMap { window -> UInt32? in
+            guard (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0 else { return nil }
+            return (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+        }
+        return Array(try spaces(of: ids).values)
     }
 
     static func displayUUID(of screen: NSScreen) -> String? {
