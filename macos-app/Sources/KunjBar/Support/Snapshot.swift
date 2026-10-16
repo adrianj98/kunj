@@ -3,8 +3,9 @@
 //
 //   KUNJBAR_SNAPSHOT=/tmp/out .build/debug/KunjBar
 //
-// writes /tmp/out/rows-light.png and rows-dark.png (and switcher-*.png, the
-// open worktree switcher) and exits.
+// writes /tmp/out/rows-light.png and rows-dark.png (and rows-selecting-*.png,
+// the rows while selecting several to remove, and switcher-*.png, the open
+// worktree switcher) and exits.
 
 import AppKit
 import SwiftUI
@@ -46,6 +47,9 @@ enum Snapshot {
             appearance.performAsCurrentDrawingAppearance {
                 write(view, to: "rows", scheme: scheme, dir: dir)
                 write(switcher, to: "switcher", scheme: scheme, dir: dir)
+                for worktree in rows.filter({ !$0.isMain }).dropFirst().prefix(2) { store.toggleSelected(worktree) }
+                write(view, to: "rows-selecting", scheme: scheme, dir: dir)
+                store.isSelecting = false
             }
         }
         exit(0)

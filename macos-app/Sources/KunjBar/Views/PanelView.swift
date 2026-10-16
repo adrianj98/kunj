@@ -23,6 +23,7 @@ struct PanelView: View {
         .background(Palette.panel)
         .background(MenuBarAnchor())
         .onAppear { store.refresh() }
+        .onDisappear { store.isSelecting = false }
     }
 
     // MARK: - Header
@@ -41,6 +42,12 @@ struct PanelView: View {
             .toggleStyle(.button)
             .controlSize(.small)
             .help("Only show worktrees that are open in an editor")
+            Toggle(isOn: Binding(get: { store.isSelecting }, set: { store.isSelecting = $0 })) {
+                Image(systemName: "checklist")
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .help("Select worktrees to remove several at once (or ⌘-click rows)")
             IconButton(symbol: "arrow.clockwise", help: "Refresh (re-fetches pull requests)") { store.refresh(fresh: true) }
         }
         .padding(10)
@@ -168,45 +175,68 @@ struct PanelView: View {
                     .buttonStyle(.borderless)
                 }
             }
-            HStack(spacing: 4) {
-                Menu {
-                    ForEach(store.repos) { state in
-                        Button(state.repo.name) { show("new-worktree", value: state.repo.root) }
-                    }
-                } label: {
-                    Label("New Worktree", systemImage: "plus")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .disabled(store.repos.isEmpty)
-
-                Spacer()
-                if let last = store.lastRefresh {
-                    Text(last, style: .relative)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Menu {
-                    Button("Add Repository…") { addRepository() }
-                    Button(store.isOrganizing ? "Organizing Windows…" : "Organize Windows") {
-                        store.organizeWindows()
-                        MenuBarAnchor.closePanel()
-                    }
-                    .disabled(store.isOrganizing || UserDefaults.standard.kunjOrganizeKinds.isEmpty)
-                    Button("Settings…") { show("settings") }
-                    Button("Show Log") { show("log") }
-                    Divider()
-                    Button("Quit Kunj") { NSApp.terminate(nil) }
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
+            if store.isSelecting {
+                selectionBar
+            } else {
+                actionBar
             }
         }
         .padding(10)
+    }
+
+    private var selectionBar: some View {
+        HStack(spacing: 8) {
+            let count = store.selectedWorktrees.count
+            Text(count == 0 ? "Click worktrees to select them" : "\(count) selected")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Cancel") { store.isSelecting = false }
+                .keyboardShortcut(.cancelAction)
+            Button(count > 1 ? "Remove \(count) Worktrees…" : "Remove…", role: .destructive) { store.removeSelected() }
+                .disabled(count == 0)
+        }
+        .controlSize(.small)
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: 4) {
+            Menu {
+                ForEach(store.repos) { state in
+                    Button(state.repo.name) { show("new-worktree", value: state.repo.root) }
+                }
+            } label: {
+                Label("New Worktree", systemImage: "plus")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(store.repos.isEmpty)
+
+            Spacer()
+            if let last = store.lastRefresh {
+                Text(last, style: .relative)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Menu {
+                Button("Add Repository…") { addRepository() }
+                Button(store.isOrganizing ? "Organizing Windows…" : "Organize Windows") {
+                    store.organizeWindows()
+                    MenuBarAnchor.closePanel()
+                }
+                .disabled(store.isOrganizing || UserDefaults.standard.kunjOrganizeKinds.isEmpty)
+                Button("Settings…") { show("settings") }
+                Button("Show Log") { show("log") }
+                Divider()
+                Button("Quit Kunj") { NSApp.terminate(nil) }
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
     }
 
     // MARK: - Helpers

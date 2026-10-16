@@ -18,7 +18,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const provider = new WorktreeProvider(cli, process.pid);
   sessions = new SessionManager(cli, output);
 
-  const view = vscode.window.createTreeView('kunjWorktrees', { treeDataProvider: provider, showCollapseAll: false });
+  const view = vscode.window.createTreeView('kunjWorktrees', { treeDataProvider: provider, showCollapseAll: false, canSelectMany: true });
   context.subscriptions.push(output, provider, sessions, view);
 
   // ---- status bar ------------------------------------------------------
@@ -407,53 +407,125 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     else if (choice === 'Add to Workspace') await vscode.commands.executeCommand('kunj.worktrees.addToWorkspace', node);
   });
 
-  register('kunj.worktrees.remove', async (arg?: unknown) => {
-    const node = nodeFrom(arg) || (await pickWorktree('Select a worktree to remove'));
-    if (!node) return;
-    const wt = node.worktree;
-    if (wt.isMain) {
-      void vscode.window.showWarningMessage('Kunj: the main worktree cannot be removed.');
+  // From the tree VS Code passes the clicked node and, with several selected, all of them;
+  // from the palette nothing, so offer a multi-select pick
+  register('kunj.worktrees.remove', async (arg?: unknown, selected?: unknown) => {
+    let nodes: WorktreeNode[];
+    const clicked = nodeFrom(arg);
+    if (clicked) {
+      const many = Array.isArray(selected) ? selected.filter((n): n is WorktreeNode => n instanceof WorktreeNode) : [];
+      nodes = many.some(n => n.id === clicked.id) ? many : [clicked];
+    } else {
+      nodes = await pickWorktreesToRemove();
+    }
+    if (nodes.length === 0) return;
+
+    // The main worktree cannot go, and removing the one open in this window would pull it out from under us
+    const skipped = nodes.filter(n => n.worktree.isMain || n.openHere || isInWorkspace(n.worktree));
+    nodes = nodes.filter(n => !skipped.includes(n));
+    if (nodes.length === 0) {
+      void vscode.window.showWarningMessage('Kunj: the main worktree and worktrees open in this window cannot be removed.');
       return;
     }
 
-    const warnings: string[] = [];
-    if (node.openElsewhere.length) warnings.push(`It is open in ${node.openElsewhere.map(describeSession).join(', ')}.`);
-    if (wt.status?.dirty) warnings.push(`It has ${wt.status.changedFiles} uncommitted change(s).`);
-    const needsForce = warnings.length > 0;
+    const warningsFor = (node: WorktreeNode) => {
+      const wt = node.worktree;
+      const warnings: string[] = [];
+      if (node.openElsewhere.length) warnings.push(`windows open in ${node.openElsewhere.map(describeSession).join(', ')}`);
+      if (wt.status?.dirty) warnings.push(`${wt.status.changedFiles} uncommitted change(s)`);
+      return warnings;
+    };
+    const needsForce = (node: WorktreeNode) => warningsFor(node).length > 0;
+    const anyForce = nodes.some(needsForce);
 
-    const answer = await vscode.window.showWarningMessage(
-      `Remove worktree "${wt.name}"?\n${wt.path}${warnings.length ? '\n\n' + warnings.join('\n') : ''}`,
-      { modal: true },
-      needsForce ? 'Force Remove' : 'Remove'
-    );
+    let prompt: string;
+    if (nodes.length === 1) {
+      const warnings = warningsFor(nodes[0]);
+      prompt = `Remove worktree "${nodes[0].worktree.name}"?\n${nodes[0].worktree.path}${warnings.length ? `\n\nIt has ${warnings.join(' and ')}.` : ''}`;
+    } else {
+      const lines = nodes.map(n => {
+        const warnings = warningsFor(n);
+        return `• ${n.worktree.name}${warnings.length ? ` (${warnings.join(', ')})` : ''}`;
+      });
+      prompt = `Remove ${nodes.length} worktrees?\n\n${lines.join('\n')}`;
+    }
+    if (skipped.length) prompt += `\n\nSkipping ${skipped.map(n => n.worktree.name).join(', ')} (main or open in this window).`;
+
+    const answer = await vscode.window.showWarningMessage(prompt, { modal: true }, anyForce ? 'Force Remove' : 'Remove');
     if (!answer) return;
 
-    let done = false;
+    const removed: string[] = [];
+    const refused: WorktreeNode[] = [];
+    const failed: string[] = [];
     try {
-      await vscode.window.withProgress({ location: { viewId: 'kunjWorktrees' }, title: `Removing ${wt.name}…` }, () =>
-        cli.removeWorktree(node.repo.cwd, wt.path, needsForce)
-      );
-      done = true;
-    } catch (error) {
-      const message = (error as Error).message || String(error);
-      // The CLI refuses open or dirty worktrees without --force; offer it explicitly
-      if (!needsForce && /uncommitted|--force/i.test(message)) {
+      await vscode.window.withProgress({ location: { viewId: 'kunjWorktrees' }, title: 'Removing worktrees…' }, async progress => {
+        for (const node of nodes) {
+          progress.report({ message: node.worktree.name });
+          try {
+            await cli.removeWorktree(node.repo.cwd, node.worktree.path, needsForce(node));
+            removed.push(node.worktree.name);
+          } catch (error) {
+            const message = (error as Error).message || String(error);
+            // The CLI refuses open or dirty worktrees without --force; offer it explicitly below
+            if (!needsForce(node) && /uncommitted|--force/i.test(message)) refused.push(node);
+            else failed.push(`${node.worktree.name}: ${message}`);
+            output.appendLine(`Error removing ${node.worktree.path}: ${message}`);
+          }
+        }
+      });
+
+      if (refused.length) {
+        const names = refused.map(n => n.worktree.name).join(', ');
         const retry = await vscode.window.showWarningMessage(
-          `Kunj: ${message}\n\nForce removal discards uncommitted changes in the worktree.`,
+          `Kunj: git refused to remove ${names} because of uncommitted changes.\n\nForce removal discards uncommitted changes in the worktree.`,
           { modal: true },
           'Force Remove'
         );
         if (retry) {
-          done = (await withProgress(`Force removing ${wt.name}…`, () => cli.removeWorktree(node.repo.cwd, wt.path, true))) !== undefined;
+          for (const node of refused) {
+            const ok = await withProgress(`Force removing ${node.worktree.name}…`, () => cli.removeWorktree(node.repo.cwd, node.worktree.path, true));
+            if (ok !== undefined) removed.push(node.worktree.name);
+          }
         }
-      } else {
-        void vscode.window.showErrorMessage(`Kunj: ${message}`);
       }
     } finally {
       refresh();
     }
-    if (done) void vscode.window.setStatusBarMessage(`Removed worktree ${wt.name}`, 4000);
+    if (failed.length) void vscode.window.showErrorMessage(`Kunj: ${failed.join('\n')}`);
+    if (removed.length) {
+      void vscode.window.setStatusBarMessage(
+        removed.length === 1 ? `Removed worktree ${removed[0]}` : `Removed ${removed.length} worktrees`,
+        4000
+      );
+    }
   });
+
+  async function pickWorktreesToRemove(): Promise<WorktreeNode[]> {
+    await provider.getChildren();
+    const items = provider.allWorktrees
+      .map(({ worktree, repo }) => new WorktreeNode(worktree, repo, ownPid))
+      .filter(node => !node.worktree.isMain && !node.openHere && !isInWorkspace(node.worktree))
+      .map(node => {
+        const wt = node.worktree;
+        const notes = [
+          node.openElsewhere.length ? `$(window) ${node.openElsewhere.map(describeSession).join(', ')}` : '',
+          wt.status?.dirty ? `$(edit) ${wt.status.changedFiles}` : '',
+          wt.pullRequest ? `$(git-pull-request) ${prBadge(wt.pullRequest)}` : '',
+        ];
+        return { label: wt.name, description: notes.filter(Boolean).join('  '), detail: shortenPath(wt.path, node.repo.repoRoot), node };
+      });
+    if (items.length === 0) {
+      void vscode.window.showInformationMessage('Kunj: no worktrees that can be removed.');
+      return [];
+    }
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Select the worktrees to remove',
+      canPickMany: true,
+      matchOnDescription: true,
+      matchOnDetail: true,
+    });
+    return (picked || []).map(item => item.node);
+  }
 
   // Register this window's folders; the tree loads once when the view first asks for children
   await sessions.sync();

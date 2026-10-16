@@ -2,6 +2,26 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-16 — Remove several worktrees at once (VS Code + macOS app)
+
+Why: asked to multi-select worktrees to delete in both the macOS app and the VS Code extension.
+
+- VS Code (`vscode-extension/src/extension.ts`, `package.json`): the Worktrees tree has
+  `canSelectMany`; "Remove Worktree…" (inline trash or context menu) removes every selected
+  worktree when the clicked one is part of the selection. From the command palette or the view's
+  `…` menu it opens a multi-select quick pick. The main worktree and worktrees open in this window are
+  skipped (and named in the confirmation). One modal lists every worktree with its warnings (open
+  elsewhere, uncommitted changes); open/dirty ones are force-removed, and those git still refuses
+  are offered a single "Force Remove" afterwards. The command is no longer hidden from the palette.
+- macOS app: a checklist toggle in the panel header (or ⌘-click a row, or "Select" in a row's
+  context menu) enters selection mode — rows show checkboxes (main cannot be checked), clicking toggles,
+  and the footer shows "N selected" with Cancel and "Remove N Worktrees…". `AppStore.remove(_:)` now
+  takes a list (the single remove goes through it): one confirmation, sequential removal, rows show
+  "Removing…", one force prompt for refusals, one summary flash. Closing the panel leaves selection mode.
+- `Support/Snapshot.swift` also renders `rows-selecting-light/dark.png`.
+- Verified: extension builds and type-checks; macOS app builds, Swift tests pass (49), snapshots
+  checked in light/dark, app reinstalled. Not clicked through live (removing real worktrees).
+
 ## 2026-10-15 — Organize Windows removes empty desktops
 
 - After arranging, Organize Windows removes every desktop that has no window on it, on every attached

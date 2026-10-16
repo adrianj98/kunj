@@ -11,10 +11,18 @@ struct WorktreeRow: View {
     @AppStorage(Pref.showPath) private var showPath = false
     @State private var hovering = false
 
-    private var busy: Bool { store.busyWorktrees.contains(worktree.path) }
+    private var busy: Bool { store.busyWorktrees.contains(worktree.path) || removing }
+    private var removing: Bool { store.removingWorktrees.contains(worktree.path) }
+    private var selected: Bool { store.selectedWorktrees.contains(worktree.path) }
 
     var body: some View {
         HStack(spacing: 8) {
+            if store.isSelecting {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? Palette.open : .secondary)
+                    .opacity(worktree.isMain ? 0.3 : 1)
+                    .frame(width: 16)
+            }
             icon
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 1) {
@@ -29,7 +37,7 @@ struct WorktreeRow: View {
                     }
                 }
                 if busy {
-                    Text("Opening…")
+                    Text(removing ? "Removing…" : "Opening…")
                         .font(.caption)
                         .foregroundStyle(Palette.open)
                 } else if worktree.isActive {
@@ -54,7 +62,7 @@ struct WorktreeRow: View {
             if let pr = worktree.pullRequest {
                 PullRequestBadge(pr: pr)
             }
-            if hovering {
+            if hovering && !store.isSelecting {
                 inlineActions
             }
         }
@@ -65,8 +73,13 @@ struct WorktreeRow: View {
         .animation(.easeOut(duration: 0.12), value: busy)
         .onHover { hovering = $0 }
         .onTapGesture {
-            store.open(worktree, in: repo)
-            MenuBarAnchor.closePanel()
+            // ⌘-click starts or extends a selection, like Finder
+            if store.isSelecting || NSEvent.modifierFlags.contains(.command) {
+                store.toggleSelected(worktree)
+            } else {
+                store.open(worktree, in: repo)
+                MenuBarAnchor.closePanel()
+            }
         }
         .help(tooltip)
         .contextMenu { contextMenu }
@@ -79,7 +92,7 @@ struct WorktreeRow: View {
     // add a bar in the "open" blue rather than a card of their own
     @ViewBuilder private var background: some View {
         RoundedRectangle(cornerRadius: 6)
-            .fill(busy ? Palette.open.opacity(0.18) : hovering ? Color.primary.opacity(0.08) : .clear)
+            .fill(busy || selected ? Palette.open.opacity(0.18) : hovering ? Color.primary.opacity(0.08) : .clear)
             .overlay(alignment: .leading) {
                 if worktree.isActive {
                     Capsule().fill(Palette.open).frame(width: 3).padding(.vertical, 4)
@@ -190,7 +203,12 @@ struct WorktreeRow: View {
         }
         if !worktree.isMain {
             Divider()
-            Button("Remove Worktree…", role: .destructive) { store.remove(worktree, in: repo) }
+            Button(selected ? "Deselect" : "Select") { store.toggleSelected(worktree) }
+            if selected && store.selectedWorktrees.count > 1 {
+                Button("Remove \(store.selectedWorktrees.count) Selected Worktrees…", role: .destructive) { store.removeSelected() }
+            } else {
+                Button("Remove Worktree…", role: .destructive) { store.remove(worktree, in: repo) }
+            }
         }
     }
 }

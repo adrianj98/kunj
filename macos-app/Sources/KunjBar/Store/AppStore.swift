@@ -34,6 +34,12 @@ final class AppStore {
     // Worktree paths with an action in flight, so their row can show it
     private(set) var busyWorktrees: Set<String> = []
     private(set) var isOrganizing = false
+    private(set) var removingWorktrees: Set<String> = []
+    // Selection mode: rows show checkboxes and the footer offers removing the checked worktrees
+    var isSelecting = false {
+        didSet { if !isSelecting { selectedWorktrees = [] } }
+    }
+    private(set) var selectedWorktrees: Set<String> = []
 
     @ObservationIgnored let cli: KunjCLI
     @ObservationIgnored let notifier = Notifier()
@@ -318,42 +324,98 @@ final class AppStore {
         perform("Removing \(repo.name)") { [cli] in try await cli.removeRepo(path: repo.root) }
     }
 
-    // Mirrors the extension: confirm, force when the worktree is open or
-    // dirty, and offer force when the CLI refuses
+    // MARK: - Removing
+
+    func toggleSelected(_ worktree: Worktree) {
+        guard !worktree.isMain else { return }
+        isSelecting = true
+        if selectedWorktrees.contains(worktree.path) { selectedWorktrees.remove(worktree.path) } else { selectedWorktrees.insert(worktree.path) }
+    }
+
+    func removeSelected() {
+        let items = repos.flatMap { state in
+            state.worktrees.filter { selectedWorktrees.contains($0.path) }.map { ($0, state.repo) }
+        }
+        remove(items) { [weak self] in self?.isSelecting = false }
+    }
+
     func remove(_ worktree: Worktree, in repo: KnownRepo) {
-        guard !worktree.isMain else {
+        remove([(worktree, repo)])
+    }
+
+    // Mirrors the extension: one confirmation for all of them, force the ones
+    // that are open or dirty, and offer force for those the CLI still refuses
+    private func remove(_ items: [(Worktree, KnownRepo)], onConfirm: (() -> Void)? = nil) {
+        let items = items.filter { !$0.0.isMain }
+        guard !items.isEmpty else {
             flash = "The main worktree cannot be removed"
             return
         }
-        var warnings: [String] = []
-        if !worktree.sessions.isEmpty {
-            warnings.append("It is open in \(worktree.sessions.map(\.displayName).joined(separator: ", ")).")
+        func warnings(_ worktree: Worktree) -> [String] {
+            var warnings: [String] = []
+            if !worktree.sessions.isEmpty {
+                warnings.append("open in \(worktree.sessions.map(\.displayName).joined(separator: ", "))")
+            }
+            if let status = worktree.status, status.dirty {
+                warnings.append("dirty with \(status.changedFiles) uncommitted change(s)")
+            }
+            return warnings
         }
-        if let status = worktree.status, status.dirty {
-            warnings.append("It has \(status.changedFiles) uncommitted change(s).")
-        }
-        let needsForce = !warnings.isEmpty
-        let message = ([worktree.path] + warnings).joined(separator: "\n\n")
-        guard confirm("Remove worktree “\(worktree.name)”?", message, button: needsForce ? "Force Remove" : "Remove") else { return }
+        let needsForce = Set(items.filter { !warnings($0.0).isEmpty }.map(\.0.path))
 
+        let title: String
+        let message: String
+        if items.count == 1, let worktree = items.first?.0 {
+            title = "Remove worktree “\(worktree.name)”?"
+            let w = warnings(worktree)
+            message = worktree.path + (w.isEmpty ? "" : "\n\nIt is \(w.joined(separator: ", ")).")
+        } else {
+            title = "Remove \(items.count) worktrees?"
+            message = items.map { worktree, _ in
+                let w = warnings(worktree)
+                return "• \(worktree.name)\(w.isEmpty ? "" : " (\(w.joined(separator: ", ")))")"
+            }.joined(separator: "\n")
+        }
+        guard confirm(title, message, button: needsForce.isEmpty ? "Remove" : "Force Remove") else { return }
+        onConfirm?()
+
+        removingWorktrees.formUnion(items.map(\.0.path))
         Task {
-            do {
-                try await cli.removeWorktree(repo: repo.root, worktreePath: worktree.path, force: needsForce)
-                flash = "Removed \(worktree.name)"
-            } catch {
-                let text = error.localizedDescription
-                if !needsForce, text.range(of: "uncommitted|--force", options: [.regularExpression, .caseInsensitive]) != nil,
-                   confirm("Remove “\(worktree.name)” anyway?", "\(text)\n\nForce removal discards uncommitted changes in the worktree.", button: "Force Remove") {
-                    do {
-                        try await cli.removeWorktree(repo: repo.root, worktreePath: worktree.path, force: true)
-                        flash = "Removed \(worktree.name)"
-                    } catch {
-                        flash = "Remove failed: \(error.localizedDescription)"
+            var removed: [String] = []
+            var refused: [(Worktree, KnownRepo)] = []
+            var failures: [String] = []
+            for (worktree, repo) in items {
+                let force = needsForce.contains(worktree.path)
+                do {
+                    try await cli.removeWorktree(repo: repo.root, worktreePath: worktree.path, force: force)
+                    removed.append(worktree.name)
+                } catch {
+                    let text = error.localizedDescription
+                    if !force, text.range(of: "uncommitted|--force", options: [.regularExpression, .caseInsensitive]) != nil {
+                        refused.append((worktree, repo))
+                    } else {
+                        failures.append(items.count == 1 ? text : "\(worktree.name): \(text)")
                     }
-                } else {
-                    flash = "Remove failed: \(text)"
                 }
             }
+            if !refused.isEmpty {
+                let names = refused.map { "“\($0.0.name)”" }.joined(separator: ", ")
+                if confirm("Remove \(names) anyway?", "git refused because of uncommitted changes.\n\nForce removal discards uncommitted changes in the worktree.", button: "Force Remove") {
+                    for (worktree, repo) in refused {
+                        do {
+                            try await cli.removeWorktree(repo: repo.root, worktreePath: worktree.path, force: true)
+                            removed.append(worktree.name)
+                        } catch {
+                            failures.append(items.count == 1 ? error.localizedDescription : "\(worktree.name): \(error.localizedDescription)")
+                        }
+                    }
+                }
+            }
+            removingWorktrees.subtract(items.map(\.0.path))
+            var parts: [String] = []
+            if !removed.isEmpty { parts.append(removed.count == 1 ? "Removed \(removed[0])" : "Removed \(removed.count) worktrees") }
+            if !failures.isEmpty { parts.append("Remove failed: \(failures.joined(separator: "; "))") }
+            if !parts.isEmpty { flash = parts.joined(separator: ". ") }
             refresh()
         }
     }

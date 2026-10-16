@@ -167,6 +167,11 @@
           "command": "kunj.worktrees.prune",
           "when": "view == kunjWorktrees",
           "group": "1_actions"
+        },
+        {
+          "command": "kunj.worktrees.remove",
+          "when": "view == kunjWorktrees",
+          "group": "1_actions"
         }
       ],
       "view/item/context": [
@@ -273,10 +278,6 @@
         },
         {
           "command": "kunj.worktrees.copyPath",
-          "when": "false"
-        },
-        {
-          "command": "kunj.worktrees.remove",
           "when": "false"
         },
         {
