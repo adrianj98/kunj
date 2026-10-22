@@ -1,0 +1,142 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { execFileSync } from 'child_process';
+import {
+  parseBlueprint,
+  resolveBlueprint,
+  lockfileIds,
+  blueprintHash,
+  snapshotTag,
+  blueprintLabels,
+} from '../blueprint';
+
+const ENV = {
+  ...process.env,
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_AUTHOR_NAME: 't',
+  GIT_AUTHOR_EMAIL: 't@example.com',
+  GIT_COMMITTER_NAME: 't',
+  GIT_COMMITTER_EMAIL: 't@example.com',
+};
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync('git', args, { cwd, env: ENV, encoding: 'utf8' }).trim();
+}
+
+describe('parseBlueprint', () => {
+  it('parses tools/setup/maintain and reports ignored keys', () => {
+    const bp = parseBlueprint(
+      `{ // c\n "tools": {"node": "24", "apt": ["jq"], "bun": true}, "setup": ["a"], "maintain": ["b"], "notes": "n", "zeta": 1, "alpha": 2, }`,
+      'x.json'
+    );
+    expect(bp.tools).toEqual({ node: '24', apt: ['jq'], bun: true });
+    expect(bp.setup).toEqual(['a']);
+    expect(bp.maintain).toEqual(['b']);
+    expect(bp.lockfiles).toEqual([]);
+    expect(bp.notes).toBe('n');
+    expect(bp.ignoredKeys).toEqual(['alpha', 'zeta']);
+  });
+
+  it('rejects non-array setup with the key named', () => {
+    expect(() => parseBlueprint('{"setup": "yarn"}', 'x.json')).toThrow('x.json: setup must be an array of strings');
+  });
+
+  it('rejects preset names outside [a-z0-9-]', () => {
+    expect(() => parseBlueprint('{"tools": {"Node_JS": "1"}}', 'x.json')).toThrow(
+      'x.json: tools.Node_JS is not a valid preset name'
+    );
+  });
+});
+
+describe('resolution', () => {
+  let tmp: string;
+  let origin: string;
+  let clone: string;
+  let kunjDir: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-bp-'));
+    origin = path.join(tmp, 'origin.git');
+    clone = path.join(tmp, 'clone');
+    kunjDir = path.join(tmp, 'kunj');
+    fs.mkdirSync(kunjDir);
+    git(tmp, 'init', '--bare', '-b', 'main', origin);
+    git(tmp, 'clone', origin, clone);
+    git(clone, 'checkout', '-b', 'main');
+    fs.writeFileSync(path.join(clone, 'README'), 'x');
+    git(clone, 'add', '.');
+    git(clone, 'commit', '-m', 'init');
+    git(clone, 'push', '-u', 'origin', 'main');
+  });
+
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('resolves repo file from origin default, falls back to host, then null', async () => {
+    expect(await resolveBlueprint({ cwd: clone, repoKunjDir: kunjDir, defaultBranch: 'main' })).toBeNull();
+
+    fs.writeFileSync(path.join(kunjDir, 'blueprint.json'), '{"setup":["host"]}');
+    const host = await resolveBlueprint({ cwd: clone, repoKunjDir: kunjDir, defaultBranch: 'main' });
+    expect(host?.source).toBe('host');
+    expect(host?.blueprint.setup).toEqual(['host']);
+
+    fs.mkdirSync(path.join(clone, '.kunj'));
+    fs.writeFileSync(path.join(clone, '.kunj/blueprint.json'), '{"setup":["repo"]}');
+    git(clone, 'add', '.');
+    git(clone, 'commit', '-m', 'bp');
+    git(clone, 'push', 'origin', 'main');
+    git(clone, 'fetch', 'origin');
+    const repo = await resolveBlueprint({ cwd: clone, repoKunjDir: kunjDir, defaultBranch: 'main' });
+    expect(repo?.source).toBe('repo');
+    expect(repo?.ref).toBe('origin/main');
+    expect(repo?.blueprint.setup).toEqual(['repo']);
+
+    const over = path.join(tmp, 'o.json');
+    fs.writeFileSync(over, '{"setup":["file"]}');
+    const file = await resolveBlueprint({ cwd: clone, repoKunjDir: kunjDir, defaultBranch: 'main', override: over });
+    expect(file?.source).toBe('file');
+    expect(file?.blueprint.setup).toEqual(['file']);
+  });
+
+  it('lockfileIds skips absent files', async () => {
+    fs.writeFileSync(path.join(clone, 'yarn.lock'), 'l');
+    fs.writeFileSync(path.join(clone, 'requirements-dev.txt'), 'r');
+    git(clone, 'add', '.');
+    git(clone, 'commit', '-m', 'locks');
+    const explicit = await lockfileIds(['yarn.lock', 'nope.lock'], 'HEAD', clone);
+    expect(explicit.map(l => l.path)).toEqual(['yarn.lock']);
+    expect(explicit[0].id).toMatch(/^[0-9a-f]{40}$/);
+    const defaults = await lockfileIds([], 'HEAD', clone);
+    expect(defaults.map(l => l.path).sort()).toEqual(['requirements-dev.txt', 'yarn.lock']);
+  });
+});
+
+describe('hash and names', () => {
+  const base = { text: 'a', lockfiles: [{ path: 'yarn.lock', id: '1' }], baseImage: 'img', presetHashes: ['p'] };
+
+  it('hash changes with text, lockfile id, base image and preset hash', () => {
+    const h = blueprintHash(base);
+    expect(h).toMatch(/^[0-9a-f]{12}$/);
+    expect(blueprintHash(base)).toBe(h);
+    expect(blueprintHash({ ...base, text: 'b' })).not.toBe(h);
+    expect(blueprintHash({ ...base, lockfiles: [{ path: 'yarn.lock', id: '2' }] })).not.toBe(h);
+    expect(blueprintHash({ ...base, baseImage: 'other' })).not.toBe(h);
+    expect(blueprintHash({ ...base, presetHashes: ['q'] })).not.toBe(h);
+  });
+
+  it('snapshotTag lowercases', () => {
+    expect(snapshotTag('My_Repo', 'abc')).toBe('kunj-blueprint-my_repo:abc');
+  });
+
+  it('blueprintLabels carries the identity', () => {
+    const l = blueprintLabels({ repoId: 'r', hash: 'h', ref: 'origin/main', base: 'b', user: 'u', now: new Date(0) });
+    expect(l).toEqual({
+      'kunj.repo': 'r',
+      'kunj.blueprint.hash': 'h',
+      'kunj.blueprint.ref': 'origin/main',
+      'kunj.blueprint.base': 'b',
+      'kunj.blueprint.user': 'u',
+      'kunj.blueprint.createdAt': '1970-01-01T00:00:00.000Z',
+    });
+  });
+});

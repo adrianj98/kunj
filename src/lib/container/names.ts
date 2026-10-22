@@ -51,6 +51,11 @@ export const LABEL = {
   version: 'kunj.version',
   options: 'kunj.options',
   role: 'kunj.role', // 'main' | 'helper'
+  blueprintHash: 'kunj.blueprint.hash',
+  blueprintRef: 'kunj.blueprint.ref',
+  blueprintBase: 'kunj.blueprint.base',
+  blueprintUser: 'kunj.blueprint.user',
+  blueprintCreatedAt: 'kunj.blueprint.createdAt',
 } as const;
 
 export function labelsFor(repoId: string, branch: string, extra: Record<string, string> = {}): Record<string, string> {

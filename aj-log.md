@@ -4,6 +4,7 @@ Changes made with Claude, and why.
 
 ## 2026-10-22 — Branch containers: final review fix wave
 
+- Blueprints task 2: `src/lib/container/blueprint.ts` (parse, resolve repo/host/file, lockfile ids, hash, snapshot tag, labels) and blueprint label keys in `LABEL`. Why: the blueprint file and its identity hash feed snapshot, status and start.
 - Blueprints task 1: `ContainerBackend` gains `commitContainer`, `listImages` and `removeImage` (docker commit with LABEL changes, image ls + one inspect, tolerant image rm); FakeBackend's tag set is now `existingImages` and `images` holds `ImageInfo[]`. Why: blueprint snapshots are committed, listed and pruned as labelled images.
 - Design: blueprints (`kunj ct blueprint init|snapshot|status|remove`) — a repo's `.kunj/blueprint.json`
   (`setup`/`maintain` commands) is run once in a sandbox and committed as `kunj-blueprint-<repo>:<hash>`
