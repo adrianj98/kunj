@@ -10,6 +10,9 @@ import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutErro
 import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch } from './names';
 import { ImageSource, credentialHelperSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
 import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devcontainer';
+import { ResolvedBlueprint, SEED_DIR, blueprintHash, lockfileIds, resolveBlueprint } from './blueprint';
+import { Preset, orderTools, resolvePresets } from './presets';
+import { FoundSnapshot, findSnapshot, maintain, provisionNew } from './provision';
 import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
 import {
   CLAUDE_AUTH_KEYS,
@@ -26,11 +29,13 @@ import {
   truthy,
 } from './env';
 import { getKeepDir, listKeptFiles } from '../keep';
+import { getGlobalKunjDir, getKunjDir } from '../config';
 import { ConfigVariables, expandVariables } from '../config-vars';
 import { KunjConfig } from '../../types';
 
 export { forwardedEnv, firewallEnv } from './env';
 export type { ContainerStatus, RemoveGuard } from './env';
+export { findSnapshot } from './provision';
 
 const execFileAsync = promisify(execFile);
 
@@ -53,7 +58,8 @@ export type StartErrorCode =
   | 'image'
   | 'seed'
   | 'firewall'
-  | 'collision';
+  | 'collision'
+  | 'setup';
 
 export class StartError extends Error {
   constructor(message: string, readonly code: StartErrorCode) {
@@ -81,6 +87,14 @@ export interface StartOptions {
   warn: (msg: string) => void;
   /** The repository's default branch (without origin/), asked only before a devcontainer build */
   defaultBranch?: () => Promise<string | undefined>;
+  /** Start from the base image even when the repository has a blueprint snapshot */
+  noSnapshot?: boolean;
+  /** The blueprint (null: none); resolved here, from origin/<default branch> then the host copy, when undefined */
+  blueprint?: ResolvedBlueprint | null;
+  /** Names and the kunj.branch label come from this instead of `branch` (the snapshot's `<branch>@snapshot`); the clone still checks out `branch` */
+  namesFor?: string;
+  /** The blueprint's presets, already resolved (tests, and the snapshot command); resolved here when undefined */
+  presets?: Preset[];
 }
 
 export interface StartResult {
@@ -95,6 +109,16 @@ export interface StartResult {
   copiedFiles: string[];
   publish: Array<{ container: number; host: number }>;
   firewall: 'default' | 'allowlist';
+  /** Only when the repository has a blueprint */
+  blueprint?: {
+    hash: string;
+    /** The snapshot image started from; null after a clone */
+    snapshot: string | null;
+    stale: boolean;
+    toolsRun: string[];
+    setupRan: boolean;
+    maintainRan: boolean;
+  };
 }
 
 function message(err: unknown): string {
@@ -150,7 +174,27 @@ type ResolveDevcontainer = { spec: DevcontainerSpec; treeId: string; archive: ()
 
 const emptyArchive = () => tarEntries([]);
 
-async function resolveSource(options: StartOptions, warn: (m: string) => void): Promise<ImageSource> {
+export const STALE_SNAPSHOT_HINT = 'Blueprint snapshot is stale (lockfiles or blueprint changed); run kunj ct blueprint snapshot';
+export const NO_SNAPSHOT_HINT = 'No blueprint snapshot yet; running setup in the container (kunj ct blueprint snapshot makes this instant)';
+
+async function loadBlueprint(options: StartOptions): Promise<ResolvedBlueprint | null> {
+  if (options.blueprint !== undefined) return options.blueprint;
+  const defaultBranch = (await options.defaultBranch?.())?.replace(/^origin\//, '');
+  return resolveBlueprint({ cwd: options.cwd, repoKunjDir: getKunjDir(), defaultBranch });
+}
+
+interface BlueprintPlan {
+  resolved: ResolvedBlueprint;
+  presets: Preset[];
+  hash: string;
+  snapshot: FoundSnapshot | null;
+}
+
+async function resolveSource(
+  backend: ContainerBackend,
+  options: StartOptions,
+  warn: (m: string) => void
+): Promise<{ source: ImageSource; plan: BlueprintPlan | null }> {
   const setting = options.imageOverride || options.config.container?.image || '';
   let devcontainer: ResolveDevcontainer | null = null;
   if (!setting) {
@@ -171,7 +215,28 @@ async function resolveSource(options: StartOptions, warn: (m: string) => void): 
       warn('devcontainer.json: dockerComposeFile is not supported; services are not started');
     }
   }
-  return resolveImage({ setting, devcontainer, repoName: options.repo.name, kunjVersion: options.kunjVersion });
+  const input = { setting, devcontainer, repoName: options.repo.name, kunjVersion: options.kunjVersion };
+  const base = resolveImage(input);
+
+  const resolved = await step('setup', () => loadBlueprint(options));
+  if (!resolved) return { source: base, plan: null };
+  const bp = resolved.blueprint;
+  const presets = options.presets ?? (await step('setup', () =>
+    resolvePresets(orderTools(bp.tools), { repoRoot: options.repo.root, globalKunjDir: getGlobalKunjDir() })));
+  // The base image is part of the hash, so a snapshot is only exact for the image it was built on
+  const hash = blueprintHash({
+    text: resolved.text,
+    lockfiles: await lockfileIds(bp.lockfiles, resolved.ref ?? 'HEAD', options.cwd),
+    baseImage: base.tag,
+    presetHashes: presets.map(p => p.hash),
+  });
+  // --image is a one-off choice of image, so it is never swapped for a snapshot
+  const lookup = !options.noSnapshot && !options.imageOverride;
+  const snapshot = lookup ? await findSnapshot(backend, options.repo.name, options.repo.id, hash) : null;
+  if (snapshot?.stale) warn(STALE_SNAPSHOT_HINT);
+  else if (lookup && !snapshot) warn(NO_SNAPSHOT_HINT);
+  const source = snapshot ? resolveImage({ ...input, snapshot }) : base;
+  return { source, plan: { resolved, presets, hash, snapshot } };
 }
 
 export const BUILD_NETWORK_WARNING = 'Building a Dockerfile changed on this branch; image builds run with full network access';
@@ -370,7 +435,8 @@ async function seedIfNeeded(
   options: StartOptions,
   origin: { originUrl: string; originHost: string },
   hasToken: boolean,
-  alreadySeeded: boolean
+  alreadySeeded: boolean,
+  fromSnapshot: boolean
 ): Promise<boolean> {
   if (alreadySeeded) return false;
   if (user) {
@@ -389,11 +455,13 @@ async function seedIfNeeded(
     userEmail: identity.email,
     hasToken,
     credentialHelper,
+    seedFrom: fromSnapshot ? SEED_DIR : undefined,
   });
   const r = await backend.exec(id, ['sh', '-c', script], { user: user || undefined, ...outputIO(options.jsonMode) });
   if (r.exitCode !== 0) {
+    const what = fromSnapshot ? `Seeding the workspace from the snapshot (origin ${origin.originUrl})` : `Cloning ${origin.originUrl}`;
     throw new StartError(
-      `Cloning ${origin.originUrl} in the container failed (exit ${r.exitCode}).` +
+      `${what} in the container failed (exit ${r.exitCode}).` +
         (hasToken ? '' : ' If origin needs authentication, forward a token with container.env (GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN).'),
       'seed'
     );
@@ -485,6 +553,11 @@ async function copyFiles(
   return { keptFiles, copiedFiles };
 }
 
+/** How setup, maintain and the devcontainer commands run: in the workspace, as the user. */
+function commandIO(user: string, jsonMode: boolean): ExecIO {
+  return { user: user || undefined, workdir: WORKSPACE, ...outputIO(jsonMode) };
+}
+
 async function postCommands(
   backend: ContainerBackend,
   id: string,
@@ -492,7 +565,7 @@ async function postCommands(
   spec: Pick<DevcontainerSpec, 'postCreateCommand' | 'postStartCommand'> | undefined,
   options: StartOptions
 ): Promise<void> {
-  const io: ExecIO = { user: user || undefined, workdir: WORKSPACE, ...outputIO(options.jsonMode) };
+  const io = commandIO(user, options.jsonMode);
   const marker = `"$HOME/${POST_CREATE_MARKER}"`;
   if (spec?.postCreateCommand) {
     const done = await backend.exec(id, ['sh', '-c', `test -f ${marker}`], { user: user || undefined });
@@ -531,18 +604,27 @@ function homeFor(source: ImageSource): string | null {
 // ---------------------------------------------------------------------------------------------
 // start
 
-export async function startContainer(backend: ContainerBackend, options: StartOptions): Promise<StartResult> {
+function once<T>(fn: (() => Promise<T>) | undefined): (() => Promise<T>) | undefined {
+  if (!fn) return undefined;
+  let p: Promise<T> | undefined;
+  return () => (p ??= fn());
+}
+
+export async function startContainer(backend: ContainerBackend, startOptions: StartOptions): Promise<StartResult> {
+  // Asked by the blueprint resolution and the build check: one git call is enough
+  const options: StartOptions = { ...startOptions, defaultBranch: once(startOptions.defaultBranch) };
   const { branch, repo, warn } = options;
   const cfg = options.config.container;
-  const names = containerNames(repo.name, repo.id, branch);
+  const labelBranch = options.namesFor ?? branch;
+  const names = containerNames(repo.name, repo.id, labelBranch);
   const vars = variables(options);
 
   await step('docker', () => backend.info());
 
   // An existing container is resumed whatever origin now has: its clone is the source of truth
   const labels = await step('docker', () => backend.inspectLabels(names.container));
-  if (labels && !labelsMatch(labels, repo.id, branch)) {
-    throw new StartError(`A container named ${names.container} exists but does not belong to ${repo.name} ${branch}`, 'collision');
+  if (labels && !labelsMatch(labels, repo.id, labelBranch)) {
+    throw new StartError(`A container named ${names.container} exists but does not belong to ${repo.name} ${labelBranch}`, 'collision');
   }
 
   // Origin (only its host matters for an existing container; the fetch may fail)
@@ -589,7 +671,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
   }
 
   // 4. Images
-  const source = await step('image', () => resolveSource(options, warn));
+  const { source, plan } = await step('image', () => resolveSource(backend, options, warn));
   await step('image', () => warnOnChangedBuild(backend, options, source));
   const image = await step('image', async () => {
     if (options.rebuild && source.build) await backend.buildImage(source.tag, source.build.contextTar(), {
@@ -618,7 +700,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
 
   try {
     // 5. Network and volumes
-    const objLabels = labelsFor(repo.id, branch, { [LABEL.version]: options.kunjVersion });
+    const objLabels = labelsFor(repo.id, labelBranch, { [LABEL.version]: options.kunjVersion });
     await step('docker', async () => {
       try {
         await backend.createNetwork(names.network, objLabels);
@@ -641,7 +723,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
     const spec: ContainerSpec = {
       name: names.container,
       image,
-      labels: labelsFor(repo.id, branch, {
+      labels: labelsFor(repo.id, labelBranch, {
         [LABEL.base]: options.base ?? '',
         [LABEL.version]: options.kunjVersion,
         // helperEnv lets a stopped container be brought up behind its firewall again (remove guard);
@@ -654,6 +736,9 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
           user,
           postCreateCommand: source.spec?.postCreateCommand,
           postStartCommand: source.spec?.postStartCommand,
+          // For `list`, and the seed of a resumed container that never finished seeding
+          imageKind: source.kind,
+          blueprintHash: plan?.hash,
         }),
         [LABEL.role]: 'main',
       }),
@@ -691,15 +776,34 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
     const seededBefore = await step('docker', () => hasSeedMarker(backend, id));
     await checkImage(backend, id, source, warn);
     const runAs = await step('docker', () => effectiveUser(backend, id, user));
-    const seeded = await step('seed', () => seedIfNeeded(backend, id, user, home, options, origin, hasToken, seededBefore));
+    const fromSnapshot = source.kind === 'blueprint';
+    const seeded = await step('seed', () => seedIfNeeded(backend, id, user, home, options, origin, hasToken, seededBefore, fromSnapshot));
 
     // 9. Files
     const files = await step('docker', () => copyFiles(backend, id, user, home, options, vars));
 
-    // 10. Devcontainer commands
+    // 10. Blueprint: presets and setup once (a snapshot already holds them), maintain every start
+    let blueprint: StartResult['blueprint'];
+    if (plan) {
+      const io = commandIO(user, options.jsonMode);
+      const bp = plan.resolved.blueprint;
+      const provisioned = seeded && !plan.snapshot
+        ? await step('setup', () => provisionNew(backend, id, bp, plan.presets, runAs, io, warn))
+        : { toolsRun: [], setupRan: false };
+      const maintainRan = await step('docker', () => maintain(backend, id, bp, io, warn));
+      blueprint = {
+        hash: plan.hash,
+        snapshot: plan.snapshot?.tag ?? null,
+        stale: plan.snapshot?.stale ?? false,
+        ...provisioned,
+        maintainRan,
+      };
+    }
+
+    // 11. Devcontainer commands
     await step('docker', () => postCommands(backend, id, user, source.spec, options));
 
-    return { names, containerId: id, image, user: runAs, created: true, seeded, ...files, publish, firewall };
+    return { names, containerId: id, image, user: runAs, created: true, seeded, ...files, publish, firewall, ...(blueprint ? { blueprint } : {}) };
   } catch (err) {
     if (options.keepOnError && mainRun && !ready) {
       // Kept for debugging, but never left running without its firewall
@@ -730,6 +834,8 @@ function parseOptionsLabel(labels: Record<string, string>): {
   user?: string;
   postCreateCommand?: string;
   postStartCommand?: string;
+  imageKind?: ImageSource['kind'];
+  blueprintHash?: string;
 } {
   try {
     return JSON.parse(labels[LABEL.options] ?? '{}');
@@ -746,8 +852,8 @@ async function resume(
   env: Record<string, string>,
   hasToken: boolean
 ): Promise<StartResult> {
-  const { repo, branch, warn } = options;
-  const found = await step('docker', () => backend.list(labelsFor(repo.id, branch)));
+  const { repo, warn } = options;
+  const found = await step('docker', () => backend.list(labelsFor(repo.id, options.namesFor ?? options.branch)));
   const main = found.find(c => c.name === names.container);
   if (!main) throw new StartError(`Container ${names.container} disappeared while starting`, 'docker');
   const helper: ContainerInfo | undefined = found.find(c => c.name === names.helper);
@@ -777,9 +883,31 @@ async function resume(
     const home = user ? `/home/${user}` : null;
     result.user = await step('docker', () => effectiveUser(backend, main.id, user));
     const seededBefore = await step('docker', () => hasSeedMarker(backend, main.id));
-    result.seeded = await step('seed', () => seedIfNeeded(backend, main.id, user, home, options, origin, hasToken, seededBefore));
+    const fromSnapshot = recorded.imageKind === 'blueprint';
+    result.seeded = await step('seed', () =>
+      seedIfNeeded(backend, main.id, user, home, options, origin, hasToken, seededBefore, fromSnapshot));
     if (result.seeded) {
       Object.assign(result, await step('docker', () => copyFiles(backend, main.id, user, home, options, variables(options))));
+    }
+    // An existing container is never set up again, but maintain absorbs lockfile drift every start.
+    // A broken blueprint must not keep the container from starting, so it is only a warning here.
+    let resolved: ResolvedBlueprint | null = null;
+    try {
+      resolved = await loadBlueprint(options);
+    } catch (err) {
+      warn(`Blueprint not loaded, maintain skipped: ${message(err)}`);
+    }
+    if (resolved) {
+      const bp = resolved.blueprint;
+      const maintainRan = await step('docker', () => maintain(backend, main.id, bp, commandIO(user, options.jsonMode), warn));
+      result.blueprint = {
+        hash: recorded.blueprintHash ?? '',
+        snapshot: fromSnapshot ? main.image : null,
+        stale: false,
+        toolsRun: [],
+        setupRan: false,
+        maintainRan,
+      };
     }
     await step('docker', () => postCommands(backend, main.id, user, recorded, options));
     return result;

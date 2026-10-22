@@ -289,6 +289,50 @@ describe('seedScript', () => {
     expect(s).toContain(SEED_MARKER_EXCLUDE);
   });
 
+  it('seedFrom copies the seed, resets origin and still switches', () => {
+    const s = seedScript({ ...base, seedFrom: '/opt/kunj/seed' });
+    expect(s).toContain("if [ ! -d /workspace/.git ]; then cp -a '/opt/kunj/seed/.' /workspace/; fi");
+    expect(s).not.toContain('git clone');
+    expect(s).toContain("git remote set-url origin 'git@github.com:me/r.git'");
+    expect(s.indexOf('set-url')).toBeLessThan(s.indexOf('git fetch'));
+    expect(s).toContain("git switch 'feat'");
+    expect(s).toContain(`touch ${SEED_MARKER}`);
+  });
+
+  posixOnly('seedFrom resets origin', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-seed-from-'));
+    try {
+      const origin = path.join(tmp, 'origin.git');
+      const seedDir = path.join(tmp, 'seed');
+      git(tmp, 'init', '--bare', '-b', 'main', origin);
+      git(tmp, 'clone', origin, seedDir);
+      git(seedDir, 'checkout', '-b', 'main');
+      commit(seedDir, 'a');
+      git(seedDir, 'push', 'origin', 'main');
+      fs.writeFileSync(path.join(seedDir, 'installed'), 'deps');
+      // The snapshot was taken with another URL for the same repository
+      git(seedDir, 'remote', 'set-url', 'origin', 'https://elsewhere.invalid/r.git');
+      const home = path.join(tmp, 'home');
+      fs.mkdirSync(home);
+      const ws = path.join(tmp, 'ws');
+      fs.mkdirSync(ws);
+      const script = seedScript({ ...base, originUrl: origin, create: true, base: 'main', branch: 'new', seedFrom: seedDir })
+        .split('/workspace').join(ws);
+      const env = { ...ENV, HOME: home, GIT_CONFIG_NOSYSTEM: '1' };
+      for (let i = 0; i < 2; i++) {
+        const r = spawnSync('sh', ['-c', script], { env, encoding: 'utf8' });
+        expect(r.stderr).not.toMatch(/fatal/);
+        expect(r.status).toBe(0);
+      }
+      expect(git(ws, 'remote', 'get-url', 'origin')).toBe(origin);
+      expect(git(ws, 'branch', '--show-current')).toBe('new');
+      expect(fs.readFileSync(path.join(ws, 'installed'), 'utf8')).toBe('deps');
+      expect(fs.existsSync(path.join(ws, '.kunj-seeded'))).toBe(true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   posixOnly('runs end to end against a local origin and is re-runnable', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-seed-run-'));
     try {

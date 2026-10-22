@@ -4,11 +4,13 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { FakeBackend } from './fake-backend';
-import { ContainerInfo, ContainerSpec, ExecIO } from '../backend';
+import { ContainerInfo, ContainerSpec, ExecIO, ImageInfo } from '../backend';
 import { containerNames, labelsFor, LABEL } from '../names';
 import { SANDBOX_IMAGE, NETHELPER_IMAGE } from '../image';
 import { SEED_MARKER } from '../seed';
 import { describeGuard } from '../env';
+import { ResolvedBlueprint, blueprintHash, parseBlueprint, snapshotTag } from '../blueprint';
+import { Preset } from '../presets';
 import { KunjConfig } from '../../../types';
 
 let keepDir = '';
@@ -24,6 +26,12 @@ jest.mock('../seed', () => {
     hostGitIdentity: jest.fn(),
   };
 });
+
+// The host blueprint and presets are looked up under these, never the developer's ~/.kunj
+jest.mock('../../config', () => ({
+  getKunjDir: () => path.join(tmp, 'kunj'),
+  getGlobalKunjDir: () => path.join(tmp, 'global'),
+}));
 
 jest.mock('../../keep', () => ({
   getKeepDir: () => keepDir,
@@ -42,6 +50,9 @@ import {
   StartError,
   StartOptions,
   BUILD_NETWORK_WARNING,
+  STALE_SNAPSHOT_HINT,
+  NO_SNAPSHOT_HINT,
+  findSnapshot,
 } from '../lifecycle';
 
 const mocked = seed as jest.Mocked<typeof seed>;
@@ -166,7 +177,7 @@ describe('startContainer', () => {
     ]);
     expect(main.env).toEqual({ GH_TOKEN: 'tok', ANTHROPIC_API_KEY: 'k', KUNJ_CREDENTIAL_HOST: 'github.com' });
     expect(main.labels[LABEL.role]).toBe('main');
-    expect(JSON.parse(main.labels[LABEL.options])).toEqual({ firewall: 'default', allowHost: false, publish: [], helperEnv: helper.env, user: 'dev' });
+    expect(JSON.parse(main.labels[LABEL.options])).toEqual({ firewall: 'default', allowHost: false, publish: [], helperEnv: helper.env, user: 'dev', imageKind: 'sandbox' });
 
     expect(helper.name).toBe(names.helper);
     expect(helper.image).toBe(NETHELPER_IMAGE(VERSION));
@@ -844,5 +855,214 @@ describe('containerStatus', () => {
 
     b.execErrors.set(key, new Error('docker exec failed: Error response from daemon: container abc is not running'));
     expect((await containerStatus(b, 'id', 'dev')).status).toBe('stopped');
+  });
+});
+
+describe('blueprint start', () => {
+  const PRESETS: Preset[] = [{ name: 'apt', path: '/presets/apt.sh', source: 'builtin', text: 'kunj_done 1\n', hash: 'p1' }];
+  const SEED_COPY = "cp -a '/opt/kunj/seed/.' /workspace/";
+
+  function blueprint(over: Record<string, unknown> = {}): ResolvedBlueprint {
+    const text = JSON.stringify({ tools: { apt: ['jq'] }, setup: ['yarn install --immutable', 'yarn build'], maintain: ['yarn install'], ...over });
+    return { blueprint: parseBlueprint(text, 'blueprint.json'), source: 'host', path: 'blueprint.json', text };
+  }
+
+  // cwd is not a git repository, so there are no lockfile ids
+  function hashOf(r: ResolvedBlueprint): string {
+    return blueprintHash({ text: r.text, lockfiles: [], baseImage: SANDBOX_IMAGE(VERSION), presetHashes: ['p1'] });
+  }
+
+  function snapshot(hash: string, createdAt: string, user = 'dev'): ImageInfo {
+    return {
+      tag: snapshotTag(REPO.name, hash),
+      id: `img-${hash}`,
+      createdAt,
+      labels: { [LABEL.repo]: REPO.id, [LABEL.blueprintHash]: hash, [LABEL.blueprintUser]: user },
+      size: 1,
+    };
+  }
+
+  function bpOptions(over: Partial<StartOptions> = {}): StartOptions & { warnings: string[] } {
+    const warnings: string[] = [];
+    return { ...options({ blueprint: blueprint(), presets: PRESETS, warn: m => warnings.push(m), ...over }), warnings };
+  }
+
+  const seedScriptOf = (b: FakeBackend) => execCmds(b).find(c => c.startsWith('sh -c set -e')) ?? '';
+  const presetExecs = (b: FakeBackend) => b.callsOf('exec').filter(a => (a[1] as string[]).join(' ').includes('/tmp/kunj-presets'));
+  const lcExecs = (b: FakeBackend) => b.callsOf('exec').filter(a => (a[1] as string[])[1] === '-lc');
+
+  it('uses the snapshot and copies the seed (no clone)', async () => {
+    const r = blueprint();
+    const b = backend();
+    b.images = [snapshot(hashOf(r), '2026-10-20T10:00:00Z', 'node')];
+    const opts = bpOptions({ blueprint: r });
+    const result = await startContainer(b, opts);
+
+    const [main] = runSpecs(b);
+    expect(main.image).toBe(snapshotTag(REPO.name, hashOf(r)));
+    expect(main.user).toBe('node');
+    expect(main.volumes).toContainEqual({ name: names.homeVolume, path: '/home/node' });
+    expect(JSON.parse(main.labels[LABEL.options])).toMatchObject({ imageKind: 'blueprint', blueprintHash: hashOf(r), user: 'node' });
+    const script = seedScriptOf(b);
+    expect(script).toContain(SEED_COPY);
+    expect(script).not.toContain('git clone');
+    expect(script).toContain(`git remote set-url origin '${REPO.originUrl}'`);
+    // The snapshot holds the presets and setup; maintain still runs
+    expect(presetExecs(b)).toEqual([]);
+    expect(lcExecs(b).map(a => (a[1] as string[])[2])).toEqual(['yarn install']);
+    expect(opts.warnings).toEqual([]);
+    expect(result.blueprint).toEqual({
+      hash: hashOf(r),
+      snapshot: snapshotTag(REPO.name, hashOf(r)),
+      stale: false,
+      toolsRun: [],
+      setupRan: false,
+      maintainRan: true,
+    });
+  });
+
+  it('stale snapshot used with one hint', async () => {
+    const b = backend();
+    b.images = [
+      snapshot('aaaaaaaaaaaa', '2026-10-01T10:00:00.123456789Z'),
+      snapshot('bbbbbbbbbbbb', '2026-10-21T10:00:00.123456789Z'),
+      { ...snapshot('cccccccccccc', '2026-10-22T10:00:00Z'), tag: 'kunj-blueprint-other:cccccccccccc' },
+    ];
+    const opts = bpOptions();
+    const result = await startContainer(b, opts);
+    expect(runSpecs(b)[0].image).toBe(snapshotTag(REPO.name, 'bbbbbbbbbbbb'));
+    expect(opts.warnings).toEqual([STALE_SNAPSHOT_HINT]);
+    expect(seedScriptOf(b)).toContain(SEED_COPY);
+    expect(presetExecs(b)).toEqual([]);
+    expect(result.blueprint).toMatchObject({ snapshot: snapshotTag(REPO.name, 'bbbbbbbbbbbb'), stale: true, setupRan: false });
+  });
+
+  it('--no-snapshot ignores it', async () => {
+    const r = blueprint();
+    const b = backend();
+    b.images = [snapshot(hashOf(r), '2026-10-20T10:00:00Z')];
+    b.execResults.set('cat /tmp/kunj-presets/apt.result', { exitCode: 0, stdout: 'apt 1\n' });
+    const opts = bpOptions({ blueprint: r, noSnapshot: true });
+    const result = await startContainer(b, opts);
+    expect(runSpecs(b)[0].image).toBe(SANDBOX_IMAGE(VERSION));
+    expect(b.methods()).not.toContain('listImages');
+    expect(seedScriptOf(b)).toContain('git clone');
+    expect(opts.warnings).toEqual([]);
+    expect(result.blueprint).toMatchObject({ hash: hashOf(r), snapshot: null, stale: false, toolsRun: ['apt'], setupRan: true });
+  });
+
+  it('without snapshot runs presets as root then setup as the sandbox user, in order, after keep files', async () => {
+    fs.mkdirSync(keepDir, { recursive: true });
+    fs.writeFileSync(path.join(keepDir, '.env'), 'A=1\n');
+    keptFiles = ['.env'];
+    const b = backend();
+    const opts = bpOptions();
+    const result = await startContainer(b, opts);
+    expect(opts.warnings).toContain(NO_SNAPSHOT_HINT);
+
+    const cmds = execCmds(b);
+    const seedAt = cmds.findIndex(c => c.startsWith('sh -c set -e'));
+    const keepAt = cmds.findIndex(c => c.includes('tar -xf') && c.endsWith(' /workspace'));
+    const presetsAt = cmds.findIndex(c => c.includes('/tmp/kunj-presets'));
+    const order = ['sh -lc yarn install --immutable', 'sh -lc yarn build', 'sh -lc yarn install'].map(c => cmds.indexOf(c));
+    expect(seedAt).toBeGreaterThan(-1);
+    expect(keepAt).toBeGreaterThan(seedAt);
+    expect(presetsAt).toBeGreaterThan(keepAt);
+    expect(order[0]).toBeGreaterThan(presetsAt);
+    expect(order[1]).toBeGreaterThan(order[0]);
+    expect(order[2]).toBeGreaterThan(order[1]);
+    for (const a of presetExecs(b)) expect((a[2] as ExecIO).user).toBe('root');
+    expect(result.blueprint).toEqual({ hash: hashOf(blueprint()), snapshot: null, stale: false, toolsRun: ['apt'], setupRan: true, maintainRan: true });
+  });
+
+  it('setup runs as the sandbox user', async () => {
+    const b = backend();
+    await startContainer(b, bpOptions());
+    const lc = lcExecs(b);
+    expect(lc).toHaveLength(3);
+    for (const a of lc) expect(a[2]).toMatchObject({ user: 'dev', workdir: '/workspace' });
+  });
+
+  it('setup failure → StartError code setup and rollback', async () => {
+    const b = backend();
+    b.execResults.set('sh -lc yarn build', { exitCode: 2, stdout: '' });
+    const err = await startContainer(b, bpOptions()).catch(e => e);
+    expect(err).toBeInstanceOf(StartError);
+    expect(err).toMatchObject({ code: 'setup', message: 'setup command failed (exit 2): yarn build' });
+    expect(b.callsOf('remove')).toEqual([[{
+      containers: [names.helper, names.container],
+      volumes: [names.workspaceVolume, names.homeVolume],
+      networks: [names.network],
+    }]]);
+    // Stopped at the first failure: maintain never ran
+    expect(execCmds(b)).not.toContain('sh -lc yarn install');
+  });
+
+  it('an unknown preset fails the start with code setup', async () => {
+    const b = backend();
+    const err = await startContainer(b, bpOptions({ presets: undefined, blueprint: blueprint({ tools: { nosuch: true } }) })).catch(e => e);
+    expect(err).toMatchObject({ code: 'setup', message: expect.stringContaining('Unknown preset "nosuch"') });
+    expect(b.methods()).not.toContain('run');
+  });
+
+  it('maintain runs on resume and warns on failure', async () => {
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.execResults.set('sh -lc yarn install', { exitCode: 1, stdout: '' });
+    const recorded = { user: 'dev', imageKind: 'blueprint', blueprintHash: 'abc' };
+    b.existing = [info({ state: 'exited', image: 'kunj-blueprint-app:abc', labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main', [LABEL.options]: JSON.stringify(recorded) }) })];
+    const opts = bpOptions({ blueprint: blueprint({ maintain: ['yarn install', 'never reached'] }) });
+    const result = await startContainer(b, opts);
+    expect(result.created).toBe(false);
+    expect(lcExecs(b).map(a => (a[1] as string[])[2])).toEqual(['yarn install']);
+    expect(lcExecs(b)[0][2]).toMatchObject({ user: 'dev', workdir: '/workspace' });
+    expect(presetExecs(b)).toEqual([]);
+    expect(opts.warnings).toEqual(['maintain command failed (exit 1): yarn install']);
+    expect(result.blueprint).toEqual({ hash: 'abc', snapshot: 'kunj-blueprint-app:abc', stale: false, toolsRun: [], setupRan: false, maintainRan: true });
+  });
+
+  it('resolves the host blueprint when none is passed, and starts as before without one', async () => {
+    const b = backend();
+    const plain = await startContainer(b, options());
+    expect(plain.blueprint).toBeUndefined();
+    expect(execCmds(b).some(c => c.startsWith('sh -lc'))).toBe(false);
+
+    fs.mkdirSync(path.join(tmp, 'kunj'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'kunj', 'blueprint.json'), JSON.stringify({ setup: ['make'] }));
+    const b2 = backend();
+    const result = await startContainer(b2, options({ presets: [] }));
+    expect(execCmds(b2)).toContain('sh -lc make');
+    expect(result.blueprint).toMatchObject({ setupRan: true, maintainRan: false });
+  });
+
+  it('namesFor names and labels the container while the clone checks out the branch', async () => {
+    const b = backend();
+    await startContainer(b, bpOptions({ namesFor: 'main@snapshot', branch: 'main', noSnapshot: true }));
+    const snapNames = containerNames(REPO.name, REPO.id, 'main@snapshot');
+    const [main] = runSpecs(b);
+    expect(main.name).toBe(snapNames.container);
+    expect(main.labels[LABEL.branch]).toBe('main@snapshot');
+    expect(seedScriptOf(b)).toContain("git switch 'main'");
+  });
+});
+
+describe('findSnapshot', () => {
+  const img = (tag: string, hash: string, createdAt: string): ImageInfo => ({
+    tag, id: tag, createdAt, size: 0, labels: { [LABEL.repo]: REPO.id, [LABEL.blueprintHash]: hash, [LABEL.blueprintUser]: 'dev' },
+  });
+
+  it('findSnapshot picks exact hash, else newest as stale', async () => {
+    const b = new FakeBackend();
+    expect(await findSnapshot(b, 'app', REPO.id, 'h1')).toBeNull();
+    b.images = [
+      img('kunj-blueprint-app:h1', 'h1', '2026-10-01T00:00:00Z'),
+      img('kunj-blueprint-app:h2', 'h2', '2026-10-03T00:00:00Z'),
+      img('kunj-blueprint-app:h3', 'h3', '2026-10-02T00:00:00Z'),
+      img('kunj-blueprint-application:h9', 'h9', '2026-10-09T00:00:00Z'),
+      { ...img('kunj-blueprint-app:h8', 'h8', '2026-10-08T00:00:00Z'), labels: { [LABEL.repo]: 'other/repo' } },
+    ];
+    expect(await findSnapshot(b, 'app', REPO.id, 'h1')).toEqual({ tag: 'kunj-blueprint-app:h1', user: 'dev', stale: false });
+    expect(await findSnapshot(b, 'app', REPO.id, 'zz')).toEqual({ tag: 'kunj-blueprint-app:h2', user: 'dev', stale: true });
+    expect(b.callsOf('listImages')[0]).toEqual([{ [LABEL.repo]: REPO.id }]);
   });
 });

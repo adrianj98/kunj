@@ -178,6 +178,8 @@ export interface SeedInput {
   hasToken: boolean;
   /** Absolute path of git-credential-kunj inside the container; required with a token */
   credentialHelper?: string;
+  /** A checkout already in the image (a blueprint snapshot's seed) to copy instead of cloning */
+  seedFrom?: string;
 }
 
 // POSIX sh for the container's sandbox user. Safe to re-run after a partial failure.
@@ -200,8 +202,15 @@ export function seedScript(input: SeedInput): string {
       `git config --global --add ${q(`url.https://${input.originHost}/.insteadOf`)} ${q(`ssh://git@${input.originHost}/`)}`
     );
   }
-  lines.push(`if [ ! -d /workspace/.git ]; then git clone --recurse-submodules ${q(input.originUrl)} /workspace; fi`);
-  lines.push('cd /workspace');
+  if (input.seedFrom) {
+    lines.push(`if [ ! -d /workspace/.git ]; then cp -a ${q(`${input.seedFrom}/.`)} /workspace/; fi`);
+    lines.push('cd /workspace');
+    // The snapshot may have cloned another URL for the same repository (ssh vs https)
+    lines.push(`git remote set-url origin ${q(input.originUrl)}`);
+  } else {
+    lines.push(`if [ ! -d /workspace/.git ]; then git clone --recurse-submodules ${q(input.originUrl)} /workspace; fi`);
+    lines.push('cd /workspace');
+  }
   const branch = q(input.branch);
   if (input.create) {
     const base = q(input.base ?? '');

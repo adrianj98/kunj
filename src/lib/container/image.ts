@@ -9,7 +9,7 @@ import { ContainerBackend } from './backend';
 import { DevcontainerSpec } from './devcontainer';
 
 export interface ImageSource {
-  kind: 'setting' | 'devcontainer' | 'sandbox';
+  kind: 'setting' | 'devcontainer' | 'sandbox' | 'blueprint';
   tag: string;
   build?: { contextTar: () => NodeJS.ReadableStream; dockerfile: string; buildArgs: Record<string, string> };
   /** User to run as; '' means the image's own USER (no --user is passed). */
@@ -28,6 +28,9 @@ export interface ResolveImageInput {
   } | null;
   repoName: string;
   kunjVersion: string;
+  /** A blueprint snapshot of the repository, found by the caller; the base it was built on is
+   * what resolution gives without it (and its devcontainer spec still applies). */
+  snapshot?: { tag: string; user: string; stale: boolean } | null;
 }
 
 // The tags carry a hash of the build context, so a changed Dockerfile or firewall.sh is rebuilt
@@ -97,6 +100,10 @@ export function imageHash(dockerfileText: string, treeId: string, buildArgs: Rec
 }
 
 export function resolveImage(input: ResolveImageInput): ImageSource {
+  if (input.snapshot) {
+    const base = resolveImage({ ...input, snapshot: null });
+    return { kind: 'blueprint', tag: input.snapshot.tag, user: input.snapshot.user, spec: base.spec };
+  }
   if (input.setting) return { kind: 'setting', tag: input.setting, user: '' };
 
   const dc = input.devcontainer;

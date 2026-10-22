@@ -84,6 +84,26 @@ describe('image', () => {
     expect(fromSandbox.user).toBe('dev');
   });
 
+  it('blueprint kind wins over devcontainer when a snapshot exists', () => {
+    const s = spec({ image: 'node:22', remoteUser: 'node', postCreateCommand: 'make' });
+    const snapshot = { tag: 'kunj-blueprint-repo:abc', user: 'node', stale: false };
+    const r = resolveImage({ setting: '', devcontainer: devcontainer(s), repoName: 'repo', kunjVersion: '1', snapshot });
+    expect(r).toEqual({ kind: 'blueprint', tag: 'kunj-blueprint-repo:abc', user: 'node', spec: s });
+    expect(r.build).toBeUndefined();
+    // The configured image is the snapshot's base, so the snapshot wins over it too
+    expect(resolveImage({ setting: 'my/image:1', devcontainer: null, repoName: 'repo', kunjVersion: '1', snapshot }).kind).toBe('blueprint');
+  });
+
+  it('no snapshot → previous resolution', () => {
+    const dc = devcontainer(spec({ image: 'node:22' }));
+    for (const snapshot of [undefined, null]) {
+      expect(resolveImage({ setting: '', devcontainer: dc, repoName: 'r', kunjVersion: '1', snapshot })).toEqual(
+        resolveImage({ setting: '', devcontainer: dc, repoName: 'r', kunjVersion: '1' })
+      );
+      expect(resolveImage({ setting: '', devcontainer: null, repoName: 'r', kunjVersion: '1', snapshot }).kind).toBe('sandbox');
+    }
+  });
+
   it('uses a devcontainer image as is, and falls back to the sandbox without image or build', () => {
     const withImage = resolveImage({ setting: '', devcontainer: devcontainer(spec({ image: 'node:22' })), repoName: 'r', kunjVersion: '1' });
     expect(withImage).toMatchObject({ kind: 'devcontainer', tag: 'node:22' });
