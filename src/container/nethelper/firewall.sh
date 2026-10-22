@@ -26,10 +26,11 @@ CHAIN=KUNJ-OUT
 SET4=kunj-allow
 SET6=kunj-allow6
 DOCKER_DNS=127.0.0.11
-PRIVATE4="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
+# Private, carrier-grade NAT (Tailscale and similar), link-local and "this network" ranges
+PRIVATE4="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
 PRIVATE6="fc00::/7 fe80::/10"
 ALWAYS_ALLOWED="api.anthropic.com registry.npmjs.org"
-REFRESH_SECONDS=300
+REFRESH_SECONDS=${KUNJ_FW_REFRESH_SECONDS:-300} # overridable for testing
 
 log() { echo "kunj-firewall: $*"; }
 die() { echo "kunj-firewall: ERROR: $*" >&2; exit 1; }
@@ -62,11 +63,15 @@ if [ -z "$SUBNET" ]; then
 fi
 SUBNET6=$(ip -o -f inet6 addr show dev eth0 2>/dev/null | awk '$4 !~ /^fe80/ {print $4; exit}')
 
-# The default gateway is the Docker host (host.docker.internal on a bridge network).
+# The default gateway is the Docker host on a Linux bridge network.
 GW4=$(ip route 2>/dev/null | awk '/^default/ {print $3; exit}')
 GW6=$(ip -f inet6 route 2>/dev/null | awk '/^default/ {print $3; exit}')
 
-log "mode=$MODE subnet=$SUBNET${SUBNET6:+ subnet6=$SUBNET6} gateway=${GW4:-none}${GW6:+ gateway6=$GW6} allowHost=$ALLOW_HOST"
+# Without ip6tables, IPv6 traffic would bypass every rule below. That is only acceptable when the
+# namespace has no IPv6 route out; otherwise refuse to start rather than leave a hole.
+if [ "$V6" = 0 ] && { [ -n "$SUBNET6" ] || [ -n "$GW6" ]; }; then
+  die "IPv6 is configured on eth0 but ip6tables is not usable, so IPv6 traffic cannot be filtered"
+fi
 
 # --- Allowlist sets --------------------------------------------------------------------------
 
@@ -95,9 +100,23 @@ resolve() { # <host>
   } | grep -E '^([0-9]+\.){3}[0-9]+$|^[0-9a-fA-F]*:[0-9a-fA-F:]+$' || true
 }
 
+# The Docker host is not always the gateway: Docker Desktop's host.docker.internal is
+# 192.168.65.254 while the gateway is 172.x.0.1, and other engines use other addresses. Block
+# whatever these names resolve to (through DNS or this namespace's /etc/hosts); absence is fine.
+HOST_ADDRS=$(for name in host.docker.internal gateway.docker.internal; do
+  getent hosts "$name" 2>/dev/null | awk '{print $1}' || true
+  resolve "$name"
+done | sort -u)
+HOST4=$(echo "$HOST_ADDRS" | grep -v ':' || true)
+HOST6=$(echo "$HOST_ADDRS" | grep ':' || true)
+
+log "mode=$MODE subnet=$SUBNET${SUBNET6:+ subnet6=$SUBNET6} gateway=${GW4:-none}${GW6:+ gateway6=$GW6} host=$(echo $HOST_ADDRS) allowHost=$ALLOW_HOST"
+
 # Fill <set4>/<set6> with GitHub's ranges and the resolved allowed domains. Returns 1 when the
 # GitHub ranges cannot be fetched, so a refresh keeps the previous sets instead of losing GitHub.
-populate() { # <set4> <set6>
+# With <strict>=1 (at start) origin and the always-allowed hosts must resolve too; extra domains
+# from the setting only warn.
+populate() { # <set4> <set6> <strict>
   if [ "$GITHUB" = 1 ]; then
     meta=$(curl -fsS --max-time 15 https://api.github.com/meta) || { log "WARNING: could not fetch https://api.github.com/meta"; return 1; }
     # No jq in the image: flatten the JSON and cut out each flat string array by key
@@ -111,24 +130,62 @@ populate() { # <set4> <set6>
     done
     [ "$count" -gt 0 ] || { log "WARNING: api.github.com/meta had no web/api/git ranges"; return 1; }
   fi
-  for host in $DOMAINS $ORIGIN_HOST $ALWAYS_ALLOWED; do
+  for host in $DOMAINS; do
     ips=$(resolve "$host")
     [ -n "$ips" ] || log "WARNING: $host did not resolve"
+    for ip in $ips; do add_ip "$1" "$2" "$ip"; done
+  done
+  for host in $ORIGIN_HOST $ALWAYS_ALLOWED; do
+    ips=$(resolve "$host")
+    if [ -z "$ips" ]; then
+      log "WARNING: $host did not resolve"
+      [ "$3" = 1 ] && return 1
+    fi
     for ip in $ips; do add_ip "$1" "$2" "$ip"; done
   done
   return 0
 }
 
-create_sets() { # <set4> <set6>
-  ipset create -exist "$1" hash:net family inet
-  ipset flush "$1"
-  if [ "$V6" = 1 ]; then
-    ipset create -exist "$2" hash:net family inet6
-    ipset flush "$2"
-  fi
+# Create <set> if missing; never flushes, because it may be the live set a restart inherits.
+ensure_set() { # <set> <inet|inet6>
+  ipset create -exist "$1" hash:net family "$2"
+}
+
+# Copy every member of <from> into <to>, so a refresh only adds: a host that times out or a CDN
+# answering with a different subset keeps its last-known addresses.
+union_into() { # <from> <to>
+  ipset save "$1" 2>/dev/null | awk -v to="$2" '$1 == "add" { print "add", to, $3 }' | ipset restore -exist
 }
 
 members() { ipset list "$1" 2>/dev/null | sed '1,/^Members:/d' | sort; }
+
+# Build fresh *-new sets and swap them in atomically, so the live sets are never flushed or empty
+# (a restarted helper under policy DROP still reaches api.github.com through the old ones).
+# <union>=1 keeps the live members as well. Returns 1, leaving the live sets alone, on failure.
+rebuild_sets() { # <strict> <union>
+  ensure_set "$SET4" inet
+  ensure_set "$SET4-new" inet
+  ipset flush "$SET4-new"
+  if [ "$V6" = 1 ]; then
+    ensure_set "$SET6" inet6
+    ensure_set "$SET6-new" inet6
+    ipset flush "$SET6-new"
+  fi
+  if populate "$SET4-new" "$SET6-new" "$1"; then
+    if [ "$2" = 1 ]; then
+      union_into "$SET4" "$SET4-new"
+      if [ "$V6" = 1 ]; then union_into "$SET6" "$SET6-new"; fi
+    fi
+    status=0
+    ipset swap "$SET4-new" "$SET4" || status=1
+    if [ "$V6" = 1 ]; then ipset swap "$SET6-new" "$SET6" || status=1; fi
+  else
+    status=1
+  fi
+  ipset destroy "$SET4-new" 2>/dev/null || true
+  ipset destroy "$SET6-new" 2>/dev/null || true
+  return "$status"
+}
 
 # --- Rules -----------------------------------------------------------------------------------
 
@@ -154,13 +211,14 @@ base_rules() { # <iptables|ip6tables>
   "$1" -A "$CHAIN" -p tcp --dport 53 -j REJECT
 }
 
-# The host and the LAN: blocked unless allowHost. The gateway is matched before the subnet,
-# because it lies inside the subnet; the private ranges after it, so sidecars stay reachable.
-host_rules() { # <iptables|ip6tables> <gateway> <subnet> <ranges>
+# The host and the LAN: blocked unless allowHost (then explicitly accepted, which allowlist mode
+# needs). The gateway and host addresses are matched before the subnet, because the gateway lies
+# inside it; the private ranges after it, so sidecars stay reachable.
+host_rules() { # <iptables|ip6tables> <gateway and host addresses> <subnet> <ranges>
   verdict=REJECT
-  [ "$ALLOW_HOST" = 1 ] && verdict=ACCEPT
-  [ -n "$2" ] && "$1" -A "$CHAIN" -d "$2" -j "$verdict"
-  [ -n "$3" ] && "$1" -A "$CHAIN" -d "$3" -j ACCEPT
+  if [ "$ALLOW_HOST" = 1 ]; then verdict=ACCEPT; fi
+  for addr in $2; do "$1" -A "$CHAIN" -d "$addr" -j "$verdict"; done
+  if [ -n "$3" ]; then "$1" -A "$CHAIN" -d "$3" -j ACCEPT; fi
   for net in $4; do "$1" -A "$CHAIN" -d "$net" -j "$verdict"; done
 }
 
@@ -177,15 +235,15 @@ final_rules() { # <iptables|ip6tables> <set>
 }
 
 if [ "$MODE" = allowlist ]; then
-  # Resolve before any rule exists, while DNS and HTTPS are still open
-  create_sets "$SET4" "$SET6"
-  populate "$SET4" "$SET6" || die "could not build the allowlist"
+  # Fill the sets before the rules are (re)applied. On a first start nothing is blocked yet; on a
+  # restart the previous live sets still let the GitHub fetch and the lookups through.
+  rebuild_sets 1 0 || die "could not build the allowlist (GitHub ranges, origin or a required host did not resolve)"
   log "allowlist: $(members "$SET4" | grep -c .) IPv4 / $(members "$SET6" | grep -c .) IPv6 entries"
 fi
 
 reset_chain iptables
 base_rules iptables
-host_rules iptables "$GW4" "$SUBNET" "$PRIVATE4"
+host_rules iptables "$GW4 $HOST4" "$SUBNET" "$PRIVATE4"
 final_rules iptables "$SET4"
 
 if [ "$V6" = 1 ]; then
@@ -195,7 +253,7 @@ if [ "$V6" = 1 ]; then
   for type in neighbour-solicitation neighbour-advertisement router-solicitation; do
     ip6tables -A "$CHAIN" -p ipv6-icmp --icmpv6-type "$type" -j ACCEPT
   done
-  host_rules ip6tables "$GW6" "$SUBNET6" "$PRIVATE6"
+  host_rules ip6tables "$GW6 $HOST6" "$SUBNET6" "$PRIVATE6"
   final_rules ip6tables "$SET6"
 fi
 
@@ -204,10 +262,15 @@ fi
 # Prove the allowlist actually holds before the agent starts: an arbitrary site must be
 # unreachable and origin reachable (HTTPS, or a bare TCP connect for SSH-only hosts).
 if [ "$MODE" = allowlist ]; then
-  if curl --max-time 5 -s -o /dev/null https://example.com; then
-    die "verification failed: https://example.com is reachable, the allowlist is not in effect"
-  fi
-  log "verified: https://example.com is blocked"
+  # Only a refused/rejected (7), timed-out (28) or broken TLS (35) connection counts as blocked;
+  # a DNS failure (6) or anything else proves nothing about the rules.
+  rc=0
+  curl --max-time 5 -s -o /dev/null https://example.com || rc=$?
+  case "$rc" in
+    7 | 28 | 35) log "verified: https://example.com is blocked (curl exit $rc)" ;;
+    0) die "verification failed: https://example.com is reachable, the allowlist is not in effect" ;;
+    *) die "verification failed: could not test https://example.com (curl exit $rc)" ;;
+  esac
   if [ -n "$ORIGIN_HOST" ]; then
     if curl --max-time 5 -sI -o /dev/null "https://$ORIGIN_HOST" \
       || nc -z -w 5 "$ORIGIN_HOST" 443 2>/dev/null \
@@ -229,12 +292,8 @@ if [ "$MODE" = allowlist ]; then
   while :; do
     sleep "$REFRESH_SECONDS" &
     wait $!
-    # Fill fresh sets and swap them in atomically, so there is never a window without them
-    create_sets "$SET4-new" "$SET6-new"
-    if populate "$SET4-new" "$SET6-new"; then
-      before="$(members "$SET4")$(members "$SET6")"
-      ipset swap "$SET4-new" "$SET4"
-      [ "$V6" = 1 ] && ipset swap "$SET6-new" "$SET6"
+    before="$(members "$SET4")$(members "$SET6")"
+    if rebuild_sets 0 1; then
       after="$(members "$SET4")$(members "$SET6")"
       if [ "$before" != "$after" ]; then
         log "allowlist changed: $(members "$SET4" | grep -c .) IPv4 / $(members "$SET6" | grep -c .) IPv6 entries"
@@ -242,8 +301,6 @@ if [ "$MODE" = allowlist ]; then
     else
       log "WARNING: refresh failed, keeping the previous allowlist"
     fi
-    ipset destroy "$SET4-new" 2>/dev/null || true
-    ipset destroy "$SET6-new" 2>/dev/null || true
   done
 else
   while :; do
