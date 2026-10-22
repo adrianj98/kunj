@@ -10,7 +10,7 @@ import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutErro
 import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch } from './names';
 import { ImageSource, credentialHelperSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
 import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devcontainer';
-import { ResolvedBlueprint, SEED_DIR, blueprintHash, lockfileIds, resolveBlueprint } from './blueprint';
+import { Blueprint, ResolvedBlueprint, SEED_DIR, blueprintHash, blueprintRef, lockfileIds, resolveBlueprint } from './blueprint';
 import { Preset, orderTools, resolvePresets } from './presets';
 import { FoundSnapshot, findSnapshot, maintain, provisionNew } from './provision';
 import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
@@ -114,7 +114,8 @@ export interface StartResult {
     hash: string;
     /** The snapshot image started from; null after a clone */
     snapshot: string | null;
-    stale: boolean;
+    /** Only on a new start: whether the snapshot's hash differs from the blueprint's */
+    stale?: boolean;
     toolsRun: string[];
     setupRan: boolean;
     maintainRan: boolean;
@@ -175,7 +176,12 @@ type ResolveDevcontainer = { spec: DevcontainerSpec; treeId: string; archive: ()
 const emptyArchive = () => tarEntries([]);
 
 export const STALE_SNAPSHOT_HINT = 'Blueprint snapshot is stale (lockfiles or blueprint changed); run kunj ct blueprint snapshot';
-export const NO_SNAPSHOT_HINT = 'No blueprint snapshot yet; running setup in the container (kunj ct blueprint snapshot makes this instant)';
+export function noSnapshotHint(bp: Pick<Blueprint, 'tools' | 'setup'>): string {
+  const steps = [Object.keys(bp.tools).length ? 'tools' : '', bp.setup.length ? 'setup' : ''].filter(Boolean).join(' and ');
+  return steps
+    ? `No blueprint snapshot yet; running ${steps} in the container (kunj ct blueprint snapshot makes this instant)`
+    : 'No blueprint snapshot yet (kunj ct blueprint snapshot makes new containers start from it)';
+}
 
 async function loadBlueprint(options: StartOptions): Promise<ResolvedBlueprint | null> {
   if (options.blueprint !== undefined) return options.blueprint;
@@ -226,7 +232,7 @@ async function resolveSource(
   // The base image is part of the hash, so a snapshot is only exact for the image it was built on
   const hash = blueprintHash({
     text: resolved.text,
-    lockfiles: await lockfileIds(bp.lockfiles, resolved.ref ?? 'HEAD', options.cwd),
+    lockfiles: await lockfileIds(bp.lockfiles, blueprintRef(resolved, await options.defaultBranch?.()), options.cwd),
     baseImage: base.tag,
     presetHashes: presets.map(p => p.hash),
   });
@@ -234,7 +240,7 @@ async function resolveSource(
   const lookup = !options.noSnapshot && !options.imageOverride;
   const snapshot = lookup ? await findSnapshot(backend, options.repo.name, options.repo.id, hash) : null;
   if (snapshot?.stale) warn(STALE_SNAPSHOT_HINT);
-  else if (lookup && !snapshot) warn(NO_SNAPSHOT_HINT);
+  else if (lookup && !snapshot) warn(noSnapshotHint(bp));
   const source = snapshot ? resolveImage({ ...input, snapshot }) : base;
   return { source, plan: { resolved, presets, hash, snapshot } };
 }
@@ -787,7 +793,9 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     if (plan) {
       const io = commandIO(user, options.jsonMode);
       const bp = plan.resolved.blueprint;
-      const provisioned = seeded && !plan.snapshot
+      // Every new container without a snapshot, also on a kept workspace volume (--rebuild,
+      // remove --keep-volumes): the image is new, so its tools are not there yet
+      const provisioned = !plan.snapshot
         ? await step('setup', () => provisionNew(backend, id, bp, plan.presets, runAs, io, warn))
         : { toolsRun: [], setupRan: false };
       const maintainRan = await step('docker', () => maintain(backend, id, bp, io, warn));
@@ -903,7 +911,6 @@ async function resume(
       result.blueprint = {
         hash: recorded.blueprintHash ?? '',
         snapshot: fromSnapshot ? main.image : null,
-        stale: false,
         toolsRun: [],
         setupRan: false,
         maintainRan,

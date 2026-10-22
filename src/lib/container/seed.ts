@@ -203,7 +203,10 @@ export function seedScript(input: SeedInput): string {
     );
   }
   if (input.seedFrom) {
-    lines.push(`if [ ! -d /workspace/.git ]; then cp -a ${q(`${input.seedFrom}/.`)} /workspace/; fi`);
+    // No marker: nothing, or a copy cut short, is there; start from a clean copy either way
+    lines.push(
+      `if [ ! -f ${SEED_MARKER} ]; then find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} +; cp -a ${q(`${input.seedFrom}/.`)} /workspace/; fi`
+    );
     lines.push('cd /workspace');
     // The snapshot may have cloned another URL for the same repository (ssh vs https)
     lines.push(`git remote set-url origin ${q(input.originUrl)}`);
@@ -218,7 +221,8 @@ export function seedScript(input: SeedInput): string {
     lines.push(`git switch ${branch} 2>/dev/null || git switch -c ${branch} --no-track ${q(`origin/${input.base ?? ''}`)}`);
   } else {
     lines.push(`git fetch origin ${branch}`);
-    lines.push(`git switch ${branch}`);
+    // A seed's local branch is at the snapshot's commit: move it to origin's (the seed is pristine)
+    lines.push(input.seedFrom ? `git switch -C ${branch} ${q(`origin/${input.branch}`)}` : `git switch ${branch}`);
   }
   lines.push(`grep -qx ${SEED_MARKER_EXCLUDE} .git/info/exclude 2>/dev/null || echo ${SEED_MARKER_EXCLUDE} >> .git/info/exclude`);
   lines.push(`touch ${SEED_MARKER}`);

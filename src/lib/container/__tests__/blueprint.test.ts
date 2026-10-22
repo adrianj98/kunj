@@ -9,6 +9,7 @@ import {
   blueprintHash,
   snapshotTag,
   blueprintLabels,
+  blueprintRef,
 } from '../blueprint';
 
 const ENV = {
@@ -152,5 +153,15 @@ describe('hash and names', () => {
       'kunj.blueprint.user': 'u',
       'kunj.blueprint.createdAt': '1970-01-01T00:00:00.000Z',
     });
+  });
+});
+
+describe('blueprintRef', () => {
+  it("uses the blueprint's ref, else origin/<default>, else HEAD", () => {
+    expect(blueprintRef({ ref: 'origin/main' }, 'develop')).toBe('origin/main');
+    expect(blueprintRef({}, 'develop')).toBe('origin/develop');
+    expect(blueprintRef({}, 'origin/develop')).toBe('origin/develop');
+    expect(blueprintRef({}, undefined)).toBe('HEAD');
+    expect(blueprintRef({}, '')).toBe('HEAD');
   });
 });

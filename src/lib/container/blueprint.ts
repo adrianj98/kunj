@@ -149,6 +149,14 @@ export async function lockfileIds(
   return out;
 }
 
+/** Where lockfiles are read for the hash: the blueprint's own ref, else origin/<default>, else HEAD.
+ * Start and snapshot both use this, so the hash does not depend on the worktree kunj runs in. */
+export function blueprintRef(resolved: Pick<ResolvedBlueprint, 'ref'>, defaultBranch?: string): string {
+  if (resolved.ref) return resolved.ref;
+  const branch = defaultBranch?.replace(/^origin\//, '');
+  return branch ? `origin/${branch}` : 'HEAD';
+}
+
 export function blueprintHash(input: {
   text: string;
   lockfiles: Array<{ path: string; id: string }>;

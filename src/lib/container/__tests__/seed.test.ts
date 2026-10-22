@@ -291,12 +291,17 @@ describe('seedScript', () => {
 
   it('seedFrom copies the seed, resets origin and still switches', () => {
     const s = seedScript({ ...base, seedFrom: '/opt/kunj/seed' });
-    expect(s).toContain("if [ ! -d /workspace/.git ]; then cp -a '/opt/kunj/seed/.' /workspace/; fi");
+    expect(s).toContain(
+      `if [ ! -f ${SEED_MARKER} ]; then find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} +; cp -a '/opt/kunj/seed/.' /workspace/; fi`
+    );
     expect(s).not.toContain('git clone');
     expect(s).toContain("git remote set-url origin 'git@github.com:me/r.git'");
     expect(s.indexOf('set-url')).toBeLessThan(s.indexOf('git fetch'));
-    expect(s).toContain("git switch 'feat'");
+    // The seed's own copy of the branch is moved to origin's
+    expect(s).toContain("git switch -C 'feat' 'origin/feat'");
     expect(s).toContain(`touch ${SEED_MARKER}`);
+    // Without a seed nothing changes
+    expect(seedScript(base)).toContain("git switch 'feat'\n");
   });
 
   posixOnly('seedFrom resets origin', () => {
@@ -312,22 +317,45 @@ describe('seedScript', () => {
       fs.writeFileSync(path.join(seedDir, 'installed'), 'deps');
       // The snapshot was taken with another URL for the same repository
       git(seedDir, 'remote', 'set-url', 'origin', 'https://elsewhere.invalid/r.git');
+      // ...and origin moved on after the snapshot
+      const other = path.join(tmp, 'other');
+      git(tmp, 'clone', origin, other);
+      commit(other, 'b');
+      git(other, 'push', 'origin', 'main');
+      const originHead = git(origin, 'rev-parse', 'main');
+
       const home = path.join(tmp, 'home');
       fs.mkdirSync(home);
-      const ws = path.join(tmp, 'ws');
-      fs.mkdirSync(ws);
-      const script = seedScript({ ...base, originUrl: origin, create: true, base: 'main', branch: 'new', seedFrom: seedDir })
-        .split('/workspace').join(ws);
       const env = { ...ENV, HOME: home, GIT_CONFIG_NOSYSTEM: '1' };
-      for (let i = 0; i < 2; i++) {
-        const r = spawnSync('sh', ['-c', script], { env, encoding: 'utf8' });
-        expect(r.stderr).not.toMatch(/fatal/);
-        expect(r.status).toBe(0);
-      }
+      const run = (ws: string, input: Partial<SeedInput>) => {
+        const script = seedScript({ ...base, originUrl: origin, seedFrom: seedDir, ...input }).split('/workspace').join(ws);
+        for (let i = 0; i < 2; i++) {
+          const r = spawnSync('sh', ['-c', script], { env, encoding: 'utf8' });
+          expect(r.stderr).not.toMatch(/fatal/);
+          expect(r.status).toBe(0);
+        }
+      };
+
+      // A new branch from main, over what a copy cut short left behind
+      const ws = path.join(tmp, 'ws');
+      fs.mkdirSync(path.join(ws, '.git'), { recursive: true });
+      fs.writeFileSync(path.join(ws, 'partial'), '');
+      run(ws, { create: true, base: 'main', branch: 'new' });
       expect(git(ws, 'remote', 'get-url', 'origin')).toBe(origin);
       expect(git(ws, 'branch', '--show-current')).toBe('new');
+      expect(git(ws, 'rev-parse', 'HEAD')).toBe(originHead);
       expect(fs.readFileSync(path.join(ws, 'installed'), 'utf8')).toBe('deps');
+      expect(fs.existsSync(path.join(ws, 'partial'))).toBe(false);
       expect(fs.existsSync(path.join(ws, '.kunj-seeded'))).toBe(true);
+
+      // The default branch itself, which the seed already has at the snapshot's commit
+      const ws2 = path.join(tmp, 'ws2');
+      fs.mkdirSync(ws2);
+      run(ws2, { create: false, branch: 'main' });
+      expect(git(ws2, 'branch', '--show-current')).toBe('main');
+      expect(git(ws2, 'rev-parse', 'HEAD')).toBe(originHead);
+      expect(git(ws2, 'rev-parse', '--abbrev-ref', 'main@{upstream}')).toBe('origin/main');
+      expect(git(ws2, 'remote', 'get-url', 'origin')).toBe(origin);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

@@ -51,7 +51,7 @@ import {
   StartOptions,
   BUILD_NETWORK_WARNING,
   STALE_SNAPSHOT_HINT,
-  NO_SNAPSHOT_HINT,
+  noSnapshotHint,
   findSnapshot,
 } from '../lifecycle';
 
@@ -958,7 +958,7 @@ describe('blueprint start', () => {
     const b = backend();
     const opts = bpOptions();
     const result = await startContainer(b, opts);
-    expect(opts.warnings).toContain(NO_SNAPSHOT_HINT);
+    expect(opts.warnings).toContain('No blueprint snapshot yet; running tools and setup in the container (kunj ct blueprint snapshot makes this instant)');
 
     const cmds = execCmds(b);
     const seedAt = cmds.findIndex(c => c.startsWith('sh -c set -e'));
@@ -973,6 +973,47 @@ describe('blueprint start', () => {
     expect(order[2]).toBeGreaterThan(order[1]);
     for (const a of presetExecs(b)) expect((a[2] as ExecIO).user).toBe('root');
     expect(result.blueprint).toEqual({ hash: hashOf(blueprint()), snapshot: null, stale: false, toolsRun: ['apt'], setupRan: true, maintainRan: true });
+  });
+
+  it('a kept workspace volume (seed marker present) still gets presets and setup in a new container', async () => {
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.volumes.add(names.workspaceVolume);
+    const result = await startContainer(b, bpOptions());
+    expect(result.seeded).toBe(false);
+    expect(seedScriptOf(b)).toBe('');
+    expect(presetExecs(b).length).toBeGreaterThan(0);
+    expect(execCmds(b)).toContain('sh -lc yarn build');
+    expect(result.blueprint).toMatchObject({ toolsRun: ['apt'], setupRan: true });
+  });
+
+  it('the no-snapshot hint names only what will run', () => {
+    expect(noSnapshotHint({ tools: {}, setup: ['make'] })).toBe(
+      'No blueprint snapshot yet; running setup in the container (kunj ct blueprint snapshot makes this instant)'
+    );
+    expect(noSnapshotHint({ tools: { apt: ['jq'] }, setup: [] })).toContain('running tools in the container');
+    expect(noSnapshotHint({ tools: {}, setup: [] })).not.toContain('running');
+  });
+
+  it('reads lockfiles for the hash at origin/<default> for a host blueprint', async () => {
+    const b = backend();
+    // A repository whose origin/main has a lockfile the working tree's HEAD does not
+    const repoDir = path.join(tmp, 'repo');
+    fs.mkdirSync(repoDir);
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoDir, env: GIT_ENV });
+    fs.writeFileSync(path.join(repoDir, 'yarn.lock'), 'lock');
+    execFileSync('git', ['add', 'yarn.lock'], { cwd: repoDir, env: GIT_ENV });
+    execFileSync('git', ['commit', '-qm', 'lock'], { cwd: repoDir, env: GIT_ENV });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repoDir, env: GIT_ENV });
+    execFileSync('git', ['checkout', '-q', '--orphan', 'other'], { cwd: repoDir, env: GIT_ENV });
+    execFileSync('git', ['rm', '-qf', 'yarn.lock'], { cwd: repoDir, env: GIT_ENV });
+    execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'empty'], { cwd: repoDir, env: GIT_ENV });
+    const r = blueprint({ lockfiles: ['yarn.lock'] });
+    const result = await startContainer(b, bpOptions({ blueprint: r, cwd: repoDir, defaultBranch: async () => 'main' }));
+    const blob = execFileSync('git', ['rev-parse', 'origin/main:yarn.lock'], { cwd: repoDir, encoding: 'utf8' }).trim();
+    expect(result.blueprint?.hash).toBe(
+      blueprintHash({ text: r.text, lockfiles: [{ path: 'yarn.lock', id: blob }], baseImage: SANDBOX_IMAGE(VERSION), presetHashes: ['p1'] })
+    );
   });
 
   it('setup runs as the sandbox user', async () => {
@@ -1018,7 +1059,7 @@ describe('blueprint start', () => {
     expect(lcExecs(b)[0][2]).toMatchObject({ user: 'dev', workdir: '/workspace' });
     expect(presetExecs(b)).toEqual([]);
     expect(opts.warnings).toEqual(['maintain command failed (exit 1): yarn install']);
-    expect(result.blueprint).toEqual({ hash: 'abc', snapshot: 'kunj-blueprint-app:abc', stale: false, toolsRun: [], setupRan: false, maintainRan: true });
+    expect(result.blueprint).toEqual({ hash: 'abc', snapshot: 'kunj-blueprint-app:abc', toolsRun: [], setupRan: false, maintainRan: true });
   });
 
   it('resolves the host blueprint when none is passed, and starts as before without one', async () => {
