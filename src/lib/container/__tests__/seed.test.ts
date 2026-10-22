@@ -265,8 +265,9 @@ describe('seedScript', () => {
     const without = seedScript(base);
     expect(without).not.toContain('insteadOf');
     expect(without).not.toContain('credential.helper');
-    const withToken = seedScript({ ...base, hasToken: true });
-    expect(withToken).toContain('credential.helper /usr/local/bin/git-credential-kunj');
+    const withToken = seedScript({ ...base, hasToken: true, credentialHelper: '/home/node/.kunj/bin/git-credential-kunj' });
+    expect(withToken).toContain("credential.helper '/home/node/.kunj/bin/git-credential-kunj'");
+    expect(() => seedScript({ ...base, hasToken: true })).toThrow(/credential helper/);
     expect(withToken).toContain("'url.https://github.com/.insteadOf' 'git@github.com:'");
     expect(withToken).toContain("'url.https://github.com/.insteadOf' 'ssh://git@github.com/'");
     expect(withToken).not.toContain('KUNJ_CREDENTIAL_HOST');

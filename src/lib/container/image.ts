@@ -38,6 +38,11 @@ export function sandboxAssetsDir(): string {
   return path.join(__dirname, '..', '..', 'container');
 }
 
+/** The git credential helper script, streamed into every container that gets a token. */
+export function credentialHelperSource(): string {
+  return path.join(sandboxAssetsDir(), 'sandbox', 'git-credential-kunj');
+}
+
 export function imageHash(dockerfileText: string, treeId: string, buildArgs: Record<string, string>): string {
   const args = Object.keys(buildArgs).sort().map(k => [k, buildArgs[k]]);
   return crypto

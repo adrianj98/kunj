@@ -176,6 +176,8 @@ export interface SeedInput {
   userName: string;
   userEmail: string;
   hasToken: boolean;
+  /** Absolute path of git-credential-kunj inside the container; required with a token */
+  credentialHelper?: string;
 }
 
 // POSIX sh for the container's sandbox user. Safe to re-run after a partial failure.
@@ -189,7 +191,8 @@ export function seedScript(input: SeedInput): string {
   if (input.userEmail) lines.push(`git config --global user.email ${q(input.userEmail)}`);
   lines.push('git config --global push.autoSetupRemote true');
   if (input.hasToken) {
-    lines.push('git config --global credential.helper /usr/local/bin/git-credential-kunj');
+    if (!input.credentialHelper) throw new Error('No credential helper path for the token');
+    lines.push(`git config --global credential.helper ${q(input.credentialHelper)}`);
     lines.push(
       `git config --global ${q(`url.https://${input.originHost}/.insteadOf`)} ${q(`git@${input.originHost}:`)}`
     );

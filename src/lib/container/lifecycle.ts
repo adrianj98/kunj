@@ -8,7 +8,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutError } from './backend';
 import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch } from './names';
-import { ImageSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
+import { ImageSource, credentialHelperSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
 import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devcontainer';
 import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
 import {
@@ -39,6 +39,7 @@ const READY_FILE = '/tmp/kunj-ready';
 const READY_TIMEOUT_MS = 20000;
 const READY_POLL_MS = 300;
 const POST_CREATE_MARKER = '.kunj-created';
+const CREDENTIAL_HELPER = 'git-credential-kunj';
 // Everything else is dropped: NET_RAW (an AF_PACKET socket skips the helper's OUTPUT rules) above
 // all. These keep chown, file ownership fixes and sudo in devcontainer images working.
 export const MAIN_CAPABILITIES = ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID'];
@@ -346,6 +347,7 @@ async function seedIfNeeded(
     // A volume over a path the image lacks is root-owned; the clone runs as the user
     await backend.exec(id, ['chown', user, WORKSPACE, ...(home ? [home] : [])], { user: 'root' });
   }
+  const credentialHelper = hasToken ? await installCredentialHelper(backend, id, user, home) : undefined;
   const identity = await hostGitIdentity(options.cwd);
   const script = seedScript({
     originUrl: origin.originUrl,
@@ -356,6 +358,7 @@ async function seedIfNeeded(
     userName: identity.name,
     userEmail: identity.email,
     hasToken,
+    credentialHelper,
   });
   const r = await backend.exec(id, ['sh', '-c', script], { user: user || undefined, ...outputIO(options.jsonMode) });
   if (r.exitCode !== 0) {
@@ -375,6 +378,15 @@ async function extractInto(backend: ContainerBackend, id: string, user: string, 
     stdin: tar,
   });
   if (r.exitCode !== 0) throw new Error(`Copying files into ${dir} failed (exit ${r.exitCode})`);
+}
+
+// Any image, not just kunj-sandbox, needs the helper the seed points credential.helper at. It goes
+// in $HOME (the home volume when there is one), owned by the user.
+async function installCredentialHelper(backend: ContainerBackend, id: string, user: string, home: string | null): Promise<string> {
+  const dir = path.posix.join(await containerHome(backend, id, user, home), '.kunj', 'bin');
+  const tar = tarEntries([{ path: CREDENTIAL_HELPER, content: fs.readFileSync(credentialHelperSource()), mode: 0o755 }]);
+  await extractInto(backend, id, user, dir, tar);
+  return path.posix.join(dir, CREDENTIAL_HELPER);
 }
 
 async function containerHome(backend: ContainerBackend, id: string, user: string, home: string | null): Promise<string> {

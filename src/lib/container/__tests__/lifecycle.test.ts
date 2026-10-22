@@ -237,6 +237,30 @@ describe('startContainer', () => {
     expect(helper.env).toMatchObject({ KUNJ_FW_ORIGIN_HOST: 'git.example.com', KUNJ_FW_ORIGIN_PORT: '8443' });
   });
 
+  it('streams the credential helper into any image before seeding and points git at it', async () => {
+    const b = backend();
+    b.images.add('custom:1');
+    b.execResults.set('sh -c printf %s "$HOME"', { exitCode: 0, stdout: '/home/node' });
+    await startContainer(b, options({ imageOverride: 'custom:1' }));
+    const execs = b.callsOf('exec');
+    const tarAt = execs.findIndex(a => (a[1] as string[]).includes('/home/node/.kunj/bin'));
+    const seedAt = execs.findIndex(a => (a[1] as string[])[2]?.startsWith('set -e'));
+    expect(tarAt).toBeGreaterThan(-1);
+    expect(tarAt).toBeLessThan(seedAt);
+    expect((execs[tarAt][1] as string[])[2]).toContain('tar -xf -');
+    const tar = b.stdinData[tarAt]!;
+    expect(tar).toContain('git-credential-kunj');
+    expect(tar).toContain('KUNJ_CREDENTIAL_HOST');
+    // mode 0755 in the ustar header
+    expect(tar.slice(100, 107)).toBe('0000755');
+    expect((execs[seedAt][1] as string[])[2]).toContain("credential.helper '/home/node/.kunj/bin/git-credential-kunj'");
+
+    // No token: no helper
+    const none = backend();
+    await startContainer(none, options({ hostEnv: { ANTHROPIC_API_KEY: 'k' } }));
+    expect(none.callsOf('exec').some(a => (a[1] as string[]).some(x => x.includes('.kunj/bin')))).toBe(false);
+  });
+
   it('refuses a name whose labels do not match', async () => {
     const b = backend();
     b.existing = [info({ labels: labelsFor(REPO.id, 'feature-x', { [LABEL.role]: 'main' }) })];
@@ -445,7 +469,7 @@ describe('startContainer', () => {
     expect(result.keptFiles).toEqual(['config/.env']);
     expect(result.copiedFiles).toEqual(['/home/dev/.aws/config']);
     const tarCalls = b.callsOf('exec').filter(a => (a[1] as string[]).some(x => x.includes('tar -xf')));
-    expect(tarCalls.map(a => (a[1] as string[]).slice(-1)[0])).toEqual(['/workspace', '/home/dev/.aws']);
+    expect(tarCalls.map(a => (a[1] as string[]).slice(-1)[0])).toEqual(['/home/dev/.kunj/bin', '/workspace', '/home/dev/.aws']);
     expect(b.stdinData.filter(Boolean).join('')).toContain('SECRET=1');
   });
 

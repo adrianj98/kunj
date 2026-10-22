@@ -199,8 +199,9 @@ FOWNER, SETUID and SETGID (`MAIN_CAPABILITIES` in lifecycle.ts); never give it N
 before that file exists.
 
 **Secrets:** they travel only in the `docker run` env-file. Never pass them with `docker exec -e`
-(visible in `ps` and `inspect`) and never put them in labels. The git credential helper is scoped
-to origin's host.
+(visible in `ps` and `inspect`) and never put them in labels. The git credential helper
+(`src/container/sandbox/git-credential-kunj`) is streamed into `$HOME/.kunj/bin/` of every container
+that gets a token, whatever the image, and answers only for origin's `host[:port]`.
 
 **Tests:** `npm test` runs everything with the fake backend. `npm run test:docker`
 (`*.docker.test.ts`) drives a real Docker daemon, builds the images and checks the firewall; it

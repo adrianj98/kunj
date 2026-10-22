@@ -106,9 +106,12 @@ function labelledFor(branch: string): string[] {
   ].filter(Boolean);
 }
 
-function config(network: { allow?: string[]; allowHost?: boolean }): KunjConfig {
-  return { container: { network, keepFiles: false, env: [] } } as unknown as KunjConfig;
+function config(network: { allow?: string[]; allowHost?: boolean }, env: string[] = []): KunjConfig {
+  return { container: { network, keepFiles: false, env } } as unknown as KunjConfig;
 }
+
+// A token makes the start install git-credential-kunj; git:// never asks for it
+const TOKEN_ENV = ['GH_TOKEN=secret-token'];
 
 function startOptions(branch: string, cfg: KunjConfig): StartOptions {
   return {
@@ -194,7 +197,7 @@ const BRANCH_ALLOW = 'it-allow';
   let idA = '';
 
   it('start clones the branch and seeds once', async () => {
-    const first = await startContainer(backend, startOptions(BRANCH_A, config({ allowHost: true })));
+    const first = await startContainer(backend, startOptions(BRANCH_A, config({ allowHost: true }, TOKEN_ENV)));
     expect(first.created).toBe(true);
     expect(first.seeded).toBe(true);
     expect(first.firewall).toBe('default');
@@ -209,7 +212,7 @@ const BRANCH_ALLOW = 'it-allow';
     expect(strip(caps.CapDrop)).toEqual(['ALL']);
     expect(strip(caps.CapAdd)).toEqual(['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETGID', 'SETUID']);
 
-    const second = await startContainer(backend, startOptions(BRANCH_A, config({ allowHost: true })));
+    const second = await startContainer(backend, startOptions(BRANCH_A, config({ allowHost: true }, TOKEN_ENV)));
     expect(second.created).toBe(false);
     expect(second.seeded).toBe(false);
     expect(second.containerId).toBe(idA);
@@ -225,17 +228,16 @@ const BRANCH_ALLOW = 'it-allow';
     expect(git(['rev-parse', `refs/heads/${BRANCH_A}`], bare)).toBe(sha);
   });
 
-  it('credential helper gives nothing to another host', async () => {
+  it('credential helper is installed in the home volume and gives nothing to another host', async () => {
+    const helper = await inside(idA, 'git config --global credential.helper');
+    expect(helper.stdout.trim()).toBe(`/home/${USER}/.kunj/bin/git-credential-kunj`);
+    // The configured helper, with GH_TOKEN from the run env-file
     const fill = (host: string) =>
-      inside(
-        idA,
-        `printf 'protocol=https\\nhost=${host}\\n\\n' | git -c credential.helper=/usr/local/bin/git-credential-kunj credential fill`,
-        { GH_TOKEN: 'secret-token', GIT_TERMINAL_PROMPT: '0' }
-      );
+      inside(idA, `printf 'protocol=https\\nhost=${host}\\n\\n' | git credential fill`, { GIT_TERMINAL_PROMPT: '0' });
     const evil = await fill('evil.example');
     expect(evil.stdout).not.toContain('password=');
-    // Control: origin's host does get the token, so the helper itself works
-    const origin = await fill('host.docker.internal');
+    // Control: origin's host (with its port, as git sends it) does get the token
+    const origin = await fill(`host.docker.internal:${port}`);
     expect(origin.stdout).toContain('password=secret-token');
   });
 
