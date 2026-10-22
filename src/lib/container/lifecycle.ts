@@ -813,6 +813,7 @@ const G = SAFE_GIT.join(' ');
 
 // Sections parsed by parseGuard; untracked files are not protected, as with `git worktree remove`.
 // A detached HEAD counts as a ref; a ref whose rev-list fails prints no count and counts as unpushed.
+// The stash and status sections end with their git exit code, so a failure is never read as clean.
 const GUARD_SCRIPT = [
   `cd ${WORKSPACE} 2>/dev/null && [ -d .git ] || { echo @@none; exit 0; }`,
   'echo @@refs',
@@ -820,9 +821,9 @@ const GUARD_SCRIPT = [
   `  echo "$ref $(${G} rev-list --count "$ref" --not --remotes=origin -- 2>/dev/null)"`,
   'done',
   'echo @@stash',
-  `${G} stash list | wc -l`,
+  `out=$(${G} stash list); rc=$?; printf '%s\n' "$out" | grep -c .; echo "@@stash-exit $rc"`,
   'echo @@status',
-  `${G} status --porcelain=v2 --branch --untracked-files=no`,
+  `out=$(${G} status --porcelain=v2 --branch --untracked-files=no); rc=$?; [ -z "$out" ] || printf '%s\n' "$out"; echo "@@status-exit $rc"`,
 ].join('\n');
 
 const ORIGIN_TIMEOUT_MS = 15000;

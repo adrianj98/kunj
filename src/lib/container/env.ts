@@ -94,13 +94,22 @@ export interface RemoveGuard {
   stashes: number;
   dirty: boolean;
   originReachable: boolean;
+  /** Guard sections whose git command failed (or never reported), e.g. ['stash']; absent when none */
+  unreadable?: string[];
 }
 
 /** Parse the sections printed by the remove guard script (see lifecycle.ts). */
 export function parseGuard(stdout: string): Omit<RemoveGuard, 'originReachable'> {
-  const guard = { unpushedRefs: [] as string[], stashes: 0, dirty: false };
+  const guard: Omit<RemoveGuard, 'originReachable'> = { unpushedRefs: [], stashes: 0, dirty: false };
+  const exits: Record<string, number> = {};
   let section = '';
   for (const line of stdout.split('\n')) {
+    const exit = /^@@(stash|status)-exit (\d+)$/.exec(line.trim());
+    if (exit) {
+      exits[exit[1]] = parseInt(exit[2], 10);
+      section = '';
+      continue;
+    }
     if (line.startsWith('@@')) {
       section = line.slice(2).trim();
       continue;
@@ -117,6 +126,12 @@ export function parseGuard(stdout: string): Omit<RemoveGuard, 'originReachable'>
       guard.dirty = true;
     }
   }
+  // Fail closed: a git command that failed, or a section that never finished, is not clean
+  const unreadable = ['stash', 'status'].filter(s => exits[s] !== 0);
+  if (unreadable.length) {
+    guard.unreadable = unreadable;
+    if (unreadable.includes('status')) guard.dirty = true;
+  }
   return guard;
 }
 
@@ -127,6 +142,7 @@ export function describeGuard(guard: RemoveGuard): string[] {
   }
   if (guard.stashes) problems.push(`${guard.stashes} stash${guard.stashes === 1 ? '' : 'es'}`);
   if (guard.dirty) problems.push('uncommitted changes');
+  for (const s of guard.unreadable ?? []) problems.push(`git ${s} failed in the container, so it cannot be checked`);
   if (!guard.originReachable) problems.push('origin is unreachable, so pushed work cannot be checked');
   return problems;
 }

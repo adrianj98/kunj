@@ -8,6 +8,7 @@ import { ContainerInfo, ContainerSpec, ExecIO } from '../backend';
 import { containerNames, labelsFor, LABEL } from '../names';
 import { SANDBOX_IMAGE, NETHELPER_IMAGE } from '../image';
 import { SEED_MARKER } from '../seed';
+import { describeGuard } from '../env';
 import { KunjConfig } from '../../../types';
 
 let keepDir = '';
@@ -711,7 +712,7 @@ describe('remove', () => {
   }
 
   const CTX = { user: 'dev', kunjVersion: VERSION };
-  const CLEAN = '@@refs\nrefs/heads/feature/x 0\n@@stash\n0\n@@status\n# branch.oid abc\n# branch.head feature/x\n';
+  const CLEAN = '@@refs\nrefs/heads/feature/x 0\n@@stash\n0\n@@stash-exit 0\n@@status\n# branch.oid abc\n# branch.head feature/x\n@@status-exit 0\n';
 
   it('remove guard refuses on unpushed refs', async () => {
     const stdout = CLEAN.replace('@@stash', 'refs/heads/other 1\n@@stash');
@@ -760,9 +761,23 @@ describe('remove', () => {
   });
 
   it('counts stashes and tracked changes', async () => {
-    const stdout = CLEAN.replace('@@stash\n0', '@@stash\n2') + '1 .M N... 100644 100644 100644 a b src/x.ts\n';
+    const stdout = CLEAN.replace('@@stash\n0', '@@stash\n2').replace('@@status-exit', '1 .M N... 100644 100644 100644 a b src/x.ts\n@@status-exit');
     const guard = await inspectForRemove(guardBackend(stdout), names, CTX);
     expect(guard).toMatchObject({ stashes: 2, dirty: true });
+  });
+
+  it('fails closed when git stash or git status fails, or never reports', async () => {
+    const stashFailed = await inspectForRemove(guardBackend(CLEAN.replace('@@stash-exit 0', '@@stash-exit 128')), names, CTX);
+    expect(stashFailed.unreadable).toEqual(['stash']);
+    expect(describeGuard(stashFailed)).toContain('git stash failed in the container, so it cannot be checked');
+
+    const statusFailed = await inspectForRemove(guardBackend(CLEAN.replace('@@status-exit 0', '@@status-exit 128')), names, CTX);
+    expect(statusFailed).toMatchObject({ dirty: true, unreadable: ['status'] });
+
+    // Cut short: neither section reported its exit code
+    const cut = await inspectForRemove(guardBackend('@@refs\nrefs/heads/feature/x 0\n@@stash\n'), names, CTX);
+    expect(cut).toMatchObject({ dirty: true, unreadable: ['stash', 'status'] });
+    await expect(removeContainer(guardBackend('@@refs\n'), names, { force: false, keepVolumes: false, user: 'dev', kunjVersion: VERSION })).rejects.toThrow(/--force/);
   });
 
   it('counts a detached HEAD and a ref whose rev-list failed as unpushed', async () => {
