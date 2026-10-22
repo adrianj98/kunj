@@ -21,6 +21,7 @@ import { getCurrentBranch } from '../lib/git';
 import { HookError, runActionHook } from '../lib/hooks';
 import { recordRepo } from '../lib/repos';
 import { getVersion } from '../lib/version';
+import { shellQuote } from '../lib/config-vars';
 import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
@@ -81,13 +82,14 @@ const PORT_SPEC = /^\d+(:\d+)?$/;
 type ListStatus = Omit<ContainerStatus, 'status'> & { status: ContainerStatus['status'] | 'skipped' };
 
 export class ContainerCommand extends BaseCommand {
+  private backend?: ContainerBackend;
+
   constructor() {
     super({
       name: 'container',
       aliases: ['ct'],
       description: 'Run a branch in a sandboxed container cloned from origin',
       arguments: '[action] [target] [extra...]',
-      allowUnknownOption: true,
       options: [
         { flags: '-c, --create', description: '[start] Create the branch in the container from origin/<base>' },
         { flags: '--base <ref>', description: '[start] Base for a new branch (default: preferences.defaultBaseBranch, else the repo default)' },
@@ -138,12 +140,29 @@ export class ContainerCommand extends BaseCommand {
         throw new ContainerError(`Unknown container action '${action}'. Expected one of: ${ACTIONS.join(', ')}`);
       }
       await this.dispatch(verb, target, rest, options);
-    } catch (error) {
-      if (!this.jsonMode) throw error;
+    } catch (caught) {
+      const error = await this.explainDockerError(caught);
       const message = error instanceof Error ? error.message : String(error);
-      const code = error instanceof StartError ? error.code : error instanceof HookError ? 'hook' : 'error';
-      process.stdout.write(JSON.stringify({ error: { code, message } }) + '\n');
-      process.exit(1);
+      if (this.jsonMode) {
+        const code = error instanceof StartError ? error.code : error instanceof HookError ? 'hook' : 'error';
+        process.stdout.write(JSON.stringify({ error: { code, message } }) + '\n');
+        process.exit(1);
+      }
+      // Every failure here is an outcome to report, not a crash: one line, no stack trace
+      console.error(chalk.red(`✗ ${message}`));
+      process.exitCode = 1;
+    }
+  }
+
+  // "docker ps failed: …" says little when the daemon is down; `docker info` says that clearly.
+  // Asked only after a failure, so a working listing costs no extra subprocess.
+  private async explainDockerError(error: unknown): Promise<unknown> {
+    if (!this.backend || !(error instanceof Error) || !/^docker /.test(error.message)) return error;
+    try {
+      await this.backend.info();
+      return error;
+    } catch (info) {
+      return info instanceof Error ? info : error;
     }
   }
 
@@ -199,7 +218,8 @@ export class ContainerCommand extends BaseCommand {
     const originUrl = getOriginUrl() || '';
     const repo = { root, name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root), originUrl };
     const dockerContext = options.context || config.container?.dockerContext || undefined;
-    return { config, repo, backend: new LocalDockerBackend({ context: dockerContext }), dockerContext };
+    this.backend = new LocalDockerBackend({ context: dockerContext });
+    return { config, repo, backend: this.backend, dockerContext };
   }
 
   private names(ctx: Context, branch: string): ContainerNames {
@@ -371,14 +391,14 @@ export class ContainerCommand extends BaseCommand {
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
     const user = this.userOf(main);
-    const agentCommand = (ctx.config.container?.agentCommand || CONTAINER_AGENT_COMMAND_DEFAULT).split(/\s+/).filter(Boolean);
+    const command = agentCommandLine(ctx.config.container?.agentCommand, args);
     const probe = await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user });
-    const command =
-      probe.exitCode === 0 ? ['tmux', 'new-session', '-A', '-s', 'agent', ...agentCommand, ...args] : [...agentCommand, ...args];
     if (probe.exitCode !== 0) {
       this.warn('tmux is not installed in the container; running the agent directly (it stops when you leave)');
     }
-    const r = await ctx.backend.exec(main.id, command, this.interactive(main, true));
+    // tmux runs a single command argument through the shell, so the setting keeps its quoting
+    const argv = probe.exitCode === 0 ? ['tmux', 'new-session', '-A', '-s', 'agent', command] : ['sh', '-lc', command];
+    const r = await ctx.backend.exec(main.id, argv, this.interactive(main, true));
     process.exitCode = r.exitCode;
   }
 
@@ -558,6 +578,11 @@ export class ContainerCommand extends BaseCommand {
     }
     console.log(chalk.green(`✓ Removed ${names.container}${options.keepVolumes ? ' (volumes kept)' : ''}`));
   }
+}
+
+// container.agentCommand is shell text (it may quote its own arguments); extra args are data
+export function agentCommandLine(setting: string | undefined, args: string[]): string {
+  return [(setting || CONTAINER_AGENT_COMMAND_DEFAULT).trim(), ...args.map(shellQuote)].join(' ');
 }
 
 function parsePublish(text: string | undefined): number[] {

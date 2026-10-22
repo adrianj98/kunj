@@ -42,7 +42,8 @@ jest.mock('../../lib/hooks', () => {
   };
 });
 
-import { ContainerCommand } from '../container';
+import { Command } from 'commander';
+import { ContainerCommand, agentCommandLine } from '../container';
 import * as lifecycle from '../../lib/container/lifecycle';
 
 const REPO_ID = repoIdFromUrl('https://github.com/acme/app.git');
@@ -83,6 +84,8 @@ let stdout: string[];
 let writeSpy: jest.SpyInstance;
 let logSpy: jest.SpyInstance;
 let errSpy: jest.SpyInstance;
+let errors: string[];
+let consoleErrSpy: jest.SpyInstance;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -95,6 +98,10 @@ beforeEach(() => {
     return true;
   });
   logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  errors = [];
+  consoleErrSpy = jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+    errors.push(args.map(String).join(' '));
+  });
   errSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
   process.exitCode = undefined;
 });
@@ -103,6 +110,7 @@ afterEach(() => {
   writeSpy.mockRestore();
   logSpy.mockRestore();
   errSpy.mockRestore();
+  consoleErrSpy.mockRestore();
   process.exitCode = undefined;
 });
 
@@ -133,9 +141,55 @@ describe('ContainerCommand', () => {
   });
 
   it('rejects unknown actions', async () => {
-    await expect(new ContainerCommand().execute('frobnicate', {})).rejects.toThrow(
-      "Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, forward, list, stop, remove"
-    );
+    await new ContainerCommand().execute('frobnicate', {});
+    expect(errors).toEqual([
+      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, forward, list, stop, remove",
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('rejects unknown options before running', async () => {
+    const program = new Command();
+    program.exitOverride().configureOutput({ writeErr: () => {}, writeOut: () => {} });
+    const cmd = new ContainerCommand();
+    const execute = jest.spyOn(cmd, 'execute');
+    cmd.register(program);
+    expect(() => program.parse(['ct', 'stop', '--nope', '--json'], { from: 'user' })).toThrow(/unknown option '--nope'/);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('prints a failing docker call as one line, without a stack', async () => {
+    jest.spyOn(backend, 'list').mockRejectedValueOnce(new Error('docker ps failed: Cannot connect to the Docker daemon'));
+    await new ContainerCommand().execute('list', {});
+    expect(errors).toEqual(['✗ docker ps failed: Cannot connect to the Docker daemon']);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prefers docker info's message when the daemon is down", async () => {
+    jest.spyOn(backend, 'list').mockRejectedValueOnce(new Error('docker ps failed: Cannot connect to the Docker daemon'));
+    jest.spyOn(backend, 'info').mockRejectedValueOnce(new Error('Docker is not available: Cannot connect to the Docker daemon'));
+    await new ContainerCommand().execute('list', {});
+    expect(errors).toEqual(['✗ Docker is not available: Cannot connect to the Docker daemon']);
+  });
+
+  it('hands the agent command to tmux as one shell command', async () => {
+    backend.existing = [mainContainer('feat')];
+    (jest.requireMock('../../lib/config').loadResolvedConfig as jest.Mock).mockResolvedValueOnce({
+      container: { agentCommand: 'claude --append-system-prompt "be brief"' },
+    });
+    await new ContainerCommand().execute('agent', 'feat', ["it's"], {});
+    const cmds = backend.callsOf('exec').map(c => c[1]);
+    expect(cmds).toEqual([
+      ['sh', '-c', 'command -v tmux'],
+      ['tmux', 'new-session', '-A', '-s', 'agent', `claude --append-system-prompt "be brief" 'it'\\''s'`],
+    ]);
+  });
+
+  it('runs the agent through sh without tmux', async () => {
+    backend.existing = [mainContainer('feat')];
+    backend.execResults.set('sh -c command -v tmux', { exitCode: 1, stdout: '' });
+    await new ContainerCommand().execute('agent', 'feat', [], {});
+    expect(backend.callsOf('exec')[1][1]).toEqual(['sh', '-lc', agentCommandLine(undefined, [])]);
   });
 
   it('prints the list json shape', async () => {
@@ -208,9 +262,9 @@ describe('ContainerCommand', () => {
 
   it('refuses to exec in a stopped container', async () => {
     backend.existing = [mainContainer('feat', { state: 'exited' })];
-    await expect(new ContainerCommand().execute('exec', 'feat', ['ls'], {})).rejects.toThrow(
-      'Container for feat is not running; run kunj ct start feat'
-    );
+    await new ContainerCommand().execute('exec', 'feat', ['ls'], {});
+    expect(errors).toEqual(['✗ Container for feat is not running; run kunj ct start feat']);
+    expect(backend.callsOf('exec')).toEqual([]);
   });
 
   it('writes the json error envelope for a StartError', async () => {

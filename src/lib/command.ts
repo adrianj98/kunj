@@ -28,8 +28,6 @@ export interface CommandConfig {
   helpText?: string | (() => string);
   // Other names the command answers to (e.g. `ct` for `container`)
   aliases?: string[];
-  // Accept options Commander does not know, as operands (e.g. a command run with `exec`)
-  allowUnknownOption?: boolean;
 }
 
 export abstract class BaseCommand {
@@ -57,9 +55,6 @@ export abstract class BaseCommand {
 
     for (const alias of this.config.aliases ?? []) {
       cmd.alias(alias);
-    }
-    if (this.config.allowUnknownOption) {
-      cmd.allowUnknownOption();
     }
 
     const helpText = this.config.helpText;
