@@ -1,0 +1,21 @@
+import { initializeSettings, settingsRegistry } from '../index';
+
+describe('container settings', () => {
+  it('registers the container settings with their defaults', () => {
+    initializeSettings();
+    const defaults = settingsRegistry.getDefaultConfig().container;
+    expect(defaults).toEqual({
+      image: '',
+      agentCommand: 'claude --dangerously-skip-permissions',
+      env: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'AWS_REGION', 'GH_TOKEN'],
+      files: [],
+      keepFiles: true,
+      network: { allow: [], allowHost: false },
+      dockerContext: '',
+      cpus: '',
+      memory: '',
+      publish: [],
+    });
+    expect(settingsRegistry.get('hooks.pre-container-create')).toBeDefined();
+  });
+});

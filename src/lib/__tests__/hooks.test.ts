@@ -49,6 +49,18 @@ function writeScript(file: string, content: string, mode = 0o755): void {
 }
 
 describe('hooks', () => {
+  it('defines the container hooks', () => {
+    const names = HOOKS.map(h => h.name);
+    expect(names).toEqual(
+      expect.arrayContaining(['pre-container-create', 'post-container-create', 'pre-container-delete', 'post-container-delete'])
+    );
+    expect(HOOKS.find(h => h.name === 'pre-container-create')).toMatchObject({
+      args: ['branch', 'container', 'image'],
+      abortsOnFailure: true,
+    });
+    expect(HOOKS.find(h => h.name === 'post-container-delete')?.abortsOnFailure).toBe(false);
+  });
+
   let repo: ReturnType<typeof repoVariables>;
   let worktree: string;
   let logFile: string;

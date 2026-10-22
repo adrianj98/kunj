@@ -9,6 +9,7 @@ import { registerJiraSettings } from './jira';
 import { registerSlackSettings } from './slack';
 import { registerWorktreeSettings } from './worktree';
 import { registerHookSettings } from './hooks';
+import { registerContainerSettings } from './container';
 import { settingsRegistry } from '../lib/settings-registry';
 
 let initialized = false;
@@ -29,6 +30,7 @@ export function initializeSettings(): void {
   registerSlackSettings();
   registerWorktreeSettings();
   registerHookSettings();
+  registerContainerSettings();
 
   initialized = true;
 }

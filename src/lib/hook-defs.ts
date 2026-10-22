@@ -23,7 +23,11 @@ export type HookName =
   | 'pre-pr-create'
   | 'post-pr-create'
   | 'pre-stash'
-  | 'post-stash';
+  | 'post-stash'
+  | 'pre-container-create'
+  | 'post-container-create'
+  | 'pre-container-delete'
+  | 'post-container-delete';
 
 export interface HookDefinition {
   name: HookName;
@@ -60,6 +64,7 @@ const WORKTREE_ENV = WORKTREE_ARGS.map(argEnvName);
 const BRANCH_CHANGE_ARGS = ['branch', 'previous-branch'];
 const PR_ARGS = ['branch', 'base-branch', 'title'];
 const STASH_ARGS = ['branch', 'message'];
+const CONTAINER_ARGS = ['branch', 'container', 'image'];
 
 export const HOOKS: HookDefinition[] = [
   {
@@ -111,6 +116,10 @@ export const HOOKS: HookDefinition[] = [
   define('post-pr-create', [...PR_ARGS, 'pr-url'], 'Runs after `kunj pr` has opened a pull request.'),
   define('pre-stash', STASH_ARGS, 'Runs before kunj stashes changes (`kunj stash` or the auto-stash on create/switch). A non-zero exit aborts the operation.'),
   define('post-stash', STASH_ARGS, 'Runs after kunj has stashed changes.'),
+  define('pre-container-create', CONTAINER_ARGS, 'Runs before `kunj container start` creates a container. A non-zero exit aborts it.'),
+  define('post-container-create', CONTAINER_ARGS, 'Runs after `kunj container start` has created and seeded a container.'),
+  define('pre-container-delete', CONTAINER_ARGS, 'Runs before `kunj container remove` deletes a container. A non-zero exit aborts it.'),
+  define('post-container-delete', CONTAINER_ARGS, 'Runs after `kunj container remove` has removed a container.'),
 ];
 
 export const HOOK_NAMES: HookName[] = HOOKS.map(h => h.name);

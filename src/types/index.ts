@@ -55,6 +55,18 @@ export interface KunjConfig {
     baseDir?: string;
     editorCommand?: string;
   };
+  container?: {
+    image?: string;
+    agentCommand?: string;
+    env?: string[];
+    files?: string[];
+    keepFiles?: boolean;
+    network?: { allow?: string[]; allowHost?: boolean };
+    dockerContext?: string;
+    cpus?: string;
+    memory?: string;
+    publish?: string[];
+  };
   // Commands run by kunj hooks, keyed by hook name (see src/lib/hook-defs.ts)
   hooks?: Partial<Record<HookName, string | string[]>>;
   jira?: {
