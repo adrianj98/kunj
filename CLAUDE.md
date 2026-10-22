@@ -209,8 +209,9 @@ that gets a token, whatever the image, and answers only for origin's `host[:port
 (`*.docker.test.ts`) drives a real Docker daemon, builds the images and checks the firewall; it
 skips itself when Docker is unavailable.
 
-**Hooks:** `${...}` values in `hooks.*` config commands are shell-quoted when substituted, so
-users must not wrap them in their own quotes (`"${branch}"` would double-quote). The container
+**Hooks:** `${...}` values in `hooks.*` config commands are quoted for the context they sit in
+(`expandVariablesQuoted()` in config-vars.ts): single-quoted when bare, escaped inside `"..."`,
+`'\''`-spliced inside `'...'`, so `${branch}` and `"${branch}"` both pass the value literally. The container
 hooks are `pre/post-container-create` and `pre/post-container-delete` with `branch`, `container`,
 `image`.
 

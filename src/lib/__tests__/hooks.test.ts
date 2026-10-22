@@ -234,6 +234,18 @@ describe('hooks', () => {
     expect(fs.readFileSync(logFile, 'utf8').trim()).toBe(`x$(touch ${marker})`);
   });
 
+  posixOnly('keeps values literal when the command double-quotes them', async () => {
+    const marker = path.join(tmp, 'pwned');
+    const spaced = path.join(tmp, 'a worktree');
+    fs.mkdirSync(spaced);
+    const result = await runHook('post-worktree-create', worktreeHookContext(repo, spaced, `x$(touch ${marker})`), {
+      hooks: { 'post-worktree-create': [`cd "${'${worktree}'}" && echo "${'${branch}'} in $(pwd)" > '${logFile}'`] },
+    });
+    expect(result.ok).toBe(true);
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(fs.readFileSync(logFile, 'utf8').trim()).toBe(`x$(touch ${marker}) in ${fs.realpathSync(spaced)}`);
+  });
+
   posixOnly('a failing pre hook throws a HookError and stops later hooks', async () => {
     writeScript(path.join(getHooksDir('global'), 'pre-worktree-delete'), recordingScript(logFile, 3));
     writeScript(path.join(getHooksDir('repo'), 'pre-worktree-delete'), recordingScript(logFile));

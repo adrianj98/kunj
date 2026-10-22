@@ -57,9 +57,56 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-// For text that goes to a shell: a branch name like x$(cmd) must stay data
+// Inside "...": only \, $, ` and " are special, so escaping them keeps the value literal
+function doubleQuoteEscape(value: string): string {
+  return value.replace(/[\\$`"]/g, '\\$&');
+}
+
+const VARIABLE_AT = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/y;
+
+/**
+ * For text that goes to a shell: a branch name like x$(cmd) must stay data, however the command
+ * quotes the variable. Bare `${branch}` is single-quoted; inside "..." the value is escaped for
+ * double quotes; inside '...' it is spliced in with '\'' for its own quotes. The quoting state is
+ * tracked with POSIX rules (backslash escapes outside single quotes); command substitutions are
+ * not parsed, so quotes nested inside "$(...)" count as closing the outer string.
+ */
 export function expandVariablesQuoted(value: string, vars: ConfigVariables): string {
-  return substitute(value, vars, shellQuote);
+  if (!hasVariables(value)) return value;
+  const lookup = new Map(Object.entries(vars).map(([k, v]) => [k.toLowerCase(), v]));
+  let state: 'none' | 'single' | 'double' = 'none';
+  let out = '';
+  let i = 0;
+  while (i < value.length) {
+    const c = value[i];
+    if (c === '$') {
+      VARIABLE_AT.lastIndex = i;
+      const m = VARIABLE_AT.exec(value);
+      const resolved = m ? lookup.get(m[1].toLowerCase()) : undefined;
+      if (m && resolved !== undefined) {
+        out += state === 'none' ? shellQuote(resolved) : state === 'double' ? doubleQuoteEscape(resolved) : resolved.replace(/'/g, `'\\''`);
+        i += m[0].length;
+        continue;
+      }
+    }
+    if (c === '\\' && state !== 'single' && i + 1 < value.length) {
+      out += c + value[i + 1];
+      i += 2;
+      continue;
+    }
+    if (state === 'single') {
+      if (c === "'") state = 'none';
+    } else if (state === 'double') {
+      if (c === '"') state = 'none';
+    } else if (c === "'") {
+      state = 'single';
+    } else if (c === '"') {
+      state = 'double';
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 // Repo variables derived from an already-known common dir, so callers that

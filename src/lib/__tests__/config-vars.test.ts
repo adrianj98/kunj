@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import * as os from 'os';
 import {
   expandConfigStrings,
@@ -115,5 +116,24 @@ describe('shellQuote', () => {
 describe('expandVariablesQuoted', () => {
   it('quotes substituted values only', () => {
     expect(expandVariablesQuoted('echo ${branch} ${nope}', { branch: 'x$(id)' })).toBe("echo 'x$(id)' ${nope}");
+  });
+
+  it('escapes for double quotes inside "..." and keeps single-quoted values literal', () => {
+    const vars = { branch: 'x$(id)', worktree: '/a b/c', name: `it's "q" \\ \`x\`` };
+    expect(expandVariablesQuoted('echo "${branch}"', vars)).toBe('echo "x\\$(id)"');
+    expect(expandVariablesQuoted('cd "${worktree}" && ls ${worktree}', vars)).toBe(`cd "/a b/c" && ls '/a b/c'`);
+    expect(expandVariablesQuoted('echo "${name}"', vars)).toBe('echo "it\'s \\"q\\" \\\\ \\`x\\`"');
+    expect(expandVariablesQuoted("echo '${name}'", vars)).toBe(`echo 'it'\\''s "q" \\ \`x\`'`);
+    // An escaped quote does not open a string; a quote inside single quotes does not either
+    expect(expandVariablesQuoted('echo \\" ${branch}', vars)).toBe(`echo \\" 'x$(id)'`);
+    expect(expandVariablesQuoted(`echo '"' \${branch}`, vars)).toBe(`echo '"' 'x$(id)'`);
+  });
+
+  it('expands to values the shell reads back literally in every quoting context', () => {
+    const vars = { v: `a'b"c$(echo pwned)\`x\`\\d $HOME` };
+    for (const template of ['printf %s ${v}', 'printf %s "${v}"', "printf %s '${v}'", 'printf %s "pre ${v} post"']) {
+      const out = execFileSync('sh', ['-c', expandVariablesQuoted(template, vars)], { encoding: 'utf8' });
+      expect(out).toBe(template.includes('pre') ? `pre ${vars.v} post` : vars.v);
+    }
   });
 });

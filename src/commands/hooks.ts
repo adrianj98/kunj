@@ -108,7 +108,7 @@ What a hook receives:
                  plus KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_REPO_CONFIG and KUNJ_REPO_NAME
   Config vars    config commands can use each argument as a camelCase \${...} variable
                  (\${branch}, \${previousBranch}, \${prUrl}, \${worktree}) and \${repoRoot}, \${repoName}, ...
-                 Values are already shell-quoted; do not wrap them in quotes.
+                 Values are quoted for you: \${branch} and "\${branch}" both pass them literally.
   Directory      the worktree for post-worktree-create and pre-worktree-delete, the main
                  worktree for the other worktree hooks, otherwise where kunj was run
 
