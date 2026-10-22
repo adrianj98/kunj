@@ -88,7 +88,16 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export async function snapshotBlueprint(backend: ContainerBackend, opts: SnapshotOptions): Promise<SnapshotResult> {
+export interface SnapshotPlan {
+  startOptions: StartOptions;
+  base: string;
+  hash: string;
+  tag: string;
+}
+
+/** The temporary start and the hash a snapshot of `opts.branch` would have; `status` and `list`
+ * use it too, so every command computes the hash the same way. */
+export async function planSnapshot(opts: Omit<SnapshotOptions, 'rebuild' | 'log'>): Promise<SnapshotPlan> {
   const bp = opts.blueprint.blueprint;
   const ref = blueprintRef(opts.blueprint, opts.branch);
   const presets = await resolvePresets(orderTools(bp.tools), { repoRoot: opts.repo.root, globalKunjDir: getGlobalKunjDir() });
@@ -129,7 +138,11 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
     baseImage: base,
     presetHashes: presets.map(p => p.hash),
   });
-  const tag = snapshotTag(opts.repo.name, hash);
+  return { startOptions, base, hash, tag: snapshotTag(opts.repo.name, hash) };
+}
+
+export async function snapshotBlueprint(backend: ContainerBackend, opts: SnapshotOptions): Promise<SnapshotResult> {
+  const { startOptions, base, hash, tag } = await planSnapshot(opts);
 
   if (!opts.rebuild && (await backend.imageExists(tag))) {
     const found = (await backend.listImages({ [LABEL.repo]: opts.repo.id })).find(i => i.tag === tag);

@@ -9,15 +9,17 @@
 //   kunj container list [--all] [--no-status]
 //   kunj container stop [branch]
 //   kunj container remove [branch] [--force] [--keep-volumes]
+//   kunj container blueprint init|snapshot|status|remove
 //
 // `ct` is an alias. The command is on the fast path (src/commands/fast.ts): keep heavy
 // imports out of this module, and load inquirer lazily.
 
 import chalk from 'chalk';
+import * as fs from 'fs';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
-import { getOriginUrl, getRepoCommonDir, getRepoCommonRoot, getRepoName, loadResolvedConfig } from '../lib/config';
-import { getCurrentBranch } from '../lib/git';
+import { getKunjDir, getOriginUrl, getRepoCommonDir, getRepoCommonRoot, getRepoName, loadResolvedConfig } from '../lib/config';
+import { getCurrentBranch, getGitRoot } from '../lib/git';
 import { HookError, runActionHook } from '../lib/hooks';
 import { recordRepo } from '../lib/repos';
 import { getVersion } from '../lib/version';
@@ -38,7 +40,10 @@ import {
   stopContainer,
 } from '../lib/container/lifecycle';
 import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
-import { stripUserinfo } from '../lib/container/seed';
+import { parseOrigin, stripUserinfo } from '../lib/container/seed';
+import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
+import { inferBlueprint } from '../lib/container/infer';
+import { planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
 import { KunjConfig } from '../types';
 
 interface ContainerOptions {
@@ -55,6 +60,10 @@ interface ContainerOptions {
   force?: boolean;
   keepVolumes?: boolean;
   context?: string;
+  snapshot?: boolean;
+  global?: boolean;
+  yes?: boolean;
+  blueprint?: string;
 }
 
 interface Context {
@@ -72,7 +81,8 @@ class ContainerError extends Error {
   }
 }
 
-const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'forward', 'list', 'stop', 'remove'];
+const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'forward', 'list', 'stop', 'remove', 'blueprint'];
+const BLUEPRINT_ACTIONS = ['init', 'snapshot', 'status', 'remove'];
 const WORKSPACE = '/workspace';
 const STATUS_TIMEOUT_MS = 2000;
 const SHELL = 'exec $(command -v zsh || command -v bash || echo sh) -l';
@@ -95,13 +105,17 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--base <ref>', description: '[start] Base for a new branch (default: preferences.defaultBaseBranch, else the repo default)' },
         { flags: '--image <img>', description: '[start] Use this image instead of the configured one' },
         { flags: '--publish <ports>', description: '[start] Publish container ports, e.g. 3000,5432' },
-        { flags: '--rebuild', description: '[start] Rebuild the image and recreate the container (volumes are kept)' },
+        { flags: '--rebuild', description: '[start] Rebuild the image and recreate the container (volumes are kept); [blueprint snapshot] snapshot again even when up to date' },
+        { flags: '--no-snapshot', description: "[start] Start from the base image, ignoring the blueprint's snapshot" },
         { flags: '--keep-on-error', description: '[start] Keep what a failed start created, for debugging' },
         { flags: '--no-hooks', description: "[start|remove] Skip kunj hooks (see 'kunj hooks --help')" },
         { flags: '--no-status', description: '[list] Skip the per-container status exec (faster listing)' },
         { flags: '-a, --all', description: "[list] Show every repository's containers" },
         { flags: '-f, --force', description: '[remove] Remove even when the container holds unpushed work' },
         { flags: '--keep-volumes', description: '[remove] Keep the workspace and home volumes' },
+        { flags: '--global', description: '[blueprint init] Write the host copy (~/.kunj/<repo>/blueprint.json) instead of .kunj/blueprint.json' },
+        { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file' },
+        { flags: '--blueprint <path>', description: '[blueprint snapshot|status] Use this blueprint file instead of the resolved one' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
       ],
       helpText: [
@@ -115,6 +129,15 @@ export class ContainerCommand extends BaseCommand {
         '  list                                 containers of this repository (the default)',
         '  stop [branch]                        stop, keeping the workspace',
         '  remove [branch]                      remove, refusing while work is unpushed',
+        '',
+        'Blueprint (how a new container is set up: tools, setup and maintain commands):',
+        '  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json',
+        '  blueprint snapshot [--base <ref>]    set it up once in a temporary container and save the image',
+        '  blueprint status                     which blueprint, its hash and snapshot, stale or not',
+        '  blueprint remove                     delete this repository\'s snapshot images',
+        '',
+        'The blueprint is read from origin/<default branch>:.kunj/blueprint.json, else',
+        '~/.kunj/<repo>/blueprint.json. New containers start from the snapshot (--no-snapshot to skip it).',
         '',
         '[branch] defaults to the current branch. `ct` is short for `container`.',
       ].join('\n'),
@@ -193,6 +216,8 @@ export class ContainerCommand extends BaseCommand {
         return this.stop(target, options);
       case 'remove':
         return this.remove(target, options);
+      case 'blueprint':
+        return this.blueprint(target, options);
     }
   }
 
@@ -247,7 +272,7 @@ export class ContainerCommand extends BaseCommand {
     return main;
   }
 
-  private recordedOptions(info: ContainerInfo): { firewall?: string; user?: string } {
+  private recordedOptions(info: ContainerInfo): { firewall?: string; user?: string; imageKind?: string; blueprintHash?: string } {
     try {
       return JSON.parse(info.labels[LABEL.options] ?? '{}');
     } catch {
@@ -335,6 +360,7 @@ export class ContainerCommand extends BaseCommand {
       confirmPush: () => this.confirmPush(branch),
       warn: this.warn,
       defaultBranch: async () => (await detectDefaultBranch(ctx.repo.root)) || undefined,
+      noSnapshot: options.snapshot === false,
     });
 
     if (result.created) {
@@ -351,6 +377,8 @@ export class ContainerCommand extends BaseCommand {
     console.log(`  branch    ${branch}`);
     if (result.user) console.log(`  user      ${result.user}`);
     console.log(`  firewall  ${result.firewall}`);
+    const bp = blueprintSummary(result.blueprint);
+    if (bp) console.log(`  blueprint ${bp}`);
     for (const file of result.keptFiles) console.log(`  kept      ${file}`);
     for (const file of result.copiedFiles) console.log(`  copied    ${file}`);
     for (const port of result.publish) console.log(`  port      localhost:${port.host} → :${port.container}`);
@@ -501,14 +529,22 @@ export class ContainerCommand extends BaseCommand {
       })
     );
 
+    // Asked once, and only when a container was started from a snapshot
+    const blueprintMains = mains.filter(c => this.recordedOptions(c).imageKind === 'blueprint');
+    const currentHash = blueprintMains.some(c => c.labels[LABEL.repo] === ctx.repo.id) ? await this.currentHash(ctx) : null;
+
     const containers = mains.map((c, i) => {
       const s = statuses[i];
+      const recorded = this.recordedOptions(c);
+      const stale = currentHash === null || c.labels[LABEL.repo] !== ctx.repo.id ? null : recorded.blueprintHash !== currentHash;
       return {
         branch: c.labels[LABEL.branch] ?? '',
         name: c.name,
         id: c.id,
         state: c.state,
         image: c.image,
+        imageInfo: { tag: c.image, ...(recorded.imageKind ? { kind: recorded.imageKind } : {}) },
+        ...(recorded.imageKind === 'blueprint' ? { blueprint: { hash: recorded.blueprintHash ?? '', stale } } : {}),
         createdAt: c.createdAt,
         firewall: this.recordedOptions(c).firewall || 'default',
         ports: c.ports.map(p => ({ container: p.container, host: p.host, kind: 'publish' as const })),
@@ -535,6 +571,7 @@ export class ContainerCommand extends BaseCommand {
     containers.forEach((c, i) => {
       const running = c.state === 'running';
       let line = `${running ? chalk.green('●') : chalk.gray('○')} ${chalk.white(c.branch)}  ${running ? chalk.green(c.state) : chalk.gray(c.state)}  ${chalk.gray(c.image)}`;
+      if (c.blueprint) line += c.blueprint.stale ? chalk.yellow('  [blueprint stale]') : chalk.cyan('  [blueprint]');
       if (c.agent.running) line += chalk.cyan('  [agent]');
       if (c.workspace.ahead) line += chalk.cyan(`  +${c.workspace.ahead} ahead`);
       if (c.workspace.dirty) line += chalk.yellow('  dirty');
@@ -546,6 +583,224 @@ export class ContainerCommand extends BaseCommand {
     });
     console.log('');
     console.log(chalk.gray("Tip: Use 'kunj ct start <branch>' to start a container"));
+  }
+
+  // ---------------------------------------------------------------------
+  // blueprint
+  // ---------------------------------------------------------------------
+
+  private async blueprint(sub: string | undefined, options: ContainerOptions): Promise<void> {
+    switch ((sub || 'status').toLowerCase()) {
+      case 'init':
+        return this.blueprintInit(options);
+      case 'snapshot':
+        return this.blueprintSnapshot(options);
+      case 'status':
+        return this.blueprintStatus(options);
+      case 'remove':
+        return this.blueprintRemove(options);
+    }
+    throw new ContainerError(`Unknown blueprint action '${sub}'. Expected one of: ${BLUEPRINT_ACTIONS.join(', ')}`);
+  }
+
+  // Resolved as a start resolves it: origin/<default branch>, then the host copy (or --blueprint)
+  private resolveBlueprint(options: ContainerOptions, defaultBranch: string | undefined): Promise<ResolvedBlueprint | null> {
+    return resolveBlueprint({ cwd: process.cwd(), repoKunjDir: getKunjDir(), defaultBranch, override: options.blueprint });
+  }
+
+  private snapshotInput(ctx: Context, branch: string, blueprint: ResolvedBlueprint, warn: (m: string) => void) {
+    return {
+      branch,
+      blueprint,
+      config: ctx.config,
+      repo: ctx.repo,
+      kunjVersion: getVersion(),
+      cwd: process.cwd(),
+      jsonMode: this.jsonMode,
+      warn,
+    };
+  }
+
+  /** The hash a snapshot of this repository's blueprint would have now; null when it cannot be computed. */
+  private async currentHash(ctx: Context): Promise<string | null> {
+    try {
+      const defaultBranch = (await detectDefaultBranch(ctx.repo.root)) || undefined;
+      const resolved = await this.resolveBlueprint({}, defaultBranch);
+      if (!resolved || !defaultBranch) return null;
+      return (await planSnapshot(this.snapshotInput(ctx, defaultBranch, resolved, () => {}))).hash;
+    } catch {
+      return null;
+    }
+  }
+
+  private async blueprintInit(options: ContainerOptions): Promise<void> {
+    let root: string;
+    try {
+      root = await getGitRoot();
+    } catch {
+      throw new ContainerError('Not in a git repository');
+    }
+    const file = options.global ? path.join(getKunjDir(), 'blueprint.json') : path.join(root, BLUEPRINT_PATH);
+    const interactive = !options.yes && !this.jsonMode && !!process.stdin.isTTY;
+
+    if (fs.existsSync(file) && !options.yes) {
+      if (!interactive) throw new ContainerError(`${file} already exists; pass --yes to overwrite it`);
+      const inquirer = (await import('inquirer')).default;
+      const { overwrite } = await inquirer.prompt([
+        { type: 'confirm', name: 'overwrite', message: `${file} already exists. Overwrite it?`, default: false },
+      ]);
+      if (!overwrite) {
+        console.log(chalk.gray('Left unchanged'));
+        return;
+      }
+    }
+
+    const inferred = inferBlueprint(root);
+    for (const reason of inferred.reasons) this.progress(chalk.gray(`  ${reason}`));
+
+    let tools = inferred.tools;
+    let setup = inferred.setup;
+    let maintain = inferred.maintain;
+    if (interactive) {
+      const inquirer = (await import('inquirer')).default;
+      const check = (key: keyof Blueprint, parse: (text: string) => unknown) => (text: string) => {
+        try {
+          parseBlueprint(JSON.stringify({ [key]: parse(text) }), key);
+          return true;
+        } catch (err) {
+          return err instanceof Error ? err.message : String(err);
+        }
+      };
+      const toolsFrom = (text: string) => parseToolsText(text, inferred.tools);
+      const answers = await inquirer.prompt([
+        { type: 'input', name: 'tools', message: 'Tools (name=value, ...):', default: formatTools(tools), validate: check('tools', toolsFrom) },
+        { type: 'input', name: 'setup', message: 'Setup commands (comma-separated):', default: setup.join(', '), validate: check('setup', commandsText) },
+        { type: 'input', name: 'maintain', message: 'Maintain commands (comma-separated):', default: maintain.join(', '), validate: check('maintain', commandsText) },
+      ]);
+      tools = toolsFrom(answers.tools);
+      setup = commandsText(answers.setup);
+      maintain = commandsText(answers.maintain);
+    } else {
+      this.progress(`  tools     ${formatTools(tools) || chalk.gray('none')}`);
+      this.progress(`  setup     ${setup.join(', ') || chalk.gray('none')}`);
+      this.progress(`  maintain  ${maintain.join(', ') || chalk.gray('none')}`);
+    }
+
+    const doc: Record<string, unknown> = {
+      ...(Object.keys(tools).length ? { tools } : {}),
+      setup,
+      maintain,
+      ...(inferred.lockfiles.length ? { lockfiles: inferred.lockfiles } : {}),
+    };
+    const text = JSON.stringify(doc, null, 2) + '\n';
+    try {
+      parseBlueprint(text, file);
+    } catch (err) {
+      throw new ContainerError(err instanceof Error ? err.message : String(err));
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+
+    if (this.jsonMode) {
+      this.outputJSON({ path: file, blueprint: doc, reasons: inferred.reasons });
+      return;
+    }
+    console.log(chalk.green(`✓ Wrote ${file}`));
+    if (!options.global) console.log(chalk.gray('  Commit and push it: the blueprint is read from origin/<default branch>'));
+    console.log('');
+    console.log('Next: kunj ct blueprint snapshot');
+  }
+
+  private async blueprintSnapshot(options: ContainerOptions): Promise<void> {
+    const ctx = await this.context(options);
+    // Task 9 lifts this with a host-made bundle
+    if (parseOrigin(ctx.repo.originUrl).isSsh) {
+      throw new ContainerError(
+        'snapshots clone from origin without credentials; an SSH origin cannot be snapshotted yet (private origins are coming)'
+      );
+    }
+    const defaultBranch = (await detectDefaultBranch(ctx.repo.root)) || undefined;
+    const branch = (options.base || defaultBranch)?.replace(/^origin\//, '');
+    if (!branch) throw new ContainerError('cannot detect the default branch; pass --base');
+    // The blueprint a start would use, so the snapshot's hash matches the starts that look for it
+    const resolved = await this.resolveBlueprint(options, defaultBranch || branch);
+    if (!resolved) throw new ContainerError('No blueprint; run kunj ct blueprint init');
+
+    this.progress(chalk.blue(`Snapshotting the blueprint (${resolved.path}) from ${branch}...`));
+    const result = await snapshotBlueprint(ctx.backend, {
+      ...this.snapshotInput(ctx, branch, resolved, this.warn),
+      rebuild: !!options.rebuild,
+      log: m => this.progress(chalk.gray(m)),
+    });
+
+    if (this.jsonMode) {
+      this.outputJSON(result);
+      return;
+    }
+    const from = result.ref ? ` from ${result.ref.slice(0, 7)}` : '';
+    console.log(chalk.green(`✓ Snapshot ${result.tag} (${megabytes(result.sizeBytes)} MB)${from}`));
+    for (const tool of result.tools) console.log(`  installed ${tool.name} ${tool.version}`);
+    if (result.reused) console.log(chalk.gray('  reused: already up to date (--rebuild to snapshot again)'));
+  }
+
+  private async blueprintStatus(options: ContainerOptions): Promise<void> {
+    const ctx = await this.context(options);
+    const defaultBranch = (await detectDefaultBranch(ctx.repo.root)) || undefined;
+    const resolved = await this.resolveBlueprint(options, defaultBranch);
+    if (!resolved) {
+      if (this.jsonMode) {
+        this.outputJSON({ source: null });
+        return;
+      }
+      throw new ContainerError('No blueprint; run kunj ct blueprint init');
+    }
+
+    const branch = (options.base || defaultBranch)?.replace(/^origin\//, '');
+    let hash: string | null = null;
+    if (!branch) {
+      this.warn('cannot detect the default branch; pass --base to compute the hash');
+    } else {
+      try {
+        hash = (await planSnapshot(this.snapshotInput(ctx, branch, resolved, this.warn))).hash;
+      } catch (err) {
+        this.warn(`Could not compute the blueprint hash: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const { current, others } = await snapshotStatus(ctx.backend, ctx.repo.name, ctx.repo.id, hash ?? '');
+    const stale = hash === null ? null : !current && others.length > 0;
+    const snapshot = current
+      ? { tag: current.tag, createdAt: current.labels[LABEL.blueprintCreatedAt] || current.createdAt, sizeBytes: current.size }
+      : null;
+    const notes = resolved.blueprint.notes ?? null;
+
+    if (this.jsonMode) {
+      this.outputJSON({ source: resolved.source, path: resolved.path, hash, snapshot, stale, others: others.map(i => i.tag), notes });
+      return;
+    }
+    console.log(`Blueprint: ${resolved.path} ${chalk.gray(`(${resolved.source})`)}`);
+    console.log(`  hash      ${hash ?? chalk.gray('unknown')}`);
+    if (snapshot) {
+      console.log(`  snapshot  ${snapshot.tag}  ${chalk.gray(`${snapshot.createdAt}  ${megabytes(snapshot.sizeBytes)} MB`)}`);
+    } else if (stale) {
+      console.log(`  snapshot  ${chalk.yellow(`stale (${others.map(i => i.tag).join(', ')})`)}; run kunj ct blueprint snapshot`);
+    } else {
+      console.log(`  snapshot  ${chalk.gray('none')}; run kunj ct blueprint snapshot`);
+    }
+    if (notes) console.log(`  notes     ${notes}`);
+    if (resolved.blueprint.ignoredKeys.length) {
+      console.log(chalk.yellow(`  ignored   ${resolved.blueprint.ignoredKeys.join(', ')}`));
+    }
+  }
+
+  private async blueprintRemove(options: ContainerOptions): Promise<void> {
+    const ctx = await this.context(options);
+    const removed = await removeSnapshots(ctx.backend, ctx.repo.name, ctx.repo.id, this.warn);
+    if (this.jsonMode) {
+      this.outputJSON({ removed });
+      return;
+    }
+    if (removed.length === 0) console.log(chalk.gray('No snapshots to remove'));
+    for (const tag of removed) console.log(chalk.green(`✓ Removed ${tag}`));
   }
 
   // ---------------------------------------------------------------------
@@ -599,6 +854,42 @@ export class ContainerCommand extends BaseCommand {
 // container.agentCommand is shell text (it may quote its own arguments); extra args are data
 export function agentCommandLine(setting: string | undefined, args: string[]): string {
   return [(setting || CONTAINER_AGENT_COMMAND_DEFAULT).trim(), ...args.map(shellQuote)].join(' ');
+}
+
+function megabytes(bytes: number): number {
+  return Math.round(bytes / (1024 * 1024));
+}
+
+function blueprintSummary(bp: StartResult['blueprint']): string | null {
+  if (!bp) return null;
+  if (bp.snapshot) return `snapshot ${bp.hash}${bp.stale ? ' (stale)' : ''}`;
+  const ran = [bp.toolsRun.length ? 'tools' : '', bp.setupRan ? 'setup' : ''].filter(Boolean);
+  return ran.length ? `no snapshot; ran ${ran.join(' + ')}` : 'no snapshot';
+}
+
+// `node=24, apt=jq git-lfs`: what `blueprint init` shows and lets the user edit
+function formatTools(tools: Record<string, ToolValue>): string {
+  return Object.entries(tools)
+    .map(([name, value]) => `${name}=${value === true ? 'true' : Array.isArray(value) ? value.join(' ') : value}`)
+    .join(', ');
+}
+
+// A tool proposed as a list (apt) stays a list; otherwise several words become one
+function parseToolsText(text: string, proposed: Record<string, ToolValue>): Record<string, ToolValue> {
+  const tools: Record<string, ToolValue> = {};
+  for (const pair of text.split(',').map(p => p.trim()).filter(Boolean)) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) throw new Error(`"${pair}" is not name=value`);
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    const words = value.split(/\s+/).filter(Boolean);
+    tools[name] = value === 'true' ? true : Array.isArray(proposed[name]) || words.length > 1 ? words : value;
+  }
+  return tools;
+}
+
+function commandsText(text: string): string[] {
+  return text.split(',').map(c => c.trim()).filter(Boolean);
 }
 
 function parsePublish(text: string | undefined): number[] {
