@@ -95,6 +95,8 @@ export interface StartOptions {
   namesFor?: string;
   /** The blueprint's presets, already resolved (tests, and the snapshot command); resolved here when undefined */
   presets?: Preset[];
+  /** Publish no devcontainer forwardPorts (the snapshot's temporary container binds no host port) */
+  ignoreForwardPorts?: boolean;
 }
 
 export interface StartResult {
@@ -324,7 +326,7 @@ async function mapPorts(ports: number[]): Promise<Array<{ container: number; hos
 }
 
 function requestedPorts(options: StartOptions, spec: DevcontainerSpec | undefined): number[] {
-  const all = [...options.publish, ...(options.config.container?.publish ?? []).map(p => parseInt(p, 10)), ...(spec?.forwardPorts ?? [])];
+  const all = [...options.publish, ...(options.config.container?.publish ?? []).map(p => parseInt(p, 10)), ...(options.ignoreForwardPorts ? [] : spec?.forwardPorts ?? [])];
   return all.filter(p => Number.isInteger(p) && p > 0 && p <= 65535);
 }
 

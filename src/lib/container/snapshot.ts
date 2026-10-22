@@ -1,8 +1,6 @@
 // `kunj ct blueprint snapshot`: provision a temporary container from the blueprint, copy its
 // workspace to the seed directory and commit it as kunj-blueprint-<repo>:<hash>. The temporary
 // container is an ordinary start without secrets, keep files or hooks, and is always removed.
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { ContainerBackend, ImageInfo } from './backend';
 import {
   ResolvedBlueprint,
@@ -15,13 +13,11 @@ import {
   snapshotTag,
 } from './blueprint';
 import { StartOptions, StartResult, baseImageTag, removeContainer, startContainer } from './lifecycle';
-import { LABEL } from './names';
+import { LABEL, containerNames } from './names';
 import { orderTools, resolvePresets } from './presets';
 import { SEED_COPYING, SEED_FRESH, SEED_MARKER_EXCLUDE } from './seed';
 import { getGlobalKunjDir } from '../config';
 import { KunjConfig } from '../../types';
-
-const execFileAsync = promisify(execFile);
 
 /** Written by presets through kunj_env (src/container/presets/_lib.sh), one KEY=VALUE per line. */
 export const PRESET_ENV_FILE = '/etc/kunj/env';
@@ -43,7 +39,7 @@ export interface SnapshotOptions {
 export interface SnapshotResult {
   tag: string;
   hash: string;
-  /** The commit snapshotted (empty when reused: see the image's kunj.blueprint.ref label) */
+  /** The commit snapshotted, as checked out in the container (the image's kunj.blueprint.ref label) */
   ref: string;
   base: string;
   sizeBytes: number;
@@ -78,16 +74,18 @@ function snapshotsOf(images: ImageInfo[], repoName: string): ImageInfo[] {
   return images.filter(i => i.tag.startsWith(prefix));
 }
 
-async function sizeOf(backend: ContainerBackend, repoId: string, tag: string): Promise<number> {
-  return (await backend.listImages({ [LABEL.repo]: repoId })).find(i => i.tag === tag)?.size ?? 0;
+/** First line: the workspace's HEAD (empty when unreadable); the rest: the presets' env file. Run as
+ * root, so git is told the sandbox user's checkout is safe. */
+export const SNAPSHOT_READ_SCRIPT =
+  `git -c safe.directory=/workspace -C /workspace rev-parse HEAD 2>/dev/null || echo; cat ${PRESET_ENV_FILE} 2>/dev/null || true`;
+
+/** `<branch>:snapshot`: ':' is invalid in a git ref, so no real branch's container shares these names. */
+export function snapshotNamesFor(branch: string): string {
+  return `${branch}:snapshot`;
 }
 
-async function commitSha(cwd: string, ref: string): Promise<string> {
-  try {
-    return (await execFileAsync('git', ['rev-parse', '--verify', '-q', `${ref}^{commit}`], { cwd })).stdout.trim();
-  } catch {
-    return '';
-  }
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export async function snapshotBlueprint(backend: ContainerBackend, opts: SnapshotOptions): Promise<SnapshotResult> {
@@ -118,7 +116,8 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
     defaultBranch: async () => opts.branch,
     noSnapshot: true,
     blueprint: opts.blueprint,
-    namesFor: `${opts.branch}@snapshot`,
+    namesFor: snapshotNamesFor(opts.branch),
+    ignoreForwardPorts: true,
     presets,
   };
 
@@ -133,8 +132,15 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
   const tag = snapshotTag(opts.repo.name, hash);
 
   if (!opts.rebuild && (await backend.imageExists(tag))) {
-    return { tag, hash, ref: '', base, sizeBytes: await sizeOf(backend, opts.repo.id, tag), tools: [], reused: true };
+    const found = (await backend.listImages({ [LABEL.repo]: opts.repo.id })).find(i => i.tag === tag);
+    const ref = found?.labels[LABEL.blueprintRef] ?? '';
+    return { tag, hash, ref, base, sizeBytes: found?.size ?? 0, tools: [], reused: true };
   }
+
+  // A run killed before its cleanup (Ctrl-C during setup) leaves the temporary container and its
+  // volumes; a kept workspace volume would skip the clone and snapshot an old checkout
+  const names = containerNames(opts.repo.name, opts.repo.id, snapshotNamesFor(opts.branch));
+  await removeContainer(backend, names, { force: true, keepVolumes: false, user: '', kunjVersion: opts.kunjVersion, warn: opts.warn });
 
   let result: StartResult | undefined;
   let sha = '';
@@ -145,9 +151,11 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
     const id = result.containerId;
     const copy = await backend.exec(id, ['sh', '-c', SEED_COPY_SCRIPT], { user: 'root' });
     if (copy.exitCode !== 0) throw new Error(`Copying the workspace to ${SEED_DIR} failed (exit ${copy.exitCode})`);
-    const env = await backend.exec(id, ['sh', '-c', `cat ${PRESET_ENV_FILE} 2>/dev/null || true`], { user: 'root' });
-    const changes = envChanges(env.stdout, opts.warn);
-    sha = await commitSha(opts.cwd, `origin/${opts.branch}`);
+    const read = await backend.exec(id, ['sh', '-c', SNAPSHOT_READ_SCRIPT], { user: 'root' });
+    const nl = read.stdout.indexOf('\n');
+    sha = (nl === -1 ? read.stdout : read.stdout.slice(0, nl)).trim();
+    if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new Error('Could not read the commit checked out in the snapshot container');
+    const changes = envChanges(nl === -1 ? '' : read.stdout.slice(nl + 1), opts.warn);
     const labels = blueprintLabels({ repoId: opts.repo.id, hash, ref: sha, base, user: result.user });
     opts.log('Committing snapshot…');
     await backend.commitContainer(id, tag, labels, changes);
@@ -160,15 +168,14 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
         user: result.user,
         kunjVersion: opts.kunjVersion,
         warn: opts.warn,
-      }).catch(err => opts.warn(`Could not remove the temporary snapshot container: ${err instanceof Error ? err.message : String(err)}`));
+      }).catch(err => opts.warn(`Could not remove the temporary snapshot container: ${message(err)}`));
     }
   }
 
   // One snapshot per repository
   const images = snapshotsOf(await backend.listImages({ [LABEL.repo]: opts.repo.id }), opts.repo.name);
   for (const old of images.filter(i => i.labels[LABEL.blueprintHash] !== hash)) {
-    await backend.removeImage(old.tag).catch(err =>
-      opts.warn(`Could not remove the old snapshot ${old.tag}: ${err instanceof Error ? err.message : String(err)}`));
+    await backend.removeImage(old.tag).catch(err => opts.warn(`Could not remove the old snapshot ${old.tag}: ${message(err)}`));
   }
   return {
     tag,
@@ -192,9 +199,21 @@ export async function snapshotStatus(
   return { current, others: images.filter(i => i !== current) };
 }
 
-/** Removes every snapshot of the repository; returns the tags removed. */
-export async function removeSnapshots(backend: ContainerBackend, repoName: string, repoId: string): Promise<string[]> {
-  const images = snapshotsOf(await backend.listImages({ [LABEL.repo]: repoId }), repoName);
-  for (const i of images) await backend.removeImage(i.tag);
-  return images.map(i => i.tag);
+/** Removes every snapshot of the repository; returns the tags removed (a failure warns and the rest still go). */
+export async function removeSnapshots(
+  backend: ContainerBackend,
+  repoName: string,
+  repoId: string,
+  warn: (m: string) => void = () => {}
+): Promise<string[]> {
+  const removed: string[] = [];
+  for (const i of snapshotsOf(await backend.listImages({ [LABEL.repo]: repoId }), repoName)) {
+    try {
+      await backend.removeImage(i.tag);
+      removed.push(i.tag);
+    } catch (err) {
+      warn(`Could not remove ${i.tag}: ${message(err)}`);
+    }
+  }
+  return removed;
 }

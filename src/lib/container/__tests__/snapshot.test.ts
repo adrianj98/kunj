@@ -17,6 +17,7 @@ jest.mock('../lifecycle', () => ({
   removeContainer: jest.fn(),
   baseImageTag: jest.fn(),
 }));
+const actualLifecycle = jest.requireActual('../lifecycle') as typeof import('../lifecycle');
 
 jest.mock('../../config', () => ({
   getGlobalKunjDir: () => path.join(tmp, 'global'),
@@ -24,19 +25,19 @@ jest.mock('../../config', () => ({
 
 import * as lifecycle from '../lifecycle';
 import { StartOptions, StartResult } from '../lifecycle';
-import { SEED_COPY_SCRIPT, removeSnapshots, snapshotBlueprint, snapshotStatus, SnapshotOptions } from '../snapshot';
+import { SEED_COPY_SCRIPT, SNAPSHOT_READ_SCRIPT, removeSnapshots, snapshotBlueprint, snapshotStatus, SnapshotOptions } from '../snapshot';
 
 const mocked = lifecycle as jest.Mocked<typeof lifecycle>;
 
 const REPO = { root: '', name: 'app', id: 'github.com/acme/app', originUrl: 'https://github.com/acme/app.git' };
 const BASE = 'kunj-sandbox:9.9.9';
-const NAMES = containerNames(REPO.name, REPO.id, 'main@snapshot');
+const NAMES = containerNames(REPO.name, REPO.id, 'main:snapshot');
 const COPY = ['sh', '-c', SEED_COPY_SCRIPT];
-const ENV_READ = ['sh', '-c', 'cat /etc/kunj/env 2>/dev/null || true'];
+const READ = ['sh', '-c', SNAPSHOT_READ_SCRIPT];
+const SHA = 'a'.repeat(40);
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e' };
 const TEXT = '{ "tools": { "apt": ["jq"] }, "setup": ["npm ci"] }';
 
-let originSha = '';
 let warnings: string[] = [];
 let logs: string[] = [];
 
@@ -100,6 +101,13 @@ function image(tag: string, hash: string, over: Partial<ImageInfo> = {}): ImageI
   return { tag, id: `id-${tag}`, createdAt: '2026-10-01T00:00:00Z', labels: { [LABEL.repo]: REPO.id, [LABEL.blueprintHash]: hash }, size: 1, ...over };
 }
 
+// The container's HEAD, then the presets' env file
+function backendWith(env = ''): FakeBackend {
+  const b = new FakeBackend();
+  b.execResults.set(READ.join(' '), { exitCode: 0, stdout: `${SHA}\n${env}` });
+  return b;
+}
+
 function startOptionsPassed(): StartOptions {
   return mocked.startContainer.mock.calls[0][1];
 }
@@ -112,7 +120,6 @@ beforeAll(() => {
   git('add', '.');
   git('commit', '-q', '-m', 'one');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-  originSha = git('rev-parse', 'HEAD');
   // HEAD moves on, so a hash read at HEAD would differ from one at origin/main
   fs.writeFileSync(path.join(tmp, 'package-lock.json'), '{"v":2}');
   git('commit', '-q', '-am', 'two');
@@ -128,20 +135,21 @@ beforeEach(() => {
   logs = [];
   mocked.baseImageTag.mockResolvedValue(BASE);
   mocked.startContainer.mockResolvedValue(startResult());
-  mocked.removeContainer.mockResolvedValue({ unpushedRefs: [], stashes: 0, dirty: false, originReachable: true });
+  mocked.removeContainer.mockImplementation(actualLifecycle.removeContainer);
 });
 
 describe('snapshotBlueprint', () => {
   it('snapshot forwards no env and no keep files', async () => {
-    const b = new FakeBackend();
+    const b = backendWith();
     await snapshotBlueprint(b, options());
     const o = startOptionsPassed();
     expect(o.config.container).toMatchObject({ env: [], keepFiles: false, files: [], publish: [], agentCommand: '', cpus: '2' });
     expect(o).toMatchObject({
       branch: 'main',
       create: false,
-      namesFor: 'main@snapshot',
+      namesFor: 'main:snapshot',
       noSnapshot: true,
+      ignoreForwardPorts: true,
       skipHooks: true,
       keepOnError: false,
       rebuild: true,
@@ -156,8 +164,29 @@ describe('snapshotBlueprint', () => {
     expect(mocked.baseImageTag.mock.calls[0][0]).toBe(o);
   });
 
+  it('removes a leftover temporary container and its volumes before starting', async () => {
+    const b = backendWith();
+    b.existing.push({
+      id: 'old-ctr',
+      name: NAMES.container,
+      state: 'exited',
+      image: BASE,
+      createdAt: '',
+      labels: { [LABEL.repo]: REPO.id, [LABEL.branch]: 'main:snapshot' },
+      ports: [],
+    });
+    b.volumes.add(NAMES.workspaceVolume);
+    b.volumes.add(NAMES.homeVolume);
+    await snapshotBlueprint(b, options());
+    expect(b.callsOf('remove')[0]).toEqual([
+      { containers: [NAMES.helper, NAMES.container], volumes: [NAMES.workspaceVolume, NAMES.homeVolume], networks: [NAMES.network] },
+    ]);
+    expect(mocked.removeContainer.mock.invocationCallOrder[0]).toBeLessThan(mocked.startContainer.mock.invocationCallOrder[0]);
+    expect(mocked.removeContainer.mock.calls[0][2]).toMatchObject({ force: true, keepVolumes: false });
+  });
+
   it('copies the seed as root, commits with labels, removes temp objects and older snapshots', async () => {
-    const b = new FakeBackend();
+    const b = backendWith();
     const hash = await expectedHash('origin/main');
     const tag = snapshotTag('app', hash);
     b.images.push(image('kunj-blueprint-app:old', 'old'), image('other-repo:x', 'old'), image('kunj-blueprint-app:older', 'older'));
@@ -170,58 +199,69 @@ describe('snapshotBlueprint', () => {
         ' && rm -f /opt/kunj/seed/.kunj-seeded /opt/kunj/seed/.kunj-fresh /opt/kunj/seed/.kunj-copying' +
         ' && chown -R "$(stat -c %u:%g /workspace)" /opt/kunj/seed'
     );
-    expect(execs[1]).toEqual(['ctr-1', ENV_READ, { user: 'root' }]);
+    expect(execs[1]).toEqual(['ctr-1', READ, { user: 'root' }]);
+    expect(SNAPSHOT_READ_SCRIPT).toBe(
+      'git -c safe.directory=/workspace -C /workspace rev-parse HEAD 2>/dev/null || echo; cat /etc/kunj/env 2>/dev/null || true'
+    );
 
     const [id, commitTag, labels, changes] = b.callsOf('commitContainer')[0] as [string, string, Record<string, string>, string[]];
     expect([id, commitTag, changes]).toEqual(['ctr-1', tag, []]);
     expect(labels).toMatchObject({
       [LABEL.repo]: REPO.id,
       [LABEL.blueprintHash]: hash,
-      [LABEL.blueprintRef]: originSha,
+      // The commit checked out in the container, not the host's possibly stale origin/main
+      [LABEL.blueprintRef]: SHA,
       [LABEL.blueprintBase]: BASE,
       [LABEL.blueprintUser]: 'kunj',
     });
     expect(labels[LABEL.blueprintCreatedAt]).toMatch(/^\d{4}-\d\d-\d\dT/);
     expect(logs).toContain('Committing snapshot…');
 
-    expect(mocked.removeContainer).toHaveBeenCalledWith(b, NAMES, expect.objectContaining({ force: true, keepVolumes: false, user: 'kunj', kunjVersion: '9.9.9' }));
+    // Once before the start (leftovers), once after the commit
+    expect(mocked.removeContainer).toHaveBeenCalledTimes(2);
+    expect(mocked.removeContainer).toHaveBeenLastCalledWith(b, NAMES, expect.objectContaining({ force: true, keepVolumes: false, user: 'kunj', kunjVersion: '9.9.9' }));
     // Removed after the commit; another repository's image of the same label set is left alone
     expect(b.callsOf('removeImage')).toEqual([['kunj-blueprint-app:old'], ['kunj-blueprint-app:older']]);
     expect(b.methods().indexOf('removeImage')).toBeGreaterThan(b.methods().indexOf('commitContainer'));
     expect(b.images.map(i => i.tag)).toEqual(['other-repo:x', tag]);
-    expect(result).toEqual({ tag, hash, ref: originSha, base: BASE, sizeBytes: 0, tools: [{ name: 'apt', version: 'jq' }], reused: false });
+    expect(result).toEqual({ tag, hash, ref: SHA, base: BASE, sizeBytes: 0, tools: [{ name: 'apt', version: 'jq' }], reused: false });
   });
 
   it('turns /etc/kunj/env into ENV changes', async () => {
-    const b = new FakeBackend();
-    b.execResults.set(ENV_READ.join(' '), {
-      exitCode: 0,
-      stdout: 'COREPACK_HOME=/usr/local/share/corepack\nWEIRD=a "b" $HOME\n\nnot a line\n',
-    });
+    const b = backendWith('COREPACK_HOME=/usr/local/share/corepack\nWEIRD=a "b" $HOME\n\nnot a line\n');
     await snapshotBlueprint(b, options());
     const changes = b.callsOf('commitContainer')[0][3];
     expect(changes).toEqual(['ENV COREPACK_HOME="/usr/local/share/corepack"', 'ENV WEIRD="a \\"b\\" \\$HOME"']);
     expect(warnings).toContain('Ignoring malformed line in /etc/kunj/env: not a line');
   });
 
-  it('hashes with blueprintRef (origin/<default>)', async () => {
+  it('refuses to commit when the container commit cannot be read', async () => {
     const b = new FakeBackend();
+    b.execResults.set(READ.join(' '), { exitCode: 0, stdout: '\nA=1\n' });
+    await expect(snapshotBlueprint(b, options())).rejects.toThrow('Could not read the commit checked out in the snapshot container');
+    expect(b.callsOf('commitContainer')).toEqual([]);
+    expect(mocked.removeContainer).toHaveBeenCalledTimes(2);
+  });
+
+  it('hashes with blueprintRef (origin/<default>)', async () => {
+    const b = backendWith();
     const result = await snapshotBlueprint(b, options());
     expect(result.hash).toBe(await expectedHash('origin/main'));
     expect(result.hash).not.toBe(await expectedHash('HEAD'));
     // A blueprint read from origin hashes at its own ref
-    const fromRepo = await snapshotBlueprint(new FakeBackend(), options({ blueprint: { ...blueprint(), source: 'repo', ref: 'HEAD' } }));
+    const fromRepo = await snapshotBlueprint(backendWith(), options({ blueprint: { ...blueprint(), source: 'repo', ref: 'HEAD' } }));
     expect(fromRepo.hash).toBe(await expectedHash('HEAD'));
   });
 
   it('reuses an existing tag unless rebuild', async () => {
-    const b = new FakeBackend();
+    const b = backendWith();
     const hash = await expectedHash('origin/main');
     const tag = snapshotTag('app', hash);
-    b.images.push(image(tag, hash, { size: 1234 }));
+    b.images.push(image(tag, hash, { size: 1234, labels: { [LABEL.repo]: REPO.id, [LABEL.blueprintHash]: hash, [LABEL.blueprintRef]: 'f00d' } }));
     const reused = await snapshotBlueprint(b, options());
-    expect(reused).toEqual({ tag, hash, ref: '', base: BASE, sizeBytes: 1234, tools: [], reused: true });
+    expect(reused).toEqual({ tag, hash, ref: 'f00d', base: BASE, sizeBytes: 1234, tools: [], reused: true });
     expect(mocked.startContainer).not.toHaveBeenCalled();
+    expect(mocked.removeContainer).not.toHaveBeenCalled();
     expect(b.callsOf('commitContainer')).toEqual([]);
 
     const rebuilt = await snapshotBlueprint(b, options({ rebuild: true }));
@@ -231,36 +271,39 @@ describe('snapshotBlueprint', () => {
   });
 
   it('cleans up on setup failure', async () => {
-    const b = new FakeBackend();
+    const b = backendWith();
     mocked.startContainer.mockRejectedValue(new Error('setup command failed (exit 1): npm ci'));
     await expect(snapshotBlueprint(b, options())).rejects.toThrow('setup command failed (exit 1): npm ci');
     expect(b.callsOf('commitContainer')).toEqual([]);
     expect(b.callsOf('removeImage')).toEqual([]);
-    // startContainer (keepOnError: false) rolled itself back; there is no result to remove
-    expect(mocked.removeContainer).not.toHaveBeenCalled();
-  });
-
-  it('a failed seed copy removes the temp container and commits nothing', async () => {
-    const b = new FakeBackend();
-    b.execResults.set(COPY.join(' '), { exitCode: 1, stdout: '' });
-    await expect(snapshotBlueprint(b, options())).rejects.toThrow('Copying the workspace to /opt/kunj/seed failed (exit 1)');
-    expect(b.callsOf('commitContainer')).toEqual([]);
+    // Only the leftover cleanup before the start: startContainer (keepOnError: false) rolled itself back
     expect(mocked.removeContainer).toHaveBeenCalledTimes(1);
   });
 
+  it('a failed seed copy removes the temp container and commits nothing', async () => {
+    const b = backendWith();
+    b.execResults.set(COPY.join(' '), { exitCode: 1, stdout: '' });
+    await expect(snapshotBlueprint(b, options())).rejects.toThrow('Copying the workspace to /opt/kunj/seed failed (exit 1)');
+    expect(b.callsOf('commitContainer')).toEqual([]);
+    expect(mocked.removeContainer).toHaveBeenCalledTimes(2);
+  });
+
   it('commit failure still removes the temp container', async () => {
-    const b = new FakeBackend();
+    const b = backendWith();
     b.images.push(image('kunj-blueprint-app:old', 'old'));
     b.failOn = 'commitContainer';
     await expect(snapshotBlueprint(b, options())).rejects.toThrow('commitContainer failed');
-    expect(mocked.removeContainer).toHaveBeenCalledWith(b, NAMES, expect.objectContaining({ force: true, keepVolumes: false }));
+    expect(mocked.removeContainer).toHaveBeenCalledTimes(2);
+    expect(mocked.removeContainer).toHaveBeenLastCalledWith(b, NAMES, expect.objectContaining({ force: true, keepVolumes: false, user: 'kunj' }));
     // Older snapshots are only pruned after a successful commit
     expect(b.callsOf('removeImage')).toEqual([]);
   });
 
-  it('a failing removal is a warning, not a failure', async () => {
-    const b = new FakeBackend();
-    mocked.removeContainer.mockRejectedValue(new Error('busy'));
+  it('a failing removal after the commit is a warning, not a failure', async () => {
+    const b = backendWith();
+    mocked.removeContainer
+      .mockImplementationOnce(actualLifecycle.removeContainer)
+      .mockRejectedValueOnce(new Error('busy'));
     await expect(snapshotBlueprint(b, options())).resolves.toMatchObject({ reused: false });
     expect(warnings).toContain('Could not remove the temporary snapshot container: busy');
   });
@@ -285,5 +328,18 @@ describe('removeSnapshots', () => {
     b.images.push(image('kunj-blueprint-app:ccc', 'ccc', { labels: { [LABEL.repo]: 'github.com/other/app' } }));
     await expect(removeSnapshots(b, 'app', REPO.id)).resolves.toEqual(['kunj-blueprint-app:aaa', 'kunj-blueprint-app:bbb']);
     expect(b.callsOf('removeImage')).toEqual([['kunj-blueprint-app:aaa'], ['kunj-blueprint-app:bbb']]);
+  });
+
+  it('keeps going past a tag that cannot be removed and warns', async () => {
+    const b = new FakeBackend();
+    b.images.push(image('kunj-blueprint-app:aaa', 'aaa'), image('kunj-blueprint-app:bbb', 'bbb'));
+    const real = b.removeImage.bind(b);
+    jest.spyOn(b, 'removeImage').mockImplementation(async tag => {
+      if (tag.endsWith(':aaa')) throw new Error('image is being used by a container');
+      return real(tag);
+    });
+    const warned: string[] = [];
+    await expect(removeSnapshots(b, 'app', REPO.id, m => warned.push(m))).resolves.toEqual(['kunj-blueprint-app:bbb']);
+    expect(warned).toEqual(['Could not remove kunj-blueprint-app:aaa: image is being used by a container']);
   });
 });

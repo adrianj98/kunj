@@ -562,6 +562,21 @@ describe('startContainer', () => {
     expect(runSpecs(b)[0].publish).toEqual(result.publish);
   });
 
+  it('ignoreForwardPorts publishes none of the devcontainer forwardPorts', async () => {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: tmp, env: GIT_ENV });
+    git('init', '-q');
+    fs.mkdirSync(path.join(tmp, '.devcontainer'));
+    fs.writeFileSync(path.join(tmp, '.devcontainer', 'devcontainer.json'), JSON.stringify({ forwardPorts: [5173] }));
+    git('add', '.');
+    git('commit', '-qm', 'dc');
+    git('update-ref', `refs/remotes/origin/${BRANCH}`, 'HEAD');
+
+    const b = backend();
+    const result = await startContainer(b, options({ ignoreForwardPorts: true }));
+    expect(result.publish).toEqual([]);
+    expect(runSpecs(b)[0].publish).toEqual([]);
+  });
+
   it('uses the devcontainer on origin: user, env, ports and post commands', async () => {
     const git = (...args: string[]) => execFileSync('git', args, { cwd: tmp, env: GIT_ENV });
     git('init', '-q');
