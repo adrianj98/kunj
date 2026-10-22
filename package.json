@@ -7,7 +7,7 @@
     "kunj": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-container-assets.js",
     "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
     "test": "jest",
