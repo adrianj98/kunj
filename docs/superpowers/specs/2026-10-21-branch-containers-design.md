@@ -170,7 +170,7 @@ Resolution, first match wins:
    non-root user that exists in the image; `root`, uid 0 or an absent key falls back to the image's
    `USER` if non-root, else the start is refused. (The file comes from the branch, which the agent
    can edit, so it must not be able to grant itself root.)
-3. The default `kunj-sandbox:<kunj version>`, built locally on first use from
+3. The default `kunj-sandbox:<kunj version>-<hash of its build context>`, built locally on first use from
    `dist/container/sandbox/Dockerfile`: Debian slim, git, git-lfs, gh, node LTS, Claude Code, tmux,
    socat, iproute2, zsh; user `dev` (uid 1000), **no sudo**; npm prefix in the home directory.
    Modelled on `github.com/anthropics/claude-code/.devcontainer`, minus the firewall (the network
@@ -268,7 +268,7 @@ the home volume, so a login done inside the container persists for that branch.
 
 Every branch has its own bridge network, so containers of different branches cannot reach each
 other. A small **network helper** container (`src/container/nethelper/`: Alpine + iptables + ipset
-+ a shell script, built once as `kunj-nethelper:<version>`) runs with `--network container:<the
++ a shell script, built once as `kunj-nethelper:<version>-<hash>`) runs with `--network container:<the
 branch container>` and `NET_ADMIN`/`NET_RAW`, and owns the rules in the shared network namespace.
 The agent's container has all capabilities dropped except CHOWN, DAC_OVERRIDE, FOWNER, SETUID,
 SETGID (no NET_ADMIN, no NET_RAW), so it cannot change or bypass them even if the

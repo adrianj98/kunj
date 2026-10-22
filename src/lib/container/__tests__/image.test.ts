@@ -9,6 +9,8 @@ import {
   resolveHelperImage,
   imageHash,
   imageRepoName,
+  directoryHash,
+  assetHash,
   ensureImage,
   sandboxAssetsDir,
   tarDirectory,
@@ -76,7 +78,7 @@ describe('image', () => {
 
     const fromSandbox = resolveImage({ setting: '', devcontainer: null, repoName: 'repo', kunjVersion: '1.2.3' });
     expect(fromSandbox.kind).toBe('sandbox');
-    expect(fromSandbox.tag).toBe('kunj-sandbox:1.2.3');
+    expect(fromSandbox.tag).toMatch(/^kunj-sandbox:1\.2\.3-[0-9a-f]{12}$/);
     expect(fromSandbox.tag).toBe(SANDBOX_IMAGE('1.2.3'));
     expect(fromSandbox.build?.dockerfile).toBe('Dockerfile');
     expect(fromSandbox.user).toBe('dev');
@@ -130,9 +132,28 @@ describe('image', () => {
     expect(without.user).toBe('');
   });
 
+  it('hashes an asset directory by paths and contents, so a changed file gives a new tag', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-asset-'));
+    tmpDirs.push(dir);
+    fs.mkdirSync(path.join(dir, 'sub'));
+    fs.writeFileSync(path.join(dir, 'Dockerfile'), 'FROM alpine\n');
+    fs.writeFileSync(path.join(dir, 'sub', 'firewall.sh'), 'echo 1\n');
+    const first = directoryHash(dir);
+    expect(first).toMatch(/^[0-9a-f]{12}$/);
+    fs.chmodSync(path.join(dir, 'sub', 'firewall.sh'), 0o755);
+    expect(directoryHash(dir)).toBe(first);
+    fs.writeFileSync(path.join(dir, 'sub', 'firewall.sh'), 'echo 2\n');
+    expect(directoryHash(dir)).not.toBe(first);
+    fs.renameSync(path.join(dir, 'sub', 'firewall.sh'), path.join(dir, 'sub', 'other.sh'));
+    expect(directoryHash(dir)).not.toBe(first);
+
+    expect(SANDBOX_IMAGE('1.0.0')).toBe(`kunj-sandbox:1.0.0-${assetHash('sandbox')}`);
+    expect(NETHELPER_IMAGE('1.0.0')).toBe(`kunj-nethelper:1.0.0-${directoryHash(path.join(sandboxAssetsDir(), 'nethelper'))}`);
+  });
+
   it('resolveHelperImage builds the network helper from its assets', () => {
     const helper = resolveHelperImage('2.0.0');
-    expect(helper.tag).toBe('kunj-nethelper:2.0.0');
+    expect(helper.tag).toMatch(/^kunj-nethelper:2\.0\.0-[0-9a-f]{12}$/);
     expect(helper.tag).toBe(NETHELPER_IMAGE('2.0.0'));
     expect(helper.build?.dockerfile).toBe('Dockerfile');
   });

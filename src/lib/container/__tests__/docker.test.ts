@@ -105,6 +105,11 @@ describe('docker backend', () => {
       expect(args.join(' ')).toContain('--cpus 1 --memory 256m --cap-add NET_ADMIN --cap-add NET_RAW kunj/default:1');
     });
 
+    it('runArgs passes --add-host entries', () => {
+      const args = runArgs({ ...baseSpec, extraHosts: ['host.docker.internal:host-gateway'] }, '/tmp/x/env');
+      expect(args.join(' ')).toContain('--network kunj-app-main-abc123-net --add-host host.docker.internal:host-gateway --user dev');
+    });
+
     it('runArgs drops capabilities before adding, and passes security options', () => {
       const args = runArgs({ ...baseSpec, capDrop: ['ALL'], capabilities: ['CHOWN', 'SETUID'], securityOpt: ['no-new-privileges'] }, '/tmp/x/env');
       expect(args.join(' ')).toContain('--cap-drop ALL --cap-add CHOWN --cap-add SETUID --security-opt no-new-privileges kunj/default:1');

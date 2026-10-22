@@ -30,12 +30,46 @@ export interface ResolveImageInput {
   kunjVersion: string;
 }
 
-export const SANDBOX_IMAGE = (version: string) => `kunj-sandbox:${version}`;
-export const NETHELPER_IMAGE = (version: string) => `kunj-nethelper:${version}`;
+// The tags carry a hash of the build context, so a changed Dockerfile or firewall.sh is rebuilt
+// even when the version is the same (a development build, or a re-release)
+export const SANDBOX_IMAGE = (version: string) => `kunj-sandbox:${version}-${assetHash('sandbox')}`;
+export const NETHELPER_IMAGE = (version: string) => `kunj-nethelper:${version}-${assetHash('nethelper')}`;
 
 /** dist/container from dist/lib/container, src/container under ts-jest. */
 export function sandboxAssetsDir(): string {
   return path.join(__dirname, '..', '..', 'container');
+}
+
+const assetHashes = new Map<string, string>();
+
+/** 12 hex of a hash over one asset directory's file paths and contents (not modes: the build
+ * copies chmod them, and src and dist differ). */
+export function assetHash(name: string): string {
+  let hash = assetHashes.get(name);
+  if (!hash) {
+    hash = directoryHash(path.join(sandboxAssetsDir(), name));
+    assetHashes.set(name, hash);
+  }
+  return hash;
+}
+
+export function directoryHash(dir: string): string {
+  const h = crypto.createHash('sha1');
+  const walk = (rel: string) => {
+    for (const name of fs.readdirSync(path.join(dir, rel)).sort()) {
+      const relPath = rel ? `${rel}/${name}` : name;
+      const full = path.join(dir, relPath);
+      const stat = fs.statSync(full);
+      if (stat.isDirectory()) {
+        walk(relPath);
+      } else if (stat.isFile()) {
+        h.update(`${relPath}\0${stat.size}\0`);
+        h.update(fs.readFileSync(full));
+      }
+    }
+  };
+  walk('');
+  return h.digest('hex').slice(0, 12);
 }
 
 /** The git credential helper script, streamed into every container that gets a token. */

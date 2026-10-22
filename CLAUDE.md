@@ -178,7 +178,9 @@ Phase 1 only: no services, `open`, `prune`, Docker-in-Docker or `--auto` yet.
 
 **Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward}.ts`.
 The images' build contexts live in `src/container/{sandbox,nethelper}/` and are copied to
-`dist/container` by `scripts/copy-container-assets.js` as part of the build.
+`dist/container` by `scripts/copy-container-assets.js` as part of the build. Their tags are
+`kunj-sandbox:<version>-<hash>` / `kunj-nethelper:<version>-<hash>`, the hash covering the build
+context's files (`assetHash()` in image.ts), so editing a Dockerfile or `firewall.sh` rebuilds.
 
 **Backend rule:** only `docker.ts` spawns `docker`. Everything else programs against the
 `ContainerBackend` interface (backend.ts) so a remote backend can be added later; unit tests use

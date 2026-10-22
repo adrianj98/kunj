@@ -1,4 +1,4 @@
-# Default image for kunj branch containers (kunj-sandbox:<version>). Modelled on
+# Default image for kunj branch containers (kunj-sandbox:<version>-<hash of this directory>). Modelled on
 # github.com/anthropics/claude-code/.devcontainer without the firewall: the network
 # helper container owns the rules, so this image has no sudo and no iptables.
 FROM debian:bookworm-slim

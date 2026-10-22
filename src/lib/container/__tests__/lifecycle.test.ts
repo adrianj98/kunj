@@ -151,6 +151,7 @@ describe('startContainer', () => {
     expect(main.capDrop).toEqual(['ALL']);
     expect(main.capabilities).toEqual(['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID']);
     expect(main.securityOpt).toBeUndefined();
+    expect(main.extraHosts).toEqual(['host.docker.internal:host-gateway']);
     expect(main.init).toBe(true);
     // The image's own ENTRYPOINT never runs
     expect(main.entrypoint).toEqual(['sleep']);
@@ -169,6 +170,8 @@ describe('startContainer', () => {
     expect(helper.image).toBe(NETHELPER_IMAGE(VERSION));
     expect(helper.networkOf).toBe('id-1');
     expect(helper.capabilities).toEqual(['NET_ADMIN', 'NET_RAW']);
+    // docker refuses --add-host with --network container:<id>
+    expect(helper.extraHosts).toBeUndefined();
     expect(helper.init).toBe(false);
     expect(helper.labels[LABEL.role]).toBe('helper');
     expect(helper.env.KUNJ_FW_ORIGIN_HOST).toBe('github.com');

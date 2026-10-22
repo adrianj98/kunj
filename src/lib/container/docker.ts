@@ -38,6 +38,7 @@ export function runArgs(spec: ContainerSpec, envFile: string): string[] {
   args.push('--env-file', envFile);
   // A helper shares the main container's network namespace instead of joining the network
   args.push('--network', spec.networkOf ? `container:${spec.networkOf}` : spec.network);
+  for (const h of spec.extraHosts ?? []) args.push('--add-host', h);
   if (spec.user) args.push('--user', spec.user);
   args.push('--workdir', spec.workdir);
   for (const v of spec.volumes) args.push('-v', `${v.name}:${v.path}`);

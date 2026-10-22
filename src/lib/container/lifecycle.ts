@@ -634,6 +634,9 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
       memory: cfg?.memory || undefined,
       capDrop: ['ALL'],
       capabilities: MAIN_CAPABILITIES,
+      // Docker Desktop resolves it anyway; Linux engines need the mapping (the firewall still
+      // blocks it unless allowHost)
+      extraHosts: ['host.docker.internal:host-gateway'],
       init: true,
       entrypoint: ['sleep'],
       command: ['infinity'],

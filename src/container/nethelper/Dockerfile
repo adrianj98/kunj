@@ -1,4 +1,4 @@
-# Network helper for kunj branch containers (kunj-nethelper:<version>). Runs with
+# Network helper for kunj branch containers (kunj-nethelper:<version>-<hash of this directory>). Runs with
 # --network container:<agent container> and NET_ADMIN/NET_RAW, and owns the firewall of that
 # shared network namespace, so the agent's container needs no capabilities or sudo.
 FROM alpine:3.20

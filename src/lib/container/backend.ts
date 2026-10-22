@@ -29,6 +29,8 @@ export interface ContainerSpec {
   capabilities?: string[];
   capDrop?: string[];
   securityOpt?: string[];
+  /** --add-host entries, e.g. host.docker.internal:host-gateway */
+  extraHosts?: string[];
   networkOf?: string;
   init?: boolean;
   /** Replaces the image's ENTRYPOINT: [0] is the program, the rest go before `command`. */
