@@ -181,7 +181,7 @@ describe('ContainerCommand', () => {
     const cmds = backend.callsOf('exec').map(c => c[1]);
     expect(cmds).toEqual([
       ['sh', '-c', 'command -v tmux'],
-      ['tmux', 'new-session', '-A', '-s', 'agent', `claude --append-system-prompt "be brief" 'it'\\''s'`],
+      ['tmux', '-u', 'new-session', '-A', '-s', 'agent', `claude --append-system-prompt "be brief" 'it'\\''s'`],
     ]);
   });
 

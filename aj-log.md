@@ -4,6 +4,11 @@ Changes made with Claude, and why.
 
 ## 2026-10-22 — Branch containers: final review fix wave
 
+- UTF-8 in the sandbox: `debian:bookworm-slim` has no locale, so Claude Code and tmux drew box glyphs as
+  underscores. The image now sets `LANG=C.UTF-8 LC_ALL=C.UTF-8 TERM=xterm-256color`, tmux runs with `-u`,
+  and interactive execs pass the host's `TERM`/`COLORTERM` plus `LANG=C.UTF-8`. Why: first real session
+  looked broken in the VS Code terminal.
+
 Why: the whole-branch review found one critical and ten important problems (plus five minors) in
 `kunj container`; all landed in one pass, one commit per fix.
 

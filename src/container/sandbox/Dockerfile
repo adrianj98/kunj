@@ -32,6 +32,8 @@ RUN chmod 0755 /usr/local/bin/git-credential-kunj \
 # npm installs globals into the home directory, so the agent can add tools without root
 ENV NPM_CONFIG_PREFIX=/home/dev/.npm-global
 ENV PATH=/home/dev/.npm-global/bin:$PATH
+# bookworm-slim ships no locale; without a UTF-8 one Claude Code and tmux draw boxes as underscores
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 TERM=xterm-256color
 
 USER dev
 

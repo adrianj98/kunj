@@ -406,7 +406,8 @@ export class ContainerCommand extends BaseCommand {
       this.warn('tmux is not installed in the container; running the agent directly (it stops when you leave)');
     }
     // tmux runs a single command argument through the shell, so the setting keeps its quoting
-    const argv = probe.exitCode === 0 ? ['tmux', 'new-session', '-A', '-s', 'agent', command] : ['sh', '-lc', command];
+    // -u: UTF-8 even when the image has no locale, so box-drawing glyphs render
+    const argv = probe.exitCode === 0 ? ['tmux', '-u', 'new-session', '-A', '-s', 'agent', command] : ['sh', '-lc', command];
     const r = await ctx.backend.exec(main.id, argv, this.interactive(main, true));
     process.exitCode = r.exitCode;
   }
@@ -415,7 +416,7 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
-    const r = await ctx.backend.exec(main.id, ['tmux', 'attach', '-t', 'agent'], this.interactive(main, true));
+    const r = await ctx.backend.exec(main.id, ['tmux', '-u', 'attach', '-t', 'agent'], this.interactive(main, true));
     if (r.exitCode !== 0) throw new ContainerError(`No agent session; run kunj ct agent ${branch}`);
   }
 
@@ -427,6 +428,12 @@ export class ContainerCommand extends BaseCommand {
       stderr: 'inherit' as const,
       user: this.userOf(main) || undefined,
       workdir: WORKSPACE,
+      // The host's terminal type and a UTF-8 locale, so TUIs render the same inside (none of these are secrets)
+      env: {
+        TERM: process.env.TERM || 'xterm-256color',
+        ...(process.env.COLORTERM ? { COLORTERM: process.env.COLORTERM } : {}),
+        LANG: 'C.UTF-8',
+      },
     };
   }
 
