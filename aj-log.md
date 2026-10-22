@@ -28,6 +28,7 @@ daemon should be able to live on a remote machine behind a kunj service.
   settings/hooks, names, devcontainer subset, backend + docker CLI, images, seed, lifecycle,
   forward, command + fast path, docs, Docker integration tests).
 - Added `src/lib/container/names.ts` (+ tests): repo id from remote URL, hashed container/volume/network names and `kunj.*` labels, because `branchToDirName` collapses `feature/x` and `feature-x` and repo names can repeat.
+- Added `src/lib/container/backend.ts` (`ContainerBackend` interface) and `docker.ts` (`LocalDockerBackend`, + tests): the single seam to Docker so lifecycle/forwarding/command code can be faked and a remote backend added later; docker is spawned with argv only, env goes through a 0600 `--env-file` so secrets stay out of `ps`, and a listing costs two subprocesses.
 
 ## 2026-10-16 — Remove several worktrees at once (VS Code + macOS app)
 
