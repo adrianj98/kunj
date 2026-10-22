@@ -37,6 +37,18 @@ describe('devcontainer', () => {
       expect(spec.build).toEqual({ dockerfile: 'Dockerfile', context: '.', args: { A: '1' } });
     });
 
+    it('refuses build paths that leave the repository', () => {
+      expect(() => parseDevcontainer('{"build":{"dockerfile":"D","context":".."}}', '.devcontainer.json')).toThrow(
+        '.devcontainer.json: build.context must stay inside the repository (got "..")'
+      );
+      expect(() => parseDevcontainer('{"build":{"dockerfile":"../../x"}}', FILE)).toThrow(
+        `${FILE}: build.dockerfile must stay inside the repository (got "../../x")`
+      );
+      expect(() => parseDevcontainer('{"build":{"dockerfile":"/etc/Dockerfile"}}', FILE)).toThrow(
+        'build.dockerfile must stay inside the repository'
+      );
+    });
+
     it('refuses remoteUser root', () => {
       for (const u of ['root', '0', '00', 'Root', ' root ', 'root:root', '0:0']) {
         expect(() => parseDevcontainer(JSON.stringify({ remoteUser: u }), FILE)).toThrow(

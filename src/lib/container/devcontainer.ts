@@ -119,7 +119,14 @@ export function parseDevcontainer(text: string, filePath: string): DevcontainerS
   if (!isRecord(doc)) throw new Error(`${filePath}: expected a JSON object`);
 
   const dir = path.posix.dirname(filePath.replace(/\\/g, '/'));
-  const rel = (p: string) => path.posix.normalize(path.posix.join(dir, p));
+  const rel = (p: string, key: string) => {
+    const resolved = path.posix.normalize(path.posix.join(dir, p));
+    const absolute = path.posix.isAbsolute(p) || path.win32.isAbsolute(p);
+    if (absolute || resolved === '..' || resolved.startsWith('../')) {
+      throw new Error(`${filePath}: build.${key} must stay inside the repository (got "${p}")`);
+    }
+    return resolved;
+  };
 
   const ignored = new Set(Object.keys(doc).filter(k => !SUPPORTED_KEYS.has(k)));
 
@@ -136,8 +143,8 @@ export function parseDevcontainer(text: string, filePath: string): DevcontainerS
 
   if (isRecord(doc.build) && typeof doc.build.dockerfile === 'string') {
     spec.build = {
-      dockerfile: rel(doc.build.dockerfile),
-      context: rel(typeof doc.build.context === 'string' ? doc.build.context : '.'),
+      dockerfile: rel(doc.build.dockerfile, 'dockerfile'),
+      context: rel(typeof doc.build.context === 'string' ? doc.build.context : '.', 'context'),
       args: stringMap(doc.build.args),
     };
   }
