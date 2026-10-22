@@ -213,6 +213,20 @@ Security notes:
 - Image builds are not behind the firewall: a devcontainer Dockerfile runs with full network
   access while it builds. `kunj ct start` warns when the branch changed the build context compared
   with the default branch, before building it.
+- A devcontainer image with `sudo` makes the agent root inside the container. Root cannot change
+  or bypass the firewall (the container has no NET_ADMIN or NET_RAW), but it owns everything else
+  in the container, including what you forwarded into it.
+- Forwarded variables are in the container's environment, so `docker inspect` on the host shows
+  their values to anyone who can use your Docker daemon.
+- `container.network.allowHost` opens the Docker gateway, `host.docker.internal` and every
+  private and link-local range (your LAN, Tailscale), not just the host.
+- The allowlist always admits GitHub's published ranges (when origin is on GitHub), origin, npm
+  and the Anthropic API. Git LFS storage hosts and `codeload.github.com` (archive downloads) are
+  not on it by name; add them to `container.network.allow` if the repository needs them.
+- `kunj ct forward` uses `socat` in the container when it has it; the bash `/dev/tcp` fallback
+  cannot half-close a connection, so protocols that wait for the client to finish sending may hang.
+- A devcontainer's build context is taken with `git archive`, which leaves out submodule contents
+  and Git LFS files (only their pointers are included).
 
 ### Hooks
 
