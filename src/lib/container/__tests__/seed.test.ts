@@ -291,14 +291,14 @@ describe('seedScript', () => {
 
   it('seedFrom copies the seed, resets origin and still switches', () => {
     const s = seedScript({ ...base, seedFrom: '/opt/kunj/seed' });
-    expect(s).toContain(
-      `if [ ! -f ${SEED_MARKER} ]; then find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} +; cp -a '/opt/kunj/seed/.' /workspace/; fi`
-    );
+    expect(s).toContain('if [ ! -d /workspace/.git ] || [ -f /workspace/.kunj-copying ]; then');
+    expect(s).toContain("cp -a '/opt/kunj/seed/.' /workspace/");
     expect(s).not.toContain('git clone');
     expect(s).toContain("git remote set-url origin 'git@github.com:me/r.git'");
     expect(s.indexOf('set-url')).toBeLessThan(s.indexOf('git fetch'));
     // The seed's own copy of the branch is moved to origin's
-    expect(s).toContain("git switch -C 'feat' 'origin/feat'");
+    expect(s).toContain("if [ -f .kunj-fresh ]; then git switch -C 'feat' 'origin/feat'; else git switch 'feat'; fi");
+    expect(s).toContain('echo .kunj-copying >> .git/info/exclude');
     expect(s).toContain(`touch ${SEED_MARKER}`);
     // Without a seed nothing changes
     expect(seedScript(base)).toContain("git switch 'feat'\n");
@@ -315,6 +315,8 @@ describe('seedScript', () => {
       commit(seedDir, 'a');
       git(seedDir, 'push', 'origin', 'main');
       fs.writeFileSync(path.join(seedDir, 'installed'), 'deps');
+      // The snapshot's workspace had been seeded itself
+      fs.writeFileSync(path.join(seedDir, '.kunj-seeded'), '');
       // The snapshot was taken with another URL for the same repository
       git(seedDir, 'remote', 'set-url', 'origin', 'https://elsewhere.invalid/r.git');
       // ...and origin moved on after the snapshot
@@ -340,12 +342,17 @@ describe('seedScript', () => {
       const ws = path.join(tmp, 'ws');
       fs.mkdirSync(path.join(ws, '.git'), { recursive: true });
       fs.writeFileSync(path.join(ws, 'partial'), '');
+      fs.writeFileSync(path.join(ws, '.kunj-copying'), '');
       run(ws, { create: true, base: 'main', branch: 'new' });
       expect(git(ws, 'remote', 'get-url', 'origin')).toBe(origin);
       expect(git(ws, 'branch', '--show-current')).toBe('new');
       expect(git(ws, 'rev-parse', 'HEAD')).toBe(originHead);
       expect(fs.readFileSync(path.join(ws, 'installed'), 'utf8')).toBe('deps');
       expect(fs.existsSync(path.join(ws, 'partial'))).toBe(false);
+      expect(fs.existsSync(path.join(ws, '.kunj-copying'))).toBe(false);
+      expect(fs.existsSync(path.join(ws, '.kunj-fresh'))).toBe(false);
+      // Only the fixture's untracked file: the marker and sentinels are excluded
+      expect(git(ws, 'status', '--porcelain')).toBe('?? installed');
       expect(fs.existsSync(path.join(ws, '.kunj-seeded'))).toBe(true);
 
       // The default branch itself, which the seed already has at the snapshot's commit
@@ -356,6 +363,21 @@ describe('seedScript', () => {
       expect(git(ws2, 'rev-parse', 'HEAD')).toBe(originHead);
       expect(git(ws2, 'rev-parse', '--abbrev-ref', 'main@{upstream}')).toBe('origin/main');
       expect(git(ws2, 'remote', 'get-url', 'origin')).toBe(origin);
+
+      // A checkout without the marker (git clean -x removed it) is the user's: never wiped or reset
+      const ws3 = path.join(tmp, 'ws3');
+      git(tmp, 'clone', '-q', origin, ws3);
+      git(ws3, 'reset', '-q', '--hard', 'HEAD~1');
+      commit(ws3, 'local');
+      const local = git(ws3, 'rev-parse', 'HEAD');
+      fs.writeFileSync(path.join(ws3, 'a'), 'edited');
+      fs.writeFileSync(path.join(ws3, 'untracked'), 'mine');
+      run(ws3, { create: false, branch: 'main' });
+      expect(git(ws3, 'rev-parse', 'HEAD')).toBe(local);
+      expect(fs.readFileSync(path.join(ws3, 'a'), 'utf8')).toBe('edited');
+      expect(fs.readFileSync(path.join(ws3, 'untracked'), 'utf8')).toBe('mine');
+      expect(fs.existsSync(path.join(ws3, 'installed'))).toBe(false);
+      expect(fs.existsSync(path.join(ws3, '.kunj-seeded'))).toBe(true);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

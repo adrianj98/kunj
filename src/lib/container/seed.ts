@@ -6,6 +6,10 @@ const execFileAsync = promisify(execFile);
 
 export const SEED_MARKER = '/workspace/.kunj-seeded';
 export const SEED_MARKER_EXCLUDE = '.kunj-seeded';
+/** Present from before a seed copy starts until it is complete: only then is /workspace wiped. */
+export const SEED_COPYING = '.kunj-copying';
+/** Present from a complete seed copy until its branch is moved to origin's. */
+export const SEED_FRESH = '.kunj-fresh';
 
 export interface OriginState {
   /** origin's URL without credentials (see stripUserinfo) */
@@ -203,10 +207,17 @@ export function seedScript(input: SeedInput): string {
     );
   }
   if (input.seedFrom) {
-    // No marker: nothing, or a copy cut short, is there; start from a clean copy either way
-    lines.push(
-      `if [ ! -f ${SEED_MARKER} ]; then find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} +; cp -a ${q(`${input.seedFrom}/.`)} /workspace/; fi`
-    );
+    // Only an empty workspace or a copy of ours cut short is replaced, never a checkout (the seed
+    // marker is an ignored file `git clean -x` removes, so it cannot decide this)
+    lines.push(`if [ ! -d /workspace/.git ] || [ -f /workspace/${SEED_COPYING} ]; then`);
+    lines.push(`  touch /workspace/${SEED_COPYING}`);
+    lines.push(`  find /workspace -mindepth 1 -maxdepth 1 ! -name ${SEED_COPYING} -exec rm -rf {} +`);
+    lines.push(`  cp -a ${q(`${input.seedFrom}/.`)} /workspace/`);
+    // The snapshot's workspace was seeded; this one is not until the end of this script
+    lines.push(`  rm -f ${SEED_MARKER}`);
+    lines.push(`  touch /workspace/${SEED_FRESH}`);
+    lines.push(`  rm -f /workspace/${SEED_COPYING}`);
+    lines.push('fi');
     lines.push('cd /workspace');
     // The snapshot may have cloned another URL for the same repository (ssh vs https)
     lines.push(`git remote set-url origin ${q(input.originUrl)}`);
@@ -221,10 +232,18 @@ export function seedScript(input: SeedInput): string {
     lines.push(`git switch ${branch} 2>/dev/null || git switch -c ${branch} --no-track ${q(`origin/${input.base ?? ''}`)}`);
   } else {
     lines.push(`git fetch origin ${branch}`);
-    // A seed's local branch is at the snapshot's commit: move it to origin's (the seed is pristine)
-    lines.push(input.seedFrom ? `git switch -C ${branch} ${q(`origin/${input.branch}`)}` : `git switch ${branch}`);
+    if (input.seedFrom) {
+      // A fresh copy's branch is at the snapshot's commit: move it to origin's. Any other checkout
+      // is the user's and is only switched to.
+      lines.push(`if [ -f ${SEED_FRESH} ]; then git switch -C ${branch} ${q(`origin/${input.branch}`)}; else git switch ${branch}; fi`);
+    } else {
+      lines.push(`git switch ${branch}`);
+    }
   }
-  lines.push(`grep -qx ${SEED_MARKER_EXCLUDE} .git/info/exclude 2>/dev/null || echo ${SEED_MARKER_EXCLUDE} >> .git/info/exclude`);
+  if (input.seedFrom) lines.push(`rm -f ${SEED_FRESH}`);
+  for (const name of input.seedFrom ? [SEED_MARKER_EXCLUDE, SEED_COPYING, SEED_FRESH] : [SEED_MARKER_EXCLUDE]) {
+    lines.push(`grep -qx ${name} .git/info/exclude 2>/dev/null || echo ${name} >> .git/info/exclude`);
+  }
   lines.push(`touch ${SEED_MARKER}`);
   return lines.join('\n') + '\n';
 }
