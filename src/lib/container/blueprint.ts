@@ -20,7 +20,7 @@ export const KNOWN_LOCKFILES = [
 export type ToolValue = string | string[] | true;
 
 /** One word of a tool value: no leading -, no /, no whitespace or shell metacharacters. */
-const TOOL_WORD = /^[A-Za-z0-9][A-Za-z0-9._+:=~@-]*$/;
+export const TOOL_WORD = /^[A-Za-z0-9][A-Za-z0-9._+:=~@-]*$/;
 
 export interface Blueprint {
   tools: Record<string, ToolValue>;
