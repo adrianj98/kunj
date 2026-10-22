@@ -144,6 +144,8 @@ way code goes in or out is through `origin`.
 You need Docker, a Claude login for the agent (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, or
 `CLAUDE_CODE_USE_BEDROCK` with your AWS variables) and a `GH_TOKEN` for cloning and pushing. Use a
 fine-grained GitHub token scoped to this one repository; the agent can use whatever you give it.
+A token written into origin's URL (`https://user:token@host/...`) is stripped and never reaches the
+container; forward it with `container.env` instead.
 The first start builds the `kunj-sandbox` image, which takes a few minutes and about 1.2 GB.
 
 ```bash

@@ -8,8 +8,12 @@ export const SEED_MARKER = '/workspace/.kunj-seeded';
 export const SEED_MARKER_EXCLUDE = '.kunj-seeded';
 
 export interface OriginState {
+  /** origin's URL without credentials (see stripUserinfo) */
   originUrl: string;
+  /** Bare host name, for the firewall */
   originHost: string;
+  /** What git sends as `host=` to a credential helper: host:port when the URL has a port */
+  credentialHost: string;
   branchOnOrigin: boolean;
   unpushed: number;
   isSsh: boolean;
@@ -44,16 +48,35 @@ async function succeeds(args: string[], cwd: string): Promise<boolean> {
 
 const SCP_LIKE = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/\/)/;
 
-function parseOrigin(url: string): { host: string; isSsh: boolean } {
+/**
+ * Drop credentials from a remote URL (`https://user:token@host/...`), so a token kept in the host's
+ * remote never reaches the container, an exec argv or an error message. An ssh:// URL keeps its
+ * user name (git@), which the insteadOf rewrite matches; scp-like URLs have no password to drop.
+ */
+export function stripUserinfo(url: string): string {
+  // Greedy: a password may itself contain '@' before the host
+  const m = /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*)@/i.exec(url);
+  if (!m) return url;
+  const rest = url.slice(m[0].length);
+  if (/^ssh:/i.test(m[1])) {
+    const user = m[2].split(':')[0];
+    return `${m[1]}${user ? `${user}@` : ''}${rest}`;
+  }
+  return m[1] + rest;
+}
+
+export function parseOrigin(url: string): { host: string; credentialHost: string; isSsh: boolean } {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
     try {
-      return { host: new URL(url).hostname, isSsh: new URL(url).protocol === 'ssh:' };
+      const u = new URL(url);
+      // URL.host omits the scheme's default port, as git does
+      return { host: u.hostname, credentialHost: u.host, isSsh: u.protocol === 'ssh:' };
     } catch {
-      return { host: '', isSsh: false };
+      return { host: '', credentialHost: '', isSsh: false };
     }
   }
   const scp = SCP_LIKE.exec(url);
-  return scp ? { host: scp[1], isSsh: true } : { host: '', isSsh: false };
+  return scp ? { host: scp[1], credentialHost: scp[1], isSsh: true } : { host: '', credentialHost: '', isSsh: false };
 }
 
 const DEFAULT_PORTS: Record<string, number> = { 'https:': 443, 'http:': 80, 'ssh:': 22, 'git:': 9418 };
@@ -72,14 +95,15 @@ export function originPort(url: string): number {
 }
 
 export async function inspectOrigin(branch: string, cwd: string): Promise<OriginState> {
-  let originUrl: string;
+  let rawUrl: string;
   try {
-    originUrl = await git(['remote', 'get-url', 'origin'], cwd);
+    rawUrl = await git(['remote', 'get-url', 'origin'], cwd);
   } catch {
     throw new Error('No origin remote');
   }
-  if (!originUrl) throw new Error('No origin remote');
-  const { host, isSsh } = parseOrigin(originUrl);
+  if (!rawUrl) throw new Error('No origin remote');
+  const originUrl = stripUserinfo(rawUrl);
+  const { host, credentialHost, isSsh } = parseOrigin(originUrl);
 
   // a failed fetch (offline, branch not on origin) is not an error here
   try {
@@ -101,7 +125,7 @@ export async function inspectOrigin(branch: string, cwd: string): Promise<Origin
     const range = branchOnOrigin ? `${remoteRef}..${localRef}` : localRef;
     unpushed = parseInt(await git(['rev-list', '--count', range, '--'], cwd), 10) || 0;
   }
-  return { originUrl, originHost: host, branchOnOrigin, unpushed, isSsh };
+  return { originUrl, originHost: host, credentialHost, branchOnOrigin, unpushed, isSsh };
 }
 
 async function lsRemoteHas(ref: string, cwd: string): Promise<boolean> {

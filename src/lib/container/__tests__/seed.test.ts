@@ -5,6 +5,8 @@ import { execFileSync, spawnSync } from 'child_process';
 import {
   inspectOrigin,
   originPort,
+  parseOrigin,
+  stripUserinfo,
   refExistsOnOrigin,
   pushBranch,
   hostGitIdentity,
@@ -176,6 +178,14 @@ describe('inspectOrigin url parsing', () => {
     ['ssh://git@example.com:2222/me/r.git', 'example.com', true],
     ['https://user@127.0.0.1:9/me/r.git', '127.0.0.1', false],
   ];
+  posixOnly('never returns the credentials in the remote URL', async () => {
+    git(dir, 'remote', 'add', 'origin', 'https://user:s3cret@127.0.0.1:9/me/r.git');
+    const state = await inspectOrigin('main', dir);
+    expect(state.originUrl).toBe('https://127.0.0.1:9/me/r.git');
+    expect(state.credentialHost).toBe('127.0.0.1:9');
+    expect(JSON.stringify(state)).not.toContain('s3cret');
+  });
+
   for (const [url, host, ssh] of cases) {
     posixOnly(`parses ${url}`, async () => {
       git(dir, 'remote', 'add', 'origin', url);
@@ -186,6 +196,23 @@ describe('inspectOrigin url parsing', () => {
       expect(state.unpushed).toBe(0);
     });
   }
+});
+
+describe('stripUserinfo and parseOrigin', () => {
+  it('drops credentials from URL origins, keeping an ssh user name', () => {
+    expect(stripUserinfo('https://user:tok@en@github.com/me/r.git')).toBe('https://github.com/me/r.git');
+    expect(stripUserinfo('https://x-access-token@github.com/me/r.git')).toBe('https://github.com/me/r.git');
+    expect(stripUserinfo('ssh://git:pw@example.com:2222/me/r.git')).toBe('ssh://git@example.com:2222/me/r.git');
+    expect(stripUserinfo('git@github.com:me/r.git')).toBe('git@github.com:me/r.git');
+    expect(stripUserinfo('https://github.com/me/r.git')).toBe('https://github.com/me/r.git');
+  });
+
+  it('gives the credential host with a non-default port, the firewall host without', () => {
+    expect(parseOrigin('https://host:8443/x.git')).toEqual({ host: 'host', credentialHost: 'host:8443', isSsh: false });
+    expect(parseOrigin('https://host/x.git')).toEqual({ host: 'host', credentialHost: 'host', isSsh: false });
+    expect(parseOrigin('https://host:443/x.git')).toEqual({ host: 'host', credentialHost: 'host', isSsh: false });
+    expect(parseOrigin('git@host:x.git')).toEqual({ host: 'host', credentialHost: 'host', isSsh: true });
+  });
 });
 
 describe('originPort', () => {

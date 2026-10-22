@@ -608,7 +608,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
         [LABEL.role]: 'main',
       }),
       // The devcontainer comes from the branch: it must not override the credential host or secrets
-      env: { ...(source.spec?.containerEnv ?? {}), ...env, KUNJ_CREDENTIAL_HOST: origin.originHost },
+      env: { ...(source.spec?.containerEnv ?? {}), ...env, KUNJ_CREDENTIAL_HOST: origin.credentialHost },
       network: names.network,
       user: user || undefined,
       workdir: WORKSPACE,

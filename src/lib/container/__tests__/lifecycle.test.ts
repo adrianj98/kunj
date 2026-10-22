@@ -111,6 +111,7 @@ beforeEach(() => {
   mocked.inspectOrigin.mockResolvedValue({
     originUrl: REPO.originUrl,
     originHost: 'github.com',
+    credentialHost: 'github.com',
     branchOnOrigin: true,
     unpushed: 0,
     isSsh: false,
@@ -220,6 +221,22 @@ describe('startContainer', () => {
     expect(execCmds(sandbox)).not.toContain('id -un');
   });
 
+  it('gives the credential helper host:port and the firewall the bare host and port', async () => {
+    mocked.inspectOrigin.mockResolvedValue({
+      originUrl: 'https://git.example.com:8443/acme/app.git',
+      originHost: 'git.example.com',
+      credentialHost: 'git.example.com:8443',
+      branchOnOrigin: true,
+      unpushed: 0,
+      isSsh: false,
+    });
+    const b = backend();
+    await startContainer(b, options());
+    const [main, helper] = runSpecs(b);
+    expect(main.env.KUNJ_CREDENTIAL_HOST).toBe('git.example.com:8443');
+    expect(helper.env).toMatchObject({ KUNJ_FW_ORIGIN_HOST: 'git.example.com', KUNJ_FW_ORIGIN_PORT: '8443' });
+  });
+
   it('refuses a name whose labels do not match', async () => {
     const b = backend();
     b.existing = [info({ labels: labelsFor(REPO.id, 'feature-x', { [LABEL.role]: 'main' }) })];
@@ -232,6 +249,7 @@ describe('startContainer', () => {
     mocked.inspectOrigin.mockResolvedValue({
       originUrl: REPO.originUrl,
       originHost: 'github.com',
+      credentialHost: 'github.com',
       branchOnOrigin: true,
       unpushed: 2,
       isSsh: false,
@@ -247,6 +265,7 @@ describe('startContainer', () => {
     mocked.inspectOrigin.mockResolvedValue({
       originUrl: REPO.originUrl,
       originHost: 'github.com',
+      credentialHost: 'github.com',
       branchOnOrigin: false,
       unpushed: 1,
       isSsh: false,
@@ -266,13 +285,14 @@ describe('startContainer', () => {
     mocked.inspectOrigin.mockResolvedValue({
       originUrl: 'git@github.com:acme/app.git',
       originHost: 'github.com',
+      credentialHost: 'github.com',
       branchOnOrigin: true,
       unpushed: 0,
       isSsh: true,
     });
     await expect(startContainer(backend(), options({ hostEnv: {} }))).rejects.toMatchObject({ code: 'no-token' });
 
-    mocked.inspectOrigin.mockResolvedValue({ originUrl: '/srv/app.git', originHost: '', branchOnOrigin: true, unpushed: 0, isSsh: false });
+    mocked.inspectOrigin.mockResolvedValue({ originUrl: '/srv/app.git', originHost: '', credentialHost: '', branchOnOrigin: true, unpushed: 0, isSsh: false });
     await expect(startContainer(backend(), options())).rejects.toMatchObject({ code: 'origin' });
   });
 
@@ -364,7 +384,7 @@ describe('startContainer', () => {
     const b = backend();
     b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
     b.existing = [info({ state: 'exited' })];
-    mocked.inspectOrigin.mockResolvedValue({ originUrl: REPO.originUrl, originHost: 'github.com', branchOnOrigin: false, unpushed: 3, isSsh: false });
+    mocked.inspectOrigin.mockResolvedValue({ originUrl: REPO.originUrl, originHost: 'github.com', credentialHost: 'github.com', branchOnOrigin: false, unpushed: 3, isSsh: false });
     const confirmPush = jest.fn(async () => false);
     const result = await startContainer(b, options({ confirmPush, jsonMode: true }));
     expect(result.created).toBe(false);
@@ -386,7 +406,7 @@ describe('startContainer', () => {
   it('reports a collision before any push prompt', async () => {
     const b = backend();
     b.existing = [info({ labels: { other: 'x' } })];
-    mocked.inspectOrigin.mockResolvedValue({ originUrl: REPO.originUrl, originHost: 'github.com', branchOnOrigin: false, unpushed: 1, isSsh: false });
+    mocked.inspectOrigin.mockResolvedValue({ originUrl: REPO.originUrl, originHost: 'github.com', credentialHost: 'github.com', branchOnOrigin: false, unpushed: 1, isSsh: false });
     const confirmPush = jest.fn(async () => true);
     await expect(startContainer(b, options({ confirmPush }))).rejects.toMatchObject({ code: 'collision' });
     expect(confirmPush).not.toHaveBeenCalled();

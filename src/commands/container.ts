@@ -38,6 +38,7 @@ import {
   stopContainer,
 } from '../lib/container/lifecycle';
 import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
+import { stripUserinfo } from '../lib/container/seed';
 import { KunjConfig } from '../types';
 
 interface ContainerOptions {
@@ -214,7 +215,8 @@ export class ContainerCommand extends BaseCommand {
     const config = await loadResolvedConfig(process.cwd());
     const root = getRepoCommonRoot();
     if (!root) throw new ContainerError('Not in a git repository');
-    const originUrl = getOriginUrl() || '';
+    // Credentials in the remote URL stay on the host (seed.ts strips them too)
+    const originUrl = stripUserinfo(getOriginUrl() || '');
     const repo = { root, name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root), originUrl };
     const dockerContext = options.context || config.container?.dockerContext || undefined;
     this.backend = new LocalDockerBackend({ context: dockerContext });
