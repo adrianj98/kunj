@@ -189,6 +189,32 @@ Behaviour: `init` → `inferBlueprint(repoRoot)`; print reasons; for each of too
 
 ---
 
+### Task 9: Snapshot private origins without a credential in the container
+
+**Files:**
+- Modify: `src/lib/container/seed.ts` (`SeedInput.bundlePath?: string`), `src/lib/container/lifecycle.ts` (stream the bundle before the seed when `StartOptions.bundle` is set), `src/lib/container/snapshot.ts` (make the bundle on the host, pass it), `src/commands/container.ts` (`snapshot --no-bundle` escape hatch, status text)
+- Test: `src/lib/container/__tests__/{seed,lifecycle,snapshot}.test.ts`, `integration.docker.test.ts`
+
+**Why:** snapshots forward no env (a token would reach the committed image via older engines' `container_config` or via repo-controlled `setup` writing it to disk), so a private origin cannot be cloned inside the temp container. The host already has credentials.
+
+**Interfaces (Produces):**
+```ts
+// snapshot.ts
+export async function makeBranchBundle(branch: string, cwd: string): Promise<{ path: string; cleanup: () => void }>; // git fetch origin <branch>; git bundle create <tmp>/origin.bundle refs/remotes/origin/<branch>:refs/heads/<branch> (one ref, so the bundle carries only that branch's history)
+// StartOptions gains:
+bundle?: { hostPath: string; containerPath: string };   // streamed into the container (tarEntries, as the sandbox user) before the seed script runs
+// SeedInput gains:
+bundlePath?: string;   // when set: `git clone --no-checkout <bundle> /workspace` then `git remote set-url origin <originUrl>`, then switch; no network needed for the clone
+```
+- The snapshot path always uses a bundle (public or private — one code path), unless `--no-bundle`. Normal `kunj ct start` keeps cloning from origin (the token is forwarded there by design).
+- The bundle is deleted from the container (`rm -f`) before the seed copy, and from the host temp dir in `finally`.
+- `lockfileIds`/`blueprintRef` are unchanged (they read the host's `origin/<default>`, which the fetch just updated).
+
+- [ ] Step 1: Tests — `makeBranchBundle creates a bundle containing only the branch` (real git: `git bundle list-heads`); `seedScript with bundlePath clones from the bundle and resets origin`; lifecycle `streams the bundle before the seed and removes it after`; snapshot `passes a bundle and cleans it up on success and failure`; Docker test: snapshot against the git-daemon origin with a `bundle` — assert the temp container never ran `git clone git://…` (exec log) and the image's seed HEAD equals origin's.
+- [ ] Steps 2–5. Commit `Snapshot from a host-made bundle so private origins need no token`.
+
+---
+
 ## Self-review notes
 
 - Spec coverage: file/resolution/hash → T2; presets + inference → T3/T4; snapshot → T6; start/seed/maintain/stale/`--no-snapshot` → T5; commands/JSON → T7; backend → T1; tests/docs/worked example → T8. Open question (devcontainer `postCreateCommand` during snapshot) is answered by T5's ordering: `startContainer` already runs it on a new container, so the snapshot includes it.
