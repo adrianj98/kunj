@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { ChildProcess, execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
+import * as http from 'http';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
@@ -15,6 +16,7 @@ import { LocalDockerBackend } from '../docker';
 import { LABEL, containerNames, repoIdFromUrl } from '../names';
 import { StartError, StartOptions, containerStatus, removeContainer, startContainer } from '../lifecycle';
 import { forwardPort } from '../forward';
+import { resolveHelperImage } from '../image';
 import { getVersion } from '../../version';
 import { KunjConfig } from '../../../types';
 
@@ -280,11 +282,39 @@ const BRANCH_ALLOW = 'it-allow';
     expect(labelledFor(BRANCH_A)).toEqual([]);
   });
 
-  it('default mode blocks the host (start fails at seed with allowHost=false)', async () => {
-    const err = await startContainer(backend, startOptions(BRANCH_GW, config({}))).catch(e => e);
+  it('default mode blocks the host except origin on its own port (allowHost=false)', async () => {
+    // A server on another host port that would answer if the firewall let it through
+    const server = http.createServer((_q, res) => res.end('open'));
+    const other = await freePort();
+    await new Promise<void>(resolve => server.listen(other, '0.0.0.0', resolve));
+    try {
+      // origin is on the host (git daemon), and is reachable: the clone succeeds
+      const started = await startContainer(backend, startOptions(BRANCH_GW, config({})));
+      expect(started.seeded).toBe(true);
+      const head = await inside(started.containerId, 'git rev-parse --abbrev-ref HEAD');
+      expect(head.stdout.trim()).toBe(BRANCH_GW);
+      // Any other port on the host is not: refused (7) or timed out (28), never answered
+      const blocked = await inside(started.containerId, `curl -s --max-time 5 http://host.docker.internal:${other}/`);
+      expect([7, 28]).toContain(blocked.exitCode);
+      expect(blocked.stdout).not.toContain('open');
+    } finally {
+      server.close();
+      await removeContainer(backend, containerNames(REPO_NAME, repoId, BRANCH_GW), {
+        user: USER,
+        kunjVersion: VERSION,
+        force: true,
+        keepVolumes: false,
+      });
+    }
+    expect(labelledFor(BRANCH_GW)).toEqual([]);
+  });
+
+  it('a failed start rolls back everything it created', async () => {
+    // The helper image has no git, so the seed fails after the container and helper are up
+    const options = { ...startOptions(BRANCH_GW, config({})), imageOverride: resolveHelperImage(VERSION).tag };
+    const err = await startContainer(backend, options).catch(e => e);
     expect(err).toBeInstanceOf(StartError);
     expect((err as StartError).code).toBe('seed');
-    // A failed start rolls back everything it created
     expect(labelledFor(BRANCH_GW)).toEqual([]);
   });
 

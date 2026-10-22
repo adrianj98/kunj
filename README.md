@@ -184,7 +184,7 @@ Settings (`kunj config`):
 | `container.publish` | none | Ports always published at start |
 
 Network: by default the internet is open but the Docker host, the LAN and private ranges are
-blocked. Set `container.network.allow` to restrict egress to a list of domains (plus GitHub, npm
+blocked, except origin itself on its own port (so a self-hosted origin on the LAN still works). Set `container.network.allow` to restrict egress to a list of domains (plus GitHub, npm
 and the Anthropic API); `container.network.allowHost` opens the host again. The rules are applied
 by a small helper container that shares the agent's network. The agent's container runs with all
 capabilities dropped except CHOWN, DAC_OVERRIDE, FOWNER, SETUID and SETGID, so it cannot undo them

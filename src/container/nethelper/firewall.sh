@@ -9,7 +9,9 @@
 #   KUNJ_FW_DOMAINS      space-separated extra domains for the allowlist
 #   KUNJ_FW_GITHUB       1 allows GitHub's published ranges (api.github.com/meta)
 #   KUNJ_FW_ORIGIN_HOST  host of the repository's origin; allowed, and must be reachable
-#   KUNJ_FW_ORIGIN_PORT  port origin's URL connects to (git://, https on :8443, ssh on :2222); optional
+#   KUNJ_FW_ORIGIN_PORT  port origin's URL connects to (git://, https on :8443, ssh on :2222); optional.
+#                        With it, origin's addresses are reachable on that port even when they are
+#                        private or the Docker host (a self-hosted origin), in both modes
 #   KUNJ_FW_SUBNET       the branch network's subnet; detected from eth0 when empty
 #
 # Prints READY and creates /tmp/kunj-ready once the rules are in place, then keeps running
@@ -112,7 +114,19 @@ done | sort -u)
 HOST4=$(echo "$HOST_ADDRS" | grep -v ':' || true)
 HOST6=$(echo "$HOST_ADDRS" | grep ':' || true)
 
-log "mode=$MODE subnet=$SUBNET${SUBNET6:+ subnet6=$SUBNET6} gateway=${GW4:-none}${GW6:+ gateway6=$GW6} host=$(echo $HOST_ADDRS) allowHost=$ALLOW_HOST"
+# Origin is the one channel in and out, so it stays reachable on its own port even on a private
+# address or the Docker host; every other port there is still blocked by host_rules.
+ORIGIN_ADDRS=""
+if [ -n "$ORIGIN_HOST" ] && [ -n "$ORIGIN_PORT" ]; then
+  ORIGIN_ADDRS=$({
+    getent hosts "$ORIGIN_HOST" 2>/dev/null | awk '{print $1}' || true
+    resolve "$ORIGIN_HOST"
+  } | grep -E '^([0-9]+\.){3}[0-9]+$|^[0-9a-fA-F]*:[0-9a-fA-F:]+$' | sort -u || true)
+fi
+ORIGIN4=$(echo "$ORIGIN_ADDRS" | grep -v ':' || true)
+ORIGIN6=$(echo "$ORIGIN_ADDRS" | grep ':' || true)
+
+log "mode=$MODE subnet=$SUBNET${SUBNET6:+ subnet6=$SUBNET6} gateway=${GW4:-none}${GW6:+ gateway6=$GW6} host=$(echo $HOST_ADDRS) allowHost=$ALLOW_HOST origin=$(echo $ORIGIN_ADDRS)${ORIGIN_PORT:+:$ORIGIN_PORT}"
 
 # Fill <set4>/<set6> with GitHub's ranges and the resolved allowed domains. Returns 1 when the
 # GitHub ranges cannot be fetched, so a refresh keeps the previous sets instead of losing GitHub.
@@ -213,6 +227,11 @@ base_rules() { # <iptables|ip6tables>
   "$1" -A "$CHAIN" -p tcp --dport 53 -j REJECT
 }
 
+# Origin's addresses on origin's port, ahead of the host and private-range rejects.
+origin_rules() { # <iptables|ip6tables> <addresses>
+  for addr in $2; do "$1" -A "$CHAIN" -d "$addr" -p tcp --dport "$ORIGIN_PORT" -j ACCEPT; done
+}
+
 # The host and the LAN: blocked unless allowHost (then explicitly accepted, which allowlist mode
 # needs). The gateway and host addresses are matched before the subnet, because the gateway lies
 # inside it; the private ranges after it, so sidecars stay reachable.
@@ -245,6 +264,7 @@ fi
 
 reset_chain iptables
 base_rules iptables
+origin_rules iptables "$ORIGIN4"
 host_rules iptables "$GW4 $HOST4" "$SUBNET" "$PRIVATE4"
 final_rules iptables "$SET4"
 
@@ -255,6 +275,7 @@ if [ "$V6" = 1 ]; then
   for type in neighbour-solicitation neighbour-advertisement router-solicitation; do
     ip6tables -A "$CHAIN" -p ipv6-icmp --icmpv6-type "$type" -j ACCEPT
   done
+  origin_rules ip6tables "$ORIGIN6"
   host_rules ip6tables "$GW6 $HOST6" "$SUBNET6" "$PRIVATE6"
   final_rules ip6tables "$SET6"
 fi

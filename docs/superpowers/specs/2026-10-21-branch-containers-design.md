@@ -277,8 +277,8 @@ devcontainer image happens to include iptables; devcontainer images need nothing
 The helper always:
 
 - blocks the Docker gateway (`host.docker.internal`), `10/8`, `172.16/12`, `192.168/16`, `fc00::/7`
-  and link-local, except the branch network's own subnet (sidecars) — unless
-  `container.network.allowHost`;
+  and link-local, except the branch network's own subnet (sidecars) and origin's resolved
+  addresses on origin's port (a self-hosted origin) — unless `container.network.allowHost`;
 - restricts DNS to Docker's embedded resolver (`127.0.0.11`), so DNS cannot be used to reach
   arbitrary resolvers;
 - applies the same rules with `ip6tables`.
