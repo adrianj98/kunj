@@ -169,6 +169,18 @@ describe('docker backend', () => {
       expect(argvOf(0)).toEqual(['exec', '-u', 'dev', '-w', '/w', '-e', 'A=1', 'abc', 'echo', 'hello']);
     });
 
+    it('exec rejects when docker itself fails instead of returning exit code 1', async () => {
+      results.push({ code: 1, stderr: 'Error response from daemon: container abc is not running\n' });
+      results.push({ code: 1, stderr: 'Error: No such container: abc\n' });
+      results.push({ code: 1, stderr: 'test: missing file\n' });
+      results.push({ code: 127, stderr: 'Error response from daemon: exec: "nope": executable file not found\n' });
+      const backend = new LocalDockerBackend();
+      await expect(backend.exec('abc', ['test', '-f', '/x'])).rejects.toThrow('docker exec failed: Error response from daemon: container abc is not running');
+      await expect(backend.exec('abc', ['test', '-f', '/x'])).rejects.toThrow('docker exec failed: Error: No such container: abc');
+      await expect(backend.exec('abc', ['test', '-f', '/x'])).resolves.toEqual({ exitCode: 1, stdout: '' });
+      await expect(backend.exec('abc', ['nope'])).resolves.toEqual({ exitCode: 127, stdout: '' });
+    });
+
     it('exec passes -i and -t and inherits stdio for an interactive session', async () => {
       results.push({ code: 0 });
       const backend = new LocalDockerBackend();
@@ -262,6 +274,19 @@ describe('docker backend', () => {
         await new LocalDockerBackend().buildImage('kunj/x:1', Readable.from([]), { dockerfile: 'Dockerfile.dev', buildArgs: { V: '1' } });
         expect(argvOf(0)).toEqual(['build', '-t', 'kunj/x:1', '-f', 'Dockerfile.dev', '--build-arg', 'V=1', '-']);
         expect(write.mock.calls.map(c => String(c[0])).join('')).toContain('Step 1/2');
+      } finally {
+        write.mockRestore();
+      }
+    });
+
+    it('buildImage failures name the BuildKit ERROR line, not the progress header', async () => {
+      results.push({ code: 1, stderr: '#0 building with "default" instance using docker driver\n#1 [internal] load build definition\nERROR: failed to solve: process "/bin/sh -c false" did not complete successfully: exit code: 1\n' });
+      results.push({ code: 1, stderr: '#0 building with "default" instance\nsomething else went wrong\n\n' });
+      const write = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const backend = new LocalDockerBackend();
+        await expect(backend.buildImage('t', Readable.from([]))).rejects.toThrow('docker build failed: ERROR: failed to solve: process "/bin/sh -c false" did not complete successfully: exit code: 1');
+        await expect(backend.buildImage('t', Readable.from([]))).rejects.toThrow('docker build failed: something else went wrong');
       } finally {
         write.mockRestore();
       }

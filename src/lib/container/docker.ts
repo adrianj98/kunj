@@ -106,6 +106,17 @@ function firstLine(out: Output): string {
   return out.stderr.trim().split('\n')[0] || `exit code ${out.code}`;
 }
 
+// BuildKit writes its progress to stderr, so the first line is "#0 building with ..." and the
+// cause is the last "ERROR..." line
+function buildErrorLine(out: Output): string {
+  const lines = out.stderr.split('\n').map(l => l.trim()).filter(Boolean);
+  return [...lines].reverse().find(l => l.startsWith('ERROR')) ?? lines[lines.length - 1] ?? `exit code ${out.code}`;
+}
+
+// Docker's own failures (container gone or stopped) exit 1 like the command could, so they are
+// told apart by the daemon's message
+const DOCKER_EXEC_ERROR = /^Error response from daemon:|^Error: No such container/;
+
 // "docker volume rm" reads better in an error than "docker volume"
 function subcommand(args: string[]): string {
   return ['volume', 'network', 'image'].includes(args[0]) ? `${args[0]} ${args[1]}` : args[0];
@@ -157,7 +168,10 @@ export class LocalDockerBackend implements ContainerBackend {
 
   private async checked(args: string[], opts: { input?: NodeJS.ReadableStream; echo?: boolean } = {}): Promise<Output> {
     const out = await this.spawnDocker(args, opts);
-    if (out.code !== 0) throw new Error(`docker ${subcommand(args)} failed: ${firstLine(out)}`);
+    if (out.code !== 0) {
+      const line = args[0] === 'build' ? buildErrorLine(out) : firstLine(out);
+      throw new Error(`docker ${subcommand(args)} failed: ${line}`);
+    }
     return out;
   }
 
@@ -280,9 +294,18 @@ export class LocalDockerBackend implements ContainerBackend {
           const detail = Buffer.concat(stderr).toString().trim().split('\n')[0];
           reject(new Error(`docker exec failed to start: ${err.message}${detail ? ` (${detail})` : ''}`));
         }));
-      // The command's own exit code is the result, not an error
+      // The command's own exit code is the result, not an error; 126/127 (not executable / not
+      // found) are the command's too
       child.on('close', (code: number | null) =>
-        finish(() => resolve({ exitCode: code ?? 1, stdout: Buffer.concat(stdout).toString() })));
+        finish(() => {
+          const exitCode = code ?? 1;
+          const first = Buffer.concat(stderr).toString().trim().split('\n')[0];
+          if (!io.stderr && exitCode !== 0 && exitCode !== 126 && exitCode !== 127 && DOCKER_EXEC_ERROR.test(first)) {
+            reject(new Error(`docker exec failed: ${first}`));
+            return;
+          }
+          resolve({ exitCode, stdout: Buffer.concat(stdout).toString() });
+        }));
     });
   }
 
