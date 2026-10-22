@@ -4,6 +4,12 @@ Changes made with Claude, and why.
 
 ## 2026-10-22 — Branch containers: final review fix wave
 
+- Design: blueprints (`kunj ct blueprint init|snapshot|status|remove`) — a repo's `.kunj/blueprint.json`
+  (`setup`/`maintain` commands) is run once in a sandbox and committed as `kunj-blueprint-<repo>:<hash>`
+  with the tree at `/opt/kunj/seed`; new branch containers copy the seed instead of installing. Why:
+  asked for a Devin-style blueprint so containers start with dependencies installed. Spec:
+  `docs/superpowers/specs/2026-10-22-blueprints-design.md`; branch `feature/blueprints`.
+
 - UTF-8 in the sandbox: `debian:bookworm-slim` has no locale, so Claude Code and tmux drew box glyphs as
   underscores. The image now sets `LANG=C.UTF-8 LC_ALL=C.UTF-8 TERM=xterm-256color`, tmux runs with `-u`,
   and interactive execs pass the host's `TERM`/`COLORTERM` plus `LANG=C.UTF-8`. Why: first real session
