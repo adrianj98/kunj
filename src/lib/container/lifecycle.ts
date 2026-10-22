@@ -612,6 +612,9 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
   // What this run created, and so what a failure removes. Volumes kept by `remove --keep-volumes`
   // existed before and are never removed here.
   const created: { containers: string[]; volumes: string[]; networks: string[] } = { containers: [], volumes: [], networks: [] };
+  // Set once the firewall is in place; a main container running before that is unfirewalled
+  let mainRun = false;
+  let ready = false;
 
   try {
     // 5. Network and volumes
@@ -676,11 +679,13 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
     // (the label check above ruled out a container of someone else's by this name)
     created.containers.unshift(names.container);
     const id = await step('docker', () => backend.run(spec));
+    mainRun = true;
 
     // 7. Network helper
     created.containers.unshift(names.helper);
     const helperId = await step('docker', () => backend.run(helperSpec(names, id, spec.labels, options.kunjVersion, fwEnv)));
     await waitForHelper(backend, helperId);
+    ready = true;
 
     // 8. Nothing runs in the container before this point. Seed, once the firewall is in place
     const seededBefore = await step('docker', () => hasSeedMarker(backend, id));
@@ -696,6 +701,14 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
 
     return { names, containerId: id, image, user: runAs, created: true, seeded, ...files, publish, firewall };
   } catch (err) {
+    if (options.keepOnError && mainRun && !ready) {
+      // Kept for debugging, but never left running without its firewall
+      try {
+        await backend.stop(names.container);
+      } catch (stopErr) {
+        warn(`Could not stop ${names.container}: ${message(stopErr)}`);
+      }
+    }
     if (!options.keepOnError) {
       try {
         await backend.remove({
@@ -755,8 +768,10 @@ async function resume(
   if (main.state === 'running' && helper?.state === 'running') return result;
 
   const state: UpState = { startedMain: false, helperCreated: false };
+  let ready = false;
   try {
     await bringUp(backend, names, main, helperEnv(options, origin, env), options.kunjVersion, warn, state);
+    ready = true;
 
     const user = recorded.user ?? '';
     const home = user ? `/home/${user}` : null;
@@ -769,7 +784,12 @@ async function resume(
     await step('docker', () => postCommands(backend, main.id, user, recorded, options));
     return result;
   } catch (err) {
-    if (!options.keepOnError) await undoUp(backend, names, main.id, state, warn);
+    if (!options.keepOnError) {
+      await undoUp(backend, names, main.id, state, warn);
+    } else if (!ready && state.startedMain) {
+      // Keep the helper to debug, but stop the container this run started without a firewall
+      await undoUp(backend, names, main.id, { startedMain: true, helperCreated: false }, warn);
+    }
     throw err;
   }
 }

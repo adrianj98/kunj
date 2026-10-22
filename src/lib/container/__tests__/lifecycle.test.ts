@@ -363,6 +363,30 @@ describe('startContainer', () => {
     expect(execCmds(b)).not.toContain(MARKER);
   });
 
+  it('--keep-on-error keeps the objects but stops a container whose firewall never came up', async () => {
+    const b = backend();
+    b.execErrors.set(READY, new Error('docker exec failed: container is not running'));
+    await expect(startContainer(b, options({ keepOnError: true }))).rejects.toMatchObject({ code: 'firewall' });
+    expect(b.methods()).not.toContain('remove');
+    expect(b.callsOf('stop')).toEqual([[names.container]]);
+
+    // Once the firewall is up, a later failure leaves it running for debugging
+    const seedFails = backend();
+    const real = seedFails.exec.bind(seedFails);
+    seedFails.exec = async (id: string, cmd: string[], io?: ExecIO) =>
+      cmd[2]?.startsWith('set -e') ? { exitCode: 1, stdout: '' } : real(id, cmd, io);
+    await expect(startContainer(seedFails, options({ keepOnError: true }))).rejects.toMatchObject({ code: 'seed' });
+    expect(seedFails.methods()).not.toContain('stop');
+
+    // Resume: the container it started is stopped, the helper kept
+    const resumed = backend();
+    resumed.existing = [info({ state: 'exited' })];
+    resumed.execErrors.set(READY, new Error('docker exec failed: not running'));
+    await expect(startContainer(resumed, options({ keepOnError: true }))).rejects.toMatchObject({ code: 'firewall' });
+    expect(resumed.callsOf('stop')).toEqual([['main-id']]);
+    expect(resumed.callsOf('remove')).toEqual([[{ containers: [names.helper] }]]);
+  });
+
   it('removes nothing when the network cannot be created', async () => {
     const b = backend();
     b.failOn = 'createNetwork';
