@@ -325,5 +325,14 @@ describe('docker backend', () => {
       await expect(backend.imageExists('a')).resolves.toBe(true);
       await expect(backend.imageExists('b')).resolves.toBe(false);
     });
+
+    it('volumeExists reflects the exit code of docker volume inspect', async () => {
+      results.push({ code: 0, stdout: 'v\n' });
+      results.push({ code: 1, stderr: 'no such volume\n' });
+      const backend = new LocalDockerBackend();
+      await expect(backend.volumeExists('v')).resolves.toBe(true);
+      await expect(backend.volumeExists('w')).resolves.toBe(false);
+      expect(argvOf(0)).toEqual(['volume', 'inspect', '--format', '{{.Name}}', 'v']);
+    });
   });
 });

@@ -67,6 +67,7 @@ export interface ContainerBackend {
   buildImage(tag: string, context: NodeJS.ReadableStream, opts?: BuildOptions): Promise<void>;
   createNetwork(name: string, labels: Labels): Promise<void>;
   createVolume(name: string, labels: Labels): Promise<void>;
+  volumeExists(name: string): Promise<boolean>;
   run(spec: ContainerSpec): Promise<string>;
   list(filter: Labels): Promise<ContainerInfo[]>;
   /** null when the object does not exist */

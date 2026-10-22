@@ -210,6 +210,10 @@ export class LocalDockerBackend implements ContainerBackend {
     await this.checked(['volume', 'create', ...labelArgs(labels), name]);
   }
 
+  async volumeExists(name: string): Promise<boolean> {
+    return (await this.spawnDocker(['volume', 'inspect', '--format', '{{.Name}}', name])).code === 0;
+  }
+
   async run(spec: ContainerSpec): Promise<string> {
     for (const [k, v] of Object.entries(spec.env)) {
       // --env-file is line based, so a newline would split the value into another variable

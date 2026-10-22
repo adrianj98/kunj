@@ -17,6 +17,8 @@ export class FakeBackend implements ContainerBackend {
   failOn?: string;
   existing: ContainerInfo[] = [];
   images = new Set<string>();
+  /** Volumes that exist; createVolume adds to it. */
+  volumes = new Set<string>();
   /** Pipe io.stdin to io.stdout uppercased. */
   echoUpper = false;
   /** stdin contents captured per exec call, in call order (undefined when no stream was given). */
@@ -59,6 +61,12 @@ export class FakeBackend implements ContainerBackend {
 
   async createVolume(name: string, labels: Labels): Promise<void> {
     this.record('createVolume', [name, labels]);
+    this.volumes.add(name);
+  }
+
+  async volumeExists(name: string): Promise<boolean> {
+    this.record('volumeExists', [name]);
+    return this.volumes.has(name);
   }
 
   async run(spec: ContainerSpec): Promise<string> {

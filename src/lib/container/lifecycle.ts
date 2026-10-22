@@ -578,9 +578,9 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
   const publish = await mapPorts(requestedPorts(options, source.spec));
   const firewall = firewallMode(cfg);
   const fwEnv = helperEnv(options, origin, env);
-  const created: { containers: string[]; networks: string[] } = { containers: [], networks: [] };
-  // Volumes may survive from `remove --keep-volumes`; they are only rolled back once known to hold no clone
-  let volumesFresh = false;
+  // What this run created, and so what a failure removes. Volumes kept by `remove --keep-volumes`
+  // existed before and are never removed here.
+  const created: { containers: string[]; volumes: string[]; networks: string[] } = { containers: [], volumes: [], networks: [] };
 
   try {
     // 5. Network and volumes
@@ -596,7 +596,11 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
     const volumes = [{ name: names.workspaceVolume, path: WORKSPACE }];
     if (home) volumes.push({ name: names.homeVolume, path: home });
     else warn('The image has no known user, so its home directory is not kept in a volume');
-    for (const v of volumes) await step('docker', () => backend.createVolume(v.name, objLabels));
+    for (const v of volumes) {
+      if (await step('docker', () => backend.volumeExists(v.name))) continue;
+      await step('docker', () => backend.createVolume(v.name, objLabels));
+      created.volumes.push(v.name);
+    }
 
     // 6. Main container: all capabilities dropped except MAIN_CAPABILITIES, and the image's ENTRYPOINT (branch-controlled for a
     // devcontainer) replaced by sleep, so nothing of the image's runs before the firewall is up
@@ -634,8 +638,10 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
       entrypoint: ['sleep'],
       command: ['infinity'],
     };
-    const id = await step('docker', () => backend.run(spec));
+    // Listed before run: a run that creates the container but fails to start it leaves it behind
+    // (the label check above ruled out a container of someone else's by this name)
     created.containers.unshift(names.container);
+    const id = await step('docker', () => backend.run(spec));
 
     // 7. Network helper
     created.containers.unshift(names.helper);
@@ -644,7 +650,6 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
 
     // 8. Nothing runs in the container before this point. Seed, once the firewall is in place
     const seededBefore = await step('docker', () => hasSeedMarker(backend, id));
-    volumesFresh = !seededBefore;
     await checkImage(backend, id, source, warn);
     const runAs = await step('docker', () => effectiveUser(backend, id, user));
     const seeded = await step('seed', () => seedIfNeeded(backend, id, user, home, options, origin, hasToken, seededBefore));
@@ -661,7 +666,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
       try {
         await backend.remove({
           containers: created.containers,
-          volumes: volumesFresh ? volumeNames(names, home) : [],
+          volumes: created.volumes,
           networks: created.networks,
         });
       } catch (cleanup) {
@@ -670,10 +675,6 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
     }
     throw err;
   }
-}
-
-function volumeNames(names: ContainerNames, home: string | null): string[] {
-  return home ? [names.workspaceVolume, names.homeVolume] : [names.workspaceVolume];
 }
 
 function parseOptionsLabel(labels: Record<string, string>): {

@@ -131,13 +131,15 @@ describe('startContainer', () => {
     const b = backend();
     const result = await startContainer(b, options());
 
-    expect(b.methods().slice(0, 10)).toEqual([
+    expect(b.methods().slice(0, 12)).toEqual([
       'info',
       'inspectLabels',
       'imageExists',
       'imageExists',
       'createNetwork',
+      'volumeExists',
       'createVolume',
+      'volumeExists',
       'createVolume',
       'run',
       'run',
@@ -348,17 +350,55 @@ describe('startContainer', () => {
     const b = backend();
     b.execErrors.set(READY, new Error('docker exec failed: container is not running'));
     await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'firewall' });
-    // Whether the volumes held a clone is not known yet, so they are kept
-    expect(b.callsOf('remove')).toEqual([[{ containers: [names.helper, names.container], volumes: [], networks: [names.network] }]]);
+    // This run created the volumes, so they go too
+    expect(b.callsOf('remove')).toEqual([[{
+      containers: [names.helper, names.container],
+      volumes: [names.workspaceVolume, names.homeVolume],
+      networks: [names.network],
+    }]]);
     expect(execCmds(b)).not.toContain(MARKER);
   });
 
-  it('keeps volumes that already held a clone when a later step fails', async () => {
+  it('removes nothing when the network cannot be created', async () => {
     const b = backend();
-    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
     b.failOn = 'createNetwork';
     await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'docker' });
     expect(b.callsOf('remove')).toEqual([[{ containers: [], volumes: [], networks: [] }]]);
+  });
+
+  it('rolls back the first volume when the second cannot be created', async () => {
+    const b = backend();
+    const real = b.createVolume.bind(b);
+    b.createVolume = async (name, labels) => {
+      if (name === names.homeVolume) throw new Error('docker volume create failed: disk full');
+      return real(name, labels);
+    };
+    await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'docker' });
+    expect(b.callsOf('remove')).toEqual([[{ containers: [], volumes: [names.workspaceVolume], networks: [names.network] }]]);
+  });
+
+  it('removes the main container when docker run fails', async () => {
+    const b = backend();
+    b.failOn = 'run';
+    await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'docker' });
+    expect(b.callsOf('remove')).toEqual([[{
+      containers: [names.container],
+      volumes: [names.workspaceVolume, names.homeVolume],
+      networks: [names.network],
+    }]]);
+  });
+
+  it('never removes a volume that existed before a failed fresh start', async () => {
+    const b = backend();
+    b.volumes.add(names.workspaceVolume);
+    b.execErrors.set(READY, new Error('docker exec failed: container is not running'));
+    await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'firewall' });
+    expect(b.callsOf('createVolume').map(a => a[0])).toEqual([names.homeVolume]);
+    expect(b.callsOf('remove')).toEqual([[{
+      containers: [names.helper, names.container],
+      volumes: [names.homeVolume],
+      networks: [names.network],
+    }]]);
   });
 
   it('skips seed when the marker exists and reruns it when missing', async () => {
