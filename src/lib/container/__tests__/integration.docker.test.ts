@@ -173,14 +173,21 @@ const BRANCH_ALLOW = 'it-allow';
   });
 
   afterAll(async () => {
-    if (repoId) {
-      const left = labelled();
-      if (left.containers.length) docker(['rm', '-f', ...left.containers]);
-      if (left.volumes.length) docker(['volume', 'rm', '-f', ...left.volumes]);
-      if (left.networks.length) docker(['network', 'rm', ...left.networks]);
-    }
-    daemon?.kill();
-    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+    // Each step on its own, so one failure (Docker gone, say) never leaks the daemon or temp dir
+    const attempt = (what: string, fn: () => void) => {
+      try {
+        fn();
+      } catch (err) {
+        process.stderr.write(`cleanup: ${what} failed: ${(err as Error).message}\n`);
+      }
+    };
+    let left = { containers: [] as string[], volumes: [] as string[], networks: [] as string[] };
+    if (repoId) attempt('listing labelled objects', () => (left = labelled()));
+    if (left.containers.length) attempt('removing containers', () => docker(['rm', '-f', ...left.containers]));
+    if (left.volumes.length) attempt('removing volumes', () => docker(['volume', 'rm', '-f', ...left.volumes]));
+    if (left.networks.length) attempt('removing networks', () => docker(['network', 'rm', ...left.networks]));
+    attempt('stopping git daemon', () => daemon?.kill());
+    if (tmp) attempt('removing the temp dir', () => fs.rmSync(tmp, { recursive: true, force: true }));
   });
 
   const namesA = () => containerNames(REPO_NAME, repoId, BRANCH_A);
