@@ -15,6 +15,14 @@ daemon should be able to live on a remote machine behind a kunj service.
   devcontainer, per-branch network with sidecar services, opt-in Docker-in-Docker (sysbox /
   privileged in an isolated VM), port forwarding over `docker exec`, agents in tmux, and a
   `ContainerBackend` interface so a remote backend can be added without redesign.
+- Second pass (same day): an adversarial review found 15 issues; verified the two about existing
+  code (`branchToDirName` collapses `feature/x`/`feature-x`; `hooks.*` config commands substitute
+  `${branch}` as text into a `shell: true` command). Spec revised: hash suffix on names + label
+  match on reuse, stronger remove guard, credential helper scoped to origin's host, root refused,
+  firewall moved to a network-helper sidecar (agent container has no capabilities), host/LAN
+  blocked by default, AWS keys only with Bedrock, DNS pinned, allowlist re-resolved, privileged
+  needs an explicit setting, hook quoting fix as a prerequisite, idempotent seed, prune/`--auto`
+  moved to later phases. A "what the sandbox does and does not protect" table was added.
 - No code yet; the spec is up for review before planning.
 
 ## 2026-10-16 — Remove several worktrees at once (VS Code + macOS app)
