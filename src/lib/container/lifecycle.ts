@@ -10,7 +10,7 @@ import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutErro
 import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch } from './names';
 import { ImageSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
 import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devcontainer';
-import { SEED_MARKER, hostGitIdentity, inspectOrigin, pushBranch, refExistsOnOrigin, seedScript } from './seed';
+import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
 import {
   CLAUDE_AUTH_KEYS,
   ContainerStatus,
@@ -234,9 +234,10 @@ async function waitForHelper(backend: ContainerBackend, helperId: string): Promi
   }
 }
 
-function helperEnv(options: StartOptions, originHost: string, env: Record<string, string>): Record<string, string> {
+function helperEnv(options: StartOptions, origin: { originUrl: string; originHost: string }, env: Record<string, string>): Record<string, string> {
   const bedrockRegion = truthy(env.CLAUDE_CODE_USE_BEDROCK) ? env.AWS_REGION || env.AWS_DEFAULT_REGION : undefined;
-  return firewallEnv(options.config.container, '', originHost, bedrockRegion);
+  // The port lets the allowlist check reach origin wherever it listens (git://, https on :8443, ssh on :2222)
+  return firewallEnv(options.config.container, '', origin.originHost, bedrockRegion, originPort(origin.originUrl));
 }
 
 function helperSpec(
@@ -551,7 +552,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
   const home = homeFor(source);
   const publish = await mapPorts(requestedPorts(options, source.spec));
   const firewall = firewallMode(cfg);
-  const fwEnv = helperEnv(options, origin.originHost, env);
+  const fwEnv = helperEnv(options, origin, env);
   const created: { containers: string[]; networks: string[] } = { containers: [], networks: [] };
   // Volumes may survive from `remove --keep-volumes`; they are only rolled back once known to hold no clone
   let volumesFresh = false;
@@ -691,7 +692,7 @@ async function resume(
 
   const state: UpState = { startedMain: false, helperCreated: false };
   try {
-    await bringUp(backend, names, main, helperEnv(options, origin.originHost, env), options.kunjVersion, warn, state);
+    await bringUp(backend, names, main, helperEnv(options, origin, env), options.kunjVersion, warn, state);
 
     const user = recorded.user ?? '';
     const home = user ? `/home/${user}` : null;

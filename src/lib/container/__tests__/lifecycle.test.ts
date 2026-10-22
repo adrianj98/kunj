@@ -166,6 +166,8 @@ describe('startContainer', () => {
     expect(helper.init).toBe(false);
     expect(helper.labels[LABEL.role]).toBe('helper');
     expect(helper.env.KUNJ_FW_ORIGIN_HOST).toBe('github.com');
+    // origin's port, so the allowlist check can reach an origin that is not on 443 or 22
+    expect(helper.env.KUNJ_FW_ORIGIN_PORT).toBe('443');
 
     // The seed runs only after the helper reported ready
     const cmds = execCmds(b);
@@ -494,8 +496,10 @@ describe('firewallEnv', () => {
       KUNJ_FW_DOMAINS: '',
       KUNJ_FW_GITHUB: '1',
       KUNJ_FW_ORIGIN_HOST: 'github.com',
+      KUNJ_FW_ORIGIN_PORT: '',
       KUNJ_FW_SUBNET: '',
     });
+    expect(firewallEnv({}, '', 'example.com', undefined, 8443).KUNJ_FW_ORIGIN_PORT).toBe('8443');
     expect(firewallEnv({ network: { allow: [] } }, '', 'gitlab.com', undefined).KUNJ_FW_MODE).toBe('default');
     const env = firewallEnv({ network: { allow: ['npmjs.org'], allowHost: true } }, '10.0.0.0/24', 'gitlab.com', 'eu-west-1');
     expect(env).toMatchObject({

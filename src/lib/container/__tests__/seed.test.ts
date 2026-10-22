@@ -4,6 +4,7 @@ import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import {
   inspectOrigin,
+  originPort,
   refExistsOnOrigin,
   pushBranch,
   hostGitIdentity,
@@ -185,6 +186,21 @@ describe('inspectOrigin url parsing', () => {
       expect(state.unpushed).toBe(0);
     });
   }
+});
+
+describe('originPort', () => {
+  it('uses the URL port, else the scheme default, else 0', () => {
+    expect(originPort('git://host.docker.internal:52337/r.git')).toBe(52337);
+    expect(originPort('https://example.com:8443/r.git')).toBe(8443);
+    expect(originPort('https://github.com/me/r.git')).toBe(443);
+    expect(originPort('http://example.com/r.git')).toBe(80);
+    expect(originPort('git://example.com/r.git')).toBe(9418);
+    expect(originPort('ssh://git@example.com:2222/me/r.git')).toBe(2222);
+    expect(originPort('ssh://git@example.com/me/r.git')).toBe(22);
+    expect(originPort('git@github.com:me/r.git')).toBe(22);
+    expect(originPort('/srv/r.git')).toBe(0);
+    expect(originPort('file:///srv/r.git')).toBe(0);
+  });
 });
 
 describe('seedScript', () => {

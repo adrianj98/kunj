@@ -56,6 +56,21 @@ function parseOrigin(url: string): { host: string; isSsh: boolean } {
   return scp ? { host: scp[1], isSsh: true } : { host: '', isSsh: false };
 }
 
+const DEFAULT_PORTS: Record<string, number> = { 'https:': 443, 'http:': 80, 'ssh:': 22, 'git:': 9418 };
+
+/** The TCP port git connects to for origin; 0 when the URL has none (a local path). */
+export function originPort(url: string): number {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
+    try {
+      const u = new URL(url);
+      return u.port ? Number(u.port) : DEFAULT_PORTS[u.protocol] ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+  return SCP_LIKE.test(url) ? 22 : 0;
+}
+
 export async function inspectOrigin(branch: string, cwd: string): Promise<OriginState> {
   let originUrl: string;
   try {

@@ -41,7 +41,8 @@ export function firewallEnv(
   config: KunjConfig['container'],
   subnet: string,
   originHost: string,
-  bedrockRegion: string | undefined
+  bedrockRegion: string | undefined,
+  originPort = 0
 ): Record<string, string> {
   const domains = [...(config?.network?.allow ?? [])];
   if (bedrockRegion) domains.push(`bedrock-runtime.${bedrockRegion}.amazonaws.com`);
@@ -51,6 +52,7 @@ export function firewallEnv(
     KUNJ_FW_DOMAINS: domains.join(' '),
     KUNJ_FW_GITHUB: /(^|\.)github\.com$/i.test(originHost) ? '1' : '0',
     KUNJ_FW_ORIGIN_HOST: originHost,
+    KUNJ_FW_ORIGIN_PORT: originPort ? String(originPort) : '',
     KUNJ_FW_SUBNET: subnet,
   };
 }

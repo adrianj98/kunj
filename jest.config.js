@@ -4,6 +4,8 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/?(*.)+(spec|test).ts'],
+  // Docker integration tests run only through `npm run test:docker`
+  testPathIgnorePatterns: ['/node_modules/', '\\.docker\\.test\\.ts$'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },

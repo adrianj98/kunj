@@ -9,6 +9,7 @@
 #   KUNJ_FW_DOMAINS      space-separated extra domains for the allowlist
 #   KUNJ_FW_GITHUB       1 allows GitHub's published ranges (api.github.com/meta)
 #   KUNJ_FW_ORIGIN_HOST  host of the repository's origin; allowed, and must be reachable
+#   KUNJ_FW_ORIGIN_PORT  port origin's URL connects to (git://, https on :8443, ssh on :2222); optional
 #   KUNJ_FW_SUBNET       the branch network's subnet; detected from eth0 when empty
 #
 # Prints READY and creates /tmp/kunj-ready once the rules are in place, then keeps running
@@ -20,6 +21,7 @@ ALLOW_HOST=${KUNJ_FW_ALLOW_HOST:-0}
 DOMAINS=${KUNJ_FW_DOMAINS:-}
 GITHUB=${KUNJ_FW_GITHUB:-0}
 ORIGIN_HOST=${KUNJ_FW_ORIGIN_HOST:-}
+ORIGIN_PORT=${KUNJ_FW_ORIGIN_PORT:-}
 SUBNET=${KUNJ_FW_SUBNET:-}
 
 CHAIN=KUNJ-OUT
@@ -272,7 +274,10 @@ if [ "$MODE" = allowlist ]; then
     *) die "verification failed: could not test https://example.com (curl exit $rc)" ;;
   esac
   if [ -n "$ORIGIN_HOST" ]; then
-    if curl --max-time 5 -sI -o /dev/null "https://$ORIGIN_HOST" \
+    # origin's own port first: an origin served elsewhere (git daemon, a custom https or ssh
+    # port) has nothing listening on 443 or 22
+    if { [ -n "$ORIGIN_PORT" ] && nc -z -w 5 "$ORIGIN_HOST" "$ORIGIN_PORT" 2>/dev/null; } \
+      || curl --max-time 5 -sI -o /dev/null "https://$ORIGIN_HOST" \
       || nc -z -w 5 "$ORIGIN_HOST" 443 2>/dev/null \
       || nc -z -w 5 "$ORIGIN_HOST" 22 2>/dev/null; then
       log "verified: $ORIGIN_HOST is reachable"
