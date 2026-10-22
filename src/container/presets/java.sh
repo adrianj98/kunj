@@ -1,11 +1,11 @@
 #!/bin/sh
 # kunj preset: java — Eclipse Temurin JDK. tools: { "java": "21" }
+# Allowlist mode needs api.adoptium.net and github.com, objects.githubusercontent.com in container.network.allow.
 set -eu
 . "$(dirname "$0")/_lib.sh"
 kunj_need curl
 want="${KUNJ_TOOL_VERSION:-21}"
-arch="$(kunj_arch_node)"; [ "$arch" = arm64 ] && arch=aarch64
-[ "$arch" = x64 ] && arch=x64
+arch="$(kunj_arch)"; [ "$arch" = x86_64 ] && arch=x64   # Adoptium spells them x64 / aarch64
 dest="/usr/local/jdk-$want"
 if [ ! -x "$dest/bin/java" ]; then
   mkdir -p "$dest"

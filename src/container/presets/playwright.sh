@@ -1,6 +1,7 @@
 #!/bin/sh
 # kunj preset: playwright — browsers + OS deps, shared system-wide. tools: { "playwright": "chromium" } | true (all)
 # Uses the project's @playwright/test version when the tree declares one, so browsers match.
+# Allowlist mode needs playwright.download.prss.microsoft.com, cdn.playwright.dev and the apt mirror in container.network.allow.
 set -eu
 . "$(dirname "$0")/_lib.sh"
 kunj_need node; kunj_need npx

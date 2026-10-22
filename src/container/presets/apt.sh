@@ -1,5 +1,6 @@
 #!/bin/sh
 # kunj preset: apt — Debian/Ubuntu packages. tools: { "apt": ["jq", "postgresql-client"] }
+# Allowlist mode needs the image's package mirror (deb.debian.org for Debian) in container.network.allow.
 set -eu
 . "$(dirname "$0")/_lib.sh"
 [ -n "${KUNJ_TOOL_VERSION:-}" ] || { echo "apt: list the packages to install" >&2; exit 1; }

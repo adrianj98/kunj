@@ -20,16 +20,17 @@ kunj_env() {
   printf 'export %s\n' "$(sed 's/^\([^=]*\)=\(.*\)$/\1="\2"/' "$KUNJ_ENV_FILE" | tr '\n' ' ')" > /etc/profile.d/kunj-tools.sh
 }
 
-# Architecture in the two spellings download sites use: "x64 amd64" or "arm64 aarch64".
+# Architecture as download sites spell it. Not a pipeline, so an unsupported machine fails the
+# `x="$(kunj_arch_node)"` assignment under set -e instead of yielding "".
 kunj_arch() {
   case "$(uname -m)" in
-    x86_64) echo "x64 amd64" ;;
-    aarch64|arm64) echo "arm64 aarch64" ;;
-    *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+    x86_64|amd64) echo x86_64 ;;
+    aarch64|arm64) echo aarch64 ;;
+    *) echo "$KUNJ_TOOL_NAME: unsupported architecture $(uname -m)" >&2; return 1 ;;
   esac
 }
-kunj_arch_node() { kunj_arch | cut -d' ' -f1; }   # x64 | arm64
-kunj_arch_deb()  { kunj_arch | cut -d' ' -f2; }   # amd64 | aarch64 (go/jdk/uv spellings differ; see each preset)
+kunj_arch_node() { _a="$(kunj_arch)" || return 1; [ "$_a" = x86_64 ] && echo x64 || echo arm64; }      # node, temurin (x64)
+kunj_arch_deb()  { _a="$(kunj_arch)" || return 1; [ "$_a" = x86_64 ] && echo amd64 || echo arm64; }    # debian, go
 
 # Where the project tree is while presets run: the seed during a snapshot, else the workspace.
 kunj_tree() {
@@ -38,4 +39,9 @@ kunj_tree() {
 
 kunj_need() { command -v "$1" >/dev/null 2>&1 || { echo "$KUNJ_TOOL_NAME: needs $1 in the image" >&2; exit 1; }; }
 
-kunj_done() { echo "installed $KUNJ_TOOL_NAME $1"; }
+# Last step of every preset: kunj reads the version from $KUNJ_RESULT_DIR/<name>.result.
+kunj_done() {
+  _d="${KUNJ_RESULT_DIR:-/tmp/kunj-presets}"
+  if [ -d "$_d" ]; then echo "$KUNJ_TOOL_NAME $1" > "$_d/$KUNJ_TOOL_NAME.result"; fi
+  echo "installed $KUNJ_TOOL_NAME $1"
+}

@@ -33,7 +33,7 @@ DOCKER_DNS=127.0.0.11
 # Private, carrier-grade NAT (Tailscale and similar), link-local and "this network" ranges
 PRIVATE4="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
 PRIVATE6="fc00::/7 fe80::/10"
-ALWAYS_ALLOWED="api.anthropic.com registry.npmjs.org"
+ALWAYS_ALLOWED="api.anthropic.com registry.npmjs.org nodejs.org" # nodejs.org: the node preset
 REFRESH_SECONDS=${KUNJ_FW_REFRESH_SECONDS:-300} # overridable for testing
 
 log() { echo "kunj-firewall: $*"; }

@@ -1,5 +1,6 @@
 #!/bin/sh
 # kunj preset: python — a CPython via uv, plus uv itself. tools: { "python": "3.12" }
+# Allowlist mode needs astral.sh and github.com, objects.githubusercontent.com in container.network.allow.
 set -eu
 . "$(dirname "$0")/_lib.sh"
 kunj_need curl
