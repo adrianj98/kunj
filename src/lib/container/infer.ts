@@ -64,6 +64,7 @@ export function inferBlueprint(repoRoot: string, imageNodeMajor = 22): Inferred 
   const lockfiles = KNOWN_LOCKFILES.filter(f => has(repoRoot, f));
 
   // JavaScript
+  const nvm = has(repoRoot, '.nvmrc') ? '.nvmrc' : has(repoRoot, '.node-version') ? '.node-version' : null;
   const pkgText = read(repoRoot, 'package.json');
   let pkg: Record<string, any> | null = null;
   if (pkgText !== null) {
@@ -113,12 +114,8 @@ export function inferBlueprint(repoRoot: string, imageNodeMajor = 22): Inferred 
     }
 
     // Node version
-    const nvm = has(repoRoot, '.nvmrc') ? '.nvmrc' : has(repoRoot, '.node-version') ? '.node-version' : null;
     const engines = pkg.engines && typeof pkg.engines.node === 'string' ? pkg.engines.node : null;
-    if (nvm) {
-      tools.node = 'nvmrc';
-      reasons.push(`${nvm} → node: nvmrc`);
-    } else if (engines) {
+    if (!nvm && engines) {
       const r = nodeRange(engines, imageNodeMajor);
       if (!r) reasons.push(`engines.node "${engines}" not understood; node left to the image`);
       else if (r.satisfied) reasons.push(`engines.node "${engines}" is satisfied by the image's node ${imageNodeMajor}; node omitted`);
@@ -133,12 +130,10 @@ export function inferBlueprint(repoRoot: string, imageNodeMajor = 22): Inferred 
       tools.playwright = true;
       reasons.push('playwright in package.json → playwright: true');
     }
-  } else if (pkgText === null) {
-    const nvm = has(repoRoot, '.nvmrc') ? '.nvmrc' : has(repoRoot, '.node-version') ? '.node-version' : null;
-    if (nvm) {
-      tools.node = 'nvmrc';
-      reasons.push(`${nvm} → node: nvmrc`);
-    }
+  }
+  if (nvm) {
+    tools.node = 'nvmrc';
+    reasons.push(`${nvm} → node: nvmrc`);
   }
 
   // Python
@@ -203,7 +198,7 @@ export function inferBlueprint(repoRoot: string, imageNodeMajor = 22): Inferred 
       const line = raw.replace(/#.*/, '').trim();
       if (!line) continue;
       const [name, version] = line.split(/\s+/);
-      const preset = ASDF_NAMES[name];
+      const preset = Object.hasOwn(ASDF_NAMES, name) ? ASDF_NAMES[name] : undefined;
       if (!preset || !version || !TOOL_WORD.test(version)) {
         reasons.push(`.tool-versions: ${name} is not supported; install it by hand`);
       } else if (tools[preset] !== undefined) {

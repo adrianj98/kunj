@@ -44,7 +44,62 @@ describe('inferBlueprint', () => {
 
   it('yarn 1 uses frozen-lockfile', () => {
     const i = inferBlueprint(repo({ 'package.json': { packageManager: 'yarn@1.22.19' }, 'yarn.lock': '' }));
-    expect(i.setup).toEqual(['yarn install --frozen-lockfile']);
+    expect(core(i)).toEqual({
+      tools: { yarn: 'corepack' },
+      setup: ['yarn install --frozen-lockfile'],
+      maintain: ['yarn install --frozen-lockfile'],
+      lockfiles: ['yarn.lock'],
+    });
+  });
+
+  it('yarn.lock without packageManager: berry by __metadata, else classic', () => {
+    const berry = inferBlueprint(repo({ 'package.json': {}, 'yarn.lock': '__metadata:\n  version: 8\n' }));
+    expect(core(berry)).toEqual({
+      tools: { yarn: 'corepack' }, setup: ['yarn install --immutable'], maintain: ['yarn install --immutable'], lockfiles: ['yarn.lock'],
+    });
+    const classic = inferBlueprint(repo({ 'package.json': {}, 'yarn.lock': '# yarn lockfile v1\n' }));
+    expect(core(classic)).toEqual({
+      tools: { yarn: 'corepack' },
+      setup: ['yarn install --frozen-lockfile'],
+      maintain: ['yarn install --frozen-lockfile'],
+      lockfiles: ['yarn.lock'],
+    });
+  });
+
+  it('bun.lockb', () => {
+    const i = inferBlueprint(repo({ 'package.json': {}, 'bun.lockb': '' }));
+    expect(core(i)).toEqual({
+      tools: { bun: true }, setup: ['bun install --frozen-lockfile'], maintain: ['bun install --frozen-lockfile'], lockfiles: ['bun.lockb'],
+    });
+  });
+
+  it('malformed package.json does not throw', () => {
+    const i = inferBlueprint(repo({ 'package.json': '{ nope' }));
+    expect(core(i)).toEqual({ tools: {}, setup: [], maintain: [], lockfiles: [] });
+    hasReason(i, 'package.json is not valid JSON; skipped');
+  });
+
+  it('.nvmrc is honoured with a malformed package.json', () => {
+    const i = inferBlueprint(repo({ 'package.json': '{ nope', '.nvmrc': '20\n' }));
+    expect(core(i)).toEqual({ tools: { node: 'nvmrc' }, setup: [], maintain: [], lockfiles: [] });
+    hasReason(i, 'package.json is not valid JSON; skipped');
+  });
+
+  it('.node-version', () => {
+    const i = inferBlueprint(repo({ 'package.json': {}, 'package-lock.json': '', '.node-version': '20.1.0\n' }));
+    expect(core(i)).toEqual({ tools: { node: 'nvmrc' }, setup: ['npm ci'], maintain: ['npm ci'], lockfiles: ['package-lock.json'] });
+    hasReason(i, '.node-version → node: nvmrc');
+  });
+
+  it('engines ranges: ">=18 <21" and "18.x" give 18', () => {
+    expect(inferBlueprint(repo({ 'package.json': { engines: { node: '>=18 <21' } } })).tools).toEqual({ node: '18' });
+    expect(inferBlueprint(repo({ 'package.json': { engines: { node: '18.x' } } })).tools).toEqual({ node: '18' });
+  });
+
+  it('.tool-versions ignores prototype names', () => {
+    const i = inferBlueprint(repo({ '.tool-versions': 'constructor 1.0\ntoString 2.0\n' }));
+    expect(core(i)).toEqual({ tools: {}, setup: [], maintain: [], lockfiles: [] });
+    hasReason(i, 'constructor is not supported');
   });
 
   it('pnpm from the lockfile', () => {
@@ -70,8 +125,8 @@ describe('inferBlueprint', () => {
 
   it('.nvmrc wins over engines', () => {
     const i = inferBlueprint(repo({ 'package.json': { engines: { node: '^20' } }, 'package-lock.json': '', '.nvmrc': '20\n' }));
-    expect(i.tools).toEqual({ node: 'nvmrc' });
-    hasReason(i, 'nvmrc');
+    expect(core(i)).toEqual({ tools: { node: 'nvmrc' }, setup: ['npm ci'], maintain: ['npm ci'], lockfiles: ['package-lock.json'] });
+    hasReason(i, '.nvmrc → node: nvmrc');
   });
 
   it('kunj-like: engines >=18 is satisfied by the image so node is omitted', () => {
@@ -80,7 +135,7 @@ describe('inferBlueprint', () => {
     hasReason(i, 'omitted');
   });
 
-  it('engines ^20 with image 22 pins node 20; "20 || 22" gives 20', () => {
+  it('engines ^20 with image 22 pins node 20; "20 || 22" is satisfied so node is omitted', () => {
     expect(inferBlueprint(repo({ 'package.json': { engines: { node: '^20' } } })).tools).toEqual({ node: '20' });
     expect(inferBlueprint(repo({ 'package.json': { engines: { node: '20 || 22' } } })).tools).toEqual({});
     expect(inferBlueprint(repo({ 'package.json': { engines: { node: '20 || 24' } } }), 23).tools).toEqual({ node: '20' });
