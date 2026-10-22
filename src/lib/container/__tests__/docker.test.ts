@@ -105,6 +105,13 @@ describe('docker backend', () => {
       expect(args.join(' ')).toContain('--cpus 1 --memory 256m --cap-add NET_ADMIN --cap-add NET_RAW kunj/default:1');
     });
 
+    it('runArgs replaces the image entrypoint when one is given', () => {
+      const args = runArgs({ ...baseSpec, entrypoint: ['sleep'], command: ['infinity'] }, '/e');
+      expect(args.slice(-4)).toEqual(['--entrypoint', 'sleep', 'kunj/default:1', 'infinity']);
+      const multi = runArgs({ ...baseSpec, entrypoint: ['sh', '-c'], command: ['true'] }, '/e');
+      expect(multi.slice(-5)).toEqual(['--entrypoint', 'sh', 'kunj/default:1', '-c', 'true']);
+    });
+
     it('runArgs leaves out --init only when init is false', () => {
       expect(runArgs({ ...baseSpec, init: false }, '/e')).not.toContain('--init');
     });

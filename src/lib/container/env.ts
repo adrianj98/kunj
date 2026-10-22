@@ -105,8 +105,10 @@ export function parseGuard(stdout: string): Omit<RemoveGuard, 'originReachable'>
     }
     if (!line.trim()) continue;
     if (section === 'refs') {
-      const m = /^(\S+) (\d+)$/.exec(line.trim());
-      if (m && parseInt(m[2], 10) > 0) guard.unpushedRefs.push(m[1]);
+      // No count means rev-list failed: fail closed
+      const m = /^(\S+)(?: (\d+))?$/.exec(line.trim());
+      const ref = m ? m[1] : line.trim().split(' ')[0];
+      if (!m || m[2] === undefined || parseInt(m[2], 10) > 0) guard.unpushedRefs.push(ref);
     } else if (section === 'stash') {
       guard.stashes = parseInt(line.trim(), 10) || 0;
     } else if (section === 'status' && !line.startsWith('#')) {

@@ -234,21 +234,23 @@ async function waitForHelper(backend: ContainerBackend, helperId: string): Promi
   }
 }
 
-async function runHelper(
-  backend: ContainerBackend,
-  options: StartOptions,
+function helperEnv(options: StartOptions, originHost: string, env: Record<string, string>): Record<string, string> {
+  const bedrockRegion = truthy(env.CLAUDE_CODE_USE_BEDROCK) ? env.AWS_REGION || env.AWS_DEFAULT_REGION : undefined;
+  return firewallEnv(options.config.container, '', originHost, bedrockRegion);
+}
+
+function helperSpec(
   names: ContainerNames,
   mainId: string,
-  originHost: string,
+  mainLabels: Record<string, string>,
+  kunjVersion: string,
   env: Record<string, string>
-): Promise<string> {
-  const helperImage = NETHELPER_TAG(options.kunjVersion);
-  const bedrockRegion = truthy(env.CLAUDE_CODE_USE_BEDROCK) ? env.AWS_REGION || env.AWS_DEFAULT_REGION : undefined;
-  return backend.run({
+): ContainerSpec {
+  return {
     name: names.helper,
-    image: helperImage,
-    labels: labelsFor(options.repo.id, options.branch, { [LABEL.version]: options.kunjVersion, [LABEL.role]: 'helper' }),
-    env: firewallEnv(options.config.container, '', originHost, bedrockRegion),
+    image: NETHELPER_TAG(kunjVersion),
+    labels: labelsFor(mainLabels[LABEL.repo], mainLabels[LABEL.branch], { [LABEL.version]: kunjVersion, [LABEL.role]: 'helper' }),
+    env,
     network: names.network,
     workdir: '/',
     volumes: [],
@@ -257,7 +259,45 @@ async function runHelper(
     networkOf: mainId,
     init: false,
     command: [],
-  });
+  };
+}
+
+interface UpState { startedMain: boolean; helperCreated: boolean }
+
+/**
+ * Bring an existing main container up behind a fresh network helper. Nothing is exec'd in main
+ * before the helper reports ready: the firewall accepts established connections, so anything
+ * opened earlier would outlive the rules. `state` says what to undo when this throws.
+ */
+async function bringUp(
+  backend: ContainerBackend,
+  names: ContainerNames,
+  main: ContainerInfo,
+  fwEnv: Record<string, string>,
+  kunjVersion: string,
+  warn: (m: string) => void,
+  state: UpState
+): Promise<void> {
+  await step('image', () => ensureImage(backend, resolveHelperImage(kunjVersion), warn));
+  if (main.state !== 'running') {
+    await step('docker', () => backend.start(main.id));
+    state.startedMain = true;
+  }
+  // Always a fresh helper: a stale ready file survives a docker restart, the rules do not
+  await step('docker', () => backend.remove({ containers: [names.helper] }));
+  state.helperCreated = true;
+  const helperId = await step('docker', () => backend.run(helperSpec(names, main.id, main.labels, kunjVersion, fwEnv)));
+  await waitForHelper(backend, helperId);
+}
+
+/** Never leave a container this run started running without its firewall. */
+async function undoUp(backend: ContainerBackend, names: ContainerNames, mainId: string, state: UpState, warn: (m: string) => void): Promise<void> {
+  try {
+    if (state.helperCreated) await backend.remove({ containers: [names.helper] });
+    if (state.startedMain) await backend.stop(mainId);
+  } catch (err) {
+    warn(`Could not undo this start: ${message(err)}`);
+  }
 }
 
 const NETHELPER_TAG = (version: string) => resolveHelperImage(version).tag;
@@ -401,7 +441,7 @@ async function postCommands(
   backend: ContainerBackend,
   id: string,
   user: string,
-  spec: DevcontainerSpec | undefined,
+  spec: Pick<DevcontainerSpec, 'postCreateCommand' | 'postStartCommand'> | undefined,
   options: StartOptions
 ): Promise<void> {
   const io: ExecIO = { user: user || undefined, workdir: WORKSPACE, ...outputIO(options.jsonMode) };
@@ -443,49 +483,53 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
 
   await step('docker', () => backend.info());
 
-  // 1. Origin
+  // An existing container is resumed whatever origin now has: its clone is the source of truth
+  const labels = await step('docker', () => backend.inspectLabels(names.container));
+  if (labels && !labelsMatch(labels, repo.id, branch)) {
+    throw new StartError(`A container named ${names.container} exists but does not belong to ${repo.name} ${branch}`, 'collision');
+  }
+
+  // Origin (only its host matters for an existing container; the fetch may fail)
   const origin = await step('origin', () => inspectOrigin(branch, options.cwd));
   if (!origin.originHost) {
     throw new StartError('Origin has no host; a container can only clone from a remote origin', 'origin');
   }
   const env = forwardedEnv(cfg, options.hostEnv, vars);
   const hasToken = TOKEN_KEYS.some(k => env[k]);
-  if (origin.isSsh && !hasToken) {
-    throw new StartError(
-      `Origin ${origin.originUrl} uses SSH, which the container cannot use without a token; forward GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN with container.env`,
-      'no-token'
-    );
-  }
-  if (options.create) {
-    if (!options.base) throw new StartError('No base branch to create the branch from', 'base-missing');
-    const base = options.base;
-    if (!(await step('origin', () => refExistsOnOrigin(base, options.cwd)))) {
-      throw new StartError(`Base ${base} is not on origin`, 'base-missing');
-    }
+
+  if (labels && !options.rebuild) {
+    return resume(backend, options, names, origin, env, hasToken);
   }
 
-  // 2. Origin must have the work
-  if (!options.create && (origin.unpushed > 0 || !origin.branchOnOrigin)) {
-    const what = origin.branchOnOrigin
-      ? `${branch} has ${origin.unpushed} commit${origin.unpushed === 1 ? '' : 's'} origin does not have`
-      : `${branch} is not on origin`;
-    if (options.jsonMode || !(await options.confirmPush())) {
-      throw new StartError(`${what}; push it first (the container clones from origin)`, 'unpushed');
+  if (!labels) {
+    if (origin.isSsh && !hasToken) {
+      throw new StartError(
+        `Origin ${origin.originUrl} uses SSH, which the container cannot use without a token; forward GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN with container.env`,
+        'no-token'
+      );
     }
-    await step('unpushed', () => pushBranch(branch, options.cwd));
+    if (options.create) {
+      if (!options.base) throw new StartError('No base branch to create the branch from', 'base-missing');
+      const base = options.base;
+      if (!(await step('origin', () => refExistsOnOrigin(base, options.cwd)))) {
+        throw new StartError(`Base ${base} is not on origin`, 'base-missing');
+      }
+    }
+
+    // Origin must have the work the new clone starts from
+    if (!options.create && (origin.unpushed > 0 || !origin.branchOnOrigin)) {
+      const what = origin.branchOnOrigin
+        ? `${branch} has ${origin.unpushed} commit${origin.unpushed === 1 ? '' : 's'} origin does not have`
+        : `${branch} is not on origin`;
+      if (options.jsonMode || !(await options.confirmPush())) {
+        throw new StartError(`${what}; push it first (the container clones from origin)`, 'unpushed');
+      }
+      await step('unpushed', () => pushBranch(branch, options.cwd));
+    }
   }
 
   if (cfg?.agentCommand?.trim().startsWith('claude') !== false && !CLAUDE_AUTH_KEYS.some(k => env[k])) {
     warn('None of ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN or CLAUDE_CODE_USE_BEDROCK is forwarded; Claude Code will need a login inside the container');
-  }
-
-  // 3. Existing container
-  const labels = await step('docker', () => backend.inspectLabels(names.container));
-  if (labels && !labelsMatch(labels, repo.id, branch)) {
-    throw new StartError(`A container named ${names.container} exists but does not belong to ${repo.name} ${branch}`, 'collision');
-  }
-  if (labels && !options.rebuild) {
-    return resume(backend, options, names, origin, env, hasToken);
   }
 
   // 4. Images
@@ -507,8 +551,9 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
   const home = homeFor(source);
   const publish = await mapPorts(requestedPorts(options, source.spec));
   const firewall = firewallMode(cfg);
+  const fwEnv = helperEnv(options, origin.originHost, env);
   const created: { containers: string[]; networks: string[] } = { containers: [], networks: [] };
-  // Volumes may survive from `remove --keep-volumes`; they are only rolled back once known to be empty
+  // Volumes may survive from `remove --keep-volumes`; they are only rolled back once known to hold no clone
   let volumesFresh = false;
 
   try {
@@ -527,14 +572,25 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
     else warn('The image has no known user, so its home directory is not kept in a volume');
     for (const v of volumes) await step('docker', () => backend.createVolume(v.name, objLabels));
 
-    // 6. Main container: no capabilities, nothing running but sleep until the firewall is up
+    // 6. Main container: no capabilities, and the image's ENTRYPOINT (branch-controlled for a
+    // devcontainer) replaced by sleep, so nothing of the image's runs before the firewall is up
     const spec: ContainerSpec = {
       name: names.container,
       image,
       labels: labelsFor(repo.id, branch, {
         [LABEL.base]: options.base ?? '',
         [LABEL.version]: options.kunjVersion,
-        [LABEL.options]: JSON.stringify({ firewall, allowHost: !!cfg?.network?.allowHost, publish }),
+        // helperEnv lets a stopped container be brought up behind its firewall again (remove guard);
+        // user and the post commands are what resuming needs, even once the branch is gone from origin
+        [LABEL.options]: JSON.stringify({
+          firewall,
+          allowHost: !!cfg?.network?.allowHost,
+          publish,
+          helperEnv: fwEnv,
+          user,
+          postCreateCommand: source.spec?.postCreateCommand,
+          postStartCommand: source.spec?.postStartCommand,
+        }),
         [LABEL.role]: 'main',
       }),
       // The devcontainer comes from the branch: it must not override the credential host or secrets
@@ -547,21 +603,21 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
       cpus: cfg?.cpus || undefined,
       memory: cfg?.memory || undefined,
       init: true,
-      command: ['sleep', 'infinity'],
+      entrypoint: ['sleep'],
+      command: ['infinity'],
     };
     const id = await step('docker', () => backend.run(spec));
     created.containers.unshift(names.container);
 
     // 7. Network helper
     created.containers.unshift(names.helper);
-    const helperId = await step('docker', () => runHelper(backend, options, names, id, origin.originHost, env));
+    const helperId = await step('docker', () => backend.run(helperSpec(names, id, spec.labels, options.kunjVersion, fwEnv)));
+    await waitForHelper(backend, helperId);
 
+    // 8. Nothing runs in the container before this point. Seed, once the firewall is in place
     const seededBefore = await step('docker', () => hasSeedMarker(backend, id));
     volumesFresh = !seededBefore;
     await checkImage(backend, id, source, warn);
-    await waitForHelper(backend, helperId);
-
-    // 8. Seed, only once the firewall is in place
     const seeded = await step('seed', () => seedIfNeeded(backend, id, user, home, options, origin, hasToken, seededBefore));
 
     // 9. Files
@@ -591,7 +647,13 @@ function volumeNames(names: ContainerNames, home: string | null): string[] {
   return home ? [names.workspaceVolume, names.homeVolume] : [names.workspaceVolume];
 }
 
-function parseOptionsLabel(labels: Record<string, string>): { publish?: Array<{ container: number; host: number }> } {
+function parseOptionsLabel(labels: Record<string, string>): {
+  publish?: Array<{ container: number; host: number }>;
+  helperEnv?: Record<string, string>;
+  user?: string;
+  postCreateCommand?: string;
+  postStartCommand?: string;
+} {
   try {
     return JSON.parse(labels[LABEL.options] ?? '{}');
   } catch {
@@ -613,6 +675,7 @@ async function resume(
   if (!main) throw new StartError(`Container ${names.container} disappeared while starting`, 'docker');
   const helper: ContainerInfo | undefined = found.find(c => c.name === names.helper);
   const firewall = firewallMode(options.config.container);
+  const recorded = parseOptionsLabel(main.labels);
   const result: StartResult = {
     names,
     containerId: main.id,
@@ -621,43 +684,26 @@ async function resume(
     seeded: false,
     keptFiles: [],
     copiedFiles: [],
-    publish: main.ports.length ? main.ports : parseOptionsLabel(main.labels).publish ?? [],
+    publish: main.ports.length ? main.ports : recorded.publish ?? [],
     firewall,
   };
   if (main.state === 'running' && helper?.state === 'running') return result;
 
-  const source = await step('image', () => resolveSource(options, warn));
-  await step('image', () => ensureImage(backend, resolveHelperImage(options.kunjVersion), warn));
-
-  const startedMain = main.state !== 'running';
-  let helperCreated = false;
+  const state: UpState = { startedMain: false, helperCreated: false };
   try {
-    if (startedMain) await step('docker', () => backend.start(main.id));
-    // Always a fresh helper: a stale ready file survives a docker restart, the rules do not
-    await step('docker', () => backend.remove({ containers: [names.helper] }));
-    helperCreated = true;
-    const helperId = await step('docker', () => runHelper(backend, options, names, main.id, origin.originHost, env));
-    await waitForHelper(backend, helperId);
+    await bringUp(backend, names, main, helperEnv(options, origin.originHost, env), options.kunjVersion, warn, state);
 
-    const user = source.user;
-    const home = homeFor(source);
+    const user = recorded.user ?? '';
+    const home = user ? `/home/${user}` : null;
     const seededBefore = await step('docker', () => hasSeedMarker(backend, main.id));
     result.seeded = await step('seed', () => seedIfNeeded(backend, main.id, user, home, options, origin, hasToken, seededBefore));
     if (result.seeded) {
       Object.assign(result, await step('docker', () => copyFiles(backend, main.id, user, home, options, variables(options))));
     }
-    await step('docker', () => postCommands(backend, main.id, user, source.spec, options));
+    await step('docker', () => postCommands(backend, main.id, user, recorded, options));
     return result;
   } catch (err) {
-    if (!options.keepOnError) {
-      // Never leave a container we started running without its firewall
-      try {
-        if (helperCreated) await backend.remove({ containers: [names.helper] });
-        if (startedMain) await backend.stop(main.id);
-      } catch (cleanup) {
-        warn(`Could not undo this start: ${message(cleanup)}`);
-      }
-    }
+    if (!options.keepOnError) await undoUp(backend, names, main.id, state, warn);
     throw err;
   }
 }
@@ -675,22 +721,27 @@ export async function stopContainer(backend: ContainerBackend, names: ContainerN
   await backend.stop(names.container);
 }
 
-// Sections parsed by parseGuard; untracked files are not protected, as with `git worktree remove`
+// The workspace's .git/config is the agent's: git must not run its fsmonitor or hooks for kunj
+const SAFE_GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
+const G = SAFE_GIT.join(' ');
+
+// Sections parsed by parseGuard; untracked files are not protected, as with `git worktree remove`.
+// A detached HEAD counts as a ref; a ref whose rev-list fails prints no count and counts as unpushed.
 const GUARD_SCRIPT = [
   `cd ${WORKSPACE} 2>/dev/null && [ -d .git ] || { echo @@none; exit 0; }`,
   'echo @@refs',
-  "git for-each-ref --format='%(refname)' refs/heads | while read -r ref; do",
-  '  echo "$ref $(git rev-list --count "$ref" --not --remotes=origin --)"',
+  `{ ${G} symbolic-ref -q HEAD >/dev/null || echo HEAD; ${G} for-each-ref --format='%(refname)' refs/heads; } | while read -r ref; do`,
+  `  echo "$ref $(${G} rev-list --count "$ref" --not --remotes=origin -- 2>/dev/null)"`,
   'done',
   'echo @@stash',
-  'git stash list | wc -l',
+  `${G} stash list | wc -l`,
   'echo @@status',
-  'git status --porcelain=v2 --branch --untracked-files=no',
+  `${G} status --porcelain=v2 --branch --untracked-files=no`,
 ].join('\n');
 
 const ORIGIN_TIMEOUT_MS = 15000;
 
-async function mainState(backend: ContainerBackend, names: ContainerNames): Promise<ContainerInfo> {
+async function mainInfo(backend: ContainerBackend, names: ContainerNames): Promise<ContainerInfo> {
   const labels = await backend.inspectLabels(names.container);
   if (!labels) throw new Error(`No container ${names.container}`);
   const found = await backend.list({ [LABEL.repo]: labels[LABEL.repo], [LABEL.branch]: labels[LABEL.branch] });
@@ -699,21 +750,38 @@ async function mainState(backend: ContainerBackend, names: ContainerNames): Prom
   return main;
 }
 
-export async function inspectForRemove(backend: ContainerBackend, names: ContainerNames, user: string): Promise<RemoveGuard> {
-  const main = await mainState(backend, names);
-  const started = main.state !== 'running';
-  if (started) await backend.start(names.container);
+export interface RemoveContext {
+  user: string;
+  kunjVersion: string;
+  warn?: (msg: string) => void;
+}
+
+/** Starts a stopped container (behind its firewall) to look inside, and stops it again. */
+export async function inspectForRemove(backend: ContainerBackend, names: ContainerNames, ctx: RemoveContext): Promise<RemoveGuard> {
+  const warn = ctx.warn ?? (() => {});
+  const main = await mainInfo(backend, names);
+  const state: UpState = { startedMain: false, helperCreated: false };
+  if (main.state !== 'running') {
+    const fwEnv = parseOptionsLabel(main.labels).helperEnv;
+    if (!fwEnv) throw new Error(`${names.container} has no recorded firewall settings, so it cannot be checked safely; use --force`);
+    try {
+      await bringUp(backend, names, main, fwEnv, ctx.kunjVersion, warn, state);
+    } catch (err) {
+      await undoUp(backend, names, main.id, state, warn);
+      throw err;
+    }
+  }
   try {
-    const io: ExecIO = { user: user || undefined, workdir: WORKSPACE };
-    const r = await backend.exec(names.container, ['sh', '-c', GUARD_SCRIPT], io);
+    const io: ExecIO = { user: ctx.user || undefined, workdir: WORKSPACE };
+    const r = await backend.exec(main.id, ['sh', '-c', GUARD_SCRIPT], io);
     if (r.exitCode !== 0) throw new Error(`Could not inspect ${names.container} for unpushed work (exit ${r.exitCode}); use --force`);
-    if (r.stdout.includes('@@none')) {
+    if (r.stdout.split('\n')[0].trim() === '@@none') {
       // Never cloned: nothing to lose
       return { unpushedRefs: [], stashes: 0, dirty: false, originReachable: true };
     }
     let originReachable = false;
     try {
-      const ls = await backend.exec(names.container, ['git', 'ls-remote', '--exit-code', 'origin', 'HEAD'], {
+      const ls = await backend.exec(main.id, [...SAFE_GIT, 'ls-remote', '--exit-code', 'origin', 'HEAD'], {
         ...io,
         env: { GIT_TERMINAL_PROMPT: '0' },
         timeoutMs: ORIGIN_TIMEOUT_MS,
@@ -724,7 +792,7 @@ export async function inspectForRemove(backend: ContainerBackend, names: Contain
     }
     return { ...parseGuard(r.stdout), originReachable };
   } finally {
-    if (started) await backend.stop(names.container);
+    if (state.startedMain) await stopContainer(backend, names);
   }
 }
 
@@ -732,11 +800,11 @@ export async function inspectForRemove(backend: ContainerBackend, names: Contain
 export async function removeContainer(
   backend: ContainerBackend,
   names: ContainerNames,
-  opts: { force: boolean; keepVolumes: boolean; user: string }
+  opts: RemoveContext & { force: boolean; keepVolumes: boolean }
 ): Promise<RemoveGuard> {
   let guard: RemoveGuard = { unpushedRefs: [], stashes: 0, dirty: false, originReachable: true };
   if (!opts.force) {
-    guard = await inspectForRemove(backend, names, opts.user);
+    guard = await inspectForRemove(backend, names, opts);
     const problems = describeGuard(guard);
     if (problems.length) throw new Error(`Container has unpushed work: ${problems.join('; ')}; use --force`);
   }
@@ -748,7 +816,7 @@ export async function removeContainer(
   return guard;
 }
 
-const STATUS_SCRIPT = `tmux has-session -t agent 2>/dev/null; echo "tmux=$?"; cd ${WORKSPACE} && git status --porcelain=v2 --branch`;
+const STATUS_SCRIPT = `tmux has-session -t agent 2>/dev/null; echo "tmux=$?"; cd ${WORKSPACE} && ${G} status --porcelain=v2 --branch`;
 
 /** One exec per container, bounded by timeoutMs, so a listing never hangs on one container. */
 export async function containerStatus(backend: ContainerBackend, id: string, user: string, timeoutMs = 2000): Promise<ContainerStatus> {

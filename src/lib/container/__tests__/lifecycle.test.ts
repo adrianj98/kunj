@@ -146,7 +146,9 @@ describe('startContainer', () => {
     expect(main.name).toBe(names.container);
     expect(main.capabilities).toBeUndefined();
     expect(main.init).toBe(true);
-    expect(main.command).toEqual(['sleep', 'infinity']);
+    // The image's own ENTRYPOINT never runs
+    expect(main.entrypoint).toEqual(['sleep']);
+    expect(main.command).toEqual(['infinity']);
     expect(main.user).toBe('dev');
     expect(main.workdir).toBe('/workspace');
     expect(main.volumes).toEqual([
@@ -155,7 +157,7 @@ describe('startContainer', () => {
     ]);
     expect(main.env).toEqual({ GH_TOKEN: 'tok', ANTHROPIC_API_KEY: 'k', KUNJ_CREDENTIAL_HOST: 'github.com' });
     expect(main.labels[LABEL.role]).toBe('main');
-    expect(JSON.parse(main.labels[LABEL.options])).toEqual({ firewall: 'default', allowHost: false, publish: [] });
+    expect(JSON.parse(main.labels[LABEL.options])).toEqual({ firewall: 'default', allowHost: false, publish: [], helperEnv: helper.env, user: 'dev' });
 
     expect(helper.name).toBe(names.helper);
     expect(helper.image).toBe(NETHELPER_IMAGE(VERSION));
@@ -170,6 +172,26 @@ describe('startContainer', () => {
     const seedAt = cmds.findIndex(c => c.startsWith('sh -c set -e'));
     expect(seedAt).toBeGreaterThan(cmds.indexOf(READY));
     expect(result).toMatchObject({ containerId: 'id-1', created: true, seeded: true, firewall: 'default' });
+  });
+
+  it('runs nothing in the container before the helper reports ready', async () => {
+    const b = backend();
+    // Ready on the third poll
+    b.images.add('custom:1');
+    let polls = 0;
+    const real = b.exec.bind(b);
+    b.exec = async (id: string, cmd: string[], io?: ExecIO) => {
+      const r = await real(id, cmd, io);
+      if (cmd.join(' ') === READY) return { exitCode: ++polls >= 3 ? 0 : 1, stdout: '' };
+      return r;
+    };
+    await startContainer(b, options({ imageOverride: 'custom:1' }));
+    const execs = b.callsOf('exec').map(a => ({ id: a[0], cmd: (a[1] as string[]).join(' ') }));
+    const readyAt = execs.findIndex((e, i) => e.cmd === READY && execs.slice(0, i + 1).filter(x => x.cmd === READY).length === 3);
+    expect(readyAt).toBeGreaterThan(-1);
+    expect(execs.slice(0, readyAt).every(e => e.id === 'id-2' && e.cmd === READY)).toBe(true);
+    // id -u / tool checks for a non-sandbox image come after ready too
+    expect(execs.slice(readyAt + 1).some(e => e.id === 'id-1')).toBe(true);
   });
 
   it('refuses a name whose labels do not match', async () => {
@@ -252,12 +274,21 @@ describe('startContainer', () => {
     expect(kept.methods()).not.toContain('remove');
   });
 
-  it('fails with firewall when the helper exits, and keeps volumes that held a clone', async () => {
+  it('fails with firewall when the helper exits, before anything is checked inside', async () => {
     const b = backend();
-    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
     b.execErrors.set(READY, new Error('docker exec failed: container is not running'));
     await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'firewall' });
+    // Whether the volumes held a clone is not known yet, so they are kept
     expect(b.callsOf('remove')).toEqual([[{ containers: [names.helper, names.container], volumes: [], networks: [names.network] }]]);
+    expect(execCmds(b)).not.toContain(MARKER);
+  });
+
+  it('keeps volumes that already held a clone when a later step fails', async () => {
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.failOn = 'createNetwork';
+    await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'docker' });
+    expect(b.callsOf('remove')).toEqual([[{ containers: [], volumes: [], networks: [] }]]);
   });
 
   it('skips seed when the marker exists and reruns it when missing', async () => {
@@ -301,6 +332,47 @@ describe('startContainer', () => {
     expect(m.indexOf('buildImage')).toBeLessThan(m.indexOf('remove'));
     expect(b.callsOf('remove')).toEqual([[{ containers: [names.helper, names.container] }]]);
     expect(runSpecs(b).map(s => s.name)).toEqual([names.container, names.helper]);
+  });
+
+  it('resumes even when the branch is gone from origin or has unpushed commits, without prompting', async () => {
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.existing = [info({ state: 'exited' })];
+    mocked.inspectOrigin.mockResolvedValue({ originUrl: REPO.originUrl, originHost: 'github.com', branchOnOrigin: false, unpushed: 3, isSsh: false });
+    const confirmPush = jest.fn(async () => false);
+    const result = await startContainer(b, options({ confirmPush, jsonMode: true }));
+    expect(result.created).toBe(false);
+    expect(confirmPush).not.toHaveBeenCalled();
+    expect(mocked.pushBranch).not.toHaveBeenCalled();
+    expect(runSpecs(b)[0].env.KUNJ_FW_ORIGIN_HOST).toBe('github.com');
+  });
+
+  it('resume runs postStartCommand as the recorded user', async () => {
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    const recorded = { user: 'node', postStartCommand: 'npm run dev' };
+    b.existing = [info({ state: 'exited', labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main', [LABEL.options]: JSON.stringify(recorded) }) })];
+    await startContainer(b, options());
+    const post = b.callsOf('exec').find(a => (a[1] as string[]).join(' ') === 'sh -lc npm run dev');
+    expect((post?.[2] as ExecIO).user).toBe('node');
+  });
+
+  it('reports a collision before any push prompt', async () => {
+    const b = backend();
+    b.existing = [info({ labels: { other: 'x' } })];
+    mocked.inspectOrigin.mockResolvedValue({ originUrl: REPO.originUrl, originHost: 'github.com', branchOnOrigin: false, unpushed: 1, isSsh: false });
+    const confirmPush = jest.fn(async () => true);
+    await expect(startContainer(b, options({ confirmPush }))).rejects.toMatchObject({ code: 'collision' });
+    expect(confirmPush).not.toHaveBeenCalled();
+  });
+
+  it('resume stops a container it started when the helper fails', async () => {
+    const b = backend();
+    b.existing = [info({ state: 'exited' })];
+    b.execErrors.set(READY, new Error('docker exec failed: not running'));
+    await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'firewall' });
+    expect(b.callsOf('stop')).toEqual([['main-id']]);
+    expect(execCmds(b).filter(c => c !== READY)).toEqual([]);
   });
 
   it('is a no-op for a running container with a running helper', async () => {
@@ -441,34 +513,45 @@ describe('remove', () => {
 
   function guardBackend(stdout: string, opts: { state?: ContainerInfo['state']; origin?: number } = {}): FakeBackend {
     const b = new FakeBackend();
-    b.existing = [info({ state: opts.state ?? 'running' })];
+    const fw = { KUNJ_FW_MODE: 'default', KUNJ_FW_ORIGIN_HOST: 'github.com' };
+    b.existing = [info({
+      state: opts.state ?? 'running',
+      labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main', [LABEL.options]: JSON.stringify({ helperEnv: fw }) }),
+    })];
+    b.images.add(NETHELPER_IMAGE(VERSION));
     const real = b.exec.bind(b);
     b.exec = async (id: string, cmd: string[], io?: ExecIO) => {
       const r = await real(id, cmd, io);
       if (cmd.join(' ').startsWith(GUARD_KEY_PREFIX)) return { exitCode: 0, stdout };
-      if (cmd[1] === 'ls-remote') return { exitCode: opts.origin ?? 0, stdout: '' };
+      if (cmd.includes('ls-remote')) return { exitCode: opts.origin ?? 0, stdout: '' };
       return r;
     };
     return b;
   }
 
+  const CTX = { user: 'dev', kunjVersion: VERSION };
   const CLEAN = '@@refs\nrefs/heads/feature/x 0\n@@stash\n0\n@@status\n# branch.oid abc\n# branch.head feature/x\n';
 
   it('remove guard refuses on unpushed refs', async () => {
     const stdout = CLEAN.replace('@@stash', 'refs/heads/other 1\n@@stash');
     const b = guardBackend(stdout, { state: 'exited' });
-    await expect(removeContainer(b, names, { force: false, keepVolumes: false, user: 'dev' })).rejects.toThrow(/--force/);
-    expect(b.methods()[b.methods().indexOf('start') + 1]).toBe('exec');
-    expect(b.callsOf('start')).toEqual([[names.container]]);
+    await expect(removeContainer(b, names, { force: false, keepVolumes: false, user: 'dev', kunjVersion: VERSION })).rejects.toThrow(/--force/);
+    // Started behind a fresh helper, and nothing exec'd in it before the helper was ready
+    expect(b.callsOf('start')).toEqual([['main-id']]);
+    const helper = runSpecs(b)[0];
+    expect(helper).toMatchObject({ name: names.helper, networkOf: 'main-id', env: { KUNJ_FW_MODE: 'default', KUNJ_FW_ORIGIN_HOST: 'github.com' } });
+    const cmds = execCmds(b);
+    expect(cmds[0]).toBe(READY);
+    expect(cmds[1]).toMatch(/^sh -c /);
     // Put back the way it was
-    expect(b.callsOf('stop')).toEqual([[names.container]]);
-    expect(b.methods()).not.toContain('remove');
+    expect(b.callsOf('stop')).toEqual([[names.helper], [names.container]]);
+    expect(b.callsOf('remove')).toEqual([[{ containers: [names.helper] }]]);
 
-    const guard = await inspectForRemove(guardBackend(stdout), names, 'dev');
+    const guard = await inspectForRemove(guardBackend(stdout), names, CTX);
     expect(guard).toEqual({ unpushedRefs: ['refs/heads/other'], stashes: 0, dirty: false, originReachable: true });
 
     const forced = guardBackend(stdout);
-    await removeContainer(forced, names, { force: true, keepVolumes: false, user: 'dev' });
+    await removeContainer(forced, names, { force: true, keepVolumes: false, user: 'dev', kunjVersion: VERSION });
     expect(forced.callsOf('remove')).toEqual([[{
       containers: [names.helper, names.container],
       volumes: [names.workspaceVolume, names.homeVolume],
@@ -478,7 +561,7 @@ describe('remove', () => {
 
   it('removes a clean container and keeps volumes on request', async () => {
     const b = guardBackend(CLEAN);
-    const guard = await removeContainer(b, names, { force: false, keepVolumes: true, user: 'dev' });
+    const guard = await removeContainer(b, names, { force: false, keepVolumes: true, user: 'dev', kunjVersion: VERSION });
     expect(guard).toEqual({ unpushedRefs: [], stashes: 0, dirty: false, originReachable: true });
     expect(b.callsOf('remove')).toEqual([[{ containers: [names.helper, names.container], volumes: [], networks: [names.network] }]]);
     expect(b.methods()).not.toContain('start');
@@ -486,19 +569,47 @@ describe('remove', () => {
 
   it('remove guard fails closed when origin is unreachable', async () => {
     const b = guardBackend(CLEAN, { origin: 128 });
-    await expect(removeContainer(b, names, { force: false, keepVolumes: false, user: 'dev' })).rejects.toThrow(/origin.*--force/s);
+    await expect(removeContainer(b, names, { force: false, keepVolumes: false, user: 'dev', kunjVersion: VERSION })).rejects.toThrow(/origin.*--force/s);
     expect(b.methods()).not.toContain('remove');
 
     const hung = guardBackend(CLEAN);
-    hung.hangOn.add('git ls-remote --exit-code origin HEAD');
-    const guard = await inspectForRemove(hung, names, 'dev');
+    hung.hangOn.add('git -c core.fsmonitor=false -c core.hooksPath=/dev/null ls-remote --exit-code origin HEAD');
+    const guard = await inspectForRemove(hung, names, CTX);
     expect(guard.originReachable).toBe(false);
   });
 
   it('counts stashes and tracked changes', async () => {
     const stdout = CLEAN.replace('@@stash\n0', '@@stash\n2') + '1 .M N... 100644 100644 100644 a b src/x.ts\n';
-    const guard = await inspectForRemove(guardBackend(stdout), names, 'dev');
+    const guard = await inspectForRemove(guardBackend(stdout), names, CTX);
     expect(guard).toMatchObject({ stashes: 2, dirty: true });
+  });
+
+  it('counts a detached HEAD and a ref whose rev-list failed as unpushed', async () => {
+    const stdout = CLEAN.replace('@@stash', 'HEAD 2\nrefs/heads/broken \n@@stash');
+    const guard = await inspectForRemove(guardBackend(stdout), names, CTX);
+    expect(guard.unpushedRefs).toEqual(['HEAD', 'refs/heads/broken']);
+  });
+
+  it('treats only a leading @@none as never cloned', async () => {
+    const tricky = CLEAN.replace('@@status\n', '@@status\n1 .M N... 100644 100644 100644 a b @@none\n');
+    expect((await inspectForRemove(guardBackend(tricky), names, CTX)).dirty).toBe(true);
+    expect(await inspectForRemove(guardBackend('@@none\n'), names, CTX)).toEqual({ unpushedRefs: [], stashes: 0, dirty: false, originReachable: true });
+  });
+
+  it('runs every guard git command with fsmonitor and hooks off', async () => {
+    const b = guardBackend(CLEAN);
+    await inspectForRemove(b, names, CTX);
+    const script = (b.callsOf('exec')[0][1] as string[])[2];
+    const gitCalls = script.match(/(?<![.\w-])git [^|;}\n]*/g) ?? [];
+    expect(gitCalls.length).toBeGreaterThan(4);
+    for (const call of gitCalls) expect(call).toContain('git -c core.fsmonitor=false -c core.hooksPath=/dev/null');
+  });
+
+  it('refuses to start a stopped container with no recorded firewall settings', async () => {
+    const b = guardBackend(CLEAN, { state: 'exited' });
+    b.existing[0].labels = labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main' });
+    await expect(inspectForRemove(b, names, CTX)).rejects.toThrow(/firewall/);
+    expect(b.methods()).not.toContain('start');
   });
 });
 

@@ -46,7 +46,8 @@ export function runArgs(spec: ContainerSpec, envFile: string): string[] {
   if (spec.cpus) args.push('--cpus', spec.cpus);
   if (spec.memory) args.push('--memory', spec.memory);
   for (const cap of spec.capabilities ?? []) args.push('--cap-add', cap);
-  args.push(spec.image, ...spec.command);
+  if (spec.entrypoint?.length) args.push('--entrypoint', spec.entrypoint[0]);
+  args.push(spec.image, ...(spec.entrypoint?.slice(1) ?? []), ...spec.command);
   return args;
 }
 
