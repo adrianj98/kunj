@@ -211,7 +211,9 @@ skips itself when Docker is unavailable.
 
 **Hooks:** `${...}` values in `hooks.*` config commands are quoted for the context they sit in
 (`expandVariablesQuoted()` in config-vars.ts): single-quoted when bare, escaped inside `"..."`,
-`'\''`-spliced inside `'...'`, so `${branch}` and `"${branch}"` both pass the value literally. The container
+`'\''`-spliced inside `'...'`, and quoted as bare inside `$(...)` and backticks (which open a fresh
+unquoted context even within `"..."`; backtick spans get one more level of escaping), so every
+form passes the value literally. The container
 hooks are `pre/post-container-create` and `pre/post-container-delete` with `branch`, `container`,
 `image`; the create hooks are skipped when `start` resumes an existing container.
 

@@ -1,5 +1,7 @@
 import { execFileSync } from 'child_process';
+import * as fs from 'fs';
 import * as os from 'os';
+import * as path from 'path';
 import {
   expandConfigStrings,
   expandVariables,
@@ -9,6 +11,8 @@ import {
   repoVariables,
   treeHasVariables,
 } from '../config-vars';
+
+const posixOnly = process.platform === 'win32' ? it.skip : it;
 
 describe('repoVariables', () => {
   it('treats a .git directory as the config dir and its parent as the root', () => {
@@ -129,9 +133,26 @@ describe('expandVariablesQuoted', () => {
     expect(expandVariablesQuoted(`echo '"' \${branch}`, vars)).toBe(`echo '"' 'x$(id)'`);
   });
 
+  posixOnly('quotes values inside $(...) and backticks as bare, even within "..."', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-quote-'));
+    try {
+      // `sh<f` would run the file f, which leaves a marker
+      fs.writeFileSync(path.join(dir, 'f'), `touch '${path.join(dir, 'pwned')}'\n`);
+      const vars = { branch: 'x;sh<f' };
+      expect(expandVariablesQuoted('echo "$(basename ${branch})"', vars)).toBe(`echo "$(basename 'x;sh<f')"`);
+      for (const template of ['echo "$(basename ${branch})"', 'echo "`basename ${branch}`"', 'echo `basename ${branch}`', 'echo $(echo "$(basename ${branch})")']) {
+        const out = execFileSync('sh', ['-c', expandVariablesQuoted(template, vars)], { cwd: dir, encoding: 'utf8' });
+        expect(out.trim()).toBe('x;sh<f');
+        expect(fs.existsSync(path.join(dir, 'pwned'))).toBe(false);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('expands to values the shell reads back literally in every quoting context', () => {
     const vars = { v: `a'b"c$(echo pwned)\`x\`\\d $HOME` };
-    for (const template of ['printf %s ${v}', 'printf %s "${v}"', "printf %s '${v}'", 'printf %s "pre ${v} post"']) {
+    for (const template of ['printf %s ${v}', 'printf %s "${v}"', "printf %s '${v}'", 'printf %s "pre ${v} post"', 'printf %s "$(printf %s ${v})"', 'printf %s "`printf %s ${v}`"', 'printf %s "$( (printf %s "${v}") )"']) {
       const out = execFileSync('sh', ['-c', expandVariablesQuoted(template, vars)], { encoding: 'utf8' });
       expect(out).toBe(template.includes('pre') ? `pre ${vars.v} post` : vars.v);
     }

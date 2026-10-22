@@ -64,44 +64,82 @@ function doubleQuoteEscape(value: string): string {
 
 const VARIABLE_AT = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/y;
 
+// Inside `...` the shell first strips one level of backslashes before \, ` and $, and a bare `
+// ends the substitution whatever the quoting, so a value in there is escaped once more
+function backtickEscape(value: string): string {
+  return value.replace(/[\\`$]/g, '\\$&');
+}
+
+interface QuoteFrame {
+  kind: 'top' | 'subst' | 'backtick';
+  quote: 'none' | 'single' | 'double';
+  /** Unbalanced "(" inside a $(...), so its own ")" is not taken for the end */
+  depth: number;
+}
+
 /**
  * For text that goes to a shell: a branch name like x$(cmd) must stay data, however the command
- * quotes the variable. Bare `${branch}` is single-quoted; inside "..." the value is escaped for
- * double quotes; inside '...' it is spliced in with '\'' for its own quotes. The quoting state is
- * tracked with POSIX rules (backslash escapes outside single quotes); command substitutions are
- * not parsed, so quotes nested inside "$(...)" count as closing the outer string.
+ * quotes the variable. The quoting context is tracked with POSIX rules, including $(...) and
+ * `...`, which open a fresh unquoted context even inside "...": bare values are single-quoted,
+ * values inside "..." have \ $ ` and " escaped, values inside '...' are spliced in with '\'' for
+ * their own quotes, and inside backticks the result is escaped once more.
  */
 export function expandVariablesQuoted(value: string, vars: ConfigVariables): string {
   if (!hasVariables(value)) return value;
   const lookup = new Map(Object.entries(vars).map(([k, v]) => [k.toLowerCase(), v]));
-  let state: 'none' | 'single' | 'double' = 'none';
+  const frames: QuoteFrame[] = [{ kind: 'top', quote: 'none', depth: 0 }];
   let out = '';
   let i = 0;
   while (i < value.length) {
+    const f = frames[frames.length - 1];
     const c = value[i];
     if (c === '$') {
       VARIABLE_AT.lastIndex = i;
       const m = VARIABLE_AT.exec(value);
       const resolved = m ? lookup.get(m[1].toLowerCase()) : undefined;
       if (m && resolved !== undefined) {
-        out += state === 'none' ? shellQuote(resolved) : state === 'double' ? doubleQuoteEscape(resolved) : resolved.replace(/'/g, `'\\''`);
+        let text = f.quote === 'none' ? shellQuote(resolved) : f.quote === 'double' ? doubleQuoteEscape(resolved) : resolved.replace(/'/g, `'\\''`);
+        for (let k = frames.length - 1; k >= 0; k--) if (frames[k].kind === 'backtick') text = backtickEscape(text);
+        out += text;
         i += m[0].length;
         continue;
       }
     }
-    if (c === '\\' && state !== 'single' && i + 1 < value.length) {
+    if (f.quote === 'single') {
+      if (c === "'") f.quote = 'none';
+      out += c;
+      i++;
+      continue;
+    }
+    if (c === '\\' && i + 1 < value.length) {
       out += c + value[i + 1];
       i += 2;
       continue;
     }
-    if (state === 'single') {
-      if (c === "'") state = 'none';
-    } else if (state === 'double') {
-      if (c === '"') state = 'none';
+    if (c === '$' && value[i + 1] === '(') {
+      frames.push({ kind: 'subst', quote: 'none', depth: 0 });
+      out += '$(';
+      i += 2;
+      continue;
+    }
+    if (c === '`') {
+      if (f.kind === 'backtick') frames.pop();
+      else frames.push({ kind: 'backtick', quote: 'none', depth: 0 });
+      out += c;
+      i++;
+      continue;
+    }
+    if (f.quote === 'double') {
+      if (c === '"') f.quote = 'none';
     } else if (c === "'") {
-      state = 'single';
+      f.quote = 'single';
     } else if (c === '"') {
-      state = 'double';
+      f.quote = 'double';
+    } else if (f.kind === 'subst' && c === '(') {
+      f.depth++;
+    } else if (f.kind === 'subst' && c === ')') {
+      if (f.depth > 0) f.depth--;
+      else frames.pop();
     }
     out += c;
     i++;

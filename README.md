@@ -269,7 +269,9 @@ kunj was run from.
 Short commands can live in config instead of a script. They run through the shell and may use
 the arguments as camelCase variables (`${branch}`, `${previousBranch}`, `${prUrl}`, `${worktree}`, ...)
 and `${repoRoot}` and the other config variables. Values are quoted for you and always reach the
-command literally, whether you write `${branch}` or `"${branch}"`:
+command literally: bare (`${branch}`), inside double quotes (`"${branch}"`), inside single quotes
+(`'${branch}'`) and inside a command substitution (`"$(basename ${branch})"`, backticks), which is
+quoted like a bare value:
 
 ```bash
 kunj config --set hooks.post-worktree-create="npm install"
