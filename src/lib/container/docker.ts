@@ -219,10 +219,10 @@ export class LocalDockerBackend implements ContainerBackend {
     await this.checked(args, { input: context, echo: true });
   }
 
-  async commitContainer(id: string, tag: string, labels: Labels): Promise<void> {
+  async commitContainer(id: string, tag: string, labels: Labels, extra: string[] = []): Promise<void> {
     // --change takes Dockerfile syntax, so keys and values are double-quoted with JSON escapes
     const changes = Object.keys(labels).sort().flatMap(k => ['--change', `LABEL ${JSON.stringify(k)}=${JSON.stringify(labels[k])}`]);
-    await this.checked(['commit', ...changes, id, tag]);
+    await this.checked(['commit', ...changes, ...extra.flatMap(c => ['--change', c]), id, tag]);
   }
 
   // Two subprocesses whatever the number of images: ls for the matching ids, then one inspect

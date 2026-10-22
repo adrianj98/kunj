@@ -55,12 +55,12 @@ export async function provisionNew(
   toolUser: string,
   io: ExecIO,
   warn: (msg: string) => void
-): Promise<{ toolsRun: string[]; setupRan: boolean }> {
+): Promise<{ toolsRun: string[]; tools: Array<{ name: string; version: string }>; setupRan: boolean }> {
   const output = { stdout: io.stdout, stderr: io.stderr };
   const installed = presets.length ? await runPresets(backend, id, presets, blueprint.tools, toolUser, output, warn) : [];
   const failed = await runCommands(backend, id, blueprint.setup, io);
   if (failed) throw new Error(`setup command failed (exit ${failed.exitCode}): ${failed.command}`);
-  return { toolsRun: installed.map(t => t.name), setupRan: blueprint.setup.length > 0 };
+  return { toolsRun: installed.map(t => t.name), tools: installed, setupRan: blueprint.setup.length > 0 };
 }
 
 /** `maintain` on every start; a failure is a warning (dependencies may be partly updated). */

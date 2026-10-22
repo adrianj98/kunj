@@ -335,6 +335,12 @@ describe('docker backend', () => {
       expect(argvOf(0)).toEqual(['commit', '--change', 'LABEL "k"="a b=c \\"d\\""', 'abc', 'repo:1']);
     });
 
+    it('commitContainer adds each extra change after the labels', async () => {
+      results.push({ code: 0, stdout: 'sha256:x\n' });
+      await new LocalDockerBackend().commitContainer('abc', 'repo:1', { k: 'v' }, ['ENV A="1"', 'ENV B="x y"']);
+      expect(argvOf(0)).toEqual(['commit', '--change', 'LABEL "k"="v"', '--change', 'ENV A="1"', '--change', 'ENV B="x y"', 'abc', 'repo:1']);
+    });
+
     it('listImages parses ls json and inspect labels/size; empty ls -> [] without inspect', async () => {
       results.push({ code: 0, stdout: '' });
       const backend = new LocalDockerBackend();

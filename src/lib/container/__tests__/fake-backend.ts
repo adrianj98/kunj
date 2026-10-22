@@ -59,8 +59,8 @@ export class FakeBackend implements ContainerBackend {
     this.existingImages.add(tag);
   }
 
-  async commitContainer(id: string, tag: string, labels: Labels): Promise<void> {
-    this.record('commitContainer', [id, tag, labels]);
+  async commitContainer(id: string, tag: string, labels: Labels, changes?: string[]): Promise<void> {
+    this.record('commitContainer', [id, tag, labels, changes]);
     this.images.push({ tag, id: `img-${this.nextImageId++}`, createdAt: new Date().toISOString(), labels, size: 0 });
   }
 

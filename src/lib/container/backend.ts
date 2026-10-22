@@ -75,8 +75,8 @@ export interface ContainerBackend {
   info(): Promise<{ serverVersion: string }>;
   imageExists(tag: string): Promise<boolean>;
   buildImage(tag: string, context: NodeJS.ReadableStream, opts?: BuildOptions): Promise<void>;
-  /** Snapshot a container as an image; each label becomes a LABEL instruction. */
-  commitContainer(id: string, tag: string, labels: Labels): Promise<void>;
+  /** Snapshot a container as an image; each label becomes a LABEL instruction, each of `changes` (Dockerfile syntax, e.g. ENV) another --change. */
+  commitContainer(id: string, tag: string, labels: Labels, changes?: string[]): Promise<void>;
   /** One entry per tag of every image carrying all of `filter`'s labels; untagged images are skipped. */
   listImages(filter: Labels): Promise<ImageInfo[]>;
   /** Idempotent: an image that is already gone is not a failure. */

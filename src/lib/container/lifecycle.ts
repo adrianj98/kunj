@@ -117,6 +117,8 @@ export interface StartResult {
     /** Only on a new start: whether the snapshot's hash differs from the blueprint's */
     stale?: boolean;
     toolsRun: string[];
+    /** What each preset reported it installed; only on a new start without a snapshot */
+    tools?: Array<{ name: string; version: string }>;
     setupRan: boolean;
     maintainRan: boolean;
   };
@@ -196,11 +198,10 @@ interface BlueprintPlan {
   snapshot: FoundSnapshot | null;
 }
 
-async function resolveSource(
-  backend: ContainerBackend,
+async function baseSource(
   options: StartOptions,
   warn: (m: string) => void
-): Promise<{ source: ImageSource; plan: BlueprintPlan | null }> {
+): Promise<{ input: Parameters<typeof resolveImage>[0]; base: ImageSource }> {
   const setting = options.imageOverride || options.config.container?.image || '';
   let devcontainer: ResolveDevcontainer | null = null;
   if (!setting) {
@@ -222,8 +223,20 @@ async function resolveSource(
     }
   }
   const input = { setting, devcontainer, repoName: options.repo.name, kunjVersion: options.kunjVersion };
-  const base = resolveImage(input);
+  return { input, base: resolveImage(input) };
+}
 
+/** The image a start would use without a blueprint snapshot; the snapshot hashes the same tag. */
+export async function baseImageTag(options: StartOptions, warn: (m: string) => void = () => {}): Promise<string> {
+  return (await baseSource(options, warn)).base.tag;
+}
+
+async function resolveSource(
+  backend: ContainerBackend,
+  options: StartOptions,
+  warn: (m: string) => void
+): Promise<{ source: ImageSource; plan: BlueprintPlan | null }> {
+  const { input, base } = await baseSource(options, warn);
   const resolved = await step('setup', () => loadBlueprint(options));
   if (!resolved) return { source: base, plan: null };
   const bp = resolved.blueprint;

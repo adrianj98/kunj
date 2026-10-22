@@ -53,6 +53,7 @@ import {
   STALE_SNAPSHOT_HINT,
   noSnapshotHint,
   findSnapshot,
+  baseImageTag,
 } from '../lifecycle';
 
 const mocked = seed as jest.Mocked<typeof seed>;
@@ -972,7 +973,7 @@ describe('blueprint start', () => {
     expect(order[1]).toBeGreaterThan(order[0]);
     expect(order[2]).toBeGreaterThan(order[1]);
     for (const a of presetExecs(b)) expect((a[2] as ExecIO).user).toBe('root');
-    expect(result.blueprint).toEqual({ hash: hashOf(blueprint()), snapshot: null, stale: false, toolsRun: ['apt'], setupRan: true, maintainRan: true });
+    expect(result.blueprint).toEqual({ hash: hashOf(blueprint()), snapshot: null, stale: false, toolsRun: ['apt'], tools: [{ name: 'apt', version: '' }], setupRan: true, maintainRan: true });
   });
 
   it('a kept workspace volume (seed marker present) still gets presets and setup in a new container', async () => {
@@ -1105,5 +1106,12 @@ describe('findSnapshot', () => {
     expect(await findSnapshot(b, 'app', REPO.id, 'h1')).toEqual({ tag: 'kunj-blueprint-app:h1', user: 'dev', stale: false });
     expect(await findSnapshot(b, 'app', REPO.id, 'zz')).toEqual({ tag: 'kunj-blueprint-app:h2', user: 'dev', stale: true });
     expect(b.callsOf('listImages')[0]).toEqual([{ [LABEL.repo]: REPO.id }]);
+  });
+});
+
+describe('baseImageTag', () => {
+  it('is the image a start resolves without a snapshot: the setting, else the sandbox', async () => {
+    await expect(baseImageTag(options())).resolves.toBe(SANDBOX_IMAGE(VERSION));
+    await expect(baseImageTag(options({ config: { container: { image: 'my/img:1' } } as KunjConfig }))).resolves.toBe('my/img:1');
   });
 });
