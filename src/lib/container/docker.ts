@@ -220,7 +220,8 @@ export class LocalDockerBackend implements ContainerBackend {
   }
 
   async commitContainer(id: string, tag: string, labels: Labels): Promise<void> {
-    const changes = Object.keys(labels).sort().flatMap(k => ['--change', `LABEL ${k}=${labels[k]}`]);
+    // --change takes Dockerfile syntax, so keys and values are double-quoted with JSON escapes
+    const changes = Object.keys(labels).sort().flatMap(k => ['--change', `LABEL ${JSON.stringify(k)}=${JSON.stringify(labels[k])}`]);
     await this.checked(['commit', ...changes, id, tag]);
   }
 

@@ -326,7 +326,13 @@ describe('docker backend', () => {
     it('commitContainer argv emits one --change per label (sorted) then id and tag', async () => {
       results.push({ code: 0, stdout: 'sha256:x\n' });
       await new LocalDockerBackend().commitContainer('abc', 'repo:1', { 'b.key': 'two words', 'a.key': '1' });
-      expect(argvOf(0)).toEqual(['commit', '--change', 'LABEL a.key=1', '--change', 'LABEL b.key=two words', 'abc', 'repo:1']);
+      expect(argvOf(0)).toEqual(['commit', '--change', 'LABEL "a.key"="1"', '--change', 'LABEL "b.key"="two words"', 'abc', 'repo:1']);
+    });
+
+    it('commitContainer quotes values containing spaces, = and quotes', async () => {
+      results.push({ code: 0, stdout: 'sha256:x\n' });
+      await new LocalDockerBackend().commitContainer('abc', 'repo:1', { k: 'a b=c "d"' });
+      expect(argvOf(0)).toEqual(['commit', '--change', 'LABEL "k"="a b=c \\"d\\""', 'abc', 'repo:1']);
     });
 
     it('listImages parses ls json and inspect labels/size; empty ls -> [] without inspect', async () => {

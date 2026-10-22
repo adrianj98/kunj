@@ -29,6 +29,7 @@ export class FakeBackend implements ContainerBackend {
   /** Per exec call with a stdin stream, in call order: whether that stream has ended. */
   stdinEnded: boolean[] = [];
   private nextId = 1;
+  private nextImageId = 1;
 
   private record(method: string, args: unknown[]): void {
     this.calls.push({ method, args });
@@ -60,7 +61,7 @@ export class FakeBackend implements ContainerBackend {
 
   async commitContainer(id: string, tag: string, labels: Labels): Promise<void> {
     this.record('commitContainer', [id, tag, labels]);
-    this.images.push({ tag, id: `img-${this.nextId++}`, createdAt: new Date().toISOString(), labels, size: 0 });
+    this.images.push({ tag, id: `img-${this.nextImageId++}`, createdAt: new Date().toISOString(), labels, size: 0 });
   }
 
   async listImages(filter: Labels): Promise<ImageInfo[]> {
