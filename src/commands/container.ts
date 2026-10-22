@@ -73,7 +73,6 @@ class ContainerError extends Error {
 
 const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'forward', 'list', 'stop', 'remove'];
 const WORKSPACE = '/workspace';
-const DEFAULT_USER = 'dev';
 const STATUS_TIMEOUT_MS = 2000;
 const SHELL = 'exec $(command -v zsh || command -v bash || echo sh) -l';
 const PORT_SPEC = /^\d+(:\d+)?$/;
@@ -254,8 +253,10 @@ export class ContainerCommand extends BaseCommand {
     }
   }
 
+  // '' (an image without remoteUser, or --image) means the image's own USER: no `-u`, which
+  // docker exec resolves to the same user the container was started as
   private userOf(info: ContainerInfo): string {
-    return this.recordedOptions(info).user || DEFAULT_USER;
+    return this.recordedOptions(info).user ?? '';
   }
 
   // target, else the current branch, else a picker (TTY only)
@@ -341,6 +342,7 @@ export class ContainerCommand extends BaseCommand {
     console.log(chalk.green(`✓ Container ${result.names.container} ${result.created ? 'created' : 'resumed'}`));
     console.log(`  image     ${result.image}`);
     console.log(`  branch    ${branch}`);
+    if (result.user) console.log(`  user      ${result.user}`);
     console.log(`  firewall  ${result.firewall}`);
     for (const file of result.keptFiles) console.log(`  kept      ${file}`);
     for (const file of result.copiedFiles) console.log(`  copied    ${file}`);
@@ -390,7 +392,7 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
-    const user = this.userOf(main);
+    const user = this.userOf(main) || undefined;
     const command = agentCommandLine(ctx.config.container?.agentCommand, args);
     const probe = await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user });
     if (probe.exitCode !== 0) {
@@ -416,7 +418,7 @@ export class ContainerCommand extends BaseCommand {
       stdin: 'inherit' as const,
       stdout: 'inherit' as const,
       stderr: 'inherit' as const,
-      user: this.userOf(main),
+      user: this.userOf(main) || undefined,
       workdir: WORKSPACE,
     };
   }
@@ -431,7 +433,7 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
-    const hasSocat = (await ctx.backend.exec(main.id, ['sh', '-c', 'command -v socat'], { user: this.userOf(main) })).exitCode === 0;
+    const hasSocat = (await ctx.backend.exec(main.id, ['sh', '-c', 'command -v socat'], { user: this.userOf(main) || undefined })).exitCode === 0;
 
     const forwarders: Array<{ container: number; forwarder: Forwarder }> = [];
     try {

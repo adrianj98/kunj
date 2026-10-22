@@ -248,6 +248,16 @@ describe('ContainerCommand', () => {
     expect(process.exitCode).toBe(3);
   });
 
+  it("runs as the image's own user (no -u) when the recorded user is empty", async () => {
+    const labels = { ...mainContainer('feat').labels, 'kunj.options': JSON.stringify({ firewall: 'default', user: '' }) };
+    backend.existing = [mainContainer('feat', { labels })];
+    await new ContainerCommand().execute('exec', 'feat', ['ls'], {});
+    await new ContainerCommand().execute('agent', 'feat', [], {});
+    const ios = backend.callsOf('exec').map(c => c[2] as any);
+    expect(ios).toHaveLength(3);
+    for (const io of ios) expect(io.user).toBeUndefined();
+  });
+
   it('exec without a branch takes the current one when everything is after --', async () => {
     backend.existing = [mainContainer('current')];
     const argv = process.argv;

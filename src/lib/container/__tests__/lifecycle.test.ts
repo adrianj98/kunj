@@ -199,6 +199,27 @@ describe('startContainer', () => {
     expect(execs.slice(readyAt + 1).some(e => e.id === 'id-1')).toBe(true);
   });
 
+  it("resolves the image's own user with id -un after ready, and passes no -u for it", async () => {
+    const b = backend();
+    b.images.add('custom:1');
+    b.execResults.set('id -un', { exitCode: 0, stdout: 'node\n' });
+    const result = await startContainer(b, options({ imageOverride: 'custom:1' }));
+    expect(result.user).toBe('node');
+    expect(runSpecs(b)[0].user).toBeUndefined();
+    expect(JSON.parse(runSpecs(b)[0].labels[LABEL.options]).user).toBe('');
+    const execs = b.callsOf('exec');
+    const whoami = execs.findIndex(a => (a[1] as string[]).join(' ') === 'id -un');
+    expect(whoami).toBeGreaterThan(execs.findIndex(a => (a[1] as string[]).join(' ') === READY));
+    expect((execs[whoami][2] as ExecIO | undefined)?.user).toBeUndefined();
+    // Nothing in the main container gets -u for an image's own user
+    expect(execs.filter(a => a[0] === 'id-1').every(a => !(a[2] as ExecIO | undefined)?.user)).toBe(true);
+
+    // The sandbox's user is known: no lookup
+    const sandbox = backend();
+    expect((await startContainer(sandbox, options())).user).toBe('dev');
+    expect(execCmds(sandbox)).not.toContain('id -un');
+  });
+
   it('refuses a name whose labels do not match', async () => {
     const b = backend();
     b.existing = [info({ labels: labelsFor(REPO.id, 'feature-x', { [LABEL.role]: 'main' }) })];

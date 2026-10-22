@@ -84,6 +84,8 @@ export interface StartResult {
   names: ContainerNames;
   containerId: string;
   image: string;
+  /** Who commands run as; resolved with `id -un` when the image's own USER is used. */
+  user: string;
   created: boolean;
   seeded: boolean;
   keptFiles: string[];
@@ -464,6 +466,14 @@ async function postCommands(
   }
 }
 
+// Only called after READY. Labels cannot change after `docker run`, so this is reported, not
+// recorded: later commands pass no -u for a recorded '', which docker resolves to the same user.
+async function effectiveUser(backend: ContainerBackend, id: string, user: string): Promise<string> {
+  if (user) return user;
+  const r = await backend.exec(id, ['id', '-un']);
+  return r.exitCode === 0 ? r.stdout.trim() : '';
+}
+
 async function hasSeedMarker(backend: ContainerBackend, id: string): Promise<boolean> {
   return (await backend.exec(id, ['test', '-f', SEED_MARKER])).exitCode === 0;
 }
@@ -624,6 +634,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
     const seededBefore = await step('docker', () => hasSeedMarker(backend, id));
     volumesFresh = !seededBefore;
     await checkImage(backend, id, source, warn);
+    const runAs = await step('docker', () => effectiveUser(backend, id, user));
     const seeded = await step('seed', () => seedIfNeeded(backend, id, user, home, options, origin, hasToken, seededBefore));
 
     // 9. Files
@@ -632,7 +643,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
     // 10. Devcontainer commands
     await step('docker', () => postCommands(backend, id, user, source.spec, options));
 
-    return { names, containerId: id, image, created: true, seeded, ...files, publish, firewall };
+    return { names, containerId: id, image, user: runAs, created: true, seeded, ...files, publish, firewall };
   } catch (err) {
     if (!options.keepOnError) {
       try {
@@ -686,6 +697,7 @@ async function resume(
     names,
     containerId: main.id,
     image: main.image,
+    user: recorded.user ?? '',
     created: false,
     seeded: false,
     keptFiles: [],
@@ -701,6 +713,7 @@ async function resume(
 
     const user = recorded.user ?? '';
     const home = user ? `/home/${user}` : null;
+    result.user = await step('docker', () => effectiveUser(backend, main.id, user));
     const seededBefore = await step('docker', () => hasSeedMarker(backend, main.id));
     result.seeded = await step('seed', () => seedIfNeeded(backend, main.id, user, home, options, origin, hasToken, seededBefore));
     if (result.seeded) {
