@@ -8,7 +8,10 @@ yarn-error.log*
 dist/
 
 # Kunj local configuration and metadata
-.kunj/
+.kunj/*
+# but the committed blueprint and presets (legacy ./.kunj config stays ignored)
+!.kunj/blueprint.json
+!.kunj/presets/
 test-*
 # IDE
 .vscode/
