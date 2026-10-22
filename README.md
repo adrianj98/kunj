@@ -184,8 +184,10 @@ Settings (`kunj config`):
 Network: by default the internet is open but the Docker host, the LAN and private ranges are
 blocked. Set `container.network.allow` to restrict egress to a list of domains (plus GitHub, npm
 and the Anthropic API); `container.network.allowHost` opens the host again. The rules are applied
-by a small helper container that shares the agent's network, so the agent itself has no
-capabilities with which to undo them, and nothing runs in the container until they are in place.
+by a small helper container that shares the agent's network. The agent's container runs with all
+capabilities dropped except CHOWN, DAC_OVERRIDE, FOWNER, SETUID and SETGID, so it cannot undo them
+(no NET_ADMIN) or go around them (no NET_RAW), and nothing runs in the container until they are in
+place.
 
 Ports: `kunj ct forward <branch> 3000` or `8080:3000` forwards a local port into the container
 over `docker exec`, so nothing is published. `--publish` and `container.publish` use Docker's own

@@ -39,6 +39,9 @@ const READY_FILE = '/tmp/kunj-ready';
 const READY_TIMEOUT_MS = 20000;
 const READY_POLL_MS = 300;
 const POST_CREATE_MARKER = '.kunj-created';
+// Everything else is dropped: NET_RAW (an AF_PACKET socket skips the helper's OUTPUT rules) above
+// all. These keep chown, file ownership fixes and sudo in devcontainer images working.
+export const MAIN_CAPABILITIES = ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID'];
 
 export type StartErrorCode =
   | 'unpushed'
@@ -573,7 +576,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
     else warn('The image has no known user, so its home directory is not kept in a volume');
     for (const v of volumes) await step('docker', () => backend.createVolume(v.name, objLabels));
 
-    // 6. Main container: no capabilities, and the image's ENTRYPOINT (branch-controlled for a
+    // 6. Main container: all capabilities dropped except MAIN_CAPABILITIES, and the image's ENTRYPOINT (branch-controlled for a
     // devcontainer) replaced by sleep, so nothing of the image's runs before the firewall is up
     const spec: ContainerSpec = {
       name: names.container,
@@ -603,6 +606,8 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
       publish,
       cpus: cfg?.cpus || undefined,
       memory: cfg?.memory || undefined,
+      capDrop: ['ALL'],
+      capabilities: MAIN_CAPABILITIES,
       init: true,
       entrypoint: ['sleep'],
       command: ['infinity'],

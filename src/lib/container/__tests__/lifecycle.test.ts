@@ -144,7 +144,10 @@ describe('startContainer', () => {
     ]);
     const [main, helper] = runSpecs(b);
     expect(main.name).toBe(names.container);
-    expect(main.capabilities).toBeUndefined();
+    // Only what chown and sudo need; NET_RAW in particular is gone
+    expect(main.capDrop).toEqual(['ALL']);
+    expect(main.capabilities).toEqual(['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID']);
+    expect(main.securityOpt).toBeUndefined();
     expect(main.init).toBe(true);
     // The image's own ENTRYPOINT never runs
     expect(main.entrypoint).toEqual(['sleep']);

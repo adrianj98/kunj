@@ -193,8 +193,9 @@ state, and a reused container must match its labels.
 imports light, load inquirer lazily and do not import the AWS or LangChain modules.
 
 **No code before READY:** the main container runs with `--entrypoint sleep`, and the network helper
-(a sidecar sharing its network namespace, holding NET_ADMIN, which the agent container lacks) applies
-the firewall and then touches `/tmp/kunj-ready`. Nothing may be exec'd in the main container
+(a sidecar sharing its network namespace, holding NET_ADMIN) applies the firewall and then touches
+`/tmp/kunj-ready`. The main container runs with all capabilities dropped except CHOWN, DAC_OVERRIDE,
+FOWNER, SETUID and SETGID (`MAIN_CAPABILITIES` in lifecycle.ts); never give it NET_ADMIN or NET_RAW. Nothing may be exec'd in the main container
 before that file exists.
 
 **Secrets:** they travel only in the `docker run` env-file. Never pass them with `docker exec -e`

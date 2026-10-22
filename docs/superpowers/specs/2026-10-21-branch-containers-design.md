@@ -199,8 +199,8 @@ about missing ones (the agent then runs without tmux; forwarding falls back to b
 4. **Network and volumes** created if missing; **network helper** started on the network (below);
    **services** started (phase 2).
 5. **Run** the container detached: `sleep infinity` as PID 1 under `--init`, the sandbox user,
-   workdir `/workspace`, labels, env file, `--network`, optional `--cpus/--memory`, no added
-   capabilities, `--runtime sysbox-runc` or `--privileged` for DinD (phase 2), and
+   workdir `/workspace`, labels, env file, `--network`, optional `--cpus/--memory`, all
+   capabilities dropped except CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, `--runtime sysbox-runc` or `--privileged` for DinD (phase 2), and
    `-p 127.0.0.1:<free>:<port>` for each `--publish` / `forwardPorts` entry.
 6. **Seed** (`seed.ts`, run with `exec` as the sandbox user) — unless the `kunj.seeded` label is
    set, so a half-finished seed (e.g. kept by `--keep-on-error`) is redone:
@@ -270,7 +270,8 @@ Every branch has its own bridge network, so containers of different branches can
 other. A small **network helper** container (`src/container/nethelper/`: Alpine + iptables + ipset
 + a shell script, built once as `kunj-nethelper:<version>`) runs with `--network container:<the
 branch container>` and `NET_ADMIN`/`NET_RAW`, and owns the rules in the shared network namespace.
-The agent's container has no capabilities and no sudo, so it cannot change them even if the
+The agent's container has all capabilities dropped except CHOWN, DAC_OVERRIDE, FOWNER, SETUID,
+SETGID (no NET_ADMIN, no NET_RAW), so it cannot change or bypass them even if the
 devcontainer image happens to include iptables; devcontainer images need nothing for this to work.
 
 The helper always:

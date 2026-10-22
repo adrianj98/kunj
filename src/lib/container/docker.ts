@@ -45,7 +45,10 @@ export function runArgs(spec: ContainerSpec, envFile: string): string[] {
   for (const p of spec.publish) args.push('-p', `127.0.0.1:${p.host}:${p.container}`);
   if (spec.cpus) args.push('--cpus', spec.cpus);
   if (spec.memory) args.push('--memory', spec.memory);
+  // Drops first: Docker applies --cap-add on top of --cap-drop ALL
+  for (const cap of spec.capDrop ?? []) args.push('--cap-drop', cap);
   for (const cap of spec.capabilities ?? []) args.push('--cap-add', cap);
+  for (const opt of spec.securityOpt ?? []) args.push('--security-opt', opt);
   if (spec.entrypoint?.length) args.push('--entrypoint', spec.entrypoint[0]);
   args.push(spec.image, ...(spec.entrypoint?.slice(1) ?? []), ...spec.command);
   return args;

@@ -203,6 +203,12 @@ const BRANCH_ALLOW = 'it-allow';
     const head = await inside(idA, 'git rev-parse --abbrev-ref HEAD');
     expect(head.stdout.trim()).toBe(BRANCH_A);
 
+    // Every capability dropped but the few chown and sudo need (no NET_RAW)
+    const caps = JSON.parse(docker(['inspect', '--format', '{{json .HostConfig}}', idA]));
+    const strip = (list: string[] | null) => (list ?? []).map(c => c.replace(/^CAP_/, '')).sort();
+    expect(strip(caps.CapDrop)).toEqual(['ALL']);
+    expect(strip(caps.CapAdd)).toEqual(['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETGID', 'SETUID']);
+
     const second = await startContainer(backend, startOptions(BRANCH_A, config({ allowHost: true })));
     expect(second.created).toBe(false);
     expect(second.seeded).toBe(false);
