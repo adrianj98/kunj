@@ -2,6 +2,32 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-22 — Branch containers: final review fix wave
+
+Why: the whole-branch review found one critical and ten important problems (plus five minors) in
+`kunj container`; all landed in one pass, one commit per fix.
+
+- Agent container runs with `--cap-drop ALL` plus CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID
+  (`ContainerSpec.capDrop/securityOpt`). Why: root inside kept NET_RAW and could bypass the firewall.
+- A recorded user of `''` means no `-u` everywhere; the effective user is resolved with `id -un`
+  after READY and reported (labels cannot change after `docker run`). Why: images without `dev` broke.
+- git-credential-kunj is streamed into `$HOME/.kunj/bin` of every container with a token, and
+  `KUNJ_CREDENTIAL_HOST` is host:port. Why: only kunj-sandbox had the helper; git sends the port.
+- Origin URL credentials are stripped before anything uses the URL. Why: tokens reached argv,
+  `.git/config` and error output.
+- Devcontainer image tags are lowercased; kunj-sandbox/kunj-nethelper tags carry a hash of their
+  build context. Why: Docker rejects uppercase; edited Dockerfiles/firewall.sh were never rebuilt.
+- Failed starts remove exactly what they created (new `volumeExists()`, main container listed
+  before `run`); `--keep-on-error` still stops a container whose firewall never came up.
+- Firewall accepts origin's addresses on origin's port before the private-range rejects; main
+  container gets `--add-host host.docker.internal:host-gateway`. Why: a LAN/host origin could not clone.
+- Hook `${...}` quoting follows the shell context (`"${worktree}"` works again).
+- Warn before building a Dockerfile changed on the branch (builds have full network access).
+- Remove guard fails closed when `git stash`/`git status` fail; create hooks skip on resume;
+  README security notes; package.json `files` whitelist.
+- Tests: `npm test` 257, `npm run test:docker` 9. Old `kunj-sandbox:1.0.0`/`kunj-nethelper:1.0.0`
+  tags removed after the new ones built.
+
 ## 2026-10-22 — Implement branch containers, phase 1
 
 Why: executed the phase-1 plan so `kunj container` (alias `ct`) exists end to end.
