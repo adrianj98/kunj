@@ -196,7 +196,8 @@ over `docker exec`, so nothing is published. `--publish` and `container.publish`
 port publishing instead.
 
 Hooks: `pre-container-create`, `post-container-create`, `pre-container-delete` and
-`post-container-delete` receive `branch`, `container` and `image` (see [Hooks](#hooks)).
+`post-container-delete` receive `branch`, `container` and `image` (see [Hooks](#hooks)). The create
+hooks run only when a container is created (or recreated by `--rebuild`), not when one is resumed.
 
 What the sandbox does and does not protect:
 

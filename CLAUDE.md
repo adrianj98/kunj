@@ -213,7 +213,7 @@ skips itself when Docker is unavailable.
 (`expandVariablesQuoted()` in config-vars.ts): single-quoted when bare, escaped inside `"..."`,
 `'\''`-spliced inside `'...'`, so `${branch}` and `"${branch}"` both pass the value literally. The container
 hooks are `pre/post-container-create` and `pre/post-container-delete` with `branch`, `container`,
-`image`.
+`image`; the create hooks are skipped when `start` resumes an existing container.
 
 ## Repository Registry & macOS App
 

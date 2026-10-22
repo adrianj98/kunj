@@ -315,4 +315,32 @@ describe('ContainerCommand', () => {
     ]);
     expect(JSON.parse(stdout.join(''))).toMatchObject({ branch: 'feat', containerId: 'cid-9', keptFiles: ['.env'] });
   });
+
+  it('runs no create hooks when resuming an existing container', async () => {
+    backend.existing = [mainContainer('feat')];
+    (lifecycle.startContainer as jest.Mock).mockResolvedValue({
+      names: containerNames('app', REPO_ID, 'feat'),
+      containerId: 'cid-1',
+      image: 'kunj-sandbox:1.3.0',
+      user: 'dev',
+      created: false,
+      seeded: false,
+      keptFiles: [],
+      copiedFiles: [],
+      publish: [],
+      firewall: 'default',
+    });
+    const hooks = jest.requireMock('../../lib/hooks').runActionHook as jest.Mock;
+    await new ContainerCommand().execute('start', 'feat', { json: true });
+    expect(lifecycle.startContainer).toHaveBeenCalled();
+    expect(hooks).not.toHaveBeenCalled();
+
+    // --rebuild recreates it: both hooks
+    (lifecycle.startContainer as jest.Mock).mockResolvedValue({
+      ...(await (lifecycle.startContainer as jest.Mock).mock.results[0].value),
+      created: true,
+    });
+    await new ContainerCommand().execute('start', 'feat', { json: true, rebuild: true });
+    expect(hooks.mock.calls.map(c => c[0])).toEqual(['pre-container-create', 'post-container-create']);
+  });
 });

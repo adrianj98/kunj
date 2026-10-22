@@ -311,8 +311,10 @@ export class ContainerCommand extends BaseCommand {
     }
 
     const hookOptions = { hooks: config.hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
-    // A failing pre hook throws and nothing is created
-    await runActionHook('pre-container-create', { branch, container: names.container, image: '' }, hookOptions);
+    // The create hooks are for creating: resuming an existing container runs neither. --rebuild
+    // recreates the container, so it counts. A failing pre hook throws and nothing is created.
+    const willCreate = !!options.rebuild || (await ctx.backend.inspectLabels(names.container)) === null;
+    if (willCreate) await runActionHook('pre-container-create', { branch, container: names.container, image: '' }, hookOptions);
 
     this.progress(chalk.blue(`Starting the container for '${branch}'...`));
     const result: StartResult = await startContainer(ctx.backend, {
@@ -335,7 +337,9 @@ export class ContainerCommand extends BaseCommand {
       defaultBranch: async () => (await detectDefaultBranch(ctx.repo.root)) || undefined,
     });
 
-    await runActionHook('post-container-create', { branch, container: names.container, image: result.image }, hookOptions);
+    if (result.created) {
+      await runActionHook('post-container-create', { branch, container: names.container, image: result.image }, hookOptions);
+    }
 
     if (this.jsonMode) {
       this.outputJSON({ ...result, branch });
