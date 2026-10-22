@@ -332,6 +332,7 @@ export class ContainerCommand extends BaseCommand {
       keepOnError: !!options.keepOnError,
       confirmPush: () => this.confirmPush(branch),
       warn: this.warn,
+      defaultBranch: async () => (await detectDefaultBranch(ctx.repo.root)) || undefined,
     });
 
     await runActionHook('post-container-create', { branch, container: names.container, image: result.image }, hookOptions);

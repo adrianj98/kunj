@@ -79,6 +79,8 @@ export interface StartOptions {
   keepOnError: boolean;
   confirmPush: () => Promise<boolean>;
   warn: (msg: string) => void;
+  /** The repository's default branch (without origin/), asked only before a devcontainer build */
+  defaultBranch?: () => Promise<string | undefined>;
 }
 
 export interface StartResult {
@@ -170,6 +172,34 @@ async function resolveSource(options: StartOptions, warn: (m: string) => void): 
     }
   }
   return resolveImage({ setting, devcontainer, repoName: options.repo.name, kunjVersion: options.kunjVersion });
+}
+
+export const BUILD_NETWORK_WARNING = 'Building a Dockerfile changed on this branch; image builds run with full network access';
+
+/** True when the devcontainer build context on the branch differs from the default branch's. */
+async function buildContextChanged(options: StartOptions, context: string): Promise<boolean> {
+  const defaultBranch = (await options.defaultBranch?.())?.replace(/^origin\//, '');
+  if (!defaultBranch) return false;
+  const ref = hostRef(options.branch, options.create, options.base);
+  const base = `origin/${defaultBranch}`;
+  if (ref === base) return false;
+  try {
+    await execFileAsync('git', ['diff', '--quiet', `${base}..${ref}`, '--', context], { cwd: options.cwd });
+    return false;
+  } catch (err) {
+    // 1 means a difference; anything else (an unknown ref) skips the comparison
+    return (err as { code?: unknown }).code === 1;
+  }
+}
+
+/**
+ * Image builds are not behind the firewall (they need the network for package installs), so a
+ * branch that changed its Dockerfile gets a say before anything is built. A warning, not a prompt.
+ */
+async function warnOnChangedBuild(backend: ContainerBackend, options: StartOptions, source: ImageSource): Promise<void> {
+  if (source.kind !== 'devcontainer' || !source.build || !source.spec?.build) return;
+  if (!options.rebuild && (await backend.imageExists(source.tag))) return;
+  if (await buildContextChanged(options, source.spec.build.context)) options.warn(BUILD_NETWORK_WARNING);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -560,6 +590,7 @@ export async function startContainer(backend: ContainerBackend, options: StartOp
 
   // 4. Images
   const source = await step('image', () => resolveSource(options, warn));
+  await step('image', () => warnOnChangedBuild(backend, options, source));
   const image = await step('image', async () => {
     if (options.rebuild && source.build) await backend.buildImage(source.tag, source.build.contextTar(), {
       dockerfile: source.build.dockerfile,

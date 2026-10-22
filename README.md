@@ -207,6 +207,12 @@ What the sandbox does and does not protect:
 | Host services and LAN: blocked by default | Exfiltration under an allowlist: GitHub, npm and DNS are enough to carry a token out |
 | Host Docker daemon: the socket is never mounted | |
 
+Security notes:
+
+- Image builds are not behind the firewall: a devcontainer Dockerfile runs with full network
+  access while it builds. `kunj ct start` warns when the branch changed the build context compared
+  with the default branch, before building it.
+
 ### Hooks
 
 Like git hooks, kunj can run your own scripts around its own actions. They fire when kunj does
