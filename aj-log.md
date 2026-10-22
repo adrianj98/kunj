@@ -217,3 +217,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
   substitute `${branch}`-style values shell-quoted. Why: a branch name like `x$(cmd)` was executed by the shell.
   Hook commands that wrapped variables in their own quotes now see literal single quotes.
 - Container settings (task 2): `container.*` settings (src/settings/container.ts), `container` block in KunjConfig, defaults in src/lib/container/defaults.ts, and four `pre/post-container-create/delete` hooks in hook-defs.ts. Why: foundation for `kunj container`.
+- Devcontainer parser (task 4): src/lib/container/devcontainer.ts parses the supported devcontainer.json subset (JSONC, build paths, ports, post commands) and refuses root/0 remoteUser. Why: the file comes from the branch, which an agent can edit, so it must not grant root.
