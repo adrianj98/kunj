@@ -8,6 +8,7 @@ import {
   resolveImage,
   resolveHelperImage,
   imageHash,
+  imageRepoName,
   ensureImage,
   sandboxAssetsDir,
   tarDirectory,
@@ -99,6 +100,15 @@ describe('image', () => {
   it('rejects a devcontainer dockerfile outside the build context', () => {
     const dc = devcontainer(spec({ build: { dockerfile: 'Dockerfile', context: 'sub', args: {} } }));
     expect(() => resolveImage({ setting: '', devcontainer: dc, repoName: 'r', kunjVersion: '1' })).toThrow(/inside build.context/);
+  });
+
+  it('lowercases and sanitises the repository part of a devcontainer image tag', () => {
+    const dc = devcontainer(spec({ build: { dockerfile: '.devcontainer/Dockerfile', context: '.devcontainer', args: {} } }));
+    const tag = resolveImage({ setting: '', devcontainer: dc, repoName: 'MyApp', kunjVersion: '1' }).tag;
+    expect(tag).toMatch(/^kunj-myapp:[0-9a-f]{12}$/);
+    expect(imageRepoName('My App@2!')).toBe('my-app-2');
+    expect(imageRepoName('_.Repo--x..')).toBe('repo-x');
+    expect(imageRepoName('@@@')).toBe('repo');
   });
 
   it('imageHash changes with dockerfile, tree id and args', () => {

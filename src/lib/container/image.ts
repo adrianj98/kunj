@@ -43,6 +43,16 @@ export function credentialHelperSource(): string {
   return path.join(sandboxAssetsDir(), 'sandbox', 'git-credential-kunj');
 }
 
+/** A repository name as a Docker image name: lowercase, [a-z0-9._-], starting and ending alphanumeric. */
+export function imageRepoName(name: string): string {
+  const safe = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/[._-]{2,}/g, '-')
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+  return safe || 'repo';
+}
+
 export function imageHash(dockerfileText: string, treeId: string, buildArgs: Record<string, string>): string {
   const args = Object.keys(buildArgs).sort().map(k => [k, buildArgs[k]]);
   return crypto
@@ -67,7 +77,7 @@ export function resolveImage(input: ResolveImageInput): ImageSource {
       }
       return {
         kind: 'devcontainer',
-        tag: `kunj-${input.repoName}:${imageHash(dc.dockerfileText, dc.treeId, args)}`,
+        tag: `kunj-${imageRepoName(input.repoName)}:${imageHash(dc.dockerfileText, dc.treeId, args)}`,
         build: { contextTar: dc.archive, dockerfile: inContext, buildArgs: args },
         user,
         spec: dc.spec,
