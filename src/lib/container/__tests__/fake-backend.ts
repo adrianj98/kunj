@@ -21,6 +21,8 @@ export class FakeBackend implements ContainerBackend {
   echoUpper = false;
   /** stdin contents captured per exec call, in call order (undefined when no stream was given). */
   stdinData: Array<string | undefined> = [];
+  /** Per exec call with a stdin stream, in call order: whether that stream has ended. */
+  stdinEnded: boolean[] = [];
   private nextId = 1;
 
   private record(method: string, args: unknown[]): void {
@@ -78,7 +80,12 @@ export class FakeBackend implements ContainerBackend {
     this.record('exec', [id, cmd, io]);
     const key = cmd.join(' ');
     const stdin = typeof io.stdin === 'object' ? io.stdin : undefined;
-    const input = stdin ? await readAll(stdin) : undefined;
+    let input: string | undefined;
+    if (stdin) {
+      const index = this.stdinEnded.push(false) - 1;
+      input = await readAll(stdin);
+      this.stdinEnded[index] = true;
+    }
     this.stdinData.push(input);
     if (io.timeoutMs !== undefined && (this.hangOn.has(key) || this.hangOn.has('__hang__'))) {
       throw new ExecTimeoutError(`docker exec timed out after ${io.timeoutMs} ms`);
@@ -108,15 +115,12 @@ export class FakeBackend implements ContainerBackend {
   }
 }
 
-// Like LocalDockerBackend, attaches no 'error' listener to the stdin stream, so a caller that
-// forgets its own handler sees the error surface; a stream that closes without ending yields what
-// was read so far.
+// Like LocalDockerBackend, which pipes stdin into `docker exec`: attaches no 'error' listener and
+// finishes only on 'end', so a stream that is destroyed without ending leaves the exec running.
 function readAll(stream: NodeJS.ReadableStream): Promise<string> {
   return new Promise(resolve => {
     const chunks: Buffer[] = [];
-    const done = () => resolve(Buffer.concat(chunks).toString('latin1'));
     stream.on('data', (d: Buffer | string) => chunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d)));
-    stream.on('end', done);
-    stream.on('close', done);
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('latin1')));
   });
 }

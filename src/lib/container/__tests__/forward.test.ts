@@ -25,6 +25,15 @@ function roundTrip(port: number, text: string): Promise<string> {
   });
 }
 
+/** Polls `condition` until it holds, failing after a second. */
+async function waitFor(condition: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise(r => setTimeout(r, 5));
+  }
+}
+
 describe('parseForwardSpec', () => {
   it('parses a container port', () => {
     expect(parseForwardSpec('3000')).toEqual({ container: 3000 });
@@ -114,6 +123,22 @@ describe('forwardPort', () => {
       setTimeout(() => reject(new Error('socket stayed open')), 2000).unref();
     });
     await closed;
+    await waitFor(() => backend.stdinEnded[0] === true, "the exec's stdin to end");
+  });
+
+  it("a reset connection ends the exec's stdin", async () => {
+    const backend = new FakeBackend();
+    const forwarder = await forwardPort(backend, 'ctr-1', { container: 3000, host: 0 }, { hasSocat: true });
+    try {
+      const socket = net.connect(forwarder.hostPort, '127.0.0.1', () => socket.write('partial'));
+      socket.on('error', () => {});
+      await waitFor(() => backend.stdinEnded.length === 1, 'the exec to start');
+      expect(backend.stdinEnded).toEqual([false]);
+      socket.resetAndDestroy();
+      await waitFor(() => backend.stdinEnded[0] === true, "the exec's stdin to end");
+    } finally {
+      await forwarder.close();
+    }
   });
 
   it('a socket error does not crash the process', async () => {

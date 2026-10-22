@@ -91,7 +91,15 @@ export async function forwardPort(
       if (socket.destroyed) return;
       socket.end(() => socket.destroy());
     };
-    backend.exec(containerId, command, { stdin: socket, stdout: socket, stderr }).then(finish, finish);
+    // pipe() ends exec's stdin only on the socket's 'end'; a reset or destroyed socket never
+    // emits it, which would leave docker exec and socat running. Ending stdin on 'close' covers both.
+    const stdin = new PassThrough();
+    socket.pipe(stdin);
+    socket.on('close', () => {
+      socket.unpipe(stdin);
+      if (!stdin.writableEnded) stdin.end();
+    });
+    backend.exec(containerId, command, { stdin, stdout: socket, stderr }).then(finish, finish);
   });
 
   const hostPort = await listenLocal(server, spec.host ?? spec.container);
