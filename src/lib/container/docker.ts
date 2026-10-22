@@ -9,6 +9,7 @@ import {
   ContainerSpec,
   ExecIO,
   ExecTimeoutError,
+  ImageInfo,
   Labels,
 } from './backend';
 
@@ -107,6 +108,21 @@ export function parseInspect(json: string): ContainerInfo[] {
   });
 }
 
+/** Parse `docker image ls --format '{{json .}}'` output; untagged images are skipped. */
+export function parseImageLs(lines: string): Array<{ id: string; tag: string }> {
+  return jsonLines(lines)
+    .filter(o => o.Repository && o.Repository !== '<none>' && o.Tag && o.Tag !== '<none>')
+    .map(o => ({ id: o.ID, tag: `${o.Repository}:${o.Tag}` }));
+}
+
+/** Parse `docker image inspect --format '{{json .}}'` output: one entry per tag of each image. */
+export function parseImageInspect(json: string): ImageInfo[] {
+  return jsonLines(json).flatMap(o =>
+    ((o.RepoTags ?? []) as string[])
+      .filter(t => t && !t.startsWith('<none>'))
+      .map(tag => ({ tag, id: o.Id, createdAt: o.Created, labels: o.Config?.Labels ?? {}, size: o.Size ?? 0 })));
+}
+
 function firstLine(out: Output): string {
   return out.stderr.trim().split('\n')[0] || `exit code ${out.code}`;
 }
@@ -201,6 +217,27 @@ export class LocalDockerBackend implements ContainerBackend {
     for (const [k, v] of Object.entries(opts.buildArgs ?? {})) args.push('--build-arg', `${k}=${v}`);
     args.push('-');
     await this.checked(args, { input: context, echo: true });
+  }
+
+  async commitContainer(id: string, tag: string, labels: Labels): Promise<void> {
+    const changes = Object.keys(labels).sort().flatMap(k => ['--change', `LABEL ${k}=${labels[k]}`]);
+    await this.checked(['commit', ...changes, id, tag]);
+  }
+
+  // Two subprocesses whatever the number of images: ls for the matching ids, then one inspect
+  // for exact labels, size and every tag
+  async listImages(filter: Labels): Promise<ImageInfo[]> {
+    const filters = Object.keys(filter).flatMap(k => ['--filter', `label=${k}=${filter[k]}`]);
+    const ls = await this.checked(['image', 'ls', '--no-trunc', '--format', '{{json .}}', ...filters]);
+    const ids = [...new Set(parseImageLs(ls.stdout).map(i => i.id))];
+    if (ids.length === 0) return [];
+    return parseImageInspect((await this.checked(['image', 'inspect', '--format', '{{json .}}', ...ids])).stdout);
+  }
+
+  async removeImage(tag: string): Promise<void> {
+    const out = await this.spawnDocker(['image', 'rm', tag]);
+    if (out.code === 0 || /No such image/i.test(out.stderr)) return;
+    throw new Error(`docker image rm failed: ${firstLine(out)}`);
   }
 
   async createNetwork(name: string, labels: Labels): Promise<void> {

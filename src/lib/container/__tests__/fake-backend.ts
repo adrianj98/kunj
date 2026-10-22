@@ -1,6 +1,6 @@
 // In-memory ContainerBackend for lifecycle and port-forwarding tests. Records every call;
 // exec results are programmed by the joined command.
-import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutError, Labels } from '../backend';
+import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutError, ImageInfo, Labels } from '../backend';
 
 export type ExecResult = { exitCode: number; stdout: string };
 
@@ -16,7 +16,10 @@ export class FakeBackend implements ContainerBackend {
   /** Method name that throws. */
   failOn?: string;
   existing: ContainerInfo[] = [];
-  images = new Set<string>();
+  /** Tags that exist without being committed snapshots; buildImage adds to it. */
+  existingImages = new Set<string>();
+  /** Committed (blueprint) images; commitContainer appends. */
+  images: ImageInfo[] = [];
   /** Volumes that exist; createVolume adds to it. */
   volumes = new Set<string>();
   /** Pipe io.stdin to io.stdout uppercased. */
@@ -47,12 +50,28 @@ export class FakeBackend implements ContainerBackend {
 
   async imageExists(tag: string): Promise<boolean> {
     this.record('imageExists', [tag]);
-    return this.images.has(tag);
+    return this.existingImages.has(tag) || this.images.some(i => i.tag === tag);
   }
 
   async buildImage(tag: string, _context: NodeJS.ReadableStream, opts?: unknown): Promise<void> {
     this.record('buildImage', [tag, opts]);
-    this.images.add(tag);
+    this.existingImages.add(tag);
+  }
+
+  async commitContainer(id: string, tag: string, labels: Labels): Promise<void> {
+    this.record('commitContainer', [id, tag, labels]);
+    this.images.push({ tag, id: `img-${this.nextId++}`, createdAt: new Date().toISOString(), labels, size: 0 });
+  }
+
+  async listImages(filter: Labels): Promise<ImageInfo[]> {
+    this.record('listImages', [filter]);
+    return this.images.filter(i => Object.keys(filter).every(k => i.labels[k] === filter[k]));
+  }
+
+  async removeImage(tag: string): Promise<void> {
+    this.record('removeImage', [tag]);
+    this.images = this.images.filter(i => i.tag !== tag);
+    this.existingImages.delete(tag);
   }
 
   async createNetwork(name: string, labels: Labels): Promise<void> {

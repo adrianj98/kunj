@@ -13,6 +13,14 @@ export interface ContainerInfo {
   ports: Array<{ container: number; host: number }>;
 }
 
+export interface ImageInfo {
+  tag: string;
+  id: string;
+  createdAt: string;
+  labels: Labels;
+  size: number;
+}
+
 export interface ContainerSpec {
   name: string;
   image: string;
@@ -67,6 +75,12 @@ export interface ContainerBackend {
   info(): Promise<{ serverVersion: string }>;
   imageExists(tag: string): Promise<boolean>;
   buildImage(tag: string, context: NodeJS.ReadableStream, opts?: BuildOptions): Promise<void>;
+  /** Snapshot a container as an image; each label becomes a LABEL instruction. */
+  commitContainer(id: string, tag: string, labels: Labels): Promise<void>;
+  /** One entry per tag of every image carrying all of `filter`'s labels; untagged images are skipped. */
+  listImages(filter: Labels): Promise<ImageInfo[]>;
+  /** Idempotent: an image that is already gone is not a failure. */
+  removeImage(tag: string): Promise<void>;
   createNetwork(name: string, labels: Labels): Promise<void>;
   createVolume(name: string, labels: Labels): Promise<void>;
   volumeExists(name: string): Promise<boolean>;

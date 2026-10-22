@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { PassThrough, Readable } from 'stream';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
-import { LocalDockerBackend, runArgs, parsePsJson, parseInspect } from '../docker';
+import { LocalDockerBackend, runArgs, parsePsJson, parseInspect, parseImageLs, parseImageInspect } from '../docker';
 import { ContainerSpec, ExecTimeoutError } from '../backend';
 
 jest.mock('child_process');
@@ -321,6 +321,48 @@ describe('docker backend', () => {
     it('remove throws on other failures', async () => {
       results.push({ code: 1, stderr: 'Error response from daemon: network n has active endpoints\n' });
       await expect(new LocalDockerBackend().remove({ networks: ['n'] })).rejects.toThrow('docker network rm failed: Error response from daemon: network n has active endpoints');
+    });
+
+    it('commitContainer argv emits one --change per label (sorted) then id and tag', async () => {
+      results.push({ code: 0, stdout: 'sha256:x\n' });
+      await new LocalDockerBackend().commitContainer('abc', 'repo:1', { 'b.key': 'two words', 'a.key': '1' });
+      expect(argvOf(0)).toEqual(['commit', '--change', 'LABEL a.key=1', '--change', 'LABEL b.key=two words', 'abc', 'repo:1']);
+    });
+
+    it('listImages parses ls json and inspect labels/size; empty ls -> [] without inspect', async () => {
+      results.push({ code: 0, stdout: '' });
+      const backend = new LocalDockerBackend();
+      await expect(backend.listImages({ 'kunj.blueprint': 'app' })).resolves.toEqual([]);
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(argvOf(0)).toEqual(['image', 'ls', '--no-trunc', '--format', '{{json .}}', '--filter', 'label=kunj.blueprint=app']);
+
+      spawnMock.mockClear();
+      results.push({ code: 0, stdout: JSON.stringify({ ID: 'sha256:1', Repository: 'r', Tag: 'a' }) + '\n' + JSON.stringify({ ID: 'sha256:1', Repository: 'r', Tag: 'b' }) + '\n' });
+      results.push({ code: 0, stdout: JSON.stringify({ Id: 'sha256:1', RepoTags: ['r:a', 'r:b'], Size: 42, Created: '2026-01-01T00:00:00Z', Config: { Labels: { k: 'v' } } }) + '\n' });
+      const images = await backend.listImages({});
+      expect(argvOf(0)).toEqual(['image', 'ls', '--no-trunc', '--format', '{{json .}}']);
+      expect(argvOf(1)).toEqual(['image', 'inspect', '--format', '{{json .}}', 'sha256:1']);
+      expect(images).toEqual([
+        { tag: 'r:a', id: 'sha256:1', createdAt: '2026-01-01T00:00:00Z', labels: { k: 'v' }, size: 42 },
+        { tag: 'r:b', id: 'sha256:1', createdAt: '2026-01-01T00:00:00Z', labels: { k: 'v' }, size: 42 },
+      ]);
+    });
+
+    it('parseImageLs skips untagged images; parseImageInspect tolerates missing labels', () => {
+      const out = [{ ID: 'i1', Repository: 'r', Tag: 't' }, { ID: 'i2', Repository: '<none>', Tag: '<none>' }].map(o => JSON.stringify(o)).join('\n');
+      expect(parseImageLs(out)).toEqual([{ id: 'i1', tag: 'r:t' }]);
+      expect(parseImageInspect(JSON.stringify({ Id: 'i', RepoTags: ['x:1'], Size: 1, Created: 'c', Config: {} }))).toEqual([
+        { tag: 'x:1', id: 'i', createdAt: 'c', labels: {}, size: 1 },
+      ]);
+    });
+
+    it('removeImage tolerates No such image and rethrows other errors', async () => {
+      results.push({ code: 1, stderr: 'Error response from daemon: No such image: a:1\n' });
+      const backend = new LocalDockerBackend();
+      await expect(backend.removeImage('a:1')).resolves.toBeUndefined();
+      expect(argvOf(0)).toEqual(['image', 'rm', 'a:1']);
+      results.push({ code: 1, stderr: 'conflict: image is being used\n' });
+      await expect(backend.removeImage('a:1')).rejects.toThrow('docker image rm failed: conflict: image is being used');
     });
 
     it('imageExists reflects the exit code of docker image inspect', async () => {

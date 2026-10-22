@@ -78,8 +78,8 @@ function options(over: Partial<StartOptions> = {}): StartOptions {
 
 function backend(): FakeBackend {
   const b = new FakeBackend();
-  b.images.add(SANDBOX_IMAGE(VERSION));
-  b.images.add(NETHELPER_IMAGE(VERSION));
+  b.existingImages.add(SANDBOX_IMAGE(VERSION));
+  b.existingImages.add(NETHELPER_IMAGE(VERSION));
   // No seed marker yet, and no postCreate marker
   b.execResults.set(MARKER, { exitCode: 1, stdout: '' });
   return b;
@@ -190,7 +190,7 @@ describe('startContainer', () => {
   it('runs nothing in the container before the helper reports ready', async () => {
     const b = backend();
     // Ready on the third poll
-    b.images.add('custom:1');
+    b.existingImages.add('custom:1');
     let polls = 0;
     const real = b.exec.bind(b);
     b.exec = async (id: string, cmd: string[], io?: ExecIO) => {
@@ -209,7 +209,7 @@ describe('startContainer', () => {
 
   it("resolves the image's own user with id -un after ready, and passes no -u for it", async () => {
     const b = backend();
-    b.images.add('custom:1');
+    b.existingImages.add('custom:1');
     b.execResults.set('id -un', { exitCode: 0, stdout: 'node\n' });
     const result = await startContainer(b, options({ imageOverride: 'custom:1' }));
     expect(result.user).toBe('node');
@@ -246,7 +246,7 @@ describe('startContainer', () => {
 
   it('streams the credential helper into any image before seeding and points git at it', async () => {
     const b = backend();
-    b.images.add('custom:1');
+    b.existingImages.add('custom:1');
     b.execResults.set('sh -c printf %s "$HOME"', { exitCode: 0, stdout: '/home/node' });
     await startContainer(b, options({ imageOverride: 'custom:1' }));
     const execs = b.callsOf('exec');
@@ -567,7 +567,7 @@ describe('startContainer', () => {
     git('update-ref', `refs/remotes/origin/${BRANCH}`, 'HEAD');
 
     const b = backend();
-    b.images.add('node:22');
+    b.existingImages.add('node:22');
     b.execResults.set('id -u', { exitCode: 0, stdout: '1000\n' });
     b.execResults.set('sh -c test -f "$HOME/.kunj-created"', { exitCode: 1, stdout: '' });
     b.execResults.set('sh -lc npm ci', { exitCode: 1, stdout: '' });
@@ -638,7 +638,7 @@ describe('startContainer', () => {
     git('add', '.');
     git('commit', '-qm', 'dc');
     git('update-ref', `refs/remotes/origin/${BRANCH}`, 'HEAD');
-    b.images.add('node:22');
+    b.existingImages.add('node:22');
     await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'image' });
     expect(b.callsOf('remove')).toHaveLength(1);
   });
@@ -700,7 +700,7 @@ describe('remove', () => {
       state: opts.state ?? 'running',
       labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main', [LABEL.options]: JSON.stringify({ helperEnv: fw }) }),
     })];
-    b.images.add(NETHELPER_IMAGE(VERSION));
+    b.existingImages.add(NETHELPER_IMAGE(VERSION));
     const real = b.exec.bind(b);
     b.exec = async (id: string, cmd: string[], io?: ExecIO) => {
       const r = await real(id, cmd, io);
