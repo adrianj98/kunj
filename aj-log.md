@@ -2,6 +2,21 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-21 — Design: branch containers (`kunj container`)
+
+Why: asked for a feature that starts a session for a branch inside a Docker container, like
+`kunj worktree` but sandboxed, mainly to run an AI agent with permissions skipped; later the Docker
+daemon should be able to live on a remote machine behind a kunj service.
+
+- Wrote `docs/superpowers/specs/2026-10-21-branch-containers-design.md`. Decisions reached in the
+  brainstorm: real sandbox (own clone, no bind mounts, origin is the only channel in and out — the
+  bundle idea was dropped as unnecessary), image from the repo's devcontainer else a kunj default,
+  configurable credential forwarding, optional egress allowlist adapted from Anthropic's reference
+  devcontainer, per-branch network with sidecar services, opt-in Docker-in-Docker (sysbox /
+  privileged in an isolated VM), port forwarding over `docker exec`, agents in tmux, and a
+  `ContainerBackend` interface so a remote backend can be added without redesign.
+- No code yet; the spec is up for review before planning.
+
 ## 2026-10-16 — Remove several worktrees at once (VS Code + macOS app)
 
 Why: asked to multi-select worktrees to delete in both the macOS app and the VS Code extension.
