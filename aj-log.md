@@ -2,6 +2,24 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-22 — Implement branch containers, phase 1
+
+Why: executed the phase-1 plan so `kunj container` (alias `ct`) exists end to end.
+
+- 12 tasks: hook quoting fix, settings and hooks, names, devcontainer subset, backend + docker CLI,
+  images, seed, lifecycle, forward, command + fast path, docs (this entry, README, CLAUDE.md), Docker
+  integration tests.
+- Review findings that changed the design: the main container runs `--entrypoint sleep` so no
+  image code runs before the firewall is up; the firewall is a network-helper sidecar sharing the
+  agent's network namespace (the agent holds no capabilities); names carry a hash suffix and reuse
+  checks labels; the git credential helper is scoped to origin's host; `${...}` in `hooks.*` config
+  commands is now shell-quoted (users must not add their own quotes).
+- Docs: README section "Run a branch in a sandboxed container", CLAUDE.md "Branch Containers", and a
+  line in `kunj hooks --help` about quoting.
+- Tests: `npm test` 235, `npm run test:docker` 8.
+- Deferred to phase 2+: sidecar services, `open`, `prune`/`--auto`, Docker-in-Docker, remote backend
+  (`kunj serve`), VS Code extension and macOS app UI.
+
 ## 2026-10-21 — Design: branch containers (`kunj container`)
 
 Why: asked for a feature that starts a session for a branch inside a Docker container, like

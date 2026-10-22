@@ -134,6 +134,75 @@ kunj worktree keep                    # interactive menu
 
 Add `--json` to any action for machine-readable output.
 
+### Run a branch in a sandboxed container
+
+`kunj container` (alias `ct`) runs a branch in a Docker container with its own clone of the
+repository, so you can let an AI agent work with its permissions skipped without giving it your
+working tree. Nothing is bind-mounted from the host: the workspace is a Docker volume, and the only
+way code goes in or out is through `origin`.
+
+You need Docker, a Claude login for the agent (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, or
+`CLAUDE_CODE_USE_BEDROCK` with your AWS variables) and a `GH_TOKEN` for cloning and pushing. Use a
+fine-grained GitHub token scoped to this one repository; the agent can use whatever you give it.
+The first start builds the `kunj-sandbox` image, which takes a few minutes and about 1.2 GB.
+
+```bash
+export GH_TOKEN=github_pat_...         # fine-grained, this repo only
+kunj ct start -c feature/x             # new branch from origin/<base>, cloned into a container
+kunj ct agent feature/x                # Claude in tmux; detach with Ctrl-b d
+kunj ct attach feature/x               # come back to it later
+kunj ct shell feature/x                # login shell in /workspace
+kunj ct exec feature/x -- npm test     # run one command
+kunj ct forward feature/x 3000         # localhost:3000 -> container port 3000
+git fetch origin && git switch feature/x   # the agent's pushes arrive via origin
+kunj ct list                           # containers of this repository (-a for all)
+kunj ct stop feature/x                 # keeps the workspace
+kunj ct remove feature/x               # refuses while work is unpushed (-f to override)
+```
+
+The branch defaults to the current one. `start` takes `--base <ref>`, `--image <img>`,
+`--publish <ports>`, `--rebuild` and `--keep-on-error`; `remove` takes `--force` and
+`--keep-volumes`; `--context <name>` picks a Docker context; `--json` works on every action. The
+image comes from the repository's `.devcontainer/devcontainer.json` (an image or a Dockerfile) if
+there is one, else `kunj-sandbox`.
+
+Settings (`kunj config`):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `container.image` | none | Image override (default: the devcontainer, else `kunj-sandbox`) |
+| `container.agentCommand` | Claude with permissions skipped | Command `kunj ct agent` runs in tmux |
+| `container.env` | `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`, `AWS_REGION`, `GH_TOKEN` | Host variables forwarded when set; `NAME=value` passes a literal |
+| `container.files` | none | Host files copied into new containers, as `hostPath:containerPath` |
+| `container.keepFiles` | `true` | Copy the repository's keep files into new containers |
+| `container.network.allow` | none | Egress allowlist of domains; empty means open internet |
+| `container.network.allowHost` | `false` | Let containers reach the Docker host |
+| `container.dockerContext` | none | Docker context for every call |
+| `container.cpus`, `container.memory` | none | Limits passed to `docker run` (e.g. `2`, `4g`) |
+| `container.publish` | none | Ports always published at start |
+
+Network: by default the internet is open but the Docker host, the LAN and private ranges are
+blocked. Set `container.network.allow` to restrict egress to a list of domains (plus GitHub, npm
+and the Anthropic API); `container.network.allowHost` opens the host again. The rules are applied
+by a small helper container that shares the agent's network, so the agent itself has no
+capabilities with which to undo them, and nothing runs in the container until they are in place.
+
+Ports: `kunj ct forward <branch> 3000` or `8080:3000` forwards a local port into the container
+over `docker exec`, so nothing is published. `--publish` and `container.publish` use Docker's own
+port publishing instead.
+
+Hooks: `pre-container-create`, `post-container-create`, `pre-container-delete` and
+`post-container-delete` receive `branch`, `container` and `image` (see [Hooks](#hooks)).
+
+What the sandbox does and does not protect:
+
+| Protected | Not protected |
+|---|---|
+| Host files: nothing is bind-mounted | Whatever you forward in: the agent can read every variable and file you pass and, with internet access, send it anywhere |
+| Your clone and other branches: each container has its own clone, on its own network | Origin, within the token's scope: the agent can push to any branch the token may write to; use branch protection |
+| Host services and LAN: blocked by default | Exfiltration under an allowlist: GitHub, npm and DNS are enough to carry a token out |
+| Host Docker daemon: the socket is never mounted | |
+
 ### Hooks
 
 Like git hooks, kunj can run your own scripts around its own actions. They fire when kunj does
@@ -174,7 +243,8 @@ kunj was run from.
 
 Short commands can live in config instead of a script. They run through the shell and may use
 the arguments as camelCase variables (`${branch}`, `${previousBranch}`, `${prUrl}`, `${worktree}`, ...)
-and `${repoRoot}` and the other config variables:
+and `${repoRoot}` and the other config variables. Values are shell-quoted for you, so write
+`${branch}`, not `"${branch}"`:
 
 ```bash
 kunj config --set hooks.post-worktree-create="npm install"
@@ -219,6 +289,12 @@ npm run build
 
 ```bash
 npm run dev <command> [options]
+```
+
+### Docker integration tests
+
+```bash
+npm run test:docker   # needs Docker; skipped when it is not available
 ```
 
 ### Test locally

@@ -137,6 +137,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj prompt-info` - Output PR# for shell prompts
 - `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
+- `kunj container [start|shell|exec|agent|attach|forward|list|stop|remove]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
 - `kunj install [vscode|macos|all]` - Download the VS Code extension / macOS app from the GitHub release and install them (also offered at the end of `kunj setup`)
@@ -167,6 +168,47 @@ fatals there, so ask git for `--git-common-dir` first. Pull requests are fetched
 **Opening an editor:** `buildOpenCommand()`/`openWorktree()` in src/lib/worktree.ts launch `worktree.editorCommand` (default `code`) detached. VS Code-like editors (code, cursor, codium, windsurf) get `-r` to reuse the window, or `-n` with `--new-window`, unless the configured command already sets a window flag. An empty command disables opening.
 
 The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
+
+## Branch Containers
+
+`kunj container` (alias `ct`, src/commands/container.ts) runs a branch in a Docker container with its
+own clone, mainly to run an agent with permissions skipped. Origin is the only channel in and out;
+nothing from the host is bind-mounted. Design: docs/superpowers/specs/2026-10-21-branch-containers-design.md.
+Phase 1 only: no services, `open`, `prune`, Docker-in-Docker or `--auto` yet.
+
+**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward}.ts`.
+The images' build contexts live in `src/container/{sandbox,nethelper}/` and are copied to
+`dist/container` by `scripts/copy-container-assets.js` as part of the build.
+
+**Backend rule:** only `docker.ts` spawns `docker`. Everything else programs against the
+`ContainerBackend` interface (backend.ts) so a remote backend can be added later; unit tests use
+`FakeBackend`.
+
+**Naming and state:** containers, volumes and networks are `kunj-<repo>-<b>-<h>`, where `<h>` is a
+short hash of the exact branch name, because `branchToDirName` collapses `feature/x` and
+`feature-x` (names.ts). There is no state file: `kunj.*` labels on the Docker objects are the only
+state, and a reused container must match its labels.
+
+**Fast path:** `container` and `ct` are in `FAST_COMMANDS` (src/commands/fast.ts). Keep top-level
+imports light, load inquirer lazily and do not import the AWS or LangChain modules.
+
+**No code before READY:** the main container runs with `--entrypoint sleep`, and the network helper
+(a sidecar sharing its network namespace, holding NET_ADMIN, which the agent container lacks) applies
+the firewall and then touches `/tmp/kunj-ready`. Nothing may be exec'd in the main container
+before that file exists.
+
+**Secrets:** they travel only in the `docker run` env-file. Never pass them with `docker exec -e`
+(visible in `ps` and `inspect`) and never put them in labels. The git credential helper is scoped
+to origin's host.
+
+**Tests:** `npm test` runs everything with the fake backend. `npm run test:docker`
+(`*.docker.test.ts`) drives a real Docker daemon, builds the images and checks the firewall; it
+skips itself when Docker is unavailable.
+
+**Hooks:** `${...}` values in `hooks.*` config commands are shell-quoted when substituted, so
+users must not wrap them in their own quotes (`"${branch}"` would double-quote). The container
+hooks are `pre/post-container-create` and `pre/post-container-delete` with `branch`, `container`,
+`image`.
 
 ## Repository Registry & macOS App
 
