@@ -24,8 +24,17 @@ export interface ContainerNames {
   network: string;
 }
 
+// Docker names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*; branchToDirName leaves #, @, unicode etc. in
+function dockerSafe(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_.-]+/g, '-').replace(/-{2,}/g, '-').replace(/^[^a-zA-Z0-9]+/, '').replace(/[-.]+$/, '');
+}
+
+// Cap on the readable "<repo>-<branch>" part, so "<container>-net-helper" stays under 64 chars
+const MAX_READABLE = 40;
+
 export function containerNames(repoName: string, repoId: string, branch: string): ContainerNames {
-  const container = `kunj-${repoName}-${branchToDirName(branch)}-${nameHash(repoId, branch)}`;
+  const readable = dockerSafe(`${dockerSafe(repoName)}-${dockerSafe(branchToDirName(branch))}`).slice(0, MAX_READABLE).replace(/[-.]+$/, '');
+  const container = `kunj-${readable}-${nameHash(repoId, branch)}`;
   return {
     container,
     helper: `${container}-net-helper`,

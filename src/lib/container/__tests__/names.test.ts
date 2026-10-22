@@ -33,6 +33,24 @@ describe('container names', () => {
       expect(a.container).not.toBe(b.container);
     });
 
+    it('produces valid docker names for awkward branches', () => {
+      for (const b of ['fix#12', 'feat/café', 'user@x']) {
+        const n = containerNames('kunj', 'github.com/o/kunj', b);
+        for (const name of Object.values(n)) {
+          expect(name).toMatch(/^kunj-[a-zA-Z0-9][a-zA-Z0-9_.-]*$/);
+        }
+        expect(n.container).not.toMatch(/[#@]|[^\x00-\x7f]/);
+      }
+    });
+
+    it('caps long names and keeps distinct long branches distinct', () => {
+      const a = containerNames('kunj', 'github.com/o/kunj', 'a'.repeat(200));
+      const b = containerNames('kunj', 'github.com/o/kunj', 'a'.repeat(199) + 'b');
+      expect(a.container.length).toBeLessThanOrEqual(63);
+      expect(a.helper.length).toBeLessThanOrEqual(63);
+      expect(a.container).not.toBe(b.container);
+    });
+
     it('gives the home volume its own name', () => {
       const n = containerNames('kunj', 'github.com/o/kunj', 'main');
       expect(n.homeVolume).toBe(`${n.container}-home`);
