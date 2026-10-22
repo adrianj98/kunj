@@ -108,11 +108,15 @@ export class FakeBackend implements ContainerBackend {
   }
 }
 
+// Like LocalDockerBackend, attaches no 'error' listener to the stdin stream, so a caller that
+// forgets its own handler sees the error surface; a stream that closes without ending yields what
+// was read so far.
 function readAll(stream: NodeJS.ReadableStream): Promise<string> {
-  return new Promise((resolve, reject) => {
+  return new Promise(resolve => {
     const chunks: Buffer[] = [];
+    const done = () => resolve(Buffer.concat(chunks).toString('latin1'));
     stream.on('data', (d: Buffer | string) => chunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d)));
-    stream.on('end', () => resolve(Buffer.concat(chunks).toString('latin1')));
-    stream.on('error', reject);
+    stream.on('end', done);
+    stream.on('close', done);
   });
 }
