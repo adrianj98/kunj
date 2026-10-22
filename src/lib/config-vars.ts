@@ -39,13 +39,27 @@ export function hasVariables(value: string): boolean {
   return value.includes('${');
 }
 
-export function expandVariables(value: string, vars: ConfigVariables): string {
+function substitute(value: string, vars: ConfigVariables, format: (resolved: string) => string): string {
   if (!hasVariables(value)) return value;
   const lookup = new Map(Object.entries(vars).map(([k, v]) => [k.toLowerCase(), v]));
   return value.replace(VARIABLE_PATTERN, (match, name: string) => {
     const resolved = lookup.get(name.toLowerCase());
-    return resolved === undefined ? match : resolved;
+    return resolved === undefined ? match : format(resolved);
   });
+}
+
+export function expandVariables(value: string, vars: ConfigVariables): string {
+  return substitute(value, vars, resolved => resolved);
+}
+
+// POSIX single-quoting: nothing inside is interpreted by the shell
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+// For text that goes to a shell: a branch name like x$(cmd) must stay data
+export function expandVariablesQuoted(value: string, vars: ConfigVariables): string {
+  return substitute(value, vars, shellQuote);
 }
 
 // Repo variables derived from an already-known common dir, so callers that

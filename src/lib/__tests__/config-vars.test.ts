@@ -2,6 +2,8 @@ import * as os from 'os';
 import {
   expandConfigStrings,
   expandVariables,
+  expandVariablesQuoted,
+  shellQuote,
   hasVariables,
   repoVariables,
   treeHasVariables,
@@ -99,5 +101,19 @@ describe('expandConfigStrings', () => {
     const input = { a: '${repoName}' };
     expandConfigStrings(input, vars);
     expect(input.a).toBe('${repoName}');
+  });
+});
+
+describe('shellQuote', () => {
+  it('wraps in single quotes and escapes embedded ones', () => {
+    expect(shellQuote('a b')).toBe("'a b'");
+    expect(shellQuote("it's")).toBe("'it'\\''s'");
+    expect(shellQuote('')).toBe("''");
+  });
+});
+
+describe('expandVariablesQuoted', () => {
+  it('quotes substituted values only', () => {
+    expect(expandVariablesQuoted('echo ${branch} ${nope}', { branch: 'x$(id)' })).toBe("echo 'x$(id)' ${nope}");
   });
 });

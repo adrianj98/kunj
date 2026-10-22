@@ -210,3 +210,8 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - `kunj install [vscode|macos|all]` — downloads and installs the companion apps; offered at the end of `kunj setup`.
 - Also in this release: hooks, new branches from the fetched default branch, `worktree add -c`, config variables,
   bare repository support, keep files.
+
+## Shell-quote hook variables
+- `shellQuote` / `expandVariablesQuoted` in src/lib/config-vars.ts; configured hook commands (src/lib/hooks.ts) now
+  substitute `${branch}`-style values shell-quoted. Why: a branch name like `x$(cmd)` was executed by the shell.
+  Hook commands that wrapped variables in their own quotes now see literal single quotes.

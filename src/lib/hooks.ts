@@ -27,7 +27,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getGlobalKunjDir, getKunjDir } from './config';
 import chalk from 'chalk';
-import { ConfigVariables, RepoVariables, expandVariables, resolveConfigVariables } from './config-vars';
+import { ConfigVariables, RepoVariables, expandVariablesQuoted, resolveConfigVariables } from './config-vars';
 import {
   HOOKS_DIR,
   HOOK_NAMES,
@@ -323,7 +323,7 @@ export async function runHook(name: HookName, context: HookContext, options: Run
     );
   }
   for (const configured of configuredHookCommands(name, options.hooks)) {
-    const command = expandVariables(configured, runContext.vars);
+    const command = expandVariablesQuoted(configured, runContext.vars);
     queue.push({ kind: 'config', source: configured, command, spec: { file: command, args: [], shell: true } });
   }
 

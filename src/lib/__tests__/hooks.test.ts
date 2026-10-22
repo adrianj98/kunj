@@ -203,13 +203,23 @@ describe('hooks', () => {
 
   posixOnly('runs configured commands through the shell with variables expanded', async () => {
     const result = await runHook('post-worktree-create', worktreeHookContext(repo, worktree, 'feature/x'), {
-      hooks: { 'post-worktree-create': [`echo "${'${branch}'} in ${'${worktree}'} of ${'${repoName}'}" > '${logFile}'`, 'true'] },
+      hooks: { 'post-worktree-create': [`echo ${'${branch}'} in ${'${worktree}'} of ${'${repoName}'} > '${logFile}'`, 'true'] },
     });
     expect(result.ok).toBe(true);
     expect(result.executions.map(e => e.status)).toEqual(['ok', 'ok']);
     expect(result.executions[0].kind).toBe('config');
-    expect(result.executions[0].command).toContain(`feature/x in ${worktree} of ${repo.repoName}`);
+    expect(result.executions[0].command).toContain(`'feature/x' in '${worktree}' of '${repo.repoName}'`);
     expect(fs.readFileSync(logFile, 'utf8').trim()).toBe(`feature/x in ${worktree} of ${repo.repoName}`);
+  });
+
+  posixOnly('does not execute shell syntax in a branch name', async () => {
+    const marker = path.join(tmp, 'pwned');
+    const result = await runHook('post-worktree-create', worktreeHookContext(repo, worktree, `x$(touch ${marker})`), {
+      hooks: { 'post-worktree-create': [`echo ${'${branch}'} > '${logFile}'`] },
+    });
+    expect(result.ok).toBe(true);
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(fs.readFileSync(logFile, 'utf8').trim()).toBe(`x$(touch ${marker})`);
   });
 
   posixOnly('a failing pre hook throws a HookError and stops later hooks', async () => {
