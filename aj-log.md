@@ -23,7 +23,10 @@ daemon should be able to live on a remote machine behind a kunj service.
   blocked by default, AWS keys only with Bedrock, DNS pinned, allowlist re-resolved, privileged
   needs an explicit setting, hook quoting fix as a prerequisite, idempotent seed, prune/`--auto`
   moved to later phases. A "what the sandbox does and does not protect" table was added.
-- No code yet; the spec is up for review before planning.
+- Spec approved. Wrote the phase-1 implementation plan
+  `docs/superpowers/plans/2026-10-21-branch-containers-phase-1.md` (12 tasks: hook quoting fix,
+  settings/hooks, names, devcontainer subset, backend + docker CLI, images, seed, lifecycle,
+  forward, command + fast path, docs, Docker integration tests).
 
 ## 2026-10-16 — Remove several worktrees at once (VS Code + macOS app)
 
