@@ -52,13 +52,28 @@ export function getRepoCommonRoot(): string | null {
   return commonRootCache;
 }
 
+// The git common dir (<root>/.git, or the repository itself when bare)
+export function getRepoCommonDir(): string | null {
+  getRepoCommonRoot();
+  return commonDirCache;
+}
+
+// The origin remote's URL, or null when there is none
+let originUrlCache: string | null | undefined;
+export function getOriginUrl(): string | null {
+  if (originUrlCache === undefined) {
+    originUrlCache = gitSync('remote get-url origin') || null;
+  }
+  return originUrlCache;
+}
+
 // Resolve the repository name used to namespace ~/.kunj/{reponame}
 let repoNameCache: string | null | undefined;
 export function getRepoName(): string | null {
   if (repoNameCache !== undefined) {
     return repoNameCache;
   }
-  const origin = gitSync('remote get-url origin');
+  const origin = getOriginUrl();
   if (origin) {
     const fromUrl = repoNameFromUrl(origin);
     if (fromUrl) {
@@ -76,6 +91,7 @@ export function resetRepoCache(): void {
   commonRootCache = undefined;
   commonDirCache = null;
   repoNameCache = undefined;
+  originUrlCache = undefined;
   migrationChecked = false;
 }
 

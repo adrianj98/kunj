@@ -6,21 +6,13 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { CommandRegistry } from './lib/command';
 import { loadFastCommand } from './commands/fast';
+import { getVersion } from './lib/version';
 
 // Loaded lazily: pulling in every command costs close to a second of startup
 async function getAllCommands() {
   return (await import('./commands')).getAllCommands();
 }
 
-// The release workflow rewrites package.json *after* the build, so the version
-// has to be read at runtime -- anything inlined at compile time is stale.
-function getVersion(): string {
-  try {
-    return require('../package.json').version || '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-}
 
 // Main function to handle both completion and normal execution
 async function main() {

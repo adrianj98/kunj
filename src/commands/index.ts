@@ -20,6 +20,7 @@ export { PromptInfoCommand } from './prompt-info';
 export { IssueCommand } from './issue';
 export { TeamCommand } from './team';
 export { WorktreeCommand } from './worktree';
+export { ContainerCommand } from './container';
 export { HooksCommand } from './hooks';
 export { ReposCommand } from './repos';
 export { InstallCommand } from './install';
@@ -49,6 +50,7 @@ import { PromptInfoCommand } from './prompt-info';
 import { IssueCommand } from './issue';
 import { TeamCommand } from './team';
 import { WorktreeCommand } from './worktree';
+import { ContainerCommand } from './container';
 import { HooksCommand } from './hooks';
 import { ReposCommand } from './repos';
 import { InstallCommand } from './install';
@@ -79,6 +81,7 @@ export function getAllCommands(): BaseCommand[] {
     new IssueCommand(),
     new TeamCommand(),
     new WorktreeCommand(),
+    new ContainerCommand(),
     new HooksCommand(),
     new ReposCommand(),
     new InstallCommand(),

@@ -9,7 +9,11 @@
 
 import { BaseCommand } from '../lib/command';
 
+const loadContainer = async () => new (await import('./container')).ContainerCommand();
+
 const FAST_COMMANDS: Record<string, () => Promise<BaseCommand>> = {
+  container: loadContainer,
+  ct: loadContainer,
   worktree: async () => new (await import('./worktree')).WorktreeCommand(),
   repos: async () => new (await import('./repos')).ReposCommand(),
   'prompt-info': async () => new (await import('./prompt-info')).PromptInfoCommand(),

@@ -26,6 +26,10 @@ export interface CommandConfig {
   ui?: UIWidgetConfig;
   // Extra text printed after the options in --help (a function is only called when help is shown)
   helpText?: string | (() => string);
+  // Other names the command answers to (e.g. `ct` for `container`)
+  aliases?: string[];
+  // Accept options Commander does not know, as operands (e.g. a command run with `exec`)
+  allowUnknownOption?: boolean;
 }
 
 export abstract class BaseCommand {
@@ -50,6 +54,13 @@ export abstract class BaseCommand {
     }
 
     cmd.description(this.config.description);
+
+    for (const alias of this.config.aliases ?? []) {
+      cmd.alias(alias);
+    }
+    if (this.config.allowUnknownOption) {
+      cmd.allowUnknownOption();
+    }
 
     const helpText = this.config.helpText;
     if (helpText) {
@@ -89,7 +100,7 @@ export abstract class BaseCommand {
           process.exit(1);
         }
         // A failing pre-* hook or a missing base branch is an expected outcome, not a crash: no stack trace
-        if (error instanceof Error && (error.name === "HookError" || error.name === "BaseBranchError")) {
+        if (error instanceof Error && ["HookError", "BaseBranchError", "StartError", "ContainerError"].includes(error.name)) {
           console.error(`✗ ${error.message}`);
           process.exit(1);
         }
