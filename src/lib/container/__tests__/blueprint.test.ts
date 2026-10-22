@@ -47,6 +47,20 @@ describe('parseBlueprint', () => {
       'x.json: tools.Node_JS is not a valid preset name'
     );
   });
+
+  it('rejects tool values that could become options or paths in a root preset', () => {
+    const parse = (tools: unknown) => () => parseBlueprint(JSON.stringify({ tools }), 'x.json');
+    expect(parse({ apt: ['-oDPkg::Pre-Invoke::=id'] })).toThrow('x.json: tools.apt contains an invalid value "-oDPkg::Pre-Invoke::=id"');
+    expect(parse({ apt: ['/opt/kunj/seed/x.deb'] })).toThrow('x.json: tools.apt contains an invalid value "/opt/kunj/seed/x.deb"');
+    expect(parse({ java: '../../../usr/bin' })).toThrow('x.json: tools.java contains an invalid value "../../../usr/bin"');
+    expect(parse({ python: '--help' })).toThrow('x.json: tools.python contains an invalid value "--help"');
+    expect(parse({ apt: [' '] })).toThrow('x.json: tools.apt contains an invalid value " "');
+    expect(parse({ node: '  ' })).toThrow('x.json: tools.node contains an invalid value ""');
+    expect(parse({ apt: ['jq git'] })).toThrow('x.json: tools.apt contains an invalid value "jq git"');
+    expect(parse({ playwright: 'chromium $(id)' })).toThrow('x.json: tools.playwright contains an invalid value "$(id)"');
+    const ok = { yarn: 'corepack', node: '22.12', go: 'lts', apt: ['jq', 'libc6:arm64', 'g++'], playwright: 'chromium firefox', bun: true };
+    expect(parseBlueprint(JSON.stringify({ tools: ok }), 'x.json').tools).toEqual(ok);
+  });
 });
 
 describe('resolution', () => {

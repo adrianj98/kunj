@@ -19,6 +19,9 @@ export const KNOWN_LOCKFILES = [
 
 export type ToolValue = string | string[] | true;
 
+/** One word of a tool value: no leading -, no /, no whitespace or shell metacharacters. */
+const TOOL_WORD = /^[A-Za-z0-9][A-Za-z0-9._+:=~@-]*$/;
+
 export interface Blueprint {
   tools: Record<string, ToolValue>;
   setup: string[];
@@ -56,6 +59,10 @@ export function parseBlueprint(text: string, source: string): Blueprint {
       if (typeof value !== 'string' && value !== true && !isStringArray(value)) {
         throw new Error(`${source}: tools.${key} must be a string, an array of strings or true`);
       }
+      // Values reach root-run preset scripts as words: none may look like an option or a path
+      const words = value === true ? [] : Array.isArray(value) ? value : value.trim().split(/\s+/);
+      const bad = words.find(w => !TOOL_WORD.test(w));
+      if (bad !== undefined) throw new Error(`${source}: tools.${key} contains an invalid value "${bad}"`);
       tools[key] = value as ToolValue;
     }
   }

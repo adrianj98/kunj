@@ -45,6 +45,8 @@ export async function resolvePresets(
   dirs.push(['host', path.join(opts.globalKunjDir, 'presets')]);
   dirs.push(['builtin', opts.builtinDir ?? builtinPresetsDir()]);
 
+  // Every preset sources _lib.sh, so a change to it changes every preset's hash
+  const lib = await fs.promises.readFile(path.join(builtinPresetsDir(), '_lib.sh'), 'utf8');
   const presets: Preset[] = [];
   for (const name of names) {
     // Validate before any path join: the name comes from blueprint.json
@@ -58,13 +60,18 @@ export async function resolvePresets(
       } catch {
         continue;
       }
-      found = { name, path: file, source, text, hash: createHash('sha1').update(text).digest('hex').slice(0, 12) };
+      found = { name, path: file, source, text, hash: presetHash(lib, text) };
       break;
     }
     if (!found) throw new Error(`Unknown preset "${name}" (looked in ${dirs.map(d => d[1]).join(', ')})`);
     presets.push(found);
   }
   return presets;
+}
+
+/** 12 hex of sha1 over the built-in _lib.sh and the preset's own text. */
+export function presetHash(lib: string, text: string): string {
+  return createHash('sha1').update(lib).update('\0').update(text).digest('hex').slice(0, 12);
 }
 
 export function presetEnv(name: string, value: ToolValue, user: string): Record<string, string> {
@@ -91,7 +98,8 @@ export async function runPresets(
   presets: Preset[],
   tools: Blueprint['tools'],
   user: string,
-  io: ExecIO
+  io: ExecIO,
+  warn: (msg: string) => void = msg => process.stderr.write(`${msg}\n`)
 ): Promise<Array<{ name: string; version: string }>> {
   const lib = fs.readFileSync(path.join(builtinPresetsDir(), '_lib.sh'));
   const entries = [{ path: '_lib.sh', content: lib, mode: 0o644 }];
@@ -117,10 +125,11 @@ export async function runPresets(
         stderr: io.stderr ?? 'inherit',
       });
       if (r.exitCode !== 0) throw new Error(`preset ${p.name} failed (exit ${r.exitCode})`);
-      // Written by kunj_done as "<name> <version>". A preset that echoes its installed line itself
-      // has no result file: report it with an empty version rather than failing a good install.
+      // Written by kunj_done as "<name> <version>". A preset that skipped kunj_done still installed
+      // something, so it is a warning with an empty version rather than a failure.
       const result = await backend.exec(id, ['cat', `${PRESET_DIR}/${p.name}.result`], { user: 'root' });
       const m = /^(\S+) (.*)$/.exec(result.exitCode === 0 ? result.stdout.trim() : '');
+      if (!m) warn(`preset ${p.name} did not report its version (it should end with kunj_done <version>)`);
       installed.push({ name: p.name, version: m ? m[2] : '' });
     }
   } finally {

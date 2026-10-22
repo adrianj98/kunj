@@ -15,11 +15,11 @@ case "$want" in
 esac
 [ -n "$version" ] || { echo "go: no release matches '$want'" >&2; exit 1; }
 arch="$(kunj_arch_deb)"
-if [ ! -x /usr/local/go/bin/go ] || [ "$(/usr/local/go/bin/go env GOVERSION)" != "go$version" ]; then
-  rm -rf /usr/local/go
-  curl -fsSL "https://go.dev/dl/go$version.linux-$arch.tar.gz" | tar -xz -C /usr/local --no-same-owner
+if [ ! -x $KUNJ_PREFIX/go/bin/go ] || [ "$($KUNJ_PREFIX/go/bin/go env GOVERSION)" != "go$version" ]; then
+  rm -rf $KUNJ_PREFIX/go
+  curl -fsSL "https://go.dev/dl/go$version.linux-$arch.tar.gz" | tar -xz -C $KUNJ_PREFIX --no-same-owner
 fi
-ln -sf /usr/local/go/bin/go /usr/local/bin/go
-ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+ln -sf $KUNJ_PREFIX/go/bin/go $KUNJ_PREFIX/bin/go
+ln -sf $KUNJ_PREFIX/go/bin/gofmt $KUNJ_PREFIX/bin/gofmt
 kunj_env GOTOOLCHAIN=local
 kunj_done "$version"

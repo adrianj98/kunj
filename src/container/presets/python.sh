@@ -5,15 +5,16 @@ set -eu
 . "$(dirname "$0")/_lib.sh"
 kunj_need curl
 want="${KUNJ_TOOL_VERSION:-3.12}"
+KUNJ_TOOL_VERSION="$want" kunj_check_words '[0-9a-z][0-9a-z.+@-]*'
 if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=$KUNJ_PREFIX/bin UV_NO_MODIFY_PATH=1 sh
 fi
-export UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python
+export UV_PYTHON_INSTALL_DIR=$KUNJ_PREFIX/share/uv/python
 mkdir -p "$UV_PYTHON_INSTALL_DIR"
 uv python install "$want"
 py="$(uv python find "$want")"
-ln -sf "$py" /usr/local/bin/python3
-ln -sf "$py" /usr/local/bin/python
-chmod -R a+rX /usr/local/share/uv
-kunj_env UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python
+ln -sf "$py" $KUNJ_PREFIX/bin/python3
+ln -sf "$py" $KUNJ_PREFIX/bin/python
+chmod -R a+rX $KUNJ_PREFIX/share/uv
+kunj_env UV_PYTHON_INSTALL_DIR=$KUNJ_PREFIX/share/uv/python
 kunj_done "$("$py" --version | cut -d' ' -f2)"

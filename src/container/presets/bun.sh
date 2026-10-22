@@ -6,7 +6,7 @@ set -eu
 kunj_need curl; kunj_need unzip; kunj_need bash
 want="${KUNJ_TOOL_VERSION:-}"
 want="${want#v}"
-export BUN_INSTALL=/usr/local
+export BUN_INSTALL=$KUNJ_PREFIX
 if [ -n "$want" ]; then curl -fsSL https://bun.sh/install | bash -s -- "bun-v$want"; else curl -fsSL https://bun.sh/install | bash; fi
-chmod a+rx /usr/local/bin/bun
-kunj_done "$(/usr/local/bin/bun --version)"
+chmod a+rx $KUNJ_PREFIX/bin/bun
+kunj_done "$($KUNJ_PREFIX/bin/bun --version)"
