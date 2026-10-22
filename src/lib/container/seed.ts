@@ -15,6 +15,19 @@ export interface OriginState {
   isSsh: boolean;
 }
 
+const NETWORK_TIMEOUT_MS = 30000;
+
+// Network git calls must never wait on a prompt (terminal, askpass helpers, ssh)
+function nonInteractiveEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: '',
+    SSH_ASKPASS: '',
+    GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || 'ssh -o BatchMode=yes',
+  };
+}
+
 async function git(args: string[], cwd: string): Promise<string> {
   const { stdout } = await execFileAsync('git', args, { cwd });
   return stdout.trim();
@@ -22,8 +35,7 @@ async function git(args: string[], cwd: string): Promise<string> {
 
 async function succeeds(args: string[], cwd: string): Promise<boolean> {
   try {
-    // never wait on a credential prompt
-    await execFileAsync('git', args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    await git(args, cwd);
     return true;
   } catch {
     return false;
@@ -54,22 +66,36 @@ export async function inspectOrigin(branch: string, cwd: string): Promise<Origin
   if (!originUrl) throw new Error('No origin remote');
   const { host, isSsh } = parseOrigin(originUrl);
 
-  await succeeds(['fetch', 'origin', branch], cwd);
-  const branchOnOrigin = await succeeds(['rev-parse', '--verify', '-q', `refs/remotes/origin/${branch}`], cwd);
-  const local = await succeeds(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], cwd);
+  // a failed fetch (offline, branch not on origin) is not an error here
+  try {
+    await execFileAsync(
+      'git',
+      ['fetch', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+      { cwd, env: nonInteractiveEnv(), timeout: NETWORK_TIMEOUT_MS }
+    );
+  } catch {
+    // ignored
+  }
+  const remoteRef = `refs/remotes/origin/${branch}`;
+  const localRef = `refs/heads/${branch}`;
+  const branchOnOrigin = await succeeds(['rev-parse', '--verify', '-q', remoteRef], cwd);
+  const local = await succeeds(['rev-parse', '--verify', '-q', localRef], cwd);
 
   let unpushed = 0;
   if (local) {
-    const range = branchOnOrigin ? [`origin/${branch}..${branch}`] : [branch];
-    unpushed = parseInt(await git(['rev-list', '--count', ...range], cwd), 10) || 0;
+    const range = branchOnOrigin ? `${remoteRef}..${localRef}` : localRef;
+    unpushed = parseInt(await git(['rev-list', '--count', range, '--'], cwd), 10) || 0;
   }
   return { originUrl, originHost: host, branchOnOrigin, unpushed, isSsh };
 }
 
-// exit 0 -> exists, exit 2 -> no matching ref, anything else (network, auth) is an error
-export async function refExistsOnOrigin(ref: string, cwd: string): Promise<boolean> {
+async function lsRemoteHas(ref: string, cwd: string): Promise<boolean> {
   try {
-    await execFileAsync('git', ['ls-remote', '--exit-code', 'origin', ref], { cwd });
+    await execFileAsync('git', ['ls-remote', '--exit-code', 'origin', ref], {
+      cwd,
+      env: nonInteractiveEnv(),
+      timeout: NETWORK_TIMEOUT_MS,
+    });
     return true;
   } catch (err) {
     if ((err as { code?: unknown }).code === 2) return false;
@@ -77,8 +103,18 @@ export async function refExistsOnOrigin(ref: string, cwd: string): Promise<boole
   }
 }
 
+// A bare name is looked up as a branch, then as a tag; refs/... is checked as given.
+// exit 0 -> exists, exit 2 -> no matching ref, anything else (network, auth) is an error
+export async function refExistsOnOrigin(ref: string, cwd: string): Promise<boolean> {
+  if (ref.startsWith('refs/')) return lsRemoteHas(ref, cwd);
+  return (await lsRemoteHas(`refs/heads/${ref}`, cwd)) || (await lsRemoteHas(`refs/tags/${ref}`, cwd));
+}
+
 export async function pushBranch(branch: string, cwd: string): Promise<void> {
-  await git(['push', '-u', 'origin', branch], cwd);
+  await execFileAsync('git', ['push', '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], {
+    cwd,
+    env: nonInteractiveEnv(),
+  });
 }
 
 export async function hostGitIdentity(cwd: string): Promise<{ name: string; email: string }> {
@@ -105,6 +141,9 @@ export interface SeedInput {
 
 // POSIX sh for the container's sandbox user. Safe to re-run after a partial failure.
 export function seedScript(input: SeedInput): string {
+  if (!input.originHost) {
+    throw new Error('Origin has no host; a container can only clone from a remote origin');
+  }
   const q = shellQuote;
   const lines: string[] = ['set -e'];
   if (input.userName) lines.push(`git config --global user.name ${q(input.userName)}`);
@@ -114,6 +153,9 @@ export function seedScript(input: SeedInput): string {
     lines.push('git config --global credential.helper /usr/local/bin/git-credential-kunj');
     lines.push(
       `git config --global ${q(`url.https://${input.originHost}/.insteadOf`)} ${q(`git@${input.originHost}:`)}`
+    );
+    lines.push(
+      `git config --global --add ${q(`url.https://${input.originHost}/.insteadOf`)} ${q(`ssh://git@${input.originHost}/`)}`
     );
   }
   lines.push(`if [ ! -d /workspace/.git ]; then git clone --recurse-submodules ${q(input.originUrl)} /workspace; fi`);

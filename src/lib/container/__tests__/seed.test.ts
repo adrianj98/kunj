@@ -90,6 +90,60 @@ describe('origin checks', () => {
     expect(await refExistsOnOrigin('topic', clone)).toBe(true);
   });
 
+  posixOnly('refExistsOnOrigin finds tags and fully qualified refs', async () => {
+    git(clone, 'tag', 'v1');
+    git(clone, 'push', 'origin', 'v1');
+    expect(await refExistsOnOrigin('v1', clone)).toBe(true);
+    expect(await refExistsOnOrigin('refs/tags/v1', clone)).toBe(true);
+    expect(await refExistsOnOrigin('refs/heads/main', clone)).toBe(true);
+    expect(await refExistsOnOrigin('refs/heads/v1', clone)).toBe(false);
+  });
+
+  posixOnly('a file named like the branch does not confuse inspectOrigin', async () => {
+    git(clone, 'checkout', '-b', 'topic');
+    commit(clone, 'x');
+    fs.writeFileSync(path.join(clone, 'topic'), 'file');
+    const state = await inspectOrigin('topic', clone);
+    expect(state.branchOnOrigin).toBe(false);
+    expect(state.unpushed).toBe(2);
+  });
+
+  posixOnly('network git calls run non-interactively with a timeout-safe env', async () => {
+    const fake = path.join(tmp, 'fakebin');
+    const log = path.join(tmp, 'env.log');
+    fs.mkdirSync(fake);
+    fs.writeFileSync(
+      path.join(fake, 'git'),
+      `#!/bin/sh\nif [ "$1" = remote ]; then echo ssh://git@example.com/r.git; exit 0; fi\n` +
+        `case "$1" in fetch|ls-remote|push) echo "$1 $GIT_TERMINAL_PROMPT [$GIT_ASKPASS] [$SSH_ASKPASS] $GIT_SSH_COMMAND" >> ${log};; esac\nexit 1\n`,
+      { mode: 0o755 }
+    );
+    const saved = { PATH: process.env.PATH, ssh: process.env.GIT_SSH_COMMAND, ask: process.env.GIT_ASKPASS };
+    process.env.PATH = `${fake}${path.delimiter}${saved.PATH}`;
+    delete process.env.GIT_SSH_COMMAND;
+    process.env.GIT_ASKPASS = '/some/askpass';
+    try {
+      await inspectOrigin('main', clone);
+      await refExistsOnOrigin('main', clone).catch(() => undefined);
+      await pushBranch('main', clone).catch(() => undefined);
+      process.env.GIT_SSH_COMMAND = 'ssh -i key';
+      await pushBranch('main', clone).catch(() => undefined);
+    } finally {
+      process.env.PATH = saved.PATH;
+      if (saved.ssh === undefined) delete process.env.GIT_SSH_COMMAND;
+      else process.env.GIT_SSH_COMMAND = saved.ssh;
+      if (saved.ask === undefined) delete process.env.GIT_ASKPASS;
+      else process.env.GIT_ASKPASS = saved.ask;
+    }
+    const lines = fs.readFileSync(log, 'utf8').trim().split('\n');
+    expect(lines).toEqual([
+      'fetch 0 [] [] ssh -o BatchMode=yes',
+      'ls-remote 0 [] [] ssh -o BatchMode=yes',
+      'push 0 [] [] ssh -o BatchMode=yes',
+      'push 0 [] [] ssh -i key',
+    ]);
+  });
+
   posixOnly('refExistsOnOrigin throws when origin is unreachable', async () => {
     git(clone, 'remote', 'set-url', 'origin', path.join(tmp, 'missing.git'));
     await expect(refExistsOnOrigin('main', clone)).rejects.toThrow();
@@ -171,7 +225,14 @@ describe('seedScript', () => {
     const withToken = seedScript({ ...base, hasToken: true });
     expect(withToken).toContain('credential.helper /usr/local/bin/git-credential-kunj');
     expect(withToken).toContain("'url.https://github.com/.insteadOf' 'git@github.com:'");
+    expect(withToken).toContain("'url.https://github.com/.insteadOf' 'ssh://git@github.com/'");
     expect(withToken).not.toContain('KUNJ_CREDENTIAL_HOST');
+  });
+
+  it('refuses an origin without a host', () => {
+    expect(() => seedScript({ ...base, originUrl: '/srv/r.git', originHost: '' })).toThrow(
+      'Origin has no host; a container can only clone from a remote origin'
+    );
   });
 
   it('skips empty identity, guards the clone and marks the seed', () => {
