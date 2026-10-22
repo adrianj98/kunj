@@ -25,13 +25,17 @@ feature is **provisioning only**: no lint/test/run commands and no agent prompti
 
 ```jsonc
 {
-  "setup":     ["npm ci", "npm run build"],   // run once in /workspace during snapshot (or after a clone when there is no snapshot)
-  "maintain":  ["npm ci"],                    // run on every start after the seed, to absorb lockfile drift
-  "lockfiles": ["package-lock.json"],         // optional; default = the known names found at the repo root
-  "notes":     "Docker tests: npm run test:docker"   // free text shown by `status`; unused otherwise
+  "tools":     { "node": "24", "yarn": "corepack", "apt": ["jq"] },   // system dependencies, installed by presets as root at snapshot time
+  "setup":     ["yarn install --immutable", "yarn build"],            // run once in /workspace during snapshot (or after a clone when there is no snapshot)
+  "maintain":  ["yarn install --immutable"],                          // run on every start after the seed, to absorb lockfile drift
+  "lockfiles": ["yarn.lock"],                                         // optional; default = the known names found at the repo root
+  "notes":     "Docker tests: npm run test:docker"                    // free text shown by `status`; unused otherwise
 }
 ```
 
+- `tools` maps a **preset name** to a version or option. Presets are the extension point (below). They
+  run as root inside the temporary snapshot container, behind the firewall, before `setup`; they are
+  the blueprint's answer to "install node 24" without a Dockerfile.
 - `setup` and `maintain` are arrays of shell commands run with `sh -lc` in `/workspace` as the sandbox user, in order; the first failure stops the step.
 - `lockfiles` are paths relative to the repo root. Known names: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `requirements*.txt`, `go.sum`, `Cargo.lock`, `Gemfile.lock`.
 - Unknown keys warn once and are ignored (forward compatibility).
@@ -39,7 +43,35 @@ feature is **provisioning only**: no lint/test/run commands and no agent prompti
 
 **Resolution** (`resolveBlueprint(repo, ref)`): `git show origin/<default>:.kunj/blueprint.json` (default branch via `detectDefaultBranch()`); if absent, `~/.kunj/{repo}/blueprint.json`; if neither, no blueprint (start behaves as today). `--blueprint <path>` on `snapshot` overrides for one run.
 
-**Hash** (`blueprintHash`): sha1 of the blueprint text + each lockfile's blob id at `origin/<default>` (`git rev-parse origin/<default>:<path>`, skipped when absent) + the base image tag; first 12 hex chars. It is the snapshot's identity and its staleness test.
+**Hash** (`blueprintHash`): sha1 of the blueprint text + each lockfile's blob id at `origin/<default>` (`git rev-parse origin/<default>:<path>`, skipped when absent) + the base image tag + the content hash of every preset the blueprint uses; first 12 hex chars. It is the snapshot's identity and its staleness test.
+
+## Presets (the extension point)
+
+A preset is a POSIX `sh` script that installs one tool for a requested version. Kunj ships presets in
+`src/container/presets/<name>.sh` (copied to `dist/container/presets`); users add their own in
+`~/.kunj/presets/<name>.sh` (host) or `.kunj/presets/<name>.sh` (repo). Resolution: repo → host → built-in,
+so a repo can override `node` if it must. Each script receives `KUNJ_TOOL_VERSION` (the value from
+`tools`, `""` for `true`) and `KUNJ_TOOL_USER` (the sandbox user), runs as root with `set -eu`, must be
+idempotent, and must print one line `installed <name> <resolved version>` at the end so `status` and the
+summary can show it.
+
+Built-in presets for phase 1 — the ones `init` can infer:
+
+| Preset | Value | What it does |
+|---|---|---|
+| `node` | `"24"`, `"22.12"`, `"lts"`, `"nvmrc"` | Official tarball for the exact or latest-matching version into `/usr/local`; replaces the image's node. `"nvmrc"` reads `.nvmrc` / `.node-version` from the seed. |
+| `yarn` / `pnpm` | `"corepack"` or a version | `corepack enable` + `corepack prepare <pm>@<version> --activate` (reads `packageManager` from package.json when `corepack`). |
+| `bun` | version or `true` | Official installer into the user's home. |
+| `python` | `"3.12"` | `uv python install <v>` plus `uv` itself; `pip` via `uv pip`. |
+| `go`, `rust`, `java` | version | Official tarballs / rustup / Temurin. |
+| `apt` | `["jq", "postgresql-client"]` | `apt-get install` of the listed packages. |
+| `playwright` | `"chromium"` or `true` | `npx playwright install --with-deps <browsers>` (needs node). |
+
+Order: `apt` first, then language runtimes in the order written, then package managers, then anything else. Unknown preset names are an error at `snapshot` (not at `start`), naming the three directories searched.
+
+**Inference** (`init`): `.nvmrc` / `.node-version` → `node: "nvmrc"`; `engines.node` → the lowest satisfying major (`>=24.2` → `"24"`); `packageManager: yarn@4.6.0` → `yarn: "corepack"`; `.python-version` / `requires-python` → `python`; `go.mod`'s `go 1.22` → `go: "1.22"`; `rust-toolchain(.toml)` → `rust`; `.tool-versions` (asdf) → each line; `@playwright/test` in dependencies → `playwright: true`.
+
+Without a snapshot (fresh clone), `start` runs the presets too (as root, before `setup`) so the blueprint works even before anyone snapshots; it is just slow. Presets are the only thing in the blueprint that runs as root, which is why they are kunj-shipped scripts or files the user put on disk, never inline commands from the blueprint itself.
 
 ## Commands
 
@@ -64,7 +96,7 @@ Kept under `kunj ct` so it shares the command's context, backend and `--json` co
 
 1. Resolve the blueprint and its hash; `backend.imageExists(tag)` → "up to date" unless `--rebuild`.
 2. Start a temporary container with the existing `startContainer`, branch = default branch (or `--base`), names suffixed `-snapshot` (`containerNames(repo, id, '<default>@snapshot')`), `config.container.env = []`, `keepFiles: false`, `publish: []`. The helper and firewall run as for any start (setup has internet, not the host/LAN).
-3. Run `setup` in `/workspace` as the sandbox user, streaming output to the terminal (stderr in `--json`). Failure → remove the temporary objects, exit 1 with the failing command.
+3. Run the `tools` presets as root (each one's script streamed in with `tarEntries`, executed with `sh`), then `setup` in `/workspace` as the sandbox user, streaming output to the terminal (stderr in `--json`). Failure → remove the temporary objects, exit 1 with the failing preset or command.
 4. `exec` as root: `mkdir -p /opt/kunj && cp -a /workspace /opt/kunj/seed && chown -R <uid> /opt/kunj/seed` (the main container keeps CHOWN/DAC_OVERRIDE/FOWNER). `/workspace` stays a volume and is **not** in the image.
 5. `backend.commitContainer(id, tag, labels)` → `docker commit --change 'LABEL …' <id> kunj-blueprint-<repo>:<hash>` with labels `kunj.repo`, `kunj.blueprint.hash`, `kunj.blueprint.ref` (the commit sha snapshotted), `kunj.blueprint.base` (base image tag), `kunj.blueprint.createdAt`.
 6. Remove the temporary container, helper, volumes and network (always, also on failure).
@@ -102,10 +134,27 @@ All three are added to `ContainerBackend`, `LocalDockerBackend` and `FakeBackend
 - The seed is copied, not mounted: the agent cannot modify `/opt/kunj/seed` for other branches (the image layer is read-only; writes go to the container's own layer).
 - `maintain` runs behind the firewall like everything else.
 
+## Worked examples
+
+**kunj** (this repo): `init` infers `node: "22"` is already satisfied by the image (no entry), `setup: ["npm ci", "npm run build"]`, `maintain: ["npm ci"]`, `lockfiles: ["package-lock.json"]`.
+
+**alertd-core** (yarn 4 via corepack, node ≥ 24.2, Playwright, postgres + pulsar via compose):
+
+```jsonc
+{
+  "tools":    { "node": "24", "yarn": "corepack", "playwright": "chromium", "apt": ["postgresql-client"] },
+  "setup":    ["yarn install --immutable", "npm run build"],
+  "maintain": ["yarn install --immutable"],
+  "notes":    "postgres and pulsar come from .devcontainer/docker-compose.yml — sidecar services are phase 2"
+}
+```
+
+`init` gets `node`, `yarn` and `playwright` from `engines`, `packageManager` and the Playwright dependency; the compose services need phase 2's `container.services`.
+
 ## Testing
 
-- Unit: blueprint parsing/validation, inference table (fixtures for npm/yarn/pnpm/bun/poetry/uv/pip/go/cargo/bundler/Makefile), hash composition, `resolveImage` with/without snapshot + stale detection, `seedScript` with `seedFrom`, lifecycle `setup`/`maintain` ordering and failure handling against `FakeBackend`, `runArgs`/argv for `commitContainer`, `listImages` parsing, the `blueprint` sub-dispatcher and `--json` shapes.
-- Docker (`npm run test:docker`): blueprint for the test repo (`setup: ["touch installed", …]`), `snapshot` produces a labelled image; `start` of a new branch from it has `installed` present without running `setup`, `maintain` ran, and the clone's origin is correct; a stale blueprint prints the hint; cleanup removes the snapshot image.
+- Unit: blueprint parsing/validation (incl. `tools`), preset resolution order and the version-matching for `node`, inference table (fixtures for npm/yarn/pnpm/bun/poetry/uv/pip/go/cargo/bundler/Makefile), hash composition, `resolveImage` with/without snapshot + stale detection, `seedScript` with `seedFrom`, lifecycle `setup`/`maintain` ordering and failure handling against `FakeBackend`, `runArgs`/argv for `commitContainer`, `listImages` parsing, the `blueprint` sub-dispatcher and `--json` shapes.
+- Docker (`npm run test:docker`): blueprint for the test repo (`tools: { "apt": ["jq"] }`, `setup: ["touch installed", …]`), `snapshot` produces a labelled image in which `jq` exists; `start` of a new branch from it has `installed` present without running `setup`, `maintain` ran, and the clone's origin is correct; a stale blueprint prints the hint; cleanup removes the snapshot image.
 - Manual: `kunj ct blueprint init` in this repo → `.kunj/blueprint.json` with `npm ci` + `npm run build`; `snapshot`; `start` of a new branch is < 15 s and `node_modules` is present.
 
 ## Phases
