@@ -2,6 +2,16 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Workspace IDE: research and design spec
+
+- Added `docs/superpowers/specs/2026-10-23-workspace-ide-design.md`, mirroring the Claude Doc "Kunj Workspace
+  IDE Spec" (environment list on the left, every terminal/agent/editor for the selected environment on the
+  right). Why: user asked for a spec for a custom IDE for containers and worktrees with the runtime options
+  researched and compared.
+- Compared Electron, Tauri 2, Eclipse Theia, an embedded VS Code server and native SwiftUI; recommends
+  Electron in `workspace-app/` importing kunj's library, xterm.js + node-pty, Monaco diff editor, tmux for
+  agent persistence, VS Code as the hand-off. Not approved yet; no plan.
+
 ## 2026-10-23 — Containers: sidecar services (phase 2, Task 1)
 
 - New `src/lib/container/services.ts`: services from the blueprint's `services`, `container.services`
