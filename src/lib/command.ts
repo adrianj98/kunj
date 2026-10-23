@@ -90,8 +90,8 @@ export abstract class BaseCommand {
       } catch (error) {
         if (this.jsonMode) {
           const message = error instanceof Error ? error.message : String(error);
-          // Errors that carry a string code (AgentError) print it; everything else keeps the plain string
-          const code = (error as { code?: unknown } | null)?.code;
+          // Opt-in: only errors with a string jsonCode (AgentError) print { code, message }; all others keep the plain string
+          const code = (error as { jsonCode?: unknown } | null)?.jsonCode;
           const payload = typeof code === "string" ? { error: { code, message } } : { error: message };
           process.stdout.write(JSON.stringify(payload) + "\n");
           process.exit(1);

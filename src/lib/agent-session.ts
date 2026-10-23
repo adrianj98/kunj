@@ -18,6 +18,11 @@ export class AgentError extends Error {
     super(message);
     this.name = 'AgentError';
   }
+
+  // BaseCommand prints this as the code of a --json error (opt-in); one source, so it cannot differ from `code`
+  get jsonCode(): AgentErrorCode {
+    return this.code;
+  }
 }
 
 export function agentSessionName(repoName: string, repoId: string, branch: string): string {

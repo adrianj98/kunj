@@ -30,8 +30,8 @@ async function runJson(error: unknown): Promise<{ out: string; exit: unknown }> 
 afterEach(() => jest.restoreAllMocks());
 
 describe('BaseCommand --json errors', () => {
-  it('prints { code, message } when the error has a string code', async () => {
-    const err = Object.assign(new Error('No worktree for x'), { code: 'no-worktree' });
+  it('prints { code, message } when the error has a string jsonCode', async () => {
+    const err = Object.assign(new Error('No worktree for x'), { jsonCode: 'no-worktree' });
     const { out, exit } = await runJson(err);
     expect(JSON.parse(out)).toEqual({ error: { code: 'no-worktree', message: 'No worktree for x' } });
     expect(exit).toBe(1);
@@ -43,8 +43,13 @@ describe('BaseCommand --json errors', () => {
     expect(exit).toBe(1);
   });
 
-  it('keeps the plain string when code is not a string', async () => {
-    const { out } = await runJson(Object.assign(new Error('boom'), { code: 42 }));
+  it('keeps the plain string for system errors with a code but no jsonCode', async () => {
+    const { out } = await runJson(Object.assign(new Error('no such file'), { code: 'ENOENT' }));
+    expect(JSON.parse(out)).toEqual({ error: 'no such file' });
+  });
+
+  it('keeps the plain string when jsonCode is not a string', async () => {
+    const { out } = await runJson(Object.assign(new Error('boom'), { jsonCode: 42 }));
     expect(JSON.parse(out)).toEqual({ error: 'boom' });
   });
 });
