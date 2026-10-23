@@ -99,12 +99,12 @@ For repos whose own scripts run `docker` or `docker compose`, the branch contain
 | --- | --- | --- | --- |
 | `off` | No daemon; use sidecar services | Full | Everywhere |
 | `sysbox` | `--runtime sysbox-runc`, `dockerd` inside | Strong | Linux hosts with sysbox installed (checked with `docker info`) |
-| `privileged` | `--privileged`, `dockerd` inside | Weak: an escape reaches the Docker host's VM | Anywhere, but only allowed with `container.allowPrivileged: true` |
+| `privileged` | `--privileged`, `dockerd` inside | Weak: the agent can become root on the Docker host's VM | Anywhere, but only allowed with `container.allowPrivileged: true` |
 
 **Rules:**
 
 - The inner daemon's data lives in a per-branch volume (`/var/lib/docker`), removed with the container. Expect a few GB per branch.
-- The firewall still applies; Docker Hub, its CDN and `ghcr.io` are added to the allowlist automatically.
+- Docker Hub, its CDN and `ghcr.io` are added to the allowlist automatically. sysbox keeps inner containers off the host's root; kunj's firewall is not a boundary for inner containers in either mode.
 - `privileged` on Docker Desktop's default VM is refused even with `allowPrivileged`, because that VM shares your home directory. The README documents a dedicated Colima or OrbStack profile with file sharing off, selected with `container.dockerContext`.
 - Capabilities are not dropped in these modes (the daemon needs them); `list` marks such containers clearly.
 - When a repo has a compose file and Docker-in-Docker is off, `start` suggests sidecar services first.
@@ -182,7 +182,7 @@ kunj ct prune [--all] [--dry-run] [--force]
 | Editor attach | The editor server runs inside the container with your editor's settings | Runs as the sandbox user, behind the firewall; no host paths mounted |
 | Auto forwarding | Any port the agent opens becomes reachable on your Mac's localhost | Bound to 127.0.0.1 only; ignore list; `container.forward.auto: false` to turn it off |
 | Prune | Deleting data | Same guard as `remove`; `--dry-run` default without a terminal; services' data only deleted with their container |
-| Docker-in-Docker | `privileged` gives the container the Docker host's kernel powers | Opt-in twice (`dockerInDocker` + `allowPrivileged`), refused on Docker Desktop's shared VM, `sysbox` preferred |
+| Docker-in-Docker | `privileged` gives the container the Docker host's kernel powers | Opt-in twice (`dockerInDocker` + `allowPrivileged`), refused on Docker Desktop's shared VM, `sysbox` preferred. sysbox keeps inner containers off the host's root; kunj's firewall is not a boundary for inner containers in either mode. |
 
 ## Testing and delivery plan
 

@@ -805,6 +805,24 @@ describe('remove', () => {
   const CTX = { user: 'dev', kunjVersion: VERSION };
   const CLEAN = '@@refs\nrefs/heads/feature/x 0\n@@stash\n0\n@@stash-exit 0\n@@status\n# branch.oid abc\n# branch.head feature/x\n@@status-exit 0\n';
 
+  it('remove guard will not restart a privileged container without allowPrivileged', async () => {
+    const privileged = (state: 'exited' | 'running') => {
+      const b = guardBackend(CLEAN, { state });
+      b.existing[0].labels[LABEL.options] = JSON.stringify({ helperEnv: { KUNJ_FW_MODE: 'default', KUNJ_FW_ORIGIN_HOST: 'github.com' }, dind: 'privileged' });
+      return b;
+    };
+    const stopped = privileged('exited');
+    await expect(inspectForRemove(stopped, names, CTX)).rejects.toThrow(/allowPrivileged.*--force/s);
+    await expect(removeContainer(stopped, names, { ...CTX, force: false, keepVolumes: false })).rejects.toThrow(/allowPrivileged/);
+    expect(stopped.callsOf('start')).toEqual([]);
+    expect(stopped.callsOf('remove')).toEqual([]);
+    // Allowed again, or already running (nothing is started): the guard runs
+    const allowed = privileged('exited');
+    await expect(inspectForRemove(allowed, names, { ...CTX, allowPrivileged: true })).resolves.toMatchObject({ dirty: false });
+    expect(allowed.callsOf('start')).toEqual([['main-id']]);
+    await expect(inspectForRemove(privileged('running'), names, CTX)).resolves.toMatchObject({ dirty: false });
+  });
+
   it('remove guard refuses on unpushed refs', async () => {
     const stdout = CLEAN.replace('@@stash', 'refs/heads/other 1\n@@stash');
     const b = guardBackend(stdout, { state: 'exited' });
@@ -1549,6 +1567,37 @@ describe('docker in docker', () => {
     const cmds = execCmds(b);
     expect(cmds.indexOf(DIND_START)).toBeGreaterThan(cmds.indexOf(READY));
     expect(b.callsOf('exec').find(a => (a[1] as string[]).join(' ') === DIND_START)?.[2]).toMatchObject({ user: 'root' });
+  });
+
+  function stoppedWith(b: FakeBackend, dind: string): void {
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.existing = [info({ state: 'exited', labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main', [LABEL.options]: JSON.stringify({ user: 'dev', dind }) }) })];
+  }
+
+  it('resume refuses a privileged container once allowPrivileged is no longer true', async () => {
+    for (const [mode, container] of [['privileged', {}], ['off', {}], ['privileged', { allowPrivileged: false }]] as const) {
+      const b = dindBackend(['runc']);
+      stoppedWith(b, 'privileged');
+      await expect(startContainer(b, dindOptions(mode, {}, container))).rejects.toMatchObject({
+        code: 'dind',
+        message: expect.stringMatching(/allowPrivileged.*kunj ct remove/s),
+      });
+      expect(b.callsOf('start')).toEqual([]);
+      expect(execCmds(b)).toEqual([]);
+    }
+    // Still allowed: it resumes, privileged, with dockerd
+    const ok = dindBackend(['runc']);
+    stoppedWith(ok, 'privileged');
+    await startContainer(ok, dindOptions('privileged', {}, { allowPrivileged: true }));
+    expect(ok.callsOf('start')).toEqual([['main-id']]);
+    expect(execCmds(ok)).toContain(DIND_START);
+  });
+
+  it('resume refuses a sysbox container when the daemon no longer has the sysbox runtime', async () => {
+    const b = dindBackend(['runc']);
+    stoppedWith(b, 'sysbox');
+    await expect(startContainer(b, dindOptions('sysbox'))).rejects.toMatchObject({ code: 'dind', message: expect.stringMatching(/sysbox-runc/) });
+    expect(b.callsOf('start')).toEqual([]);
   });
 
   it('a snapshot build (withoutDind) uses the DinD image but never runs dockerd or creates the docker volume', async () => {

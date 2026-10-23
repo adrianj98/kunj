@@ -41,6 +41,17 @@ Changes made with Claude, and why.
 - Docs: README (section, Colima profile with only an empty directory mounted), docs-site configuration,
   security (threat model of each mode: the firewall is not a boundary with Docker inside), commands,
   overview; regenerated settings.json; CLAUDE.md.
+- Review fixes: `precheckDind()` (dind.ts: host checks plus the `container.image`/`--image` refusal) runs in
+  `startOrResume` before the `pre-container-create` hook and the blueprint snapshot, so a refused mode
+  builds nothing, runs no hook and pushes nothing (lifecycle keeps its own check as defence in depth).
+  Resume refuses (StartError `dind`) a container recorded `privileged` once `allowPrivileged` is no longer
+  true, and a `sysbox` one when the daemon lost the runtime (`checkRecordedDind()`); the remove/prune guard
+  will not start a stopped privileged container without `allowPrivileged` (fails closed: `--force` only).
+  `contextName()` failing no longer blocks DinD (messages say `?`). The real DinD Docker test is
+  `it.skip` when it cannot run, so it shows as skipped. Docs: `privileged` lets the agent become root on
+  the Docker host/VM with no vulnerability needed; OrbStack and default Colima share the home too (only
+  Desktop is refused); sysbox is a kernel-escape boundary, not a network one; `--rebuild` reuses the
+  sandbox base under the DinD image; `kunj ct prune` removed from "not yet supported".
 
 ## 2026-10-23 — Containers: `kunj ct prune` (phase 2, Task 4)
 

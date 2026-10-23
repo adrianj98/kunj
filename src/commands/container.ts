@@ -54,6 +54,7 @@ import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
 import { stripUserinfo } from '../lib/container/seed';
 import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
+import { precheckDind } from '../lib/container/dind';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
 import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount } from '../lib/container/prune';
 import { KunjConfig } from '../types';
@@ -414,6 +415,8 @@ export class ContainerCommand extends BaseCommand {
     // The create hooks are for creating: resuming an existing container runs neither. --rebuild
     // recreates the container, so it counts. A failing pre hook throws and nothing is created.
     const willCreate = !!options.rebuild || (await ctx.backend.inspectLabels(names.container)) === null;
+    // Docker-in-Docker that cannot or must not run here is refused before the hook, the snapshot and the push
+    if (willCreate) await precheckDind(ctx.backend, config.container, { imageOverride: options.image });
     if (willCreate) await runActionHook('pre-container-create', { branch, container: names.container, image: '' }, hookOptions);
 
     // Asked here (the snapshot) and by startContainer (the hash, a devcontainer build): one git call
@@ -1196,6 +1199,7 @@ export class ContainerCommand extends BaseCommand {
           repoName: ctx.repo.name,
           cwd: ctx.repo.root,
           kunjVersion: getVersion(),
+          allowPrivileged: ctx.config.container?.allowPrivileged === true,
           pruneAfterDays: ctx.config.container?.pruneAfterDays,
           force: !!options.force,
           currentBlueprintHash: () => this.currentHash(ctx),
@@ -1226,6 +1230,7 @@ export class ContainerCommand extends BaseCommand {
           const result = await applyPrune(run.ctx.backend, run.plan, {
             repoId: run.ctx.repo.id,
             kunjVersion: getVersion(),
+            allowPrivileged: run.ctx.config.container?.allowPrivileged === true,
             force: !!options.force,
             hook: async (name, values) => {
               await runActionHook(name, values, hookOptions);
@@ -1296,7 +1301,7 @@ export class ContainerCommand extends BaseCommand {
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireMain(ctx, branch);
     const names = this.names(ctx, branch);
-    const removeCtx = { user: this.userOf(main), kunjVersion: getVersion(), warn: this.warn };
+    const removeCtx = { user: this.userOf(main), kunjVersion: getVersion(), allowPrivileged: ctx.config.container?.allowPrivileged === true, warn: this.warn };
 
     // Inspected here (not inside removeContainer) so each problem prints on its own line
     if (!options.force) {

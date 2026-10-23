@@ -56,6 +56,8 @@ export interface PruneContext {
   /** Where `git ls-remote --heads origin` runs */
   cwd: string;
   kunjVersion: string;
+  /** container.allowPrivileged, for the remove guard */
+  allowPrivileged?: boolean;
   now?: Date;
   /** Stopped containers created longer ago than this are removed; unset or 0 = off */
   pruneAfterDays?: number;
@@ -74,6 +76,8 @@ export interface PruneContext {
 export interface ApplyContext {
   repoId: string;
   kunjVersion: string;
+  /** container.allowPrivileged, for the remove guard */
+  allowPrivileged?: boolean;
   /** false: removeContainer runs the guard again, so work done since the plan is never lost */
   force: boolean;
   /** Runs pre-/post-container-delete; a throwing pre hook skips that container */
@@ -185,7 +189,7 @@ export async function planPrune(backend: ContainerBackend, ctx: PruneContext): P
     let guardError: string | undefined;
     if (missing || !ctx.force) {
       try {
-        guard = await inspectForRemove(backend, names, { user, kunjVersion: ctx.kunjVersion });
+        guard = await inspectForRemove(backend, names, { user, kunjVersion: ctx.kunjVersion, allowPrivileged: ctx.allowPrivileged });
       } catch (err) {
         guardError = message(err);
       }
@@ -257,7 +261,7 @@ export async function applyPrune(
       // Checked again: the agent may have committed since the plan (or while the prompt waited).
       // Before the pre hook, as `remove` does, so the hook only runs for a container that goes.
       if (!ctx.force) {
-        const problems = describeGuard(await inspectForRemove(backend, c.names, { user: c.user, kunjVersion: ctx.kunjVersion }));
+        const problems = describeGuard(await inspectForRemove(backend, c.names, { user: c.user, kunjVersion: ctx.kunjVersion, allowPrivileged: ctx.allowPrivileged }));
         if (problems.length) throw new Error(`kept, it now holds work origin does not have: ${problems.join('; ')}`);
       }
       await ctx.hook?.('pre-container-delete', values);

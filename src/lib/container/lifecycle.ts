@@ -34,7 +34,7 @@ import { getGlobalKunjDir, getKunjDir } from '../config';
 import { ConfigVariables, expandVariables } from '../config-vars';
 import { KunjConfig } from '../../types';
 import { StartError, StartErrorCode } from './errors';
-import { DIND_DATA, DIND_DOMAINS, DindMode, checkDind, composeHint, dindHostInfo, dindMode, dindSource, startDockerd } from './dind';
+import { DIND_DATA, DIND_DOMAINS, DindMode, checkDind, checkRecordedDind, composeHint, dindHostInfo, dindMode, dindSource, startDockerd } from './dind';
 
 export { forwardedEnv, firewallEnv } from './env';
 export { StartError } from './errors';
@@ -715,7 +715,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   const hasToken = TOKEN_KEYS.some(k => env[k]);
 
   if (labels && !options.rebuild) {
-    return resume(backend, options, names, origin, env, hasToken);
+    return resume(backend, options, names, origin, env, hasToken, engine.runtimes);
   }
 
   // Docker-in-Docker is refused here, before anything is pushed or created, when it cannot or must not run
@@ -988,7 +988,8 @@ async function resume(
   names: ContainerNames,
   origin: { originUrl: string; originHost: string },
   env: Record<string, string>,
-  hasToken: boolean
+  hasToken: boolean,
+  runtimes: string[]
 ): Promise<StartResult> {
   const { repo, warn } = options;
   const found = await step('docker', () => backend.list(labelsFor(repo.id, options.namesFor ?? options.branch)));
@@ -999,6 +1000,8 @@ async function resume(
   const firewall = firewallMode(options.config.container);
   const recorded = parseOptionsLabel(main.labels);
   const dind = recorded.dind ?? 'off';
+  // Refused before anything starts: the container keeps the run options it was created with
+  checkRecordedDind(dind, { allowPrivileged: options.config.container?.allowPrivileged === true }, runtimes, names.container);
   if (!options.withoutDind && dind !== dindMode(options.config.container)) {
     warn(`container.dockerInDocker is "${dindMode(options.config.container)}" but this container was created with "${dind}"; kunj ct start --rebuild applies it`);
   }
@@ -1126,6 +1129,8 @@ async function mainInfo(backend: ContainerBackend, names: ContainerNames): Promi
 export interface RemoveContext {
   user: string;
   kunjVersion: string;
+  /** container.allowPrivileged: a stopped privileged container is only started for the guard while it is true */
+  allowPrivileged?: boolean;
   warn?: (msg: string) => void;
   /** Whose services to remove; default: the branch container's labels (none when it is gone) */
   owner?: ServiceOwner;
@@ -1137,8 +1142,17 @@ export async function inspectForRemove(backend: ContainerBackend, names: Contain
   const main = await mainInfo(backend, names);
   const state: UpState = { startedMain: false, helperCreated: false };
   if (main.state !== 'running') {
-    const fwEnv = parseOptionsLabel(main.labels).helperEnv;
+    const recorded = parseOptionsLabel(main.labels);
+    const fwEnv = recorded.helperEnv;
     if (!fwEnv) throw new Error(`${names.container} has no recorded firewall settings, so it cannot be checked safely; use --force`);
+    // Fail closed: a revoked allowPrivileged is never overridden to look inside (a sysbox container
+    // whose runtime is gone just fails to start, which fails the guard too)
+    if (recorded.dind === 'privileged' && ctx.allowPrivileged !== true) {
+      throw new Error(
+        `${names.container} runs privileged and container.allowPrivileged is no longer true, so it is not started to check it ` +
+          'for unpushed work; set container.allowPrivileged back to true, or use --force to remove it unchecked'
+      );
+    }
     try {
       await bringUp(backend, names, main, fwEnv, ctx.kunjVersion, warn, state);
     } catch (err) {

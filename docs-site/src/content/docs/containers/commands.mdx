@@ -39,7 +39,7 @@ terminal) and otherwise stops with `push it first (the container clones from ori
 | `--base <ref>` | Choose the base for `-c`. Defaults to `preferences.defaultBaseBranch`, else the repository's default branch. The base must exist on origin. |
 | `--image <img>` | Use another image for this container, instead of `container.image`, the devcontainer or `kunj-sandbox`. A blueprint snapshot is never used with `--image`. |
 | `--publish <ports>` | Publish container ports on `127.0.0.1`, e.g. `--publish 3000,5432`. See [Ports](#ports). |
-| `--rebuild` | Rebuild the image and recreate the container on the same volumes. The workspace and home are kept. |
+| `--rebuild` | Rebuild the image and recreate the container on the same volumes. The workspace and home are kept. With Docker-in-Docker it rebuilds the `kunj-sandbox-dind` image but reuses the sandbox image under it. |
 | `--no-snapshot` | Start without the blueprint's snapshot: clone origin and run the blueprint's tools and setup in the container. See [Blueprints](../blueprints/). |
 | `--keep-on-error` | Keep what a failed start created, for debugging. A container whose firewall never came up is stopped, never left running. |
 | `--no-hooks` | Skip the `pre/post-container-create` hooks. |

@@ -322,20 +322,24 @@ compose file and it is off, `start` suggests [services](#services) instead, whic
 
 | Mode | How | Where |
 |---|---|---|
-| `sysbox` | `--runtime sysbox-runc`: inner containers stay in the sandbox's user namespace | Linux hosts with [sysbox](https://github.com/nestybox/sysbox) installed; refused when `docker info` does not list the runtime |
-| `privileged` | `--privileged`: an escape is root on the Docker host (on a Mac, its VM) | Needs `container.allowPrivileged: true`; refused on Docker Desktop, whose VM shares your home directory |
+| `sysbox` | `--runtime sysbox-runc`: inner containers stay in the sandbox's user namespace, off the host's real root | Linux hosts with [sysbox](https://github.com/nestybox/sysbox) installed; refused when `docker info` does not list the runtime |
+| `privileged` | `--privileged`: the agent can become root on the Docker host (on a Mac, its VM) with no vulnerability needed | Needs `container.allowPrivileged: true`; refused on Docker Desktop, whose VM shares your home directory |
 
 Both modes keep the container's capabilities (dockerd needs them). `dockerd` starts as root only
 after the firewall is up, on every start, before `setup`; if it does not answer within 30 s the start
 warns and goes on. The sandbox user reaches it through the `docker` group. It uses the
 `kunj-sandbox-dind` image (the sandbox plus Docker Engine, the CLI and the compose plugin, built
-the first time); a devcontainer or `container.image` is refused in this version. Blueprint
+the first time; `--rebuild` rebuilds it but reuses an existing sandbox image); a devcontainer or
+`container.image` is refused in this version. A container created `privileged` is not started again
+once `container.allowPrivileged` is no longer true (nor one created with `sysbox` once the runtime
+is gone); set it back, or remove the container. Blueprint
 snapshots are built on that image but never run `dockerd`, so no inner images end up in a snapshot.
 With `container.network.allow`, Docker Hub, its CDN and `ghcr.io` are added to the allowlist.
 `kunj ct list` tags such containers `[dind <mode>]` (JSON: `dind`).
 
-For `privileged` on a Mac, use a dedicated VM that does not share your files, for example a Colima
-profile that mounts only an empty directory instead of your home:
+For `privileged` on a Mac, use a dedicated VM that does not share your files. OrbStack and a default
+Colima VM share your home directory just as Docker Desktop does (only Desktop is refused), so use,
+for example, a Colima profile that mounts only an empty directory instead of your home:
 
 ```bash
 mkdir -p ~/.colima-dind-empty
@@ -349,9 +353,12 @@ kunj config --set container.allowPrivileged=true
 What it costs: with Docker inside, the firewall is no longer a boundary. The sandbox user can
 start a privileged inner container on the host network and change the rules, and inner containers on
 their own bridge network are routed, not sent from the container, so kunj's rules (on outgoing
-traffic) do not apply to them. In `privileged` mode an escape from an inner container reaches the
-Docker host's kernel; `sysbox` keeps inner containers inside the sandbox's own namespaces. Use it
-for branches whose code you would run on your laptop anyway.
+traffic) do not apply to them. The agent is root in the container through the `docker` group; in
+`privileged` mode the container also has every capability and the host's devices, so the agent can
+become root on the Docker host (on a Mac, its VM) with no vulnerability needed. `sysbox` keeps inner
+containers off the host's real root (user-namespace isolation): a boundary against kernel escapes,
+not a network boundary, since inner containers' traffic is not filtered by kunj's firewall in either
+mode. Use it for branches whose code you would run on your laptop anyway.
 
 ### Blueprints
 

@@ -174,7 +174,9 @@ Either mode:
   plugin from Docker's apt repository, built from the sandbox the first time (a new sandbox image
   rebuilds it). A devcontainer, `container.image` or `--image` is refused in this version;
 - keeps `/var/lib/docker` on a per-branch volume, `<container>-docker`, so inner images survive
-  `stop` and `--rebuild`; `remove` and `prune` delete it with the other volumes;
+  `stop` and `--rebuild`; `remove` and `prune` delete it with the other volumes. `--rebuild`
+  rebuilds the `kunj-sandbox-dind` image and the container, but reuses the sandbox image it is built
+  on when that exists (remove the `kunj-sandbox` image to rebuild it too);
 - keeps the container's capabilities, which `dockerd` needs, and sets `KUNJ_DIND=<mode>` in its
   environment;
 - starts `dockerd` as root once the firewall is up, on every start, before the blueprint's `setup`
@@ -188,15 +190,21 @@ Either mode:
 A [blueprint snapshot](../blueprints/) is built on the `kunj-sandbox-dind` image but never runs
 `dockerd`, so no inner images end up in it. `kunj ct list` tags these containers `[dind sysbox]` or
 `[dind privileged]`; `--json` has `dind` on every container. The mode is fixed when a container is
-created: after changing the setting, `kunj ct start <branch> --rebuild` applies it.
+created: after changing the setting, `kunj ct start <branch> --rebuild` applies it. A container
+created `privileged` is not started again once `container.allowPrivileged` is no longer true, and
+one created with `sysbox` is not started when the daemon has lost the runtime; set it back, or
+`kunj ct remove` (or `--rebuild`) it.
 
 Read [what Docker inside costs](../security/#docker-inside-the-container) before turning it on.
 
 ### A dedicated VM for privileged mode
 
-On a Mac, `privileged` is root on the Docker VM. Docker Desktop's VM shares your home directory,
-which is why kunj refuses it there. Give it a VM of its own that shares nothing of yours, for
-example a Colima profile that mounts only an empty directory instead of your home:
+On a Mac, `privileged` lets the agent become root on the Docker VM. Docker Desktop's VM shares your
+home directory, which is why kunj refuses it there. OrbStack and a default Colima VM share your home
+directory with the VM in the same way; kunj only recognises Docker Desktop, so it does not refuse
+them, but `privileged` does not belong there either. Give it a VM (or Colima profile) of its own with
+no shared mounts, for example a Colima profile that mounts only an empty directory instead of your
+home:
 
 ```bash
 mkdir -p ~/.colima-dind-empty

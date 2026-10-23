@@ -1,10 +1,10 @@
 // Docker-in-Docker: a branch container with its own dockerd (container.dockerInDocker). Off by
 // default. `sysbox` runs the container under the sysbox-runc runtime, which keeps inner containers
-// inside the sandbox's user namespace; `privileged` runs it with --privileged, which an escape turns
-// into root on the Docker host's VM, so it needs container.allowPrivileged and is refused on Docker
-// Desktop, whose VM shares the home directory. Either way the container keeps its capabilities, its
-// /var/lib/docker is a per-branch volume, and dockerd is started as root only after the firewall
-// helper reported ready (lifecycle.ts). Snapshots never run it.
+// inside the sandbox's user namespace; `privileged` runs it with --privileged, which lets the agent
+// (root in it through the docker group) become root on the Docker host's VM, so it needs
+// container.allowPrivileged and is refused on Docker Desktop, whose VM shares the home directory.
+// Either way the container keeps its capabilities, its /var/lib/docker is a per-branch volume, and
+// dockerd is started as root only after the firewall helper reported ready (lifecycle.ts). Snapshots never run it.
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -55,7 +55,34 @@ export async function dindHostInfo(
   info?: EngineInfo
 ): Promise<{ runtimes: string[]; context: string; isDockerDesktop: boolean }> {
   const engine = info ?? (await backend.info());
-  return { runtimes: engine.runtimes, context: await backend.contextName(), isDockerDesktop: isDockerDesktop(engine) };
+  // The context name only goes into messages: not knowing it must not block anything
+  const context = await backend.contextName().catch(() => '?');
+  return { runtimes: engine.runtimes, context, isDockerDesktop: isDockerDesktop(engine) };
+}
+
+function imageRefusal(kind: string, tag: string): StartError {
+  return new StartError(
+    `container.dockerInDocker needs the kunj sandbox image in this version, but this start uses the ${kind} image ${tag}; ` +
+      'unset container.image (or --image) and use no devcontainer, or set container.dockerInDocker to "off"',
+    'dind'
+  );
+}
+
+/**
+ * What can be refused before a new container is set up: the host (checkDind) and an image named by
+ * container.image or --image. `kunj ct start` calls it before the create hook and the blueprint
+ * snapshot; startContainer checks again (and refuses a devcontainer, known only once it is read).
+ */
+export async function precheckDind(
+  backend: ContainerBackend,
+  config: KunjConfig['container'],
+  opts: { imageOverride?: string; info?: EngineInfo } = {}
+): Promise<void> {
+  const mode = dindMode(config);
+  if (mode === 'off') return;
+  const image = opts.imageOverride || config?.image;
+  if (image) throw imageRefusal('setting', image);
+  await checkDind(backend, mode, { allowPrivileged: config?.allowPrivileged === true }, await dindHostInfo(backend, opts.info));
 }
 
 /** Throws StartError('dind') when the mode cannot or must not run here; called before anything is created. */
@@ -97,15 +124,36 @@ export async function checkDind(
   }
 }
 
-/** The DinD image in place of the sandbox; anything else (a devcontainer, container.image, --image) is refused. */
-export function dindSource(base: ImageSource, kunjVersion: string): ImageSource {
-  if (base.kind !== 'sandbox') {
+/**
+ * Whether a container created with `recorded` may be started again: a privileged one only while
+ * container.allowPrivileged is still true, a sysbox one only while the daemon has the runtime.
+ * Applies whatever container.dockerInDocker now says, because the container keeps its run options.
+ */
+export function checkRecordedDind(
+  recorded: DindMode,
+  cfg: { allowPrivileged: boolean },
+  runtimes: string[],
+  container: string
+): void {
+  if (recorded === 'privileged' && !cfg.allowPrivileged) {
     throw new StartError(
-      `container.dockerInDocker needs the kunj sandbox image in this version, but this start uses the ${base.kind} image ${base.tag}; ` +
-        'unset container.image (or --image) and use no devcontainer, or set container.dockerInDocker to "off"',
+      `${container} was created with container.dockerInDocker "privileged", and container.allowPrivileged is no longer true; ` +
+        `set it back to true to start it, or kunj ct remove (or kunj ct start --rebuild) to replace it`,
       'dind'
     );
   }
+  if (recorded === 'sysbox' && !runtimes.includes(SYSBOX_RUNTIME)) {
+    throw new StartError(
+      `${container} was created with container.dockerInDocker "sysbox", but the Docker daemon no longer has the ${SYSBOX_RUNTIME} runtime; ` +
+        'install sysbox again, or kunj ct remove (or kunj ct start --rebuild) to replace it',
+      'dind'
+    );
+  }
+}
+
+/** The DinD image in place of the sandbox; anything else (a devcontainer, container.image, --image) is refused. */
+export function dindSource(base: ImageSource, kunjVersion: string): ImageSource {
+  if (base.kind !== 'sandbox') throw imageRefusal(base.kind, base.tag);
   return {
     kind: 'sandbox',
     tag: DIND_IMAGE(kunjVersion),

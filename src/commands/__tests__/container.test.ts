@@ -945,6 +945,51 @@ describe('ContainerCommand', () => {
       expect(start.mock.calls[2][1]).toMatchObject({ blueprint: null, snapshotHandled: false });
     });
 
+    it('refuses Docker-in-Docker before the create hook, the snapshot and the push', async () => {
+      (resolveBlueprint as jest.Mock).mockResolvedValue(resolved());
+      start.mockResolvedValue(created());
+      const hooks = jest.requireMock('../../lib/hooks').runActionHook as jest.Mock;
+      const cases: Array<[Record<string, unknown>, Record<string, unknown>, RegExp]> = [
+        [{ dockerInDocker: 'sysbox' }, {}, /no sysbox-runc runtime/],
+        [{ dockerInDocker: 'privileged' }, {}, /allowPrivileged/],
+        [{ dockerInDocker: 'sysbox', image: 'node:22' }, {}, /needs the kunj sandbox image/],
+        [{ dockerInDocker: 'sysbox' }, { image: 'node:22' }, /needs the kunj sandbox image/],
+      ];
+      for (const [container, opts, message] of cases) {
+        (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container });
+        backend.infoResult = { serverVersion: 'x', runtimes: container.image || opts.image ? ['runc', 'sysbox-runc'] : ['runc'], operatingSystem: 'Linux' };
+        const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
+        try {
+          await new ContainerCommand().execute('start', 'feat', { json: true, ...opts });
+        } finally {
+          exit.mockRestore();
+        }
+        const out = JSON.parse(stdout.join(''));
+        stdout.length = 0;
+        expect(out.error.code).toBe('dind');
+        expect(out.error.message).toMatch(message);
+      }
+      expect(hooks).not.toHaveBeenCalled();
+      expect(ensure).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      backend.infoResult = { serverVersion: 'fake', runtimes: ['runc'], operatingSystem: 'Fake Linux' };
+    });
+
+    it('a contextName failure does not block Docker-in-Docker', async () => {
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { dockerInDocker: 'sysbox' } });
+      backend.infoResult = { serverVersion: 'x', runtimes: ['runc', 'sysbox-runc'], operatingSystem: 'Linux' };
+      const ctxSpy = jest.spyOn(backend, 'contextName').mockRejectedValue(new Error('no context'));
+      (resolveBlueprint as jest.Mock).mockResolvedValue(null);
+      start.mockResolvedValue(created());
+      try {
+        await new ContainerCommand().execute('start', 'feat', {});
+      } finally {
+        ctxSpy.mockRestore();
+        backend.infoResult = { serverVersion: 'fake', runtimes: ['runc'], operatingSystem: 'Fake Linux' };
+      }
+      expect(start).toHaveBeenCalled();
+    });
+
     it('resuming an existing container never builds a snapshot', async () => {
       backend.existing = [mainContainer('feat')];
       (resolveBlueprint as jest.Mock).mockResolvedValue(resolved());

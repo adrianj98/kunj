@@ -26,12 +26,23 @@ import { isDockerDesktop } from '../dind';
 import { KunjConfig } from '../../../types';
 
 let dockerUp = false;
+// What the daemon may run, known before the tests are defined so a real DinD start that cannot run
+// here is reported as skipped (sysbox-runc installed, or a non-Desktop daemon and KUNJ_TEST_DIND_PRIVILEGED=1)
+let engineRuntimes: string[] = [];
+let engineIsDesktop = false;
 try {
-  execFileSync('docker', ['info'], { stdio: 'ignore', timeout: 20000 });
-  dockerUp = true;
+  const engine = JSON.parse(execFileSync('docker', ['info', '--format', '{{json .}}'], { encoding: 'utf8', timeout: 20000 }));
+  dockerUp = !!engine.ServerVersion;
+  engineRuntimes = Object.keys(engine.Runtimes ?? {});
+  engineIsDesktop = isDockerDesktop({ operatingSystem: engine.OperatingSystem ?? '' });
 } catch {
   dockerUp = false;
 }
+const realDindMode: 'sysbox' | 'privileged' | null = engineRuntimes.includes('sysbox-runc')
+  ? 'sysbox'
+  : process.env.KUNJ_TEST_DIND_PRIVILEGED === '1' && !engineIsDesktop
+    ? 'privileged'
+    : null;
 
 jest.setTimeout(600_000);
 
@@ -802,25 +813,15 @@ const BRANCH_ALLOW = 'it-allow';
   describe('docker in docker', () => {
     const DIND = 'it-dind';
     const ctx = { user: USER, kunjVersion: VERSION, force: true, keepVolumes: false };
-    let mode: 'sysbox' | 'privileged' | null = null;
-    let desktop = false;
-    let runtimes: string[] = [];
+    const mode = realDindMode;
+    const desktop = engineIsDesktop;
+    const runtimes = engineRuntimes;
 
     function withDind(m: string, allowPrivileged = false): KunjConfig {
       return { container: { network: { allowHost: true }, keepFiles: false, env: [], dockerInDocker: m, allowPrivileged } } as unknown as KunjConfig;
     }
 
     beforeAll(async () => {
-      const info = await backend.info();
-      runtimes = info.runtimes;
-      desktop = isDockerDesktop(info);
-      if (runtimes.includes('sysbox-runc')) mode = 'sysbox';
-      else if (process.env.KUNJ_TEST_DIND_PRIVILEGED === '1' && !desktop) mode = 'privileged';
-      if (!mode) {
-        process.stderr.write(
-          'docker in docker: skipping the real DinD start (no sysbox-runc runtime, and KUNJ_TEST_DIND_PRIVILEGED=1 is not set on a non-Desktop daemon)\n'
-        );
-      }
       const work = path.join(tmp, 'dind-work');
       git(['clone', '-q', bare, work], tmp);
       git(['push', '-q', 'origin', `origin/main:refs/heads/${DIND}`], work);
@@ -838,9 +839,8 @@ const BRANCH_ALLOW = 'it-allow';
       expect(labelledFor(DIND)).toEqual([]);
     });
 
-    it('runs docker inside, with /var/lib/docker on the branch volume', async () => {
-      if (!mode) return;
-      const r = await startContainer(backend, startOptions(DIND, withDind(mode, mode === 'privileged')));
+    (mode ? it : it.skip)('runs docker inside, with /var/lib/docker on the branch volume', async () => {
+      const r = await startContainer(backend, startOptions(DIND, withDind(mode!, mode === 'privileged')));
       try {
         expect(r.dind).toBe(mode);
         const run = await inside(r.containerId, 'docker run --rm alpine true');

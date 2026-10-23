@@ -99,7 +99,7 @@ and `SETGID`, which file ownership fixes and `sudo` inside devcontainer images n
 `NET_ADMIN` or `NET_RAW`.
 
 The default `kunj-sandbox` image runs as an ordinary user, `dev`, and has no `sudo`, so the agent
-cannot become root at all. kunj itself runs a few steps as root (installing blueprint tools), but
+cannot become root at all (unless [Docker-in-Docker](#docker-inside-the-container) is on). kunj itself runs a few steps as root (installing blueprint tools), but
 the agent's sessions, `shell` and `exec` run as `dev`.
 
 A repository's `devcontainer.json` comes from the branch, which the agent can edit and push. kunj
@@ -128,14 +128,22 @@ changes the picture above. With `container.dockerInDocker` on:
   start an inner container with `--privileged --network host` and change the rules outright. Treat
   the network as open, whatever `container.network.allow` says.
 - **`privileged`** (`docker run --privileged`) gives the container every capability and the host's
-  devices. An escape from it, or from an inner container, is root on the Docker host: on a Mac, the
-  VM that runs Docker. That is why it needs a second opt-in, `container.allowPrivileged`, and why
-  kunj refuses it on Docker Desktop, whose VM shares your home directory, even then. Run it in a VM
-  of its own that shares nothing of yours (see [a dedicated VM](../configuration/#a-dedicated-vm-for-privileged-mode)).
+  devices. The agent is already root in the container through the `docker` group, so with
+  `privileged` it can become root on the Docker host (on a Mac, the VM that runs Docker) with no
+  vulnerability needed: mounting the host's disk or loading a kernel module is enough. Treat the
+  whole Docker host, and anything it shares, as the agent's. That is why it needs a second opt-in,
+  `container.allowPrivileged`, and why kunj refuses it on Docker Desktop, whose VM shares your home
+  directory, even then. OrbStack and a default Colima VM share your home directory too; kunj cannot
+  tell, so run it in a VM of its own that shares nothing of yours (see
+  [a dedicated VM](../configuration/#a-dedicated-vm-for-privileged-mode)). A container created
+  `privileged` is not started again (nor started by `remove` to check it) once
+  `container.allowPrivileged` is no longer true.
 - **`sysbox`** runs the container under the sysbox runtime, which maps its root to an unprivileged
-  user on the host. Inner containers stay inside the sandbox's own user, mount and network
-  namespaces, so an escape from them lands in the sandbox, not on the host. It is the safer mode
-  where it is available (Linux hosts with sysbox installed).
+  user on the host. Inner containers stay inside the sandbox's user namespace, so they are kept off
+  the host's real root: an escape from them lands in the sandbox, not on the host. That is a
+  boundary against kernel escapes, not a network boundary: inner containers' traffic is routed
+  through the sandbox's network namespace and is not filtered by kunj's firewall either. It is the
+  safer mode where it is available (Linux hosts with sysbox installed).
 
 What does not change: nothing from your machine is mounted (the inner daemon's data is a volume of
 its own), secrets still travel only in the `docker run` environment, `dockerd` starts only after the
@@ -197,7 +205,8 @@ that small.
   (unless `allowHost`);
 - use the Docker daemon (the host's is never mounted; with Docker-in-Docker it has its own);
 - change or switch off the firewall (with Docker-in-Docker it can: see above);
-- become root in the default image;
+- become root in the default image (with Docker-in-Docker on it can: root in the container through
+  the `docker` group, and with `privileged` root on the Docker host);
 - use the forwarded git token against any host other than origin through git.
 
 <Aside type="caution">

@@ -86,6 +86,7 @@ for are the interface it consumes. Nothing in phase 2 depends on it.
   sandbox image gains `docker-ce` CLI + `dockerd` + compose plugin (or a separate `kunj-sandbox-dind` image —
   plan decides); Docker Hub, its CDN and `ghcr.io` added to the allowlist; `list` marks the mode.
 - With a compose file and DinD off, `start` suggests services.
+- sysbox keeps inner containers off the host's root; kunj's firewall is not a boundary for inner containers in either mode.
 
 ## 6. Host MCP bridge
 
