@@ -21,7 +21,7 @@ import { resolveHelperImage } from '../image';
 import { getVersion } from '../../version';
 import { parseBlueprint, resolveBlueprint, snapshotTag, SEED_DIR } from '../blueprint';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint } from '../snapshot';
-import { KEPT_VOLUME, PruneContext, applyPrune, parseLsRemoteHeads, planPrune } from '../prune';
+import { KEPT_VOLUME, ORPHAN_GRACE_MS, PruneContext, applyPrune, parseLsRemoteHeads, planPrune } from '../prune';
 import { isDockerDesktop } from '../dind';
 import { KunjConfig } from '../../../types';
 
@@ -287,7 +287,8 @@ const BRANCH_ALLOW = 'it-allow';
     await backend.exec(idA, ['sh', '-c', `nohup node -e "${server}" >/dev/null 2>&1 &`], { user: USER });
     await waitFor(async () => (await inside(idA, 'curl -s http://127.0.0.1:8123/')).stdout === 'hi', 'the server in the container');
 
-    const forwarder = await forwardPort(backend, idA, { container: 8123, host: await freePort() }, { hasSocat: true });
+    // Through the network helper (same network namespace), as kunj ct forward does: nothing is exec'd in the branch container
+    const forwarder = await forwardPort(backend, namesA().helper, { container: 8123, host: await freePort() }, { hasSocat: true });
     try {
       const res = await fetch(`http://127.0.0.1:${forwarder.hostPort}/`);
       expect(res.status).toBe(200);
@@ -301,10 +302,9 @@ const BRANCH_ALLOW = 'it-allow';
     // Only this test's port: the server an earlier test left on 8123 is forwarded too
     const changes: AutoForwardChange[] = [];
     const controller = new AbortController();
-    const run = runAutoForward(backend, idA, {
+    const run = runAutoForward(backend, { main: idA, helper: namesA().helper }, {
       ignore: [],
       intervalMs: 200,
-      user: USER,
       onChange: c => c.port === 18765 && changes.push(c),
       signal: controller.signal,
     });
@@ -777,6 +777,9 @@ const BRANCH_ALLOW = 'it-allow';
           remoteBranches: async () => parseLsRemoteHeads(git(['ls-remote', '--heads', bare], tmp)),
           kunjImages: false,
         };
+        // Just created: within the grace period (Docker's own creation times) nothing of it is an orphan yet
+        expect((await planPrune(backend, pruneCtx)).orphans.filter(o => o.name.startsWith(orphan.names.container))).toEqual([]);
+        pruneCtx.now = new Date(Date.now() + ORPHAN_GRACE_MS + 60_000);
         const applyCtx = { repoId, kunjVersion: VERSION, force: false, forwardsFile: path.join(tmp, 'forwards.json') };
         const plan = await planPrune(backend, pruneCtx);
         expect(plan.orphans).toEqual(expect.arrayContaining([

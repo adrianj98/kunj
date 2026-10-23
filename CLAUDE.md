@@ -142,7 +142,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 - `kunj agent [start|status|stop] [branch]` - Run an agent in a host tmux session for a worktree (see Worktree agents below)
-- `kunj container [start|shell|exec|agent|attach|forward|logs|list|stop|remove|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
+- `kunj container [start|shell|exec|agent|attach|open|forward|logs|list|stop|remove|prune|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
@@ -207,13 +207,19 @@ docs/superpowers/specs/2026-10-23-workspace-ide-design.md.
 `prune.ts` (`planPrune`/`applyPrune`) removes containers of branches gone from origin (missing from one
 `git ls-remote --heads origin` and present as `refs/remotes/origin/<b>` in the clone; unreachable origin
 removes none) only when the remove guard is clean, checked at plan and again at removal, or `--force`;
-orphans found by labels (helpers, services, networks of a repo/branch with no main container; volumes
+orphans found by labels (helpers, services, networks of a repo/branch with no main container and nothing
+created in the last `ORPHAN_GRACE_MS` = 10 min, so a start waiting on services is not one; volumes
 only with `--force`); only `--yes` or a confirmation applies (`--force` is not consent);
-snapshots of another hash (all kept when the hash is unknown), other versions' `kunj-sandbox`/`kunj-nethelper`
+snapshots of another hash (all kept when the hash is unknown), other versions' `kunj-sandbox`/`kunj-nethelper`/`kunj-sandbox-dind`
 tags and stopped containers older than `container.pruneAfterDays`; never an image a container uses.
-`autoforward.ts` polls `/proc/net/tcp{,6}` (not `ss`, which most images lack) and forwards new listeners (127.0.0.1 only); running forwarders are in
-`~/.kunj/container-forwards.json` (dead pids pruned on read, atomic writes), and `agent` spawns a detached
-one unless `container.forward.auto` is `false` or one is registered for the container.
+`autoforward.ts` polls `/proc/net/tcp{,6}` (not `ss`, which most images lack) and forwards new listeners (127.0.0.1 only).
+The poll and every branch-container tunnel (`forward <port>` too) exec in the network helper (shared network
+namespace, `socat` in its image), never in the main container, which may not be READY yet after a quick
+restart; services are tunnelled through their own container. A forwarder is bound to one run of the main
+container (`containerRun()`'s `startedAt`) and exits on the first check that finds it stopped or restarted.
+Running forwarders, manual `forward` ones included, are in `~/.kunj/container-forwards.json` keyed by
+container id (dead pids pruned on read, atomic writes); a port-0 record marks an `--auto` forwarder, and
+`agent` spawns a detached one unless `container.forward.auto` is `false` or one is registered for the container.
 `dind.ts`: `sysbox` (`--runtime sysbox-runc`, refused unless `docker info` lists it) or `privileged`
 (needs `container.allowPrivileged`, refused on Docker Desktop whatever the context): capabilities kept,
 `/var/lib/docker` on `<container>-docker`, the `kunj-sandbox-dind` image (only on top of kunj's sandbox;

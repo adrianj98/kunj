@@ -50,8 +50,8 @@ An image chosen with `--image` or `container.image` runs as the image's own user
 directory is not kept in a volume (kunj warns about this). The sandbox image and devcontainers with a
 `remoteUser` get a home volume.
 
-Whatever the image, it should have `git`, and `tmux` and `socat` for `agent` and `forward` to work
-fully. kunj warns when they are missing.
+Whatever the image, it should have `git`, and `tmux` for `agent` to work fully. kunj warns when they
+are missing. `forward` needs nothing in the image: it tunnels through the network helper.
 
 ## Environment and secrets
 

@@ -7,7 +7,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutError } from './backend';
-import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch } from './names';
+import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch, optionsLabel } from './names';
 import { ImageSource, credentialHelperSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
 import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devcontainer';
 import { Blueprint, ResolvedBlueprint, SEED_DIR, computeBlueprintHash, resolveBlueprint } from './blueprint';
@@ -975,11 +975,7 @@ function parseOptionsLabel(labels: Record<string, string>): {
   blueprintHash?: string;
   dind?: DindMode;
 } {
-  try {
-    return JSON.parse(labels[LABEL.options] ?? '{}');
-  } catch {
-    return {};
-  }
+  return optionsLabel(labels);
 }
 
 async function resume(

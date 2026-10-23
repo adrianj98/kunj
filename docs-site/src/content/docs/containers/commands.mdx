@@ -202,8 +202,10 @@ Forwarding; press Ctrl-C to stop
 
 kunj listens on `127.0.0.1` only. A bare port uses the same port on your machine when it is free,
 and another free port when it is not (the output says which). Each connection is tunnelled through
-`docker exec`, so it reaches servers that listen only on `localhost` inside the container and needs
-nothing set up when the container was created. Each new connection costs a moment to open: fine for
+`docker exec … socat` in the container's network helper, which shares the container's network (so it
+reaches servers that listen only on `localhost` inside the container) and is kunj's own code: nothing
+is run in the branch container itself, and the image needs no tools for it. When the helper is not
+running, `forward` refuses. Each new connection costs a moment to open: fine for
 a browser and hot reload, not for load tests.
 
 A sidecar [service](../services/)'s port is forwarded by naming the service:
@@ -236,13 +238,16 @@ Every 2 seconds kunj lists the container's TCP listeners (one `docker exec` of
 bound to all addresses or to `127.0.0.1`, is forwarded (a server listening only on IPv6 `::1` is
 not, because the tunnel connects to `127.0.0.1`) to the same port on
 `127.0.0.1` when it is free, else to the next free port; when the listener goes away the forward is
-dropped. Ports in `container.forward.ignore` are skipped. With `--json` each change is one line,
+dropped. Ports in `container.forward.ignore`, and ports already published with `start -p`, are
+skipped. The listing and the tunnels go through the network helper, as above. With `--json` each change is one line,
 `{"event":"add","port":3000,"hostPort":3001}` (`"remove"` when it is dropped), and
 `--auto --detach --json` prints `{"success":true,"branch":"feature/search","pid":48213}`.
 
-Running auto forwarders and their ports are recorded in `~/.kunj/container-forwards.json`;
-`kunj ct list` shows the ports. A detached forwarder exits on its own when the container stops; to
-stop one sooner, `kill` its pid.
+Running forwarders and their ports, `kunj ct forward <port>` as well as `--auto`, are recorded in
+`~/.kunj/container-forwards.json`; `kunj ct list` shows the ports (a service's with its `service`). A
+forwarder belongs to one run of the container: a detached one exits on its own as soon as the
+container stops or is started again (a restart gets a new network helper, and `agent` starts a new
+forwarder). To stop one sooner, `kill` its pid.
 
 ### Ports
 
@@ -367,12 +372,14 @@ It removes:
   kept, and the plan says why. kunj asks origin once (`git ls-remote --heads origin`); when origin
   cannot be reached, no container is removed for this reason.
 - **orphans**: helpers, services and networks labelled for a branch whose container no longer exists.
+  A branch with anything created in the last 10 minutes is left alone (a start or `--rebuild` waits
+  for its services before its container exists), and `list` does not call those orphans either.
   Volumes without a container (a workspace kept by `remove --keep-volumes`, or left by a `docker rm`)
   can hold unpushed work that no check can see, so they are listed as kept and removed only with
   `--force`.
 - **old snapshot images**: [blueprint snapshots](../blueprints/) whose hash is not the current one.
   When the current hash cannot be worked out, every snapshot is kept.
-- **old kunj images**: `kunj-sandbox` and `kunj-nethelper` tags of other kunj versions.
+- **old kunj images**: `kunj-sandbox`, `kunj-nethelper` and `kunj-sandbox-dind` tags of other kunj versions.
 - **stopped containers older than `container.pruneAfterDays`** days, when you set it (off by
   default), after the same check for unpushed work.
 

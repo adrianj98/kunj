@@ -37,8 +37,9 @@ for are the interface it consumes. Nothing in phase 2 depends on it.
 - Start order: services (topologically by `dependsOn`) before the branch container; health check polled every
   2 s up to 120 s, then a warning and continue (decision). Resume starts stopped services. Stop stops them.
   Remove deletes them and their volumes. Rollback includes services created by the run.
-- Snapshots: services start before `setup` during a snapshot build (so migrations can run) and are removed
-  with the temporary container; their data is never in the snapshot.
+- Snapshots: services start before `setup` during a snapshot build and are removed with the temporary
+  container; their data is never in the snapshot. So migrations against a service belong in `maintain`
+  and must be idempotent: `setup`'s only reach the build's throwaway services, never the branch's own.
 - `list`: `services: [{ name, state, port }]` per container (JSON additive). `kunj ct logs [branch] [service]`.
 - `kunj ct forward <branch> <service>:<port>` forwards a service port (exec tunnel into the service).
 

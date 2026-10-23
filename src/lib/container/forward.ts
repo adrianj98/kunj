@@ -1,5 +1,7 @@
 // `kunj container forward`: a 127.0.0.1 listener on the host whose connections are tunnelled into
-// the container through `docker exec -i … socat`, so no port is published on the container.
+// the container through `docker exec -i … socat`, so no port is published on the container. A
+// branch container's ports are reached through its network helper (same network namespace), a
+// service's through the service container.
 import * as net from 'net';
 import { PassThrough } from 'stream';
 import { ContainerBackend } from './backend';

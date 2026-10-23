@@ -222,8 +222,10 @@ or above that listens on all addresses or on 127.0.0.1 to the same port on
 `{ "event": "add"|"remove", "port", "hostPort" }` object per line). `--detach` runs it in the
 background until the container stops (`--json`: `{ success, branch, pid }`). `kunj ct agent` starts
 one of those unless one is already running for the container or `container.forward.auto` is
-`false`. Running forwarders are recorded in `~/.kunj/container-forwards.json`, and `kunj ct list
---json` shows their ports as `kind: "forward"` entries with the forwarder's `pid`.
+`false`. Running forwarders (`kunj ct forward <port>` ones too) are recorded in
+`~/.kunj/container-forwards.json`, and `kunj ct list --json` shows their ports as `kind: "forward"`
+entries with the forwarder's `pid`. Ports are reached through the container's network helper, never
+by running anything in the branch container, and a forwarder ends when the container stops or restarts.
 
 Hooks: `pre-container-create`, `post-container-create`, `pre-container-delete` and
 `post-container-delete` receive `branch`, `container` and `image` (see [Hooks](#hooks)). The create
@@ -253,8 +255,9 @@ Security notes:
 - The allowlist always admits GitHub's published ranges (when origin is on GitHub), origin, npm
   and the Anthropic API. Git LFS storage hosts and `codeload.github.com` (archive downloads) are
   not on it by name; add them to `container.network.allow` if the repository needs them.
-- `kunj ct forward` uses `socat` in the container when it has it; the bash `/dev/tcp` fallback
-  cannot half-close a connection, so protocols that wait for the client to finish sending may hang.
+- `kunj ct forward <service>:<port>` uses `socat` in the service container when it has it; the bash
+  `/dev/tcp` fallback cannot half-close a connection, so protocols that wait for the client to finish
+  sending may hang. Branch container ports always go through the network helper's `socat`.
 - A devcontainer's build context is taken with `git archive`, which leaves out submodule contents
   and Git LFS files (only their pointers are included).
 
@@ -292,9 +295,10 @@ environment.
 
 `start` runs the services before the branch container, in `dependsOn` order, and waits for each
 health check (every 2 s, up to 2 minutes, then a warning and the start goes on), so they are up
-before `setup` runs. That holds for snapshot builds too: `setup` can run migrations against them.
-Their data is never part of the snapshot, and the temporary services go with the temporary
-container. `stop` stops them, a resumed start starts them again, and `remove` deletes them and their
+before `setup` runs. That holds for snapshot builds too, but their data is never part of the
+snapshot and the temporary services go with the temporary container, so migrations against a
+service belong in `maintain` (which runs on a start from the snapshot) and must be safe to run again:
+`setup`'s migrations only ever reach the snapshot build's throwaway database. `stop` stops them, a resumed start starts them again, and `remove` deletes them and their
 volumes (`--keep-volumes` keeps those).
 
 ```bash

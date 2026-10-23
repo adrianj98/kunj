@@ -2,6 +2,10 @@
 // exec results are programmed by the joined command.
 import { BackendEvent, ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecTimeoutError, ImageInfo, Labels } from '../backend';
 
+export const FAKE_STARTED_AT = '2026-01-01T00:00:00.000000000Z';
+/** Old enough that nothing is inside prune's orphan grace period */
+export const OLD_CREATED_AT = '2020-01-01T00:00:00Z';
+
 export type ExecResult = { exitCode: number; stdout: string };
 
 export class FakeBackend implements ContainerBackend {
@@ -34,6 +38,10 @@ export class FakeBackend implements ContainerBackend {
   composeConfigs = new Map<string, unknown>();
   /** containerState results by id; unlisted ids are 'running'. */
   states = new Map<string, ContainerInfo['state'] | null>();
+  /** containerRun's startedAt by id; unlisted ids started at FAKE_STARTED_AT. */
+  startedAt = new Map<string, string>();
+  /** Creation times of volumes and networks by name; unlisted ones were created at OLD_CREATED_AT. */
+  createdAt = new Map<string, string>();
   /** Pipe io.stdin to io.stdout uppercased. */
   echoUpper = false;
   /** stdin contents captured per exec call, in call order (undefined when no stream was given). */
@@ -113,14 +121,14 @@ export class FakeBackend implements ContainerBackend {
   async listVolumes(filter: Labels): Promise<Array<{ name: string; labels: Labels }>> {
     this.record('listVolumes', [filter]);
     return [...this.volumes]
-      .map(name => ({ name, labels: this.volumeLabels.get(name) ?? {} }))
+      .map(name => ({ name, labels: this.volumeLabels.get(name) ?? {}, createdAt: this.createdAt.get(name) ?? OLD_CREATED_AT }))
       .filter(v => Object.keys(filter).every(k => v.labels[k] === filter[k]));
   }
 
   async listNetworks(filter: Labels): Promise<Array<{ name: string; labels: Labels }>> {
     this.record('listNetworks', [filter]);
     return [...this.networks]
-      .map(([name, labels]) => ({ name, labels }))
+      .map(([name, labels]) => ({ name, labels, createdAt: this.createdAt.get(name) ?? OLD_CREATED_AT }))
       .filter(v => Object.keys(filter).every(k => v.labels[k] === filter[k]));
   }
 
@@ -142,6 +150,12 @@ export class FakeBackend implements ContainerBackend {
   async containerState(id: string): Promise<ContainerInfo['state'] | null> {
     this.record('containerState', [id]);
     return this.states.has(id) ? this.states.get(id)! : 'running';
+  }
+
+  async containerRun(id: string): Promise<{ state: ContainerInfo['state']; startedAt: string } | null> {
+    this.record('containerRun', [id]);
+    const state = this.states.has(id) ? this.states.get(id)! : 'running';
+    return state === null ? null : { state, startedAt: this.startedAt.get(id) ?? FAKE_STARTED_AT };
   }
 
   async exec(id: string, cmd: string[], io: ExecIO = {}): Promise<ExecResult> {

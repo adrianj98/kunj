@@ -337,7 +337,8 @@ export class LocalDockerBackend implements ContainerBackend {
     const ids = ls.stdout.split('\n').map(l => l.trim()).filter(Boolean);
     if (ids.length === 0) return [];
     const inspect = await this.checked([kind, 'inspect', '--format', '{{json .}}', ...ids]);
-    return jsonLines(inspect.stdout).map(o => ({ name: String(o.Name), labels: o.Labels ?? {} }));
+    // Volumes call it CreatedAt, networks Created
+    return jsonLines(inspect.stdout).map(o => ({ name: String(o.Name), labels: o.Labels ?? {}, createdAt: o.CreatedAt ?? o.Created }));
   }
 
   async run(spec: ContainerSpec): Promise<string> {
@@ -377,6 +378,13 @@ export class LocalDockerBackend implements ContainerBackend {
     const out = await this.spawnDocker(['inspect', '--format', '{{.State.Status}}', id]);
     if (out.code !== 0) return null;
     return out.stdout.trim() as ContainerInfo['state'];
+  }
+
+  async containerRun(id: string): Promise<{ state: ContainerInfo['state']; startedAt: string } | null> {
+    const out = await this.spawnDocker(['inspect', '--format', '{{.State.Status}} {{.State.StartedAt}}', id]);
+    if (out.code !== 0) return null;
+    const [state, startedAt = ''] = out.stdout.trim().split(' ');
+    return { state: state as ContainerInfo['state'], startedAt };
   }
 
   exec(id: string, cmd: string[], io: ExecIO = {}): Promise<{ exitCode: number; stdout: string }> {

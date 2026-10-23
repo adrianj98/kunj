@@ -54,6 +54,8 @@ export interface ContainerPortJson {
   host: number;
   kind: 'publish' | 'forward';
   pid?: number;
+  /** A forward to a sidecar service's port (`kunj ct forward postgres:5432`) */
+  service?: string;
 }
 
 export interface ContainerJson {

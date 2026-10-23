@@ -24,7 +24,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
-import { getKunjDir, getOriginUrl, getRepoCommonDir, getRepoCommonRoot, getRepoName, loadResolvedConfig, resetRepoCache } from '../lib/config';
+import { getKunjDir, getOriginUrl, getRepoCommonDir, getRepoCommonRoot, getRepoName, loadConfig, loadResolvedConfig, resetRepoCache } from '../lib/config';
 import { getCurrentBranch, getGitRoot } from '../lib/git';
 import { HookError, runActionHook } from '../lib/hooks';
 import { listRepos, recordRepo } from '../lib/repos';
@@ -36,11 +36,11 @@ import { LocalDockerBackend } from '../lib/container/docker';
 import { ContainerStatus, describeGuard, emptyStatus } from '../lib/container/env';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
 import { Forwarder, TUNNEL_PROBE, forwardPort, parseForwardSpec, parseTunnelProbe } from '../lib/container/forward';
-import { ForwardRecord, forwarderFor, ignoredPorts, readForwards, runAutoForward, spawnDetached, updateForwards } from '../lib/container/autoforward';
+import { ForwardRecord, HELPER_NO_SOCAT, autoForwardIgnore, forwarderFor, readForwards, recordIsFor, runAutoForward, spawnDetached, updateForwards } from '../lib/container/autoforward';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerError } from '../lib/container/errors';
 import { readWorkspaceFile, validateWorkspacePath, writeWorkspaceFile } from '../lib/container/files';
-import { ContainerNames, LABEL, containerNames, repoIdFromUrl } from '../lib/container/names';
+import { ContainerNames, LABEL, containerNames, isMain, optionsLabel, repoIdFromUrl } from '../lib/container/names';
 import {
   StartError,
   StartResult,
@@ -322,12 +322,20 @@ export class ContainerCommand extends BaseCommand {
     return main;
   }
 
-  private recordedOptions(info: ContainerInfo): { firewall?: string; user?: string; imageKind?: string; blueprintHash?: string; dind?: string } {
-    try {
-      return JSON.parse(info.labels[LABEL.options] ?? '{}');
-    } catch {
-      return {};
+  // Ports of the branch container are tunnelled through its network helper (same network
+  // namespace, kunj's own code), never by exec-ing into the branch container: without it, nothing is forwarded
+  private async requireHelper(ctx: Context, branch: string): Promise<ContainerInfo> {
+    const names = this.names(ctx, branch);
+    const found = await ctx.backend.list({ [LABEL.repo]: ctx.repo.id, [LABEL.branch]: branch });
+    const helper = found.find(c => c.name === names.helper);
+    if (helper?.state !== 'running') {
+      throw new ContainerError(`The network helper of ${branch} is not running, so no port can be forwarded; run kunj ct start ${branch}`);
     }
+    return helper;
+  }
+
+  private recordedOptions(info: ContainerInfo): { firewall?: string; user?: string; imageKind?: string; blueprintHash?: string; dind?: string } {
+    return optionsLabel(info.labels);
   }
 
   // '' (an image without remoteUser, or --image) means the image's own USER: no `-u`, which
@@ -354,8 +362,7 @@ export class ContainerCommand extends BaseCommand {
   }
 
   private isMain(c: ContainerInfo): boolean {
-    const role = c.labels[LABEL.role];
-    return role ? role === 'main' : !c.name.endsWith('-net-helper');
+    return isMain(c);
   }
 
   // In --json mode progress and warnings go to stderr so stdout stays one JSON document
@@ -530,9 +537,9 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
-    if (ctx.config.container?.forward?.auto !== false && ctx.backend.features.localPorts && !forwarderFor(main.name)) {
+    if (ctx.config.container?.forward?.auto !== false && ctx.backend.features.localPorts && !forwarderFor(main)) {
       try {
-        this.startForwarder(ctx, branch, main.name);
+        this.startForwarder(ctx, branch, main);
       } catch (err) {
         this.warn(`Could not start the port forwarder: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -662,9 +669,10 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
-    const hasSocat = specs.some(s => !s.service)
-      ? (await ctx.backend.exec(main.id, ['sh', '-c', 'command -v socat'], { user: this.userOf(main) || undefined })).exitCode === 0
-      : false;
+    const helper = specs.some(s => !s.service) ? await this.requireHelper(ctx, branch) : undefined;
+    if (helper && (await ctx.backend.exec(helper.id, ['sh', '-c', 'command -v socat'])).exitCode !== 0) {
+      throw new ContainerError(HELPER_NO_SOCAT);
+    }
 
     // A service is tunnelled into through its own container, with whichever of socat, bash or nc it has
     const services = specs.some(s => s.service) ? await findServices(ctx.backend, this.names(ctx, branch), { repoId: ctx.repo.id, branch }) : [];
@@ -689,7 +697,7 @@ export class ContainerCommand extends BaseCommand {
         const tunnel = spec.service ? tunnels.get(spec.service)! : undefined;
         const forwarder = tunnel
           ? await forwardPort(ctx.backend, tunnel.id, spec, { hasSocat: false, tool: tunnel.tool })
-          : await forwardPort(ctx.backend, main.id, spec, { hasSocat });
+          : await forwardPort(ctx.backend, helper!.id, spec, { hasSocat: true });
         forwarders.push({ container: spec.container, ...(spec.service ? { service: spec.service } : {}), forwarder });
       }
     } catch (error) {
@@ -698,6 +706,18 @@ export class ContainerCommand extends BaseCommand {
     }
 
     const list = forwarders.map(f => ({ container: f.container, host: f.forwarder.hostPort, ...(f.service ? { service: f.service } : {}) }));
+    // Registered under this process, as --auto's are, so `list` and the IDE see them
+    const pid = process.pid;
+    const record = () =>
+      updateForwards(rs => [
+        ...rs.filter(r => r.pid !== pid),
+        ...list.map(f => ({ ...forwarderRecord(pid, main, f.container, f.host), ...(f.service ? { service: f.service } : {}) })),
+      ]);
+    try {
+      record();
+    } catch (err) {
+      this.warn(`Could not record the forwards: ${err instanceof Error ? err.message : String(err)}`);
+    }
     if (this.jsonMode) {
       this.outputJSON({ forwards: list });
     } else {
@@ -709,6 +729,11 @@ export class ContainerCommand extends BaseCommand {
       const stop = () => {
         process.off('SIGINT', stop);
         process.off('SIGTERM', stop);
+        try {
+          updateForwards(rs => rs.filter(r => r.pid !== pid));
+        } catch {
+          // a dead pid's entries are pruned on the next read anyway
+        }
         Promise.all(forwarders.map(f => f.forwarder.close())).then(() => resolve(), () => resolve());
       };
       process.on('SIGINT', stop);
@@ -719,9 +744,9 @@ export class ContainerCommand extends BaseCommand {
 
   // `forward --auto --detach` in a background kunj, registered at once (port 0 marks the forwarder)
   // so a second agent sees it before the child has written anything itself
-  private startForwarder(ctx: Context, branch: string, container: string): number {
+  private startForwarder(ctx: Context, branch: string, main: ContainerInfo): number {
     const pid = spawnDetached(['ct', 'forward', branch, '--auto', ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : [])]);
-    updateForwards(rs => [...rs.filter(r => r.pid !== pid), forwarderRecord(pid, container, 0, 0)]);
+    updateForwards(rs => [...rs.filter(r => r.pid !== pid), forwarderRecord(pid, main, 0, 0)]);
     return pid;
   }
 
@@ -732,9 +757,10 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
+    const helper = await this.requireHelper(ctx, branch);
 
     if (options.detach) {
-      const pid = this.startForwarder(ctx, branch, main.name);
+      const pid = this.startForwarder(ctx, branch, main);
       if (this.jsonMode) {
         this.outputJSON({ success: true, branch, pid });
       } else {
@@ -746,8 +772,9 @@ export class ContainerCommand extends BaseCommand {
     const pid = process.pid;
     const others = (rs: ForwardRecord[]) => rs.filter(r => r.pid !== pid);
     const live = new Map<number, number>(); // container port -> host port
-    const ignore = ignoredPorts(ctx.config.container?.forward?.ignore);
-    updateForwards(rs => [...others(rs), forwarderRecord(pid, main.name, 0, 0)]);
+    // Ports published with `start -p` are reachable already
+    const ignore = autoForwardIgnore(ctx.config.container?.forward?.ignore, main.ports);
+    updateForwards(rs => [...others(rs), forwarderRecord(pid, main, 0, 0)]);
     if (!this.jsonMode) console.log(chalk.gray(`Forwarding the ports ${branch} listens on; press Ctrl-C to stop`));
 
     const controller = new AbortController();
@@ -755,9 +782,8 @@ export class ContainerCommand extends BaseCommand {
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
     try {
-      await runAutoForward(ctx.backend, main.id, {
+      await runAutoForward(ctx.backend, { main: main.id, helper: helper.id }, {
         ignore,
-        user: this.userOf(main),
         signal: controller.signal,
         onError: this.warn,
         onChange: change => {
@@ -768,8 +794,8 @@ export class ContainerCommand extends BaseCommand {
             // another forwarder's concurrent write may have lost
             updateForwards(rs => [
               ...others(rs),
-              forwarderRecord(pid, main.name, 0, 0),
-              ...[...live].map(([port, hostPort]) => forwarderRecord(pid, main.name, port, hostPort)),
+              forwarderRecord(pid, main, 0, 0),
+              ...[...live].map(([port, hostPort]) => forwarderRecord(pid, main, port, hostPort)),
             ]);
           } catch (err) {
             // the forward itself works; only `list` will not show it
@@ -859,7 +885,7 @@ export class ContainerCommand extends BaseCommand {
         dind: recorded.dind || 'off',
         ports: [
           ...c.ports.map(p => ({ container: p.container, host: p.host, kind: 'publish' as const })),
-          ...forwards.filter(r => r.container === c.name).map(r => ({ container: r.port, host: r.hostPort, kind: 'forward' as const, pid: r.pid })),
+          ...forwards.filter(r => recordIsFor(r, c)).map(r => ({ container: r.port, host: r.hostPort, kind: 'forward' as const, pid: r.pid, ...(r.service ? { service: r.service } : {}) })),
         ],
         agent: { running: s.agentRunning },
         workspace: { head: s.head ? s.head.slice(0, 7) : null, ahead: s.ahead, dirty: s.dirty },
@@ -1007,9 +1033,12 @@ export class ContainerCommand extends BaseCommand {
 
     // Notes are written by hand and never inferred, so an overwrite keeps them
     let notes: string | undefined;
+    let hadServices = false;
     if (exists) {
       try {
-        notes = parseBlueprint(fs.readFileSync(file, 'utf8'), file).notes;
+        const old = parseBlueprint(fs.readFileSync(file, 'utf8'), file);
+        notes = old.notes;
+        hadServices = !!old.services?.length;
       } catch {
         // an unreadable or invalid file has nothing worth keeping
       }
@@ -1073,6 +1102,9 @@ export class ContainerCommand extends BaseCommand {
         ? 'Next: kunj ct start <branch> builds the snapshot on first use'
         : `Next: commit ${BLUEPRINT_PATH}; kunj ct start <branch> builds the snapshot on first use`
     );
+    if (hadServices || loadConfig().container?.services) {
+      console.log(chalk.gray('Migrations against services belong in maintain, safe to run again: setup runs only for the snapshot, against its throwaway services'));
+    }
   }
 
   private async blueprintSnapshot(options: ContainerOptions): Promise<void> {
@@ -1401,6 +1433,6 @@ async function remoteBranches(): Promise<string[]> {
   });
 }
 
-function forwarderRecord(pid: number, container: string, port: number, hostPort: number): ForwardRecord {
-  return { pid, container, port, hostPort, kind: 'forward' };
+function forwarderRecord(pid: number, main: ContainerInfo, port: number, hostPort: number): ForwardRecord {
+  return { pid, container: main.name, containerId: main.id, port, hostPort, kind: 'forward' };
 }

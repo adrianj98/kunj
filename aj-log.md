@@ -2,6 +2,39 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Containers: phase 2 cross-feature fixes (forward via helper, compose deps, orphan grace, migrations docs)
+
+- Port forwarding (manual `forward <port>`, `--auto`'s listener poll and its tunnels) now execs in the
+  network helper instead of the branch container; `socat` added to the nethelper image (its tag hash
+  changes, so it rebuilds). Why: after a quick stop/start the forwarder could exec into the main container
+  before the helper's READY (secrets env, no firewall yet), and connections opened then survive the rules.
+  The helper shares main's network namespace and is kunj's own code. No helper running, or an older helper
+  without socat, fails closed with a message. Service forwards still tunnel through the service container.
+- The auto-forwarder is bound to one run of the container: new backend method `containerRun()` (state and
+  `.State.StartedAt`, only docker.ts spawns docker); it exits on the first check that finds the container
+  stopped or started again; only a failed inspect gets a second chance. Why: same race as above.
+- Compose: a `depends_on` naming a service that was dropped is dropped too and listed in the one warning
+  (`web: depends_on api (dropped)`). Why: it made every start fail. Blueprint and `container.services`
+  keep the hard error.
+- Prune/list: a branch with any object created in the last 10 minutes (`ORPHAN_GRACE_MS`, not a setting)
+  is not orphaned; volumes and networks now carry `createdAt` from inspect. Why: a start or `--rebuild`
+  waits minutes on service health checks with no main container, and `prune --yes`/`--force` could remove
+  its services, network or the kept workspace volume.
+- Docs (services, blueprints, README, phase 2 spec/design) and a `blueprint init` hint: migrations
+  against services belong in `maintain` and must be idempotent. Why: `setup` runs only in the snapshot
+  build, against its throwaway services, so its migrations never reach the branch's own database.
+- Forward registry records `containerId` (and `service`); `forwarderFor`, `list` and prune's cleanup match
+  by id (name for older records); `forwarderFor` only counts `--auto` forwarders (port 0). Manual
+  `ct forward` now registers its forwards under its pid. Why: a recreated container of the same name is
+  another container, and `list`/the IDE should see manual forwards.
+- `--auto` skips ports already published with `start -p`; `start --rebuild` removes service containers no
+  longer declared (volumes kept, with a warning naming them).
+- One source of naming truth: `namesOfContainer`, `optionsLabel` (kunj.options parser) and `isMain` live in
+  names.ts and are used by lifecycle, services, prune and the command.
+- Docs drift: CLAUDE.md key commands gain `open` and `prune`; prune's image rule names `kunj-sandbox-dind`.
+- forward.test.ts: "takes the next port above a taken one" no longer assumes port+1 is still free (it
+  flaked when another test grabbed it).
+
 ## 2026-10-23 — Containers: Docker-in-Docker (phase 2, Task 5)
 
 - New settings `container.dockerInDocker` (`off` | `sysbox` | `privileged`, default `off`) and

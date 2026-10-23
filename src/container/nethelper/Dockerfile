@@ -4,7 +4,8 @@
 # change or bypass the rules.
 FROM alpine:3.20
 
-RUN apk add --no-cache iptables ip6tables ipset bind-tools curl
+# socat: `kunj ct forward` tunnels into the shared network namespace through this container
+RUN apk add --no-cache iptables ip6tables ipset bind-tools curl socat
 
 COPY firewall.sh /firewall.sh
 RUN chmod 0755 /firewall.sh

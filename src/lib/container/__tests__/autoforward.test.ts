@@ -20,6 +20,8 @@ import { forwardPort } from '../forward';
 import {
   AutoForwardChange,
   ForwardRecord,
+  HELPER_NO_SOCAT,
+  autoForwardIgnore,
   diffPorts,
   forwarderFor,
   ignoredPorts,
@@ -121,7 +123,8 @@ describe('forward registry', () => {
   });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  const rec = (pid: number, port: number, container = 'kunj-app-feat-abc'): ForwardRecord => ({ pid, container, port, hostPort: port, kind: 'forward' });
+  const rec = (pid: number, port: number, container = 'kunj-app-feat-abc', containerId?: string): ForwardRecord =>
+    ({ pid, container, ...(containerId ? { containerId } : {}), port, hostPort: port, kind: 'forward' });
 
   it('is empty when the file is missing or unreadable', () => {
     expect(readForwards(file)).toEqual([]);
@@ -148,8 +151,19 @@ describe('forward registry', () => {
 
   it('forwarderFor finds a live forwarder of the container', () => {
     writeForwards([rec(dead, 0, 'c1'), rec(process.pid, 0, 'c2')], file);
-    expect(forwarderFor('c1', file)).toBeUndefined();
-    expect(forwarderFor('c2', file)).toBe(process.pid);
+    expect(forwarderFor({ id: 'id1', name: 'c1' }, file)).toBeUndefined();
+    expect(forwarderFor({ id: 'id2', name: 'c2' }, file)).toBe(process.pid);
+  });
+
+  it('forwarderFor matches the container id when one is recorded, so a recreated container is another one', () => {
+    writeForwards([rec(process.pid, 0, 'c1', 'old-id')], file);
+    expect(forwarderFor({ id: 'new-id', name: 'c1' }, file)).toBeUndefined();
+    expect(forwarderFor({ id: 'old-id', name: 'c1' }, file)).toBe(process.pid);
+  });
+
+  it('forwarderFor ignores the port records of a manual `ct forward`', () => {
+    writeForwards([rec(process.pid, 3000, 'c1', 'id1')], file);
+    expect(forwarderFor({ id: 'id1', name: 'c1' }, file)).toBeUndefined();
   });
 });
 
@@ -184,8 +198,16 @@ describe('spawnDetached', () => {
   });
 });
 
+describe('autoForwardIgnore', () => {
+  it('adds the published container ports to the ignore setting', () => {
+    expect(autoForwardIgnore([9229], [{ container: 3000 }, { container: 9229 }])).toEqual([9229, 3000]);
+    expect(autoForwardIgnore(undefined, [])).toEqual([]);
+  });
+});
+
 describe('runAutoForward', () => {
   const PROC = 'cat /proc/net/tcp /proc/net/tcp6';
+  const T = { main: 'cid', helper: 'hid' };
   let backend: FakeBackend;
 
   beforeEach(() => {
@@ -206,7 +228,7 @@ describe('runAutoForward', () => {
     const changes: AutoForwardChange[] = [];
     const controller = new AbortController();
     backend.execResults.set(PROC, { exitCode: 0, stdout: procNet(22) });
-    const run = runAutoForward(backend, 'cid', { ignore: [], intervalMs: 2, user: 'dev', onChange: c => changes.push(c), signal: controller.signal });
+    const run = runAutoForward(backend, T, { ignore: [], intervalMs: 2, onChange: c => changes.push(c), signal: controller.signal });
 
     await until(() => backend.callsOf('exec').length >= 3);
     expect(changes).toEqual([]);
@@ -214,7 +236,8 @@ describe('runAutoForward', () => {
     backend.execResults.set(PROC, { exitCode: 0, stdout: procNet(22, 3000) });
     await until(() => changes.length === 1);
     expect(changes).toEqual([{ event: 'add', port: 3000, hostPort: 3001 }]);
-    expect((forwardPort as jest.Mock).mock.calls[0].slice(1)).toEqual(['cid', { container: 3000 }, { hasSocat: true, nextFree: true }]);
+    // The tunnel goes through the network helper, never the branch container
+    expect((forwardPort as jest.Mock).mock.calls[0].slice(1)).toEqual(['hid', { container: 3000 }, { hasSocat: true, nextFree: true }]);
 
     backend.execResults.set(PROC, { exitCode: 0, stdout: procNet() });
     await until(() => changes.length === 2);
@@ -223,8 +246,31 @@ describe('runAutoForward', () => {
 
     controller.abort();
     await run;
-    expect(backend.callsOf('exec')[0][1]).toEqual(['sh', '-c', 'command -v socat']);
-    expect(backend.callsOf('exec').slice(1).every(c => (c[1] as string[]).join(' ') === PROC && (c[2] as { user: string }).user === 'dev')).toBe(true);
+    expect(backend.callsOf('exec')[0].slice(0, 2)).toEqual(['hid', ['sh', '-c', 'command -v socat']]);
+    expect(backend.callsOf('exec').slice(1).every(c => c[0] === 'hid' && (c[1] as string[]).join(' ') === PROC)).toBe(true);
+    expect(backend.callsOf('exec').some(c => c[0] === 'cid')).toBe(false);
+  });
+
+  it('fails closed when the helper has no socat (an older helper image)', async () => {
+    backend.execResults.set('sh -c command -v socat', { exitCode: 1, stdout: '' });
+    await expect(runAutoForward(backend, T, { ignore: [], intervalMs: 2, signal: new AbortController().signal })).rejects.toThrow(HELPER_NO_SOCAT);
+    expect(backend.callsOf('exec')).toHaveLength(1);
+  });
+
+  it('does nothing when the container is not running when it starts', async () => {
+    backend.states.set('cid', 'exited');
+    await runAutoForward(backend, T, { ignore: [], intervalMs: 2, signal: new AbortController().signal });
+    expect(backend.callsOf('exec')).toEqual([]);
+  });
+
+  it('returns as soon as the container has started again (another StartedAt), closing its forwards', async () => {
+    backend.execResults.set(PROC, { exitCode: 0, stdout: procNet(3000) });
+    const changes: AutoForwardChange[] = [];
+    const run = runAutoForward(backend, T, { ignore: [], intervalMs: 2, stateIntervalMs: 1, onChange: c => changes.push(c), signal: new AbortController().signal });
+    await until(() => changes.length === 1);
+    backend.startedAt.set('cid', '2026-02-02T00:00:00.000000000Z');
+    await run;
+    expect(mockClosed).toEqual([3000]);
   });
 
   it('reads /proc/net/tcp when the kernel has no tcp6 (cat exits 1)', async () => {
@@ -232,7 +278,7 @@ describe('runAutoForward', () => {
     const controller = new AbortController();
     const tcpOnly = [TCP_HEADER, tcp(0, '00000000:0BB8')].join('\n');
     backend.execResults.set(PROC, { exitCode: 1, stdout: tcpOnly });
-    const run = runAutoForward(backend, 'cid', { ignore: [], intervalMs: 2, onChange: c => changes.push(c), signal: controller.signal });
+    const run = runAutoForward(backend, T, { ignore: [], intervalMs: 2, onChange: c => changes.push(c), signal: controller.signal });
     await until(() => changes.length === 1);
     controller.abort();
     await run;
@@ -244,7 +290,7 @@ describe('runAutoForward', () => {
     const errors: string[] = [];
     const controller = new AbortController();
     backend.execResults.set(PROC, { exitCode: 0, stdout: procNet(3000) });
-    const run = runAutoForward(backend, 'cid', {
+    const run = runAutoForward(backend, T, {
       ignore: [],
       intervalMs: 2,
       onChange: c => changes.push(c),
@@ -276,7 +322,7 @@ describe('runAutoForward', () => {
     const controller = new AbortController();
     backend.execResults.set(PROC, { exitCode: 0, stdout: procNet(4444) });
     const errors: string[] = [];
-    const run = runAutoForward(backend, 'cid', { ignore: [], intervalMs: 2, signal: controller.signal, onError: m => errors.push(m) });
+    const run = runAutoForward(backend, T, { ignore: [], intervalMs: 2, signal: controller.signal, onError: m => errors.push(m) });
     await until(() => backend.callsOf('exec').length >= 6);
     controller.abort();
     await run;
@@ -284,29 +330,32 @@ describe('runAutoForward', () => {
     expect(errors).toEqual(['Could not forward port 4444: no free port']);
   });
 
-  it('returns once the container is seen not running twice in a row', async () => {
+  it('returns on the first state check that finds the container not running', async () => {
+    backend.execResults.set(PROC, { exitCode: 0, stdout: procNet() });
+    const run = runAutoForward(backend, T, { ignore: [], intervalMs: 2, stateIntervalMs: 1, signal: new AbortController().signal });
+    await until(() => backend.callsOf('exec').length >= 2);
     backend.states.set('cid', 'exited');
-    backend.execResults.set(PROC, { exitCode: 0, stdout: procNet(3000) });
-    await runAutoForward(backend, 'cid', { ignore: [], intervalMs: 2, stateIntervalMs: 1, signal: new AbortController().signal });
-    expect(backend.callsOf('containerState')).toEqual([['cid'], ['cid']]);
+    await run;
+    expect(backend.callsOf('containerRun').at(-1)).toEqual(['cid']);
   });
 
-  it('survives a single failed state check', async () => {
+  it('survives a single failed inspect, and returns after two in a row', async () => {
     const controller = new AbortController();
-    const state = jest.spyOn(backend, 'containerState').mockResolvedValueOnce(null);
     backend.execResults.set(PROC, { exitCode: 0, stdout: procNet() });
-    const run = runAutoForward(backend, 'cid', { ignore: [], intervalMs: 2, stateIntervalMs: 1, signal: controller.signal });
-    await until(() => state.mock.calls.length >= 4);
-    controller.abort();
-    await run;
-    expect(backend.callsOf('containerState').length).toBeGreaterThanOrEqual(3);
+    const real = backend.containerRun.bind(backend);
+    // the first call is the start; then fail, succeed, fail, fail
+    const results = [true, false, true, false, false];
+    let n = 0;
+    jest.spyOn(backend, 'containerRun').mockImplementation(async id => (results[n++] ?? true) ? real(id) : null);
+    await runAutoForward(backend, T, { ignore: [], intervalMs: 2, stateIntervalMs: 1, signal: controller.signal });
+    expect(n).toBe(5);
   });
 
   it('honours the ignore list', async () => {
     const changes: AutoForwardChange[] = [];
     const controller = new AbortController();
     backend.execResults.set(PROC, { exitCode: 0, stdout: procNet(9229, 3000) });
-    const run = runAutoForward(backend, 'cid', { ignore: [9229], intervalMs: 2, onChange: c => changes.push(c), signal: controller.signal });
+    const run = runAutoForward(backend, T, { ignore: [9229], intervalMs: 2, onChange: c => changes.push(c), signal: controller.signal });
     await until(() => changes.length === 1);
     controller.abort();
     await run;

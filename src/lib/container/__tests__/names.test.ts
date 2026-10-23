@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { repoIdFromUrl, nameHash, containerNames, labelsFor, labelsMatch, LABEL } from '../names';
+import { repoIdFromUrl, nameHash, containerNames, labelsFor, labelsMatch, LABEL, isMain, namesOfContainer, optionsLabel } from '../names';
 
 describe('container names', () => {
   // Repo id
@@ -84,5 +84,27 @@ describe('container names', () => {
       });
       expect(Object.keys(labelsFor('r', 'b'))).toEqual(['kunj.repo', 'kunj.branch']);
     });
+  });
+});
+
+describe('optionsLabel / isMain / namesOfContainer', () => {
+  it('reads kunj.options, {} when absent, unreadable or not an object', () => {
+    expect(optionsLabel({ [LABEL.options]: '{"user":"dev"}' })).toEqual({ user: 'dev' });
+    expect(optionsLabel({})).toEqual({});
+    expect(optionsLabel(undefined)).toEqual({});
+    expect(optionsLabel({ [LABEL.options]: '{nope' })).toEqual({});
+    expect(optionsLabel({ [LABEL.options]: '[1]' })).toEqual({});
+  });
+
+  it('tells the branch container from its helper and services, by role or (older containers) by name', () => {
+    expect(isMain({ name: 'kunj-a-b-123456', labels: { [LABEL.role]: 'main' } })).toBe(true);
+    expect(isMain({ name: 'kunj-a-b-123456-svc-db', labels: { [LABEL.role]: 'service' } })).toBe(false);
+    expect(isMain({ name: 'kunj-a-b-123456-net-helper', labels: {} })).toBe(false);
+    expect(isMain({ name: 'kunj-a-b-123456', labels: {} })).toBe(true);
+  });
+
+  it('containerNames is namesOfContainer of its container name', () => {
+    const names = containerNames('app', 'github.com/acme/app', 'feature/x');
+    expect(namesOfContainer(names.container)).toEqual(names);
   });
 });

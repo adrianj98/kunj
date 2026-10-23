@@ -76,7 +76,7 @@ jest.mock('../../lib/container/forward', () => ({
 }));
 
 // The forward registry lives in the home directory: an in-memory list here
-const mockForwards: Array<{ pid: number; container: string; port: number; hostPort: number; kind: 'forward' }> = [];
+const mockForwards: Array<{ pid: number; container: string; containerId?: string; port: number; hostPort: number; kind: 'forward'; service?: string }> = [];
 jest.mock('../../lib/container/autoforward', () => ({
   ...jest.requireActual('../../lib/container/autoforward'),
   readForwards: jest.fn(() => mockForwards.slice()),
@@ -84,7 +84,7 @@ jest.mock('../../lib/container/autoforward', () => ({
     mockForwards.splice(0, mockForwards.length, ...change(mockForwards.slice()));
     return mockForwards.slice();
   }),
-  forwarderFor: jest.fn((container: string) => mockForwards.find(r => r.container === container)?.pid),
+  forwarderFor: jest.fn((c: { id: string; name: string }) => mockForwards.find(r => r.port === 0 && (r.containerId ? r.containerId === c.id : r.container === c.name))?.pid),
   spawnDetached: jest.fn(() => 4242),
   runAutoForward: jest.fn(async () => {}),
 }));
@@ -297,7 +297,7 @@ describe('ContainerCommand', () => {
       backend.existing = [mainContainer('feat')];
       await new ContainerCommand().execute('agent', 'feat', [], {});
       expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto']);
-      expect(mockForwards).toEqual([{ pid: 4242, container: NAME, port: 0, hostPort: 0, kind: 'forward' }]);
+      expect(mockForwards).toEqual([{ pid: 4242, container: NAME, containerId: 'cid-1', port: 0, hostPort: 0, kind: 'forward' }]);
     });
 
     it('agent passes the Docker context on to the forwarder', async () => {
@@ -316,9 +316,16 @@ describe('ContainerCommand', () => {
 
     it('agent starts none when one is already registered for the container', async () => {
       backend.existing = [mainContainer('feat')];
-      mockForwards.push({ pid: 777, container: NAME, port: 3000, hostPort: 3000, kind: 'forward' });
+      mockForwards.push({ pid: 777, container: NAME, containerId: 'cid-1', port: 0, hostPort: 0, kind: 'forward' });
       await new ContainerCommand().execute('agent', 'feat', [], {});
       expect(spawnDetached).not.toHaveBeenCalled();
+    });
+
+    it('agent starts one when the registered forwarder is of an earlier container of the same name', async () => {
+      backend.existing = [mainContainer('feat')];
+      mockForwards.push({ pid: 777, container: NAME, containerId: 'cid-old', port: 0, hostPort: 0, kind: 'forward' });
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(spawnDetached).toHaveBeenCalled();
     });
 
     it('agent still runs when the forwarder cannot be started', async () => {
@@ -331,11 +338,52 @@ describe('ContainerCommand', () => {
     });
 
     it('forward --auto --detach prints the pid as JSON and registers it', async () => {
-      backend.existing = [mainContainer('feat')];
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
       await new ContainerCommand().execute('forward', 'feat', [], { auto: true, detach: true, json: true });
       expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto']);
       expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feat', pid: 4242 });
-      expect(mockForwards).toEqual([{ pid: 4242, container: NAME, port: 0, hostPort: 0, kind: 'forward' }]);
+      expect(mockForwards).toEqual([{ pid: 4242, container: NAME, containerId: 'cid-1', port: 0, hostPort: 0, kind: 'forward' }]);
+    });
+
+    it('forward --auto and forward <port> refuse when the network helper is not running', async () => {
+      backend.existing = [mainContainer('feat'), { ...helperContainer('feat'), state: 'exited' }];
+      await new ContainerCommand().execute('forward', 'feat', [], { auto: true });
+      await new ContainerCommand().execute('forward', 'feat', ['3000'], {});
+      expect(errors).toEqual([
+        '✗ The network helper of feat is not running, so no port can be forwarded; run kunj ct start feat',
+        '✗ The network helper of feat is not running, so no port can be forwarded; run kunj ct start feat',
+      ]);
+      expect(runAutoForward).not.toHaveBeenCalled();
+      expect(spawnDetached).not.toHaveBeenCalled();
+      expect(backend.callsOf('exec')).toEqual([]);
+    });
+
+    it('forward <port> tunnels through the network helper and registers its forwards under its pid', async () => {
+      const forward = jest.requireMock('../../lib/container/forward') as { forwardPort: jest.Mock };
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
+      const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      let registered: unknown[] = [];
+      try {
+        const done = new ContainerCommand().execute('forward', 'feat', ['8080:3000'], { json: true });
+        await new Promise(r => setTimeout(r, 20));
+        registered = mockForwards.slice();
+        process.emit('SIGINT');
+        await done;
+      } finally {
+        exit.mockRestore();
+      }
+      expect(forward.forwardPort).toHaveBeenCalledWith(backend, 'hid-1', { service: undefined, host: 8080, container: 3000 }, { hasSocat: true });
+      // Nothing is exec'd in the branch container: the socat check is the helper's
+      expect(backend.callsOf('exec').map(c => c[0])).toEqual(['hid-1']);
+      expect(registered).toEqual([{ pid: process.pid, container: NAME, containerId: 'cid-1', port: 3000, hostPort: 13000, kind: 'forward' }]);
+      expect(mockForwards).toEqual([]);
+    });
+
+    it('forward <port> fails closed when the helper predates socat', async () => {
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
+      backend.execResults.set('sh -c command -v socat', { exitCode: 1, stdout: '' });
+      await new ContainerCommand().execute('forward', 'feat', ['3000'], {});
+      expect(errors[0]).toMatch(/^✗ The network helper of this container predates/);
     });
 
     it('forward --auto refuses port arguments', async () => {
@@ -346,7 +394,7 @@ describe('ContainerCommand', () => {
     });
 
     it('forward --auto prints one NDJSON object per change and keeps the registry in step', async () => {
-      backend.existing = [mainContainer('feat')];
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
       (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { forward: { ignore: ['9229', 5555] } } });
       const seen: unknown[] = [];
       runAutoForward.mockImplementationOnce(async (_b: unknown, _id: string, opts: any) => {
@@ -362,14 +410,17 @@ describe('ContainerCommand', () => {
       } finally {
         exit.mockRestore();
       }
-      const [, id, opts] = runAutoForward.mock.calls[0];
-      expect(id).toBe('cid-1');
-      expect(opts).toMatchObject({ ignore: [9229, 5555], user: 'dev' });
+      const [, target, opts] = runAutoForward.mock.calls[0];
+      // Polled and tunnelled through the helper; bound to the main container's run
+      expect(target).toEqual({ main: 'cid-1', helper: 'hid-1' });
+      // The published port 3000 is reachable already
+      expect(opts).toMatchObject({ ignore: [9229, 5555, 3000] });
+      expect(opts.user).toBeUndefined();
       expect(stdout.join('').trim().split('\n').map(l => JSON.parse(l))).toEqual([
         { event: 'add', port: 3000, hostPort: 3001 },
         { event: 'remove', port: 3000, hostPort: 3001 },
       ]);
-      const marker = { pid: process.pid, container: NAME, port: 0, hostPort: 0, kind: 'forward' };
+      const marker = { pid: process.pid, container: NAME, containerId: 'cid-1', port: 0, hostPort: 0, kind: 'forward' };
       expect(seen).toEqual([[marker], [marker, { ...marker, port: 3000, hostPort: 3001 }], [marker]]);
       expect(mockForwards).toEqual([]);
     });
@@ -381,11 +432,15 @@ describe('ContainerCommand', () => {
         { pid: 4242, container: NAME, port: 0, hostPort: 0, kind: 'forward' },
         { pid: 4242, container: NAME, port: 5173, hostPort: 5174, kind: 'forward' },
         { pid: 4242, container: 'kunj-other', port: 8080, hostPort: 8080, kind: 'forward' },
+        // A manual service forward of this container (by id), and one of an earlier container of its name
+        { pid: 4343, container: NAME, containerId: 'cid-1', port: 5432, hostPort: 5432, kind: 'forward', service: 'postgres' },
+        { pid: 4444, container: NAME, containerId: 'cid-old', port: 9000, hostPort: 9000, kind: 'forward' },
       );
       await new ContainerCommand().execute('list', { json: true });
       expect(JSON.parse(stdout.join('')).containers[0].ports).toEqual([
         { container: 3000, host: 13000, kind: 'publish' },
         { container: 5173, host: 5174, kind: 'forward', pid: 4242 },
+        { container: 5432, host: 5432, kind: 'forward', pid: 4343, service: 'postgres' },
       ]);
     });
   });

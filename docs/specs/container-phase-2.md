@@ -56,7 +56,7 @@ Each branch gets its own instances of the services the project needs, running as
 - `stop` stops services with the container; `remove` deletes them and their volumes (the same unpushed-work guard applies to the branch, not to service data).
 - `list` shows each service's state; `kunj ct logs <branch> <service>` shows its logs.
 
-**Blueprints.** Services are not part of the snapshot (they are separate containers), but a blueprint's `setup` can rely on them: during a snapshot build the services start first, so `setup` can run migrations. Their data is not kept in the snapshot.
+**Blueprints.** Services are not part of the snapshot (they are separate containers), but a blueprint's `setup` can rely on them: during a snapshot build the services start first. Their data is not kept in the snapshot, so migrations against a service belong in `maintain` and must be idempotent: `setup`'s only reach the snapshot build's throwaway services, never the branch's own database.
 
 **Firewall.** Service containers are on the branch network and reachable from the agent. They get no forwarded environment and no host access. Their own outbound traffic is not filtered in this phase (decision below).
 

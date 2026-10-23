@@ -69,27 +69,23 @@ describe('findFreePort', () => {
 });
 
 describe('forwardPort nextFree', () => {
-  it('takes the next port above a taken one', async () => {
-    // A port whose successor is free too
-    let taken: net.Server | undefined;
-    let port = 0;
-    for (let i = 0; i < 20 && !taken; i++) {
-      const probe = await listen(0);
-      port = (probe.address() as net.AddressInfo).port;
-      const successor = await listen(port + 1).catch(() => undefined);
-      if (successor) {
-        await closeServer(successor);
-        taken = probe;
-      } else {
-        await closeServer(probe);
-      }
-    }
+  it('takes the next free port above a taken one', async () => {
+    // The successor of a taken port may itself be taken by another process by the time the
+    // forwarder listens (test files run in parallel), so the assertion is "a port just above", not
+    // "exactly port + 1"
+    const taken = await listen(0);
+    const port = (taken.address() as net.AddressInfo).port;
     try {
       const forwarder = await forwardPort(new FakeBackend(), 'cid', { container: port }, { hasSocat: true, nextFree: true });
-      expect(forwarder.hostPort).toBe(port + 1);
-      await forwarder.close();
+      try {
+        expect(forwarder.hostPort).toBeGreaterThan(port);
+        // an OS-assigned port would land anywhere in the ephemeral range
+        expect(forwarder.hostPort).toBeLessThanOrEqual(port + 100);
+      } finally {
+        await forwarder.close();
+      }
     } finally {
-      if (taken) await closeServer(taken);
+      await closeServer(taken);
     }
   });
 });

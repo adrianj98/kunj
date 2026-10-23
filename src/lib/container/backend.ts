@@ -32,6 +32,8 @@ export interface ImageInfo {
 export interface LabelledObject {
   name: string;
   labels: Labels;
+  /** When it was created (ISO time), if the engine says */
+  createdAt?: string;
 }
 
 export interface ContainerSpec {
@@ -134,6 +136,8 @@ export interface ContainerBackend {
   inspectLabels(name: string): Promise<Labels | null>;
   /** The container's state (docker inspect .State.Status); null when it does not exist */
   containerState(id: string): Promise<ContainerInfo['state'] | null>;
+  /** The state and when the container last started (.State.StartedAt), which changes on every start; null when it does not exist */
+  containerRun(id: string): Promise<{ state: ContainerInfo['state']; startedAt: string } | null>;
   /** stdout is captured unless io.stdout is given; a non-zero exit is returned, not thrown */
   exec(id: string, cmd: string[], io?: ExecIO): Promise<{ exitCode: number; stdout: string }>;
   copyIn(id: string, dir: string, tar: NodeJS.ReadableStream): Promise<void>;

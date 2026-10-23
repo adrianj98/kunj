@@ -10,7 +10,7 @@
 
 import { execFile } from 'child_process';
 import { ContainerBackend, ContainerInfo, LabelledObject } from './backend';
-import { ContainerNames, LABEL } from './names';
+import { ContainerNames, LABEL, isMain, namesOfContainer, optionsLabel } from './names';
 import { RemoveGuard, describeGuard } from './env';
 import { inspectForRemove, removeContainer } from './lifecycle';
 import { NETHELPER_IMAGE, SANDBOX_IMAGE } from './image';
@@ -109,32 +109,36 @@ export function lsRemoteHeads(cwd: string): Promise<string[] | null> {
   });
 }
 
-/** The names that go with a branch container, from its own name (survives a renamed repository). */
-export function namesOfContainer(container: string): ContainerNames {
-  return {
-    container,
-    helper: `${container}-net-helper`,
-    workspaceVolume: `${container}-ws`,
-    homeVolume: `${container}-home`,
-    dockerVolume: `${container}-docker`,
-    network: `${container}-net`,
-  };
-}
+export { namesOfContainer };
 
-export function isMainContainer(c: ContainerInfo): boolean {
-  const role = c.labels[LABEL.role];
-  return role ? role === 'main' : !c.name.endsWith('-net-helper');
-}
+export const isMainContainer = isMain;
+
+/**
+ * How long a branch's objects are not orphans after any of them was created: a start or --rebuild
+ * waits on service health checks for minutes with no main container yet, and a listing then must
+ * not call its services, network and volumes orphans (nor prune remove them).
+ */
+export const ORPHAN_GRACE_MS = 10 * 60 * 1000;
 
 const ownerKey = (labels: Record<string, string>): string | null =>
   labels[LABEL.repo] && labels[LABEL.branch] !== undefined ? `${labels[LABEL.repo]}\n${labels[LABEL.branch]}` : null;
 
 /**
  * Containers, volumes and networks labelled for a repository and branch that has no main container
- * (e.g. one removed with `docker rm`). The labels decide, never the name.
+ * (e.g. one removed with `docker rm`). The labels decide, never the name. A branch with an object
+ * created less than ORPHAN_GRACE_MS ago (or of unknown age) is taken to be starting, so none of its
+ * objects is an orphan.
  */
-export function findOrphans(containers: ContainerInfo[], volumes: LabelledObject[], networks: LabelledObject[]): PruneOrphan[] {
+export function findOrphans(containers: ContainerInfo[], volumes: LabelledObject[], networks: LabelledObject[], now: Date = new Date()): PruneOrphan[] {
   const owners = new Set(containers.filter(isMainContainer).map(c => ownerKey(c.labels)).filter(Boolean));
+  const young = (createdAt: string | undefined) => {
+    const t = createdAt ? createdTime(createdAt) : NaN;
+    return Number.isNaN(t) || now.getTime() - t < ORPHAN_GRACE_MS;
+  };
+  for (const o of [...containers, ...volumes, ...networks]) {
+    const key = ownerKey(o.labels);
+    if (key !== null && young(o.createdAt)) owners.add(key);
+  }
   const orphaned = (labels: Record<string, string>) => {
     const key = ownerKey(labels);
     return key !== null && !owners.has(key);
@@ -147,11 +151,7 @@ export function findOrphans(containers: ContainerInfo[], volumes: LabelledObject
 }
 
 function recordedUser(c: ContainerInfo): string {
-  try {
-    return JSON.parse(c.labels[LABEL.options] ?? '{}').user ?? '';
-  } catch {
-    return '';
-  }
+  return optionsLabel(c.labels).user ?? '';
 }
 
 // Docker's Created has nanoseconds; Date.parse wants at most milliseconds
@@ -212,7 +212,7 @@ export async function planPrune(backend: ContainerBackend, ctx: PruneContext): P
     backend.listVolumes({ [LABEL.repo]: ctx.repoId }),
     backend.listNetworks({ [LABEL.repo]: ctx.repoId }),
   ]);
-  plan.orphans = findOrphans(containers, volumes, networks).map(o =>
+  plan.orphans = findOrphans(containers, volumes, networks, ctx.now).map(o =>
     o.kind === 'volume' && !ctx.force ? { ...o, kept: KEPT_VOLUME } : o);
 
   // 3. Images nobody uses: snapshots of another hash, kunj images of another version
@@ -286,8 +286,10 @@ export async function applyPrune(
 
   // Registry entries of containers that no longer exist
   try {
-    const existing = new Set((await backend.list({})).map(c => c.name));
-    updateForwards(records => records.filter(r => existing.has(r.container)), ctx.forwardsFile ?? forwardsFile());
+    const all = await backend.list({});
+    const ids = new Set(all.map(c => c.id));
+    const names = new Set(all.map(c => c.name));
+    updateForwards(records => records.filter(r => (r.containerId ? ids.has(r.containerId) : names.has(r.container))), ctx.forwardsFile ?? forwardsFile());
   } catch (err) {
     failed.push(`forward registry: ${message(err)}`);
   }

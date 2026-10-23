@@ -6,7 +6,7 @@ import { ContainerInfo, ExecIO, ImageInfo, Labels } from '../backend';
 import { LABEL, containerNames, labelsFor } from '../names';
 import { readForwards, writeForwards } from '../autoforward';
 import { parseGuard } from '../env';
-import { KEPT_VOLUME, PruneContext, applyPrune, findOrphans, mergePlans, namesOfContainer, parseLsRemoteHeads, planPrune, removalCount } from '../prune';
+import { KEPT_VOLUME, ORPHAN_GRACE_MS, PruneContext, applyPrune, findOrphans, mergePlans, namesOfContainer, parseLsRemoteHeads, planPrune, removalCount } from '../prune';
 
 const REPO = { id: 'github.com/acme/app', name: 'app' };
 const VERSION = '1.2.3';
@@ -31,8 +31,8 @@ function main(branch: string, over: Partial<ContainerInfo> = {}): ContainerInfo 
   };
 }
 
-function side(branch: string, name: string, role: string, repoId = REPO.id): ContainerInfo {
-  return { id: `id-${name}`, name, state: 'running', image: 'x', createdAt: '', labels: labelsFor(repoId, branch, { [LABEL.role]: role }), ports: [] };
+function side(branch: string, name: string, role: string, repoId = REPO.id, createdAt = '2026-10-01T00:00:00Z'): ContainerInfo {
+  return { id: `id-${name}`, name, state: 'running', image: 'x', createdAt, labels: labelsFor(repoId, branch, { [LABEL.role]: role }), ports: [] };
 }
 
 function image(tag: string, size: number, labels: Labels = {}, id = `img-${tag}`): ImageInfo {
@@ -113,6 +113,17 @@ describe('planPrune', () => {
     // The guard ran as the recorded user
     const guardCall = b.callsOf('exec').find(c => (c[1] as string[])[0] === 'sh');
     expect((guardCall![2] as ExecIO).user).toBe('dev');
+  });
+
+  it('--force does not remove the kept workspace volume while --rebuild recreates the services (no main container yet)', async () => {
+    const names = n('rebuilding');
+    const labels = labelsFor(REPO.id, 'rebuilding');
+    const svc = side('rebuilding', `${names.container}-svc-postgres`, 'service', REPO.id, new Date(NOW.getTime() - 30_000).toISOString());
+    const b = backendWith([svc]);
+    b.volumes.add(names.workspaceVolume);
+    b.volumeLabels.set(names.workspaceVolume, labels);
+    b.networks.set(names.network, labels);
+    expect((await planPrune(b, ctx({ force: true }))).orphans).toEqual([]);
   });
 
   it('does not count a branch the clone never saw on origin as gone (start -c, never pushed)', async () => {
@@ -268,6 +279,25 @@ describe('findOrphans', () => {
     expect(mergePlans([one, one])).toEqual({ containers: [], orphans: [one.orphans[0], one.orphans[0]], images: ['x', 'x'], bytes: 2, warnings: ['w', 'w'] });
   });
 
+  it('leaves a branch alone while anything of it is younger than the grace period (a start waiting on services)', () => {
+    const names = n('starting');
+    const labels = labelsFor(REPO.id, 'starting');
+    const svc = side('starting', `${names.container}-svc-postgres`, 'service', REPO.id, new Date(NOW.getTime() - ORPHAN_GRACE_MS + 60_000).toISOString());
+    const volumes = [{ name: names.workspaceVolume, labels, createdAt: '2026-10-01T00:00:00Z' }];
+    const networks = [{ name: names.network, labels, createdAt: '2026-10-01T00:00:00Z' }];
+    expect(findOrphans([svc], volumes, networks, NOW)).toEqual([]);
+    // Past the grace period they are orphans
+    const later = new Date(NOW.getTime() + 2 * 60_000);
+    expect(findOrphans([svc], volumes, networks, later).map(o => o.name)).toEqual([svc.name, names.workspaceVolume, names.network]);
+  });
+
+  it('treats a young volume or network (a new start, its main container not run yet) the same, and an unknown age as young', () => {
+    const names = n('starting');
+    const labels = labelsFor(REPO.id, 'starting');
+    expect(findOrphans([], [{ name: names.workspaceVolume, labels, createdAt: NOW.toISOString() }], [{ name: names.network, labels, createdAt: '2026-10-01T00:00:00Z' }], NOW)).toEqual([]);
+    expect(findOrphans([], [{ name: names.workspaceVolume, labels }], [], NOW)).toEqual([]);
+  });
+
   it('ignores objects without kunj labels and treats unlabelled-role containers by name', () => {
     const legacyMain: ContainerInfo = { ...main('alive'), labels: labelsFor(REPO.id, 'alive') };
     expect(findOrphans([legacyMain], [{ name: 'v', labels: {} }, { name: n('alive').homeVolume, labels: labelsFor(REPO.id, 'alive') }], [])).toEqual([]);
@@ -287,6 +317,8 @@ describe('applyPrune', () => {
     writeForwards([
       { pid: process.pid, container: n('alive').container, port: 3000, hostPort: 3000, kind: 'forward' },
       { pid: process.pid, container: 'kunj-app-vanished-abcdef', port: 3001, hostPort: 3001, kind: 'forward' },
+      // Same name, but of a container since recreated (another id)
+      { pid: process.pid, container: n('alive').container, containerId: 'id-recreated-since', port: 3002, hostPort: 3002, kind: 'forward' },
     ], file);
 
     const plan = await planPrune(b, ctx());
@@ -322,7 +354,7 @@ describe('applyPrune', () => {
     expect(b.callsOf('removeImage')).toEqual([['kunj-sandbox:0.1.0']]);
     // The wip container was never touched by a remove
     expect(JSON.stringify(b.callsOf('remove'))).not.toContain(n('wip').container);
-    expect(readForwards(file).map(r => r.container)).toEqual([n('alive').container]);
+    expect(readForwards(file).map(r => r.port)).toEqual([3000]);
   });
 
   it('reports a failure and carries on; a failing pre hook skips that container', async () => {

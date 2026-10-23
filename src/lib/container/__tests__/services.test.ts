@@ -154,6 +154,19 @@ describe('servicesFromCompose', () => {
     expect(servicesFromCompose(null)).toEqual({ services: [], dropped: [] });
   });
 
+  it('drops a depends_on naming a service that was left out, with the dropped keys, so the start does not fail', () => {
+    const { services, dropped } = servicesFromCompose({
+      services: {
+        web: { image: 'node:22', depends_on: { api: { condition: 'service_started' }, db: { condition: 'service_started' } } },
+        api: { build: { context: '/api' } },
+        db: { image: 'postgres:16' },
+      },
+    });
+    expect(services.map(s => [s.name, s.dependsOn])).toEqual([['web', ['db']], ['db', []]]);
+    expect(dropped).toEqual(['api (no image; build is not supported)', 'web: depends_on api (dropped)']);
+    expect(() => serviceOrder(services)).not.toThrow();
+  });
+
   it('splits a string command like a shell', () => {
     expect(splitWords(`sh -c 'echo "a b"' x\\ y ""`)).toEqual(['sh', '-c', 'echo "a b"', 'x y', '']);
   });
@@ -284,6 +297,22 @@ describe('startServices', () => {
     await startServices(r, names, REPO, BRANCH, [svc('db')], { warn: () => {}, recreate: true });
     expect(r.callsOf('remove')).toEqual([[{ containers: [`${names.container}-svc-db`] }]]);
     expect(r.callsOf('run')).toHaveLength(1);
+  });
+
+  it('recreate (--rebuild) removes a service no longer declared, keeps its volumes and says so', async () => {
+    const b = new FakeBackend();
+    b.existing = [svcInfo('db'), svcInfo('old', {}, { volumes: [`${names.container}-svc-old-data`] })];
+    const warnings: string[] = [];
+    await startServices(b, names, REPO, BRANCH, [svc('db')], { warn: m => warnings.push(m), recreate: true });
+    expect(b.callsOf('remove')[0]).toEqual([{ containers: [`${names.container}-svc-old`] }]);
+    expect(JSON.stringify(b.callsOf('remove'))).not.toContain('svc-old-data');
+    expect(warnings).toEqual([expect.stringMatching(/Removed service old: it is no longer declared; its volumes are kept \(.*svc-old-data/)]);
+
+    // Also when no service is declared any more
+    const none = new FakeBackend();
+    none.existing = [svcInfo('old')];
+    await startServices(none, names, REPO, BRANCH, [], { warn: () => {}, recreate: true });
+    expect(none.callsOf('remove')).toEqual([[{ containers: [`${names.container}-svc-old`] }]]);
   });
 
   it('warns and continues when a health check never passes', async () => {

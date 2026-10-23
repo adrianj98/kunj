@@ -36,7 +36,11 @@ const MAX_READABLE = 40;
 
 export function containerNames(repoName: string, repoId: string, branch: string): ContainerNames {
   const readable = dockerSafe(`${dockerSafe(repoName)}-${dockerSafe(branchToDirName(branch))}`).slice(0, MAX_READABLE).replace(/[-.]+$/, '');
-  const container = `kunj-${readable}-${nameHash(repoId, branch)}`;
+  return namesOfContainer(`kunj-${readable}-${nameHash(repoId, branch)}`);
+}
+
+/** The names that go with a branch container, from its own name (survives a renamed repository). */
+export function namesOfContainer(container: string): ContainerNames {
   return {
     container,
     helper: `${container}-net-helper`,
@@ -69,4 +73,20 @@ export function labelsFor(repoId: string, branch: string, extra: Record<string, 
 // Exact comparison: the hashed name alone could in theory collide, the labels cannot
 export function labelsMatch(labels: Record<string, string> | undefined, repoId: string, branch: string): boolean {
   return !!labels && labels[LABEL.repo] === repoId && labels[LABEL.branch] === branch;
+}
+
+/** A container's kunj.options label as an object ({} when absent or unreadable). */
+export function optionsLabel(labels: Record<string, string> | undefined): Record<string, any> {
+  try {
+    const parsed = JSON.parse(labels?.[LABEL.options] ?? '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** A branch container, not its network helper or a service (containers from before kunj.role go by name). */
+export function isMain(c: { name: string; labels: Record<string, string> }): boolean {
+  const role = c.labels[LABEL.role];
+  return role ? role === 'main' : !c.name.endsWith('-net-helper');
 }

@@ -1,7 +1,11 @@
 // `kunj container forward --auto`: polls the container's TCP listeners (/proc/net/tcp and tcp6,
 // which every Linux container has, unlike `ss`; one exec every 2 s) and forwards each new one to 127.0.0.1 on the host with forwardPort, dropping it when the
-// listener goes away. Running forwarders are recorded in ~/.kunj/container-forwards.json so that
-// `kunj ct list` can show them and `kunj ct agent` does not start a second one.
+// listener goes away. The polls and the tunnels exec in the network helper, never in the branch
+// container: the helper shares its network namespace (same listeners, same 127.0.0.1), is kunj's own
+// code, and is replaced on every start, so nothing reaches the branch container before its firewall.
+// Running forwarders, and the ports `kunj ct forward` forwards, are recorded in
+// ~/.kunj/container-forwards.json so that `kunj ct list` can show them and `kunj ct agent` does not
+// start a second forwarder.
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -52,6 +56,11 @@ export function parseProcNetTcp(output: string): number[] {
   return [...ports].sort((a, b) => a - b);
 }
 
+/** What --auto leaves alone: container.forward.ignore and the ports already published with `start -p`. */
+export function autoForwardIgnore(ignoreSetting: unknown, published: Array<{ container: number }>): number[] {
+  return [...new Set([...ignoredPorts(ignoreSetting), ...published.map(p => p.container)])];
+}
+
 /** container.forward.ignore as ports: a list, or the single value `kunj config --set` stores. */
 export function ignoredPorts(value: unknown): number[] {
   const list = Array.isArray(value) ? value : value === undefined || value === null || value === '' ? [] : [value];
@@ -72,15 +81,26 @@ export function diffPorts(current: Set<number>, next: number[], ignore: number[]
 // ---------------------------------------------------------------------
 
 /**
- * One forwarded port of a running forwarder. Port 0 marks a forwarder that is running for the
- * container (with or without ports), so it can be found before its first listener appears.
+ * One forwarded port of a running forwarder. Port 0 marks an automatic forwarder that is running for
+ * the container (with or without ports), so it can be found before its first listener appears;
+ * `kunj ct forward <port>` records only its ports.
  */
 export interface ForwardRecord {
   pid: number;
+  /** The branch container's name, for display */
   container: string;
+  /** The branch container's id: a container recreated under the same name is another one (absent in older records) */
+  containerId?: string;
   port: number;
   hostPort: number;
   kind: 'forward';
+  /** Set when the port is a sidecar service's (`kunj ct forward postgres:5432`) */
+  service?: string;
+}
+
+/** Whether a record belongs to this container: by id when it has one, else (older records) by name. */
+export function recordIsFor(r: ForwardRecord, container: { id: string; name: string }): boolean {
+  return r.containerId ? r.containerId === container.id : r.container === container.name;
 }
 
 export function forwardsFile(): string {
@@ -138,9 +158,9 @@ export function updateForwards(change: (records: ForwardRecord[]) => ForwardReco
   return next;
 }
 
-/** The pid of a live forwarder for `container`, if one is registered. */
-export function forwarderFor(container: string, file: string = forwardsFile()): number | undefined {
-  return readForwards(file).find(r => r.container === container)?.pid;
+/** The pid of a live automatic forwarder for `container`, if one is registered. */
+export function forwarderFor(container: { id: string; name: string }, file: string = forwardsFile()): number | undefined {
+  return readForwards(file).find(r => r.port === 0 && recordIsFor(r, container))?.pid;
 }
 
 /**
@@ -179,19 +199,26 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** The network helper's tunnel needs socat (kunj-nethelper images before it had socat do not). */
+export const HELPER_NO_SOCAT =
+  'The network helper of this container predates port forwarding through it (it has no socat); ' +
+  'restart the container (kunj ct stop, then kunj ct start) to replace it';
+
 /**
- * Forwards the container's listeners until `signal` aborts or the container is seen not running on
- * two state checks in a row (one failed `docker inspect` is not enough), then closes every forward.
- * A failed poll keeps the current forwards; `onError` is told once each time reading starts failing.
+ * Forwards the listeners of the branch container `target.main` until `signal` aborts or that run of
+ * the container ends: the first state check that finds it not running, or started again (another
+ * .State.StartedAt), ends it; only a failed `docker inspect` gets a second chance. Listeners are read
+ * and tunnelled through `target.helper`, the network helper sharing its network namespace. Every
+ * forward is closed on the way out. A failed poll keeps the current forwards; `onError` is told once
+ * each time reading starts failing.
  */
 export async function runAutoForward(
   backend: ContainerBackend,
-  containerId: string,
+  target: { main: string; helper: string },
   opts: {
     ignore: number[];
     intervalMs?: number;
     stateIntervalMs?: number;
-    user?: string;
     onChange?: (change: AutoForwardChange) => void;
     onError?: (message: string) => void;
     signal: AbortSignal;
@@ -200,27 +227,35 @@ export async function runAutoForward(
   const { signal } = opts;
   const intervalMs = opts.intervalMs ?? POLL_MS;
   const stateIntervalMs = opts.stateIntervalMs ?? STATE_POLL_MS;
-  const user = opts.user || undefined;
   const forwards = new Map<number, Forwarder>();
   // Ports that could not be forwarded: not retried until their listener goes away
   const failed = new Set<number>();
-  const hasSocat = (await backend.exec(containerId, ['sh', '-c', 'command -v socat'], { user })).exitCode === 0;
+
+  // The run this forwarder belongs to; a restart is a new run with its own forwarder
+  const run = await backend.containerRun(target.main);
+  if (!run || run.state !== 'running') return;
+  if ((await backend.exec(target.helper, ['sh', '-c', 'command -v socat'])).exitCode !== 0) throw new Error(HELPER_NO_SOCAT);
   let lastStateCheck = Date.now();
-  let notRunning = 0;
+  let failedInspects = 0;
   let unreadable = false;
 
   try {
     while (!signal.aborted) {
       if (Date.now() - lastStateCheck >= stateIntervalMs) {
         lastStateCheck = Date.now();
-        notRunning = (await backend.containerState(containerId)) === 'running' ? 0 : notRunning + 1;
-        if (notRunning >= 2) return;
+        const now = await backend.containerRun(target.main);
+        if (now === null) {
+          if (++failedInspects >= 2) return;
+        } else {
+          if (now.state !== 'running' || now.startedAt !== run.startedAt) return;
+          failedInspects = 0;
+        }
       }
 
       let listening: number[] | undefined;
       try {
         // cat exits 1 when the kernel has no IPv6 (no tcp6) but still prints tcp: the header decides
-        const r = await backend.exec(containerId, PROC_NET_TCP, { user });
+        const r = await backend.exec(target.helper, PROC_NET_TCP);
         if (r.stdout.includes('local_address')) listening = parseProcNetTcp(r.stdout);
       } catch {
         // the container may be going away; the state check ends the loop
@@ -242,7 +277,7 @@ export async function runAutoForward(
         for (const port of add) {
           if (failed.has(port)) continue;
           try {
-            const forwarder = await forwardPort(backend, containerId, { container: port }, { hasSocat, nextFree: true });
+            const forwarder = await forwardPort(backend, target.helper, { container: port }, { hasSocat: true, nextFree: true });
             forwards.set(port, forwarder);
             opts.onChange?.({ event: 'add', port, hostPort: forwarder.hostPort });
           } catch (err) {

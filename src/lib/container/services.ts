@@ -4,7 +4,7 @@
 // branch, so it gets nothing from the host: no env but its own, no mounts but its named volumes, no
 // added capabilities, no published ports.
 import { ContainerBackend, ContainerInfo, ContainerSpec, ExecTimeoutError, Labels, isImageRef } from './backend';
-import { ContainerNames, LABEL, labelsFor } from './names';
+import { ContainerNames, LABEL, labelsFor, optionsLabel } from './names';
 
 export interface ServiceSpec {
   name: string;
@@ -242,6 +242,13 @@ export function servicesFromCompose(config: any, excludeService?: string): { ser
       dependsOn,
     });
   }
+  // A dependency on a service left out above would fail every start; it is left out too
+  const kept = new Set(services.map(s => s.name));
+  for (const svc of services) {
+    const gone = svc.dependsOn.filter(d => !kept.has(d));
+    for (const d of gone) dropped.push(`${svc.name}: depends_on ${d} (dropped)`);
+    if (gone.length) svc.dependsOn = svc.dependsOn.filter(d => kept.has(d));
+  }
   return { services, dropped };
 }
 
@@ -290,17 +297,13 @@ interface ServiceRecord {
 }
 
 function serviceRecord(info: ContainerInfo): ServiceRecord {
-  try {
-    const r = JSON.parse(info.labels[LABEL.options] ?? '{}');
-    return {
-      port: r.port,
-      healthcheck: r.healthcheck,
-      volumes: Array.isArray(r.volumes) ? r.volumes : [],
-      dependsOn: isStringArray(r.dependsOn) ? r.dependsOn : [],
-    };
-  } catch {
-    return { volumes: [] };
-  }
+  const r = optionsLabel(info.labels);
+  return {
+    port: r.port,
+    healthcheck: r.healthcheck,
+    volumes: Array.isArray(r.volumes) ? r.volumes : [],
+    dependsOn: isStringArray(r.dependsOn) ? r.dependsOn : [],
+  };
 }
 
 /** The run spec of one service: nothing from the host, on the branch network under its own name. */
@@ -449,9 +452,23 @@ export async function startServices(
     created[kind].push(name);
     opts.created?.[kind].push(name);
   };
-  if (services.length === 0) return { created: [], volumes: [] };
   const ordered = serviceOrder(services);
+  if (services.length === 0 && !opts.recreate) return { created: [], volumes: [] };
   const existing = new Map((await findServices(backend, names, { repoId, branch })).map(c => [c.name, c]));
+  if (opts.recreate) {
+    // --rebuild: a service no longer declared goes; its volumes stay, as `remove --keep-volumes` keeps them
+    const declared = new Set(ordered.map(svc => serviceNames(names, svc.name).container));
+    const undeclared = [...existing.values()].filter(c => !declared.has(c.name));
+    if (undeclared.length) {
+      await backend.remove({ containers: undeclared.map(c => c.name) });
+      for (const c of undeclared) {
+        existing.delete(c.name);
+        const volumes = serviceRecord(c).volumes;
+        opts.warn(`Removed service ${c.labels[LABEL.service] ?? c.name}: it is no longer declared` +
+          (volumes.length ? `; its volumes are kept (${volumes.join(', ')}; docker volume rm them when you no longer need the data)` : ''));
+      }
+    }
+  }
   const volumeLabels: Labels = labelsFor(repoId, branch, { [LABEL.role]: 'service', ...(opts.kunjVersion ? { [LABEL.version]: opts.kunjVersion } : {}) });
 
   for (const svc of ordered) {
