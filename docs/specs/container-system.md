@@ -16,7 +16,9 @@ This document describes what is on `main` (commit 4b94e3a). Blueprints have thei
 | Network helper with firewall (default and allowlist modes) | Shipped |
 | Blueprints and snapshots, including private origins | Shipped |
 | Default zsh config and `KUNJ_*` env | Shipped |
-| Sidecar services, editor attach, prune, Docker-in-Docker, auto port forwarding (see Container Phase 2 Spec) | Not started |
+| Phase 2 (see Container Phase 2 Spec): sidecar services, editor attach | Shipped |
+| Phase 2: auto port forwarding, prune, Docker-in-Docker, host MCP bridge | Not started |
+| Phase 3: workspace IDE (see `workspace-ide.md`) | Spec only, after phase 2 |
 | VS Code extension and macOS app UI for containers | Not started |
 | Remote Docker host (`kunj serve`) | Not started |
 

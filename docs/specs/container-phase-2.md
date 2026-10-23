@@ -13,7 +13,7 @@ Phase 2 makes a branch container usable for real projects: their databases run n
 | Feature | Status |
 | --- | --- |
 | Sidecar services | Shipped (ed136b3, 6273c61) |
-| Editor attach | In progress (93b7ed3, review fixes pending) |
+| Editor attach | Shipped (93b7ed3, f635113) |
 | Auto port forwarding | Not started |
 | Prune | Not started |
 | Docker-in-Docker | Not started |
