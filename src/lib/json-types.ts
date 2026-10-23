@@ -12,7 +12,7 @@ import type { KnownRepoInfo } from './repos';
 import type { ContainerStatus } from './container/env';
 import type { ServiceState } from './container/services';
 
-/** What a command prints (as JSON) when it fails in `--json` mode: `kunj agent` (errors with a `jsonCode`) and `kunj ct` give { code, message }, the other commands a plain message string. */
+/** What a command prints (as JSON) when it fails in `--json` mode: `kunj agent` and `kunj ct` (errors with a `jsonCode`, or a start/hook error) give { code, message }, the other commands a plain message string. */
 export interface ErrorJson {
   error: string | { code: string; message: string };
 }
@@ -75,6 +75,20 @@ export interface ContainerListJson {
   repo: string;
   backend: { kind: 'docker'; context: string };
   containers: ContainerJson[];
+}
+
+// ---- kunj ct file --json ---------------------------------------------------------------------
+
+/** `kunj ct file read [branch] <path> --json` */
+export interface FileReadJson {
+  path: string;
+  content: string;
+}
+
+/** `kunj ct file write [branch] <path> --json` */
+export interface FileWriteJson {
+  success: true;
+  path: string;
 }
 
 // ---- kunj agent --json -----------------------------------------------------------------------

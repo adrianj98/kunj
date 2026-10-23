@@ -160,6 +160,22 @@ kunj ct exec feature/search -- sh -lc 'npm run build && npm run test:e2e'
 
 Output streams to your terminal, and stdin is connected, so interactive tools work.
 
+## file
+
+Reads or writes one file of `/workspace` as the container's user, for tools that need a file without
+a shell:
+
+```bash
+kunj ct file read feature/search src/app.ts          # prints the file
+kunj ct file read src/app.ts                         # the current branch's container
+echo 'new content' | kunj ct file write feature/search src/app.ts
+```
+
+`write` reads standard input to the end and creates missing directories. The path is relative to
+`/workspace`; absolute paths and paths that leave it (`..`) are refused. With `--json`, `read` prints
+`{ "path", "content" }` and `write` prints `{ "success": true, "path" }`; failures print
+`{ "error": { "code", "message" } }` with the code `bad-path`, `not-found` or `write-failed`.
+
 ## forward
 
 Forwards ports on your machine into the container, for as long as the command runs:

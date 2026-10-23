@@ -138,7 +138,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 - `kunj agent [start|status|stop] [branch]` - Run an agent in a host tmux session for a worktree (see Worktree agents below)
-- `kunj container [start|shell|exec|agent|attach|forward|logs|list|stop|remove]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
+- `kunj container [start|shell|exec|agent|attach|forward|logs|list|stop|remove|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
@@ -201,6 +201,8 @@ context's files (`assetHash()` in image.ts), so editing a Dockerfile or `firewal
 **Backend rule:** only `docker.ts` spawns `docker`. Everything else programs against the
 `ContainerBackend` interface (backend.ts) so a remote backend can be added later; unit tests use
 `FakeBackend`.
+
+**Files:** `ct file read|write [branch] <path>` (src/lib/container/files.ts) validates paths against `/workspace` and runs as the sandbox user; its errors carry a `ContainerError` code (`bad-path`, `not-found`, `write-failed`) printed as the `--json` error code.
 
 **Naming and state:** containers, volumes and networks are `kunj-<repo>-<b>-<h>`, where `<h>` is a
 short hash of the exact branch name, because `branchToDirName` collapses `feature/x` and

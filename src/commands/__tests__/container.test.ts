@@ -221,7 +221,7 @@ describe('ContainerCommand', () => {
   it('rejects unknown actions', async () => {
     await new ContainerCommand().execute('frobnicate', {});
     expect(errors).toEqual([
-      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, logs, list, stop, remove, blueprint",
+      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, logs, list, stop, remove, blueprint, file",
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -1063,5 +1063,88 @@ describe('ContainerCommand', () => {
       expect(errors).toEqual(['✗ No container for feat; run kunj ct start feat']);
       expect(mockSpawned).toEqual([]);
     });
+  });
+});
+
+describe('ct file', () => {
+  const READ = 'sh -c cat -- "$1" sh src/a.ts';
+  const WRITE = 'sh -c mkdir -p -- "$(dirname -- "$1")" && cat > "$1" sh src/a.ts';
+  let exit: jest.SpyInstance;
+
+  beforeEach(() => {
+    backend.stdinData = [];
+    exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
+  });
+  afterEach(() => exit.mockRestore());
+
+  it('read --json prints the content', async () => {
+    backend.existing = [mainContainer('feat')];
+    backend.execResults.set(READ, { exitCode: 0, stdout: 'hello' });
+    await new ContainerCommand().execute('file', 'read', ['feat', './src/a.ts'], { json: true });
+    expect(JSON.parse(stdout.join(''))).toEqual({ path: 'src/a.ts', content: 'hello' });
+    const [, cmd, io] = backend.callsOf('exec')[0] as [string, string[], { user?: string; workdir?: string }];
+    expect(cmd.slice(-2)).toEqual(['sh', 'src/a.ts']);
+    expect(io).toMatchObject({ user: 'dev', workdir: '/workspace' });
+  });
+
+  it('read without --json prints the content raw', async () => {
+    backend.existing = [mainContainer('feat')];
+    backend.execResults.set(READ, { exitCode: 0, stdout: 'hello\n' });
+    await new ContainerCommand().execute('file', 'read', ['feat', 'src/a.ts'], {});
+    expect(stdout.join('')).toBe('hello\n');
+  });
+
+  it('read with one positional uses the current branch', async () => {
+    backend.existing = [mainContainer('current')];
+    backend.execResults.set(READ, { exitCode: 0, stdout: 'x' });
+    await new ContainerCommand().execute('file', 'read', ['src/a.ts'], { json: true });
+    expect(JSON.parse(stdout.join(''))).toEqual({ path: 'src/a.ts', content: 'x' });
+  });
+
+  it('write --json reads stdin to the end', async () => {
+    const { Readable } = await import('stream');
+    const original = Object.getOwnPropertyDescriptor(process, 'stdin')!;
+    Object.defineProperty(process, 'stdin', { value: Readable.from(['new']), configurable: true });
+    try {
+      backend.existing = [mainContainer('feat')];
+      backend.execResults.set(WRITE, { exitCode: 0, stdout: '' });
+      await new ContainerCommand().execute('file', 'write', ['feat', 'src/a.ts'], { json: true });
+    } finally {
+      Object.defineProperty(process, 'stdin', original);
+    }
+    expect(JSON.parse(stdout.join(''))).toEqual({ success: true, path: 'src/a.ts' });
+    expect(backend.stdinData).toEqual(['new']);
+  });
+
+  it('read on a stopped container fails', async () => {
+    backend.existing = [mainContainer('feat', { state: 'exited' })];
+    await new ContainerCommand().execute('file', 'read', ['feat', 'src/a.ts'], {});
+    expect(errors).toEqual(['✗ Container for feat is not running; run kunj ct start feat']);
+  });
+
+  it('a coded error prints { code, message } in --json mode', async () => {
+    backend.existing = [mainContainer('feat')];
+    await new ContainerCommand().execute('file', 'read', ['feat', '../x'], { json: true });
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(JSON.parse(stdout.join(''))).toEqual({ error: { code: 'bad-path', message: 'Path must stay inside /workspace: ../x' } });
+  });
+
+  it('a missing file is not-found', async () => {
+    backend.existing = [mainContainer('feat')];
+    backend.execResults.set(READ, { exitCode: 1, stdout: '' });
+    await new ContainerCommand().execute('file', 'read', ['feat', 'src/a.ts'], { json: true });
+    expect(JSON.parse(stdout.join('')).error.code).toBe('not-found');
+  });
+
+  it('an uncoded ContainerError keeps the plain message in --json mode', async () => {
+    backend.existing = [mainContainer('feat', { state: 'exited' })];
+    await new ContainerCommand().execute('file', 'read', ['feat', 'src/a.ts'], { json: true });
+    expect(JSON.parse(stdout.join(''))).toEqual({ error: 'Container for feat is not running; run kunj ct start feat' });
+  });
+
+  it('rejects an unknown file action and a missing path', async () => {
+    await new ContainerCommand().execute('file', 'frob', ['a'], {});
+    await new ContainerCommand().execute('file', 'read', [], {});
+    expect(errors).toEqual(["✗ Unknown file action 'frob'. Expected one of: read, write", '✗ Usage: kunj ct file read [branch] <path>']);
   });
 });
