@@ -704,7 +704,17 @@ describe('startContainer', () => {
 
   it('ends the forwarders and MCP bridges of a running container whose helper it replaces, and says so', async () => {
     const { spawn } = await import('child_process');
-    const procs = [spawn('sleep', ['30']), spawn('sleep', ['30']), spawn('sleep', ['30'])];
+    // Command lines like the real ones (`kunj ct forward ...`, `kunj ct mcp ...`); the last is a pid
+    // the system reused for something else, recorded for this container
+    const idle = ['-e', 'setTimeout(() => {}, 30000)'];
+    const procs = [
+      spawn(process.execPath, [...idle, 'ct', 'forward', BRANCH, '--auto']),
+      spawn(process.execPath, [...idle, 'ct', 'mcp', BRANCH]),
+      spawn(process.execPath, [...idle, 'ct', 'forward', 'other']),
+      spawn('sleep', ['30']),
+    ];
+    // ps sees the command line only once node has started
+    await new Promise(r => setTimeout(r, 300));
     const exited = procs.map(p => new Promise(resolve => p.on('exit', (_c, signal) => resolve(signal))));
     const files = { forwards: path.join(tmp, 'forwards.json'), bridges: path.join(tmp, 'bridges.json') };
     fs.writeFileSync(files.forwards, JSON.stringify([
@@ -712,6 +722,7 @@ describe('startContainer', () => {
       { pid: procs[0].pid, container: names.container, containerId: 'main-id', port: 3000, hostPort: 3000, kind: 'forward' },
       // Another container's forwarder is left alone
       { pid: procs[2].pid, container: 'other', containerId: 'other-id', port: 4000, hostPort: 4000, kind: 'forward' },
+      { pid: procs[3].pid, container: names.container, containerId: 'main-id', port: 5000, hostPort: 5000, kind: 'forward' },
     ]));
     fs.writeFileSync(files.bridges, JSON.stringify([{ pid: procs[1].pid, container: names.container, name: 'chrome' }]));
     try {
@@ -721,8 +732,10 @@ describe('startContainer', () => {
       await startContainer(b, options({ warn: m => warnings.push(m), registryFiles: files }));
       expect(await exited[0]).toBe('SIGTERM');
       expect(await exited[1]).toBe('SIGTERM');
-      expect(procs[2].exitCode).toBeNull();
-      expect(procs[2].signalCode).toBeNull();
+      for (const p of [procs[2], procs[3]]) {
+        expect(p.exitCode).toBeNull();
+        expect(p.signalCode).toBeNull();
+      }
       expect(warnings).toContain(`Replacing the network helper of ${names.container}: stopped 2 port forwarder/MCP bridge processes that ran through it (kunj ct agent starts them again)`);
     } finally {
       for (const p of procs) p.kill();

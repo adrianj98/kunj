@@ -45,6 +45,20 @@ Fix round (review of the above):
   helper refresh.
 - Resume reads the devcontainer's compose services according to how the container was made (its
   recorded image kind), not the current `container.image`.
+
+Second fix round:
+
+- Compose text with NEL, LS, PS, a BOM past the start, or any C0/C1 control character other than tab,
+  LF and CR is refused. Why: yaml.v3 ends comments and block scalars at those, the `yaml` package and
+  the text checks do not, so `#c\u0085include: [...]` reached compose.
+- `env_file` and `label_file` refuse the compose file, and `docker compose config` runs with
+  `--no-env-resolution` (retried without it on a compose that does not know the flag). Why: defence
+  in depth, those name host files.
+- firewall.sh recovery keeps `KUNJ-OUT-NEW` when it is jumped to and the old chain is not (a helper
+  killed mid-swap), instead of dropping the live chain. The Docker test sets up that state before one
+  of its reloads; it fails with the previous recovery.
+- A registered forwarder/bridge pid is only signalled when `ps` shows a `ct|container forward|mcp`
+  command line. Why: a reused pid must never be killed.
 ## 2026-10-23 — Containers: phase 2 follow-ups (visible forwarder errors, agent window size, logs --json, bridge minors)
 
 - `kunj ct agent` runs the foreground forwarder's checks (network helper running, socat present) before

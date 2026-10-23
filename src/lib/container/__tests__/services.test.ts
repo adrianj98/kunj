@@ -427,6 +427,23 @@ describe('fix round 1', () => {
     expect(composeRefusal('services:\n  db: [unclosed\n')).toMatch(/^it could not be parsed/);
     expect(composeRefusal('services:\n  db:\n    image: a\n    image: b\n')).toMatch(/^it could not be parsed/);
 
+    // yaml.v3 ends comments and block scalars at NEL/LS/PS; here they are refused outright
+    const breaks = 'control characters and Unicode line breaks are not supported';
+    expect(composeRefusal('services:\n  a:\n    image: x\nname: p #c\u0085include: [/etc/x.yml]\n')).toBe(breaks);
+    expect(composeRefusal('name: p\nservices: {a: {image: x}} # c\u0085include: [../other/compose.yml]\n')).toBe(breaks);
+    expect(composeRefusal('note: |\n        hi\u0085include:\n        - /etc/other/compose.yml\n')).toBe(breaks);
+    for (const c of ['\u2028', '\u2029', '\u0000', '\u001b', '\u007f', '\u009f', '\u000b', '\u000c']) {
+      expect(composeRefusal(`services: {}\nx: a${c}b\n`)).toBe(breaks);
+    }
+    expect(composeRefusal('services: {}\n\ufeffx: 1\n')).toBe(breaks);
+    // A BOM at the start, tabs and CRLF are fine
+    expect(composeRefusal('\ufeffservices:\r\n  db:\r\n    image: redis\r\n    command: ["a",\t"b"]\r\n')).toBeNull();
+
+    // Files compose would read from the host
+    expect(composeRefusal('services:\n  db:\n    image: redis\n    env_file: /home/me/.env\n')).toBe('env_file is not supported');
+    expect(composeRefusal('services:\n  db:\n    image: redis\n    env_file: [{ path: .env, required: false }]\n')).toBe('env_file is not supported');
+    expect(composeRefusal('services:\n  db:\n    image: redis\n    label_file: ./labels\n')).toBe('label_file is not supported');
+
     // Ordinary compose files still pass
     const ordinary = [
       'services:\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: dev\n    healthcheck:\n      test: ["CMD-SHELL", "pg_isready -U postgres"]\n      interval: 5s\n    volumes:\n      - data:/var/lib/postgresql/data\n  app:\n    build: .\n    depends_on:\n      db:\n        condition: service_healthy\nvolumes:\n  data: {}\n',

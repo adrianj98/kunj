@@ -564,6 +564,12 @@ export interface ComposeSource {
  * backstop for anything a YAML parser and compose's might read differently.
  */
 export function composeRefusal(text: string): string | null {
+  // yaml.v3 (compose) ends comments and block scalars at NEL, LS and PS; the parsers and patterns
+  // here do not, so a key could hide behind one. Control characters and a BOM past the start too.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028\u2029]/.test(text) || text.indexOf('\ufeff', 1) !== -1) {
+    return 'control characters and Unicode line breaks are not supported';
+  }
   // Unanchored, so flow style ({ extends: { file: ... } }) and JSON are caught as well as block style
   const key = (name: string) => new RegExp(`(^|[\\s{,\\-])["']?${name}["']?\\s*:`, 'm');
   if (key('include').test(text)) return 'include is not supported';
@@ -610,7 +616,10 @@ function structuralRefusal(text: string): string | null {
   if ('include' in value) return 'include is not supported';
   const services = isRecord(value.services) ? value.services : {};
   for (const svc of Object.values(services)) {
-    if (!isRecord(svc) || !('extends' in svc)) continue;
+    if (!isRecord(svc)) continue;
+    // Compose reads these files from the host; never let their contents reach a service
+    for (const key of ['env_file', 'label_file']) if (key in svc) return `${key} is not supported`;
+    if (!('extends' in svc)) continue;
     const ext = svc.extends;
     const plain = typeof ext === 'string' || (isRecord(ext) && Object.keys(ext).every(k => k === 'service'));
     if (!plain) return 'extends with a file is not supported';

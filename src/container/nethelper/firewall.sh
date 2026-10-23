@@ -214,14 +214,19 @@ BUILD="$CHAIN-NEW"
 # Leftovers of a helper that died part way through a swap
 recover_chain() { # <iptables|ip6tables>
   "$1" -L "$BUILD" -n >/dev/null 2>&1 || return 0
-  if "$1" -L "$CHAIN" -n >/dev/null 2>&1; then
-    # The old chain is only removed once the new one is jumped to: drop the half-built one
+  if ! "$1" -L "$CHAIN" -n >/dev/null 2>&1; then
+    # The swap had removed the old chain already: this one is the live one
+    "$1" -E "$BUILD" "$CHAIN"
+  elif "$1" -C OUTPUT -j "$BUILD" 2>/dev/null && ! "$1" -C OUTPUT -j "$CHAIN" 2>/dev/null; then
+    # Killed after the old jumps went but before the old chain did: the new one is the live one
+    "$1" -F "$CHAIN"
+    "$1" -X "$CHAIN"
+    "$1" -E "$BUILD" "$CHAIN"
+  else
+    # The old chain is still jumped to: drop the half-built one
     while "$1" -D OUTPUT -j "$BUILD" 2>/dev/null; do :; done
     "$1" -F "$BUILD"
     "$1" -X "$BUILD"
-  else
-    # The swap had removed the old chain already: this one is the live one
-    "$1" -E "$BUILD" "$CHAIN"
   fi
 }
 

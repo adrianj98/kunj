@@ -380,7 +380,13 @@ const BRANCH_ALLOW = 'it-allow';
       const looping = inside(started.containerId, probe);
       await waitFor(async () => (await inside(started.containerId, 'test -s /tmp/probe-count')).exitCode === 0, 'the probe loop');
       const reload = await backend.exec(names.helper, ['sh', '-c',
-        'for i in 1 2 3 4 5; do /firewall.sh >/tmp/fw$i.log 2>&1 & pid=$!; ' +
+        'for i in 1 2 3 4 5; do ' +
+        // Before the third, the state of a helper killed mid-swap: the new chain live, the old one
+        // still there without its jump (recovery must keep the new one, not drop it)
+        'if [ $i = 3 ]; then iptables -N KUNJ-OUT-NEW; ' +
+        'iptables -S KUNJ-OUT | sed -n "s/^-A KUNJ-OUT /-A KUNJ-OUT-NEW /p" | while read -r r; do eval iptables $r; done; ' +
+        'iptables -I OUTPUT 1 -j KUNJ-OUT-NEW; iptables -D OUTPUT -j KUNJ-OUT; fi; ' +
+        '/firewall.sh >/tmp/fw$i.log 2>&1 & pid=$!; ' +
         'n=0; until grep -q READY /tmp/fw$i.log; do n=$((n+1)); [ $n -lt 600 ] || { cat /tmp/fw$i.log; exit 1; }; sleep 0.1; done; ' +
         'kill $pid; done; iptables -S OUTPUT | grep -c KUNJ-OUT; iptables -L KUNJ-OUT-NEW -n >/dev/null 2>&1 && echo leftover || true']);
       await inside(started.containerId, 'rm -f /tmp/probe-run');

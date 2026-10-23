@@ -51,10 +51,11 @@ in an empty project directory, so nothing on the host is read.
 `command`, `healthcheck.test`, `depends_on`, named volumes and the first port of `ports`/`expose`. It
 drops, with one warning listing them, host bind mounts, published ports, `build`, `privileged`,
 `cap_add`, `network_mode`, `devices`, `pid`, `ipc`, `security_opt`, `volumes_from`, `userns_mode`,
-`cgroup_parent`, `env_file`, `extra_hosts`, `sysctls`, `runtime`, `entrypoint`, `user`, `working_dir`,
+`cgroup_parent`, `extra_hosts`, `sysctls`, `runtime`, `entrypoint`, `user`, `working_dir`,
 `tmpfs`, and a `depends_on` on a dropped service. A compose file with `include` or `extends.file` is
 refused (they read host files), judged on the parsed document (explicit, alias and escaped keys included; unparsable, multi-document or
-unknown-tag files refused), with text checks as a backstop.
+unknown-tag files refused, as are `env_file`/`label_file` and control characters or NEL/LS/PS, which
+yaml.v3 reads as line breaks), with text checks as a backstop; compose runs with `--no-env-resolution`.
 
 **Run spec:** `<container>-svc-<name>` on the branch network with `--network-alias <name>`, only the
 env and named volumes it declares (`<container>-svc-<name>-<volume>`), Docker's default capabilities

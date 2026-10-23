@@ -187,9 +187,13 @@ interface SpawnOpts {
 // compose file could read into a service (COMPOSE_* would also change which files are read)
 const COMPOSE_ENV_KEYS = ['PATH', 'HOME', 'DOCKER_HOST', 'DOCKER_CONFIG', 'DOCKER_CONTEXT', 'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY'];
 
-/** `docker compose config` arguments: stdin as the file, an empty project directory (no .env), no interpolation. */
-export function composeConfigArgs(projectDir: string): string[] {
-  return ['compose', '--project-directory', projectDir, '-p', 'kunj-import', '-f', '-', 'config', '--format', 'json', '--no-interpolate'];
+/**
+ * `docker compose config` arguments: stdin as the file, an empty project directory (no .env), no
+ * interpolation, and (when compose knows the flag) no env_file contents resolved into environment.
+ */
+export function composeConfigArgs(projectDir: string, noEnvResolution = true): string[] {
+  return ['compose', '--project-directory', projectDir, '-p', 'kunj-import', '-f', '-', 'config', '--format', 'json', '--no-interpolate',
+    ...(noEnvResolution ? ['--no-env-resolution'] : [])];
 }
 
 export class LocalDockerBackend implements ContainerBackend {
@@ -475,7 +479,16 @@ export class LocalDockerBackend implements ContainerBackend {
     try {
       const env: NodeJS.ProcessEnv = {};
       for (const k of COMPOSE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k];
-      const out = await this.checked(composeConfigArgs(dir), { input: Readable.from([yamlText]), cwd: dir, env });
+      const run = (noEnvResolution: boolean) =>
+        this.checked(composeConfigArgs(dir, noEnvResolution), { input: Readable.from([yamlText]), cwd: dir, env });
+      let out: Output;
+      try {
+        out = await run(true);
+      } catch (err) {
+        // An older compose without the flag; env_file is refused before compose sees the file anyway
+        if (!/unknown flag.*no-env-resolution/i.test(err instanceof Error ? err.message : String(err))) throw err;
+        out = await run(false);
+      }
       return JSON.parse(out.stdout);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

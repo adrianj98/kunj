@@ -1,6 +1,6 @@
 // Starting, stopping and removing a branch container. Programs against ContainerBackend only, so
 // it is tested with a fake backend; host-side git (origin checks, devcontainer reads) runs here.
-import { execFile, spawn } from 'child_process';
+import { execFile, execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
@@ -1194,6 +1194,16 @@ async function resume(
  * `kunj ct forward`) and MCP bridges registered for it tunnel through the old one, so they are ended
  * (`kunj ct agent` starts them again). One line says so.
  */
+/** Whether `pid` runs `kunj ct|container forward|mcp` (its command line, from ps). */
+function isKunjTunnel(pid: number): boolean {
+  try {
+    const command = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return /\s(ct|container)\s+(forward|mcp)(\s|$)/.test(command);
+  } catch {
+    return false;
+  }
+}
+
 function stopHelperUsers(main: ContainerInfo, warn: (m: string) => void, files: StartOptions['registryFiles'] = {}): void {
   const pids = new Set<number>();
   for (const r of readForwards(files.forwards)) if (recordIsFor(r, main)) pids.add(r.pid);
@@ -1201,6 +1211,8 @@ function stopHelperUsers(main: ContainerInfo, warn: (m: string) => void, files: 
   pids.delete(process.pid);
   let stopped = 0;
   for (const pid of pids) {
+    // A pid the system reused for something else is never signalled
+    if (!isKunjTunnel(pid)) continue;
     try {
       process.kill(pid, 'SIGTERM');
       stopped++;

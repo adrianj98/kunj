@@ -122,7 +122,9 @@ describe('docker backend', () => {
     it('composeConfigArgs reads stdin from an empty project directory without interpolation', () => {
       expect(composeConfigArgs('/tmp/empty')).toEqual([
         'compose', '--project-directory', '/tmp/empty', '-p', 'kunj-import', '-f', '-', 'config', '--format', 'json', '--no-interpolate',
+        '--no-env-resolution',
       ]);
+      expect(composeConfigArgs('/tmp/empty', false)).not.toContain('--no-env-resolution');
     });
 
     it('runArgs passes --add-host entries', () => {
@@ -233,6 +235,23 @@ describe('docker backend', () => {
       await expect(backend.info()).resolves.toEqual({ serverVersion: '27.0.1', runtimes: ['runc', 'sysbox-runc'], operatingSystem: 'Ubuntu 24.04 LTS' });
       expect(spawnMock.mock.calls[0][0]).toBe('/usr/local/bin/docker');
       expect(argvOf(0)).toEqual(['--context', 'remote', 'info', '--format', '{{json .}}']);
+    });
+
+    it('composeConfig asks for no env resolution, and retries without the flag on an older compose', async () => {
+      results.push({ stdout: '{"services":{}}\n' });
+      await expect(new LocalDockerBackend().composeConfig('services: {}\n')).resolves.toEqual({ services: {} });
+      expect(argvOf(0)).toContain('--no-env-resolution');
+
+      spawnMock.mockClear();
+      results.push({ code: 1, stderr: 'unknown flag: --no-env-resolution\n' }, { stdout: '{"services":{"a":{}}}\n' });
+      await expect(new LocalDockerBackend().composeConfig('services: {}\n')).resolves.toEqual({ services: { a: {} } });
+      expect(argvOf(1)).not.toContain('--no-env-resolution');
+
+      // Any other failure is not retried
+      spawnMock.mockClear();
+      results.push({ code: 1, stderr: 'yaml: line 1: bad\n' });
+      await expect(new LocalDockerBackend().composeConfig('x')).rejects.toThrow(/yaml: line 1: bad/);
+      expect(spawnMock).toHaveBeenCalledTimes(1);
     });
 
     it('info fails when the daemon reported errors in its JSON', async () => {
