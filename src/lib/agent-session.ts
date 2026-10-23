@@ -29,16 +29,23 @@ export function agentSessionName(repoName: string, repoId: string, branch: strin
   return containerNames(repoName, repoId, branch).container.replace(/[.:]/g, '-');
 }
 
-// []: tmux has no server (or no sessions). null: tmux is not installed, or it failed some other way,
-// so a transient failure is never read as "no agents".
-export async function listTmuxSessions(): Promise<string[] | null> {
+// []: tmux has no server (or no sessions). 'missing': tmux is not installed. 'failed': any other
+// failure, so a transient error is never read as "no agents".
+export async function readTmuxSessions(): Promise<string[] | 'missing' | 'failed'> {
   try {
     const { stdout } = await execFileAsync('tmux', ['list-sessions', '-F', '#{session_name}']);
     return stdout.split('\n').map(s => s.trim()).filter(Boolean);
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
     const stderr = String((error as { stderr?: unknown }).stderr ?? '');
-    return /no server running|error connecting to/.test(stderr) ? [] : null;
+    return /no server running|error connecting to/.test(stderr) ? [] : 'failed';
   }
+}
+
+// null: unknown (tmux is not installed, or it failed)
+export async function listTmuxSessions(): Promise<string[] | null> {
+  const sessions = await readTmuxSessions();
+  return Array.isArray(sessions) ? sessions : null;
 }
 
 export function agentRunning(sessions: string[] | null, name: string): boolean | null {
@@ -53,6 +60,13 @@ export function agentArgv(name: string, cwd: string, command: string, env: Recor
   const vars = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
   return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, ...vars, command, ';', 'set-option', '-t', name, 'window-size', 'latest'];
 }
+
+// Without tmux: the agent runs in this terminal, through the login shell as tmux would run it
+export function directArgv(command: string, shell = process.env.SHELL || 'sh'): string[] {
+  return [shell, '-lc', command];
+}
+
+export const NO_TMUX_HINT = 'tmux is not installed: the agent stops when this terminal closes (brew install tmux to keep it running)';
 
 // Run argv attached to the terminal; resolves with the exit code
 export function runTmux(argv: string[], cwd: string, env: Record<string, string | undefined>): Promise<number> {

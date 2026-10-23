@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { agentSessionName, agentRunning, agentArgv, listTmuxSessions } from '../agent-session';
+import { agentSessionName, agentRunning, agentArgv, listTmuxSessions, readTmuxSessions } from '../agent-session';
 
 jest.mock('child_process', () => ({
   ...jest.requireActual('child_process'),
@@ -66,5 +66,14 @@ describe('listTmuxSessions', () => {
   test('null on any other failure, so a transient error is not read as "no agents"', async () => {
     tmuxResult(failure({ stderr: 'server exited unexpectedly\n' }));
     await expect(listTmuxSessions()).resolves.toBeNull();
+  });
+
+  test('readTmuxSessions tells a missing tmux from a failing one', async () => {
+    tmuxResult(failure({ code: 'ENOENT' }));
+    await expect(readTmuxSessions()).resolves.toBe('missing');
+    tmuxResult(failure({ stderr: 'server exited unexpectedly\n' }));
+    await expect(readTmuxSessions()).resolves.toBe('failed');
+    tmuxResult(failure({ stderr: 'no server running on /tmp/tmux-501/default\n' }));
+    await expect(readTmuxSessions()).resolves.toEqual([]);
   });
 });

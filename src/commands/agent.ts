@@ -8,12 +8,13 @@ import { loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, agentArgv, agentRunning, agentSessionName, killTmuxSession, listTmuxSessions, runTmux } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, directArgv, killTmuxSession, readTmuxSessions, runTmux } from '../lib/agent-session';
 import type { AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
   json?: boolean;
   command?: string;
+  tmux?: boolean;
 }
 
 const ACTIONS = ['start', 'status', 'stop'];
@@ -24,14 +25,18 @@ export class AgentCommand extends BaseCommand {
       name: 'agent',
       description: 'Run or reattach an agent in a worktree (tmux)',
       arguments: '[action] [branch]',
-      options: [{ flags: '--command <cmd>', description: 'Command to run (default: the agent.command setting)' }],
+      options: [
+        { flags: '--command <cmd>', description: 'Command to run (default: the agent.command setting)' },
+        { flags: '--no-tmux', description: 'Run the agent directly in this terminal, without a tmux session' },
+      ],
       helpText: [
         'Actions:',
         '  start [branch]    run the agent in the worktree\'s tmux session, or reattach to it (default)',
         '  status [branch]   whether the session exists',
         '  stop [branch]     kill the session',
         '',
-        '[branch] defaults to the current branch; `kunj agent my-branch` starts. Needs tmux.',
+        '[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with',
+        '--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.',
       ].join('\n'),
     });
   }
@@ -60,22 +65,25 @@ export class AgentCommand extends BaseCommand {
     }
     const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
     const session = agentSessionName(repo.name, repo.id, wt.branch);
-    const sessions = await listTmuxSessions();
+    const tmux = await readTmuxSessions();
+    const sessions = Array.isArray(tmux) ? tmux : null;
 
     if (verb === 'status') {
       const running = agentRunning(sessions, session);
       if (this.jsonMode) {
         this.outputJSON({ branch: wt.branch, worktree: wt.path, session, running } satisfies AgentStatusJson);
       } else {
-        const state = running === null ? chalk.yellow('unknown (tmux is not installed)') : running ? chalk.green('running') : chalk.dim('not running');
+        const unknown = tmux === 'missing' ? 'unknown (tmux is not installed)' : 'unknown (tmux failed)';
+        const state = running === null ? chalk.yellow(unknown) : running ? chalk.green('running') : chalk.dim('not running');
         console.log(`${wt.branch}: ${state} (${session})`);
       }
       return;
     }
 
     if (verb === 'stop') {
-      if (sessions === null) throw new AgentError('tmux-missing', 'tmux is not installed; brew install tmux');
-      if (!sessions.includes(session)) throw new AgentError('not-running', `No agent session for ${wt.branch}`);
+      if (tmux === 'missing') throw new AgentError('tmux-missing', 'tmux is not installed; brew install tmux');
+      // When the listing failed, kill-session says whether the session exists
+      if (sessions && !sessions.includes(session)) throw new AgentError('not-running', `No agent session for ${wt.branch}`);
       await killTmuxSession(session);
       if (this.jsonMode) {
         this.outputJSON({ success: true, branch: wt.branch, session } satisfies AgentStopJson);
@@ -85,13 +93,16 @@ export class AgentCommand extends BaseCommand {
       return;
     }
 
-    if (sessions === null) throw new AgentError('tmux-missing', 'tmux is not installed; brew install tmux');
     if (!process.stdin.isTTY) throw new AgentError('no-tty', 'kunj agent needs a terminal to attach to');
     const config = await loadResolvedConfig(process.cwd());
     const command = opts.command || config.agent?.command || 'claude';
     const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path };
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;
-    process.exitCode = await runTmux(agentArgv(session, wt.path, command, vars), wt.path, { ...env, ...vars });
+    // Like kunj ct agent in an image without tmux: the agent runs here and ends with the terminal
+    const direct = opts.tmux === false || tmux === 'missing';
+    if (tmux === 'missing' && opts.tmux !== false) process.stderr.write(NO_TMUX_HINT + '\n');
+    const argv = direct ? directArgv(command) : agentArgv(session, wt.path, command, vars);
+    process.exitCode = await runTmux(argv, wt.path, { ...env, ...vars });
   }
 }

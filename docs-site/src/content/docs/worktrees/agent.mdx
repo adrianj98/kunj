@@ -25,7 +25,20 @@ whether the session exists and `stop` kills it. All three take `--json`.
 
 The command is `agent.command` (default `claude`); `--command <cmd>` overrides it for one run. The
 agent starts in the worktree's directory with `KUNJ_BRANCH`, `KUNJ_REPO` and `KUNJ_WORKTREE` set.
-`kunj agent` needs tmux and a terminal; without tmux it stops with an install hint.
+`kunj agent` needs a terminal, and works from inside a tmux pane too.
+
+## Without tmux
+
+tmux is optional. When it is not installed, `start` runs the command directly in your terminal,
+through your login shell, after one line on stderr:
+
+```
+tmux is not installed: the agent stops when this terminal closes (brew install tmux to keep it running)
+```
+
+The agent's exit code becomes `kunj agent`'s. `--no-tmux` does the same when tmux is installed.
+Without tmux `status` reports `running: null` (unknown) and `stop` fails with `tmux-missing`, since
+there is no session to stop.
 
 ## Session names
 

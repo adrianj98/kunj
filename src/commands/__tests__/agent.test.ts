@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { AgentCommand } from '../agent';
-import { AgentError, agentArgv, agentSessionName, listTmuxSessions, runTmux, killTmuxSession } from '../../lib/agent-session';
+import { AgentError, agentArgv, agentSessionName, readTmuxSessions, runTmux, killTmuxSession } from '../../lib/agent-session';
 
 jest.mock('../../lib/worktree', () => ({
   ...jest.requireActual('../../lib/worktree'),
@@ -20,7 +20,7 @@ jest.mock('../../lib/repo-identity', () => ({
 
 jest.mock('../../lib/agent-session', () => ({
   ...jest.requireActual('../../lib/agent-session'),
-  listTmuxSessions: jest.fn(),
+  readTmuxSessions: jest.fn(),
   runTmux: jest.fn(async () => 0),
   killTmuxSession: jest.fn(async () => undefined),
 }));
@@ -34,7 +34,7 @@ jest.mock('../../lib/git', () => ({
 }));
 
 const session = agentSessionName('app', 'github.com/acme/app', 'feature-a');
-const tmuxSessions = listTmuxSessions as jest.Mock;
+const tmuxSessions = readTmuxSessions as jest.Mock;
 let stdout: string[];
 let ttyBefore: boolean | undefined;
 
@@ -64,7 +64,7 @@ test('status --json reports the session', async () => {
 });
 
 test('status without a branch uses the current branch and reports null without tmux', async () => {
-  tmuxSessions.mockResolvedValue(null);
+  tmuxSessions.mockResolvedValue('missing');
   await new AgentCommand().execute('status', { json: true });
   expect(JSON.parse(stdout.join('')).running).toBeNull();
 });
@@ -99,9 +99,49 @@ test('a bare branch name starts, and --command overrides the setting', async () 
   );
 });
 
-test('start without tmux fails with tmux-missing', async () => {
-  tmuxSessions.mockResolvedValue(null);
-  await expect(new AgentCommand().execute('start', 'feature-a', {})).rejects.toMatchObject({ name: 'AgentError', code: 'tmux-missing' });
+test('start without tmux runs the command directly, prints the hint, passes the exit code', async () => {
+  tmuxSessions.mockResolvedValue('missing');
+  (runTmux as jest.Mock).mockResolvedValueOnce(3);
+  const stderr: string[] = [];
+  jest.spyOn(process.stderr, 'write').mockImplementation((chunk: any) => {
+    stderr.push(String(chunk));
+    return true;
+  });
+  const shellBefore = process.env.SHELL;
+  process.env.SHELL = '/bin/zsh';
+  try {
+    await new AgentCommand().execute('start', 'feature-a', {});
+  } finally {
+    if (shellBefore === undefined) delete process.env.SHELL;
+    else process.env.SHELL = shellBefore;
+  }
+  const [argv, cwd, env] = (runTmux as jest.Mock).mock.calls[0];
+  expect(argv).toEqual(['/bin/zsh', '-lc', 'claude']);
+  expect(cwd).toBe('/wt/feature-a');
+  expect(env).toEqual(expect.objectContaining({ KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a' }));
+  expect(env).not.toHaveProperty('TMUX');
+  expect(stderr.join('')).toBe('tmux is not installed: the agent stops when this terminal closes (brew install tmux to keep it running)\n');
+  expect(process.exitCode).toBe(3);
+});
+
+test('--no-tmux runs the command directly even when tmux is installed', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  await new AgentCommand().execute('start', 'feature-a', { tmux: false });
+  expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual([process.env.SHELL || 'sh', '-lc', 'claude']);
+  expect(stderr).not.toHaveBeenCalled();
+});
+
+test('stop without tmux fails with tmux-missing', async () => {
+  tmuxSessions.mockResolvedValue('missing');
+  await expect(new AgentCommand().execute('stop', 'feature-a', {})).rejects.toMatchObject({ name: 'AgentError', code: 'tmux-missing' });
+  expect(killTmuxSession).not.toHaveBeenCalled();
+});
+
+test('start without a terminal fails with no-tty on the direct path too', async () => {
+  tmuxSessions.mockResolvedValue('missing');
+  (process.stdin as any).isTTY = false;
+  await expect(new AgentCommand().execute('start', 'feature-a', {})).rejects.toMatchObject({ code: 'no-tty' });
   expect(runTmux).not.toHaveBeenCalled();
 });
 
