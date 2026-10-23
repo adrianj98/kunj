@@ -694,3 +694,6 @@ macOS app zip (`kunj install macos` needs a release that has one).
   organize-windows, then workspace-ide), checked every behaviour claim against `src/` and `macos-app/`
   and fixed the specs where the code differs; updated the links in CLAUDE.md and the plans. Why: two
   folders said the same things twice and had drifted from each other and from the code.
+- Merged the workspace IDE design into `docs/specs/workspace-ide.md` (CLI contract marked shipped with its
+  commits, events and `agent` field described as the code does, Electron decision reopened by the
+  native-shell spike, app plan on hold) and deleted `docs/superpowers/specs/`. Why: one spec per topic.
