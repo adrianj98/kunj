@@ -287,7 +287,8 @@ async function getRepoPaths(cwd: string): Promise<{ currentPath: string; repoRoo
 // Name and id for agent session names; the listing must not fail because of them
 function agentRepoIdentity(paths: { repoRoot: string; commonDir: string }): { name: string; id: string } {
   try {
-    return repoIdentity();
+    // From files, not git: the listing adds no subprocess for it
+    return repoIdentity(paths);
   } catch {
     return { name: path.basename(paths.repoRoot), id: paths.commonDir };
   }

@@ -58,7 +58,7 @@ export class AgentCommand extends BaseCommand {
     if (!wt || !wt.branch || !wt.exists || wt.bare) {
       throw new AgentError('no-worktree', `No worktree for ${name || 'the current directory'}; see kunj worktree list`);
     }
-    const repo = repoIdentity();
+    const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
     const session = agentSessionName(repo.name, repo.id, wt.branch);
     const sessions = await listTmuxSessions();
 

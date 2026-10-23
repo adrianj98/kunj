@@ -1,3 +1,4 @@
+import { Command } from 'commander';
 import { AgentCommand } from '../agent';
 import { AgentError, agentArgv, agentSessionName, listTmuxSessions, runTmux, killTmuxSession } from '../../lib/agent-session';
 
@@ -114,4 +115,18 @@ test('stop when not running fails with not-running', async () => {
 test('unknown branch fails with no-worktree', async () => {
   tmuxSessions.mockResolvedValue([]);
   await expect(new AgentCommand().execute('status', 'nope', {})).rejects.toMatchObject({ code: 'no-worktree' });
+});
+
+test('status --json for an unknown branch prints a coded error and exits 1', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  let exit: unknown;
+  jest.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    exit = code;
+    throw new Error('exit');
+  }) as any);
+  const program = new Command();
+  new AgentCommand().register(program);
+  await program.parseAsync(['agent', 'status', 'nope', '--json'], { from: 'user' }).catch(() => undefined);
+  expect(JSON.parse(stdout.join(''))).toEqual({ error: { code: 'no-worktree', message: expect.stringContaining('nope') } });
+  expect(exit).toBe(1);
 });

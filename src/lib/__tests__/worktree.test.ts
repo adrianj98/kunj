@@ -5,6 +5,7 @@ import * as path from 'path';
 import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, listWorktreesDetailed, WorktreeSession, PullRequestInfo } from '../worktree';
 import { agentSessionName, listTmuxSessions } from '../agent-session';
 import { repoIdentity } from '../repo-identity';
+import { repoIdFromUrl } from '../container/names';
 
 const mockExec = jest.fn<(cmd: string, opts: unknown, cb: (e: Error | null, r: { stdout: string; stderr: string }) => void) => void>();
 
@@ -232,6 +233,16 @@ describe('agent status', () => {
     tmuxMock.mockResolvedValue(null);
     const listing = await listWorktreesDetailed({ includeStatus: true, includePullRequests: false });
     expect(listing.worktrees.find(w => w.branch === 'feature-a')!.agent!.running).toBeNull();
+  });
+
+  it('names sessions from the origin in the git config file, as kunj agent does', async () => {
+    const url = 'https://github.com/acme/app.git';
+    fs.mkdirSync(gitCommonDir, { recursive: true });
+    fs.writeFileSync(path.join(gitCommonDir, 'config'), `[remote "origin"]\n\turl = ${url}\n`);
+    identityMock.mockImplementation(((where: never) => jest.requireActual<typeof import('../repo-identity')>('../repo-identity').repoIdentity(where)) as never);
+    tmuxMock.mockResolvedValue([]);
+    const listing = await listWorktreesDetailed({ includeStatus: true, includePullRequests: false });
+    expect(listing.worktrees.find(w => w.branch === 'feature-a')!.agent!.session).toBe(agentSessionName('app', repoIdFromUrl(url), 'feature-a'));
   });
 
   it('does not ask tmux when status is not included', async () => {
