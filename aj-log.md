@@ -43,6 +43,14 @@ Changes made with Claude, and why.
   VS Code's remote protocol is not used: it is internal to Microsoft's VS Code, and VS Code attaches to
   kunj containers on its own over `docker exec`, so kunj maintains no second protocol.
 
+## 2026-10-23 — Specs saved to disk in `docs/specs/`
+
+- Added `docs/specs/{container-system,branch-containers,blueprints,container-phase-2,workspace-ide}.md` plus a
+  README index: on-disk copies of the five Claude Docs (umbrella spec, phase 1, blueprints, phase 2, workspace
+  IDE). The first four were rebuilt from the edits made through Claude Code because the docs live in another
+  organization than the session; the IDE spec is a direct export. Why: user wants to start clean sessions from
+  files, not from docs the session may not be able to reach. Drawings are noted in italics.
+
 ## 2026-10-23 — Container spec: workspace IDE as phase 3
 
 - CLAUDE.md (Branch Containers) and the phase 2 design now name the workspace IDE as phase 3, after phase 2,
