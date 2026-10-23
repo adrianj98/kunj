@@ -92,21 +92,46 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
   });
 
   // A directory that is missing (or cannot be watched) is skipped
-  const watch = (dir: string, recursive: boolean, onChange: (file: string | null) => void) => {
+  const watch = (dir: string, recursive: boolean, onChange: (file: string | null) => void): fs.FSWatcher | null => {
     try {
       const watcher = fs.watch(dir, { recursive }, (_type, file) => onChange(file == null ? null : String(file)));
       watcher.on('error', () => watcher.close());
       cleanup.push(() => watcher.close());
+      return watcher;
     } catch {
-      // not watchable
+      return null;
     }
   };
 
+  // Never the whole common dir recursively: worktrees live in it by default (.git/kunj/worktrees),
+  // node_modules and all. Its top level (HEAD, index, packed-refs) plus refs/ and worktrees/.
   for (const repo of repos) {
     const ref = { name: repo.name, root: repo.root };
-    watch(repo.gitCommonDir, true, file => {
-      if (file === null || gitPathMatters(file)) debounce(`git:${repo.gitCommonDir}`, () => emit({ type: 'git', repo: ref, at: at() }));
+    const onGit = (relative: string | null) => {
+      if (relative === null || gitPathMatters(relative)) debounce(`git:${repo.gitCommonDir}`, () => emit({ type: 'git', repo: ref, at: at() }));
+    };
+    const subWatchers = new Map<string, fs.FSWatcher>();
+    // (Re)starts the watch of refs/ or worktrees/ when it exists; worktrees/ appears with the first linked worktree
+    const syncSub = (name: 'refs' | 'worktrees') => {
+      const dir = path.join(repo.gitCommonDir, name);
+      const current = subWatchers.get(name);
+      if (fs.existsSync(dir)) {
+        if (current) return;
+        const watcher = watch(dir, true, file => onGit(file === null ? null : path.join(name, file)));
+        if (watcher) subWatchers.set(name, watcher);
+      } else if (current) {
+        current.close();
+        subWatchers.delete(name);
+      }
+    };
+    const top = watch(repo.gitCommonDir, false, file => {
+      if (file === 'refs' || file === 'worktrees') syncSub(file);
+      onGit(file);
     });
+    if (top) {
+      syncSub('refs');
+      syncSub('worktrees');
+    }
   }
 
   const registryFiles: Record<string, 'sessions' | 'forwards' | 'repos'> = {

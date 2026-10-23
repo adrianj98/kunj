@@ -12,6 +12,9 @@ jest.mock('../agent-session', () => ({
   listTmuxSessions: jest.fn(async () => []),
 }));
 
+// fs.watch tests wait for real events and quiet periods; the default 5 s is too short under load
+jest.setTimeout(20_000);
+
 const tmuxMock = listTmuxSessions as unknown as jest.Mock<() => Promise<string[] | null>>;
 
 let tmp: string;
@@ -20,6 +23,9 @@ let kunjDir: string;
 let events: EventJson[];
 let controller: AbortController;
 let running: Promise<void> | null;
+// The module object itself: `import * as` gives a copy whose properties cannot be spied on
+const nodeFs: typeof fs = jest.requireActual('fs');
+let watchSpy: jest.SpiedFunction<typeof fs.watch> | null = null;
 
 function start(options: Partial<Parameters<typeof watchEvents>[0]> = {}): void {
   running = watchEvents({
@@ -57,9 +63,10 @@ async function settle(quietMs = 400): Promise<void> {
 const ofType = (type: EventJson['type']) => events.filter(e => e.type === type);
 
 // The watchers start asynchronously: write until one event of the type has arrived, then let them settle
-async function prime(type: EventJson['type'], write: () => void): Promise<void> {
+// (quietMs longer than the debounce: a write just before the event may have started another window)
+async function prime(type: EventJson['type'], write: () => void, quietMs = 400): Promise<void> {
   await waitFor(() => ofType(type).length > 0, write);
-  await settle();
+  await settle(quietMs);
   events = [];
 }
 
@@ -85,6 +92,8 @@ beforeEach(() => {
 afterEach(async () => {
   controller.abort();
   await running;
+  watchSpy?.mockRestore();
+  watchSpy = null;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -114,12 +123,12 @@ describe('watchEvents', () => {
   const headFile = () => path.join(repo.gitCommonDir, 'HEAD');
 
   it('two HEAD writes within the debounce yield one git event with the repo', async () => {
-    start({ debounceMs: 300 });
-    await prime('git', () => fs.writeFileSync(headFile(), 'ref: refs/heads/main\n'));
+    start({ debounceMs: 1000 });
+    await prime('git', () => fs.writeFileSync(headFile(), 'ref: refs/heads/main\n'), 1500);
     fs.writeFileSync(headFile(), 'ref: refs/heads/x\n');
     fs.writeFileSync(headFile(), 'ref: refs/heads/y\n');
     await waitFor(() => ofType('git').length > 0);
-    await settle(600);
+    await settle(1500);
     expect(ofType('git')).toEqual([{ type: 'git', repo: { name: 'app', root: repo.root }, at: expect.any(String) }]);
   });
 
@@ -132,6 +141,40 @@ describe('watchEvents', () => {
     fs.writeFileSync(path.join(repo.gitCommonDir, 'logs', 'HEAD'), 'x');
     await settle(600);
     expect(ofType('git')).toEqual([]);
+  });
+
+  it('does not watch the worktree checkouts inside the common dir', async () => {
+    watchSpy = jest.spyOn(nodeFs, 'watch');
+    const nodeModules = path.join(repo.gitCommonDir, 'kunj', 'worktrees', 'x', 'node_modules');
+    fs.mkdirSync(nodeModules, { recursive: true });
+    start();
+    await prime('git', () => fs.writeFileSync(headFile(), 'ref: refs/heads/main\n'));
+    const recursive = watchSpy!.mock.calls
+      .filter(([, opts]) => (opts as fs.WatchOptions | undefined)?.recursive)
+      .map(([dir]) => String(dir));
+    expect(recursive).toEqual([path.join(repo.gitCommonDir, 'refs')]);
+    expect(watchSpy!.mock.calls.map(([dir]) => String(dir))).not.toContain(path.join(repo.gitCommonDir, 'kunj'));
+    for (let i = 0; i < 3; i++) fs.writeFileSync(path.join(nodeModules, 'a'), String(i));
+    await settle(600);
+    expect(ofType('git')).toEqual([]);
+  });
+
+  it('a new ref under refs/ yields a git event', async () => {
+    start();
+    await prime('git', () => fs.writeFileSync(headFile(), 'ref: refs/heads/main\n'));
+    await waitFor(() => ofType('git').length > 0, () => fs.writeFileSync(path.join(repo.gitCommonDir, 'refs', 'heads', 'y'), 'b'.repeat(40) + '\n'));
+  });
+
+  it('worktrees/ created after start is watched: worktrees/<n>/HEAD yields a git event', async () => {
+    watchSpy = jest.spyOn(nodeFs, 'watch');
+    start();
+    await prime('git', () => fs.writeFileSync(headFile(), 'ref: refs/heads/main\n'));
+    const worktrees = path.join(repo.gitCommonDir, 'worktrees');
+    fs.mkdirSync(path.join(worktrees, 'n'), { recursive: true });
+    await waitFor(() => watchSpy!.mock.calls.some(([dir]) => String(dir) === worktrees));
+    await settle();
+    events = [];
+    await waitFor(() => ofType('git').length > 0, () => fs.writeFileSync(path.join(worktrees, 'n', 'HEAD'), 'ref: refs/heads/n\n'));
   });
 
   it('writing worktree-sessions.json yields a sessions event', async () => {

@@ -337,7 +337,9 @@ the release matching the CLI version, so keep the asset names in step with it.
 
 `kunj events [--json] [--repo <path>...]` (src/commands/events.ts, watcher in src/lib/events.ts,
 `EventJson` in json-types.ts) is a long-lived NDJSON stream for the workspace app: `hello` first,
-then `git` (recursive `fs.watch` of each repo's git common dir, filtered by `gitPathMatters()`),
+then `git` (`fs.watch` of each repo's git common dir top level, plus `refs/` and `worktrees/`
+recursively, started when they appear; never the whole common dir recursively, because worktrees
+live in `.git/kunj/worktrees` with their node_modules; filtered by `gitPathMatters()`),
 `sessions`/`forwards`/`repos` (the registry files in `~/.kunj`), `agent` (a poll of `kunj-` tmux
 sessions, 5 s) and `container` (`ContainerBackend.events()`, filtered on `kunj.repo`; exec/attach/copy
 actions are dropped because `kunj ct list` execs and would trigger its own refresh). Changes are
@@ -345,6 +347,8 @@ debounced per key (250 ms, the first change starts the timer). An unreachable ba
 `backend unavailable`, then `info()` is retried every 10 s until `available`. Container events map to
 a repo through `repoIdentity().id`, the same id as the `kunj.repo` label. It stops on SIGINT/SIGTERM
 or when stdin ends, so a child dies with its parent. On the fast path; a missing directory is skipped.
+`index` is a trigger, so `getWorktreeStatus()` runs `git status` with `GIT_OPTIONAL_LOCKS=0`: otherwise
+git rewrites a stale index on every listing, which is another `git` event and another refresh.
 
 ## Hooks
 

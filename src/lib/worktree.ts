@@ -234,6 +234,9 @@ export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeS
     const { stdout } = await execAsync('git status --porcelain=v2 --branch --untracked-files=normal', {
       cwd: worktreePath,
       maxBuffer: 10 * 1024 * 1024,
+      // git status refreshes stale stat info in .git/index; that write is a `git` event for
+      // `kunj events`, whose consumer would list again, and so on
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     });
     return parseStatusV2(stdout);
   } catch {

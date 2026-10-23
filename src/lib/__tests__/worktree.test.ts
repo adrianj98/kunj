@@ -2,7 +2,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, listWorktreesDetailed, WorktreeSession, PullRequestInfo } from '../worktree';
+import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, listWorktreesDetailed, getWorktreeStatus, WorktreeSession, PullRequestInfo } from '../worktree';
 import { agentSessionName, listTmuxSessions } from '../agent-session';
 import { repoIdentity } from '../repo-identity';
 import { repoIdFromUrl } from '../container/names';
@@ -261,5 +261,19 @@ describe('agent status', () => {
       running: false,
       session: agentSessionName(path.basename(dir), gitCommonDir, 'feature-a'),
     });
+  });
+});
+
+describe('getWorktreeStatus', () => {
+  it('runs git status with GIT_OPTIONAL_LOCKS=0, so a listing never rewrites the index', async () => {
+    mockExec.mockReset();
+    mockExec.mockImplementation((_cmd, _opts, cb) => cb(null, { stdout: '# branch.head main\n', stderr: '' }));
+    await getWorktreeStatus('/wt');
+    expect(mockExec).toHaveBeenCalledTimes(1);
+    const [cmd, opts] = mockExec.mock.calls[0] as unknown as [string, { cwd: string; env: NodeJS.ProcessEnv }];
+    expect(cmd).toMatch(/^git status /);
+    expect(opts.cwd).toBe('/wt');
+    expect(opts.env.GIT_OPTIONAL_LOCKS).toBe('0');
+    expect(opts.env.PATH).toBe(process.env.PATH);
   });
 });
