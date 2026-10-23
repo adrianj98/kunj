@@ -250,9 +250,10 @@ either design.
 
 The user ran the demo app (`open build/NativeIDESpike.app`) and reported "all good" for checks 1
 and 2 below: real Cmd+F, Cmd+C, Cmd+Shift+] and Cmd+W in the diff and terminal tabs, and the
-on-screen look while dragging the window to resize it. Checks 3 to 5 are still open.
+on-screen look while dragging the window to resize it. The user decided checks 3 to 5 (container
+agent, iTerm2 baseline, Metal renderer) are not needed, so the spike is closed.
 
-## Manual checks left for you
+## Manual checks (1 and 2 done by the user; 3 to 5 dropped)
 
 1. **Real keystrokes.** Run `spikes/native-ide/scripts/bundle.sh`, then `open
    spikes/native-ide/build/NativeIDESpike.app`. In "kunj (host)", click the "diff container.ts" tab
