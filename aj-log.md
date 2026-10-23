@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+
+## 2026-10-23 — `kunj agent` verified against a real tmux
+
+- Ran the manual checks from the CLI contract's final fixes report with tmux 3.8: `KUNJ_*` are this
+  branch's with another tmux server running, a second `kunj agent` reattaches to the same pane instead of
+  starting a second agent, starting from inside a tmux pane works, and the session has `window-size
+  latest`. Moved the item to Done in `docs/specs/README.md`. Why: user installed tmux and asked for it.
 ## 2026-10-23 — Specs tracker: phase 2 progress brought up to date
 
 - `docs/specs/README.md`: added the cross-feature fixes (a32bc90) to Done, the missing `forward --auto`

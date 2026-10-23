@@ -36,6 +36,7 @@ page only says where each thing stands.
 | `kunj agent` for worktrees, tmux optional | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 2974aef, 75380f3, ce52ad8, 453f241, e5b15a4 |
 | `kunj ct file read\|write` | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 47fcefe, 5721f17 |
 | `kunj events --json` with status poll | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 189d9ba, 3685ef6, ce5691d |
+| `kunj agent` checked with a real tmux 3.8: `-e` gives this branch's `KUNJ_*` with another tmux server running, a rerun reattaches (`-A`, same pane, no second agent), it starts from inside a tmux pane without the nesting error, the session has `window-size latest` | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | verified 2026-10-23, no code change |
 | Specs merged into one folder and checked against the code | this folder | f3a5e35, d1eea00 |
 
 ## In progress
@@ -65,10 +66,9 @@ page only says where each thing stands.
 
 | Item | Why |
 | --- | --- |
-| Check `kunj agent` with a real tmux (`-e` variables, `-A` reattach, `window-size latest`, run inside a tmux pane) | tmux is not installed on the machine that built it; the commands are in the CLI contract's final fixes report |
 | Verify Docker-in-Docker `sysbox` mode on a real daemon | Docker Desktop has no `sysbox-runc`; needs a Linux host or a VM with sysbox. `privileged` was only smoke-tested outside kunj |
 | Delete a stray test file: `~/Library/Application Support/Code/User/globalStorage/ms-vscode-remote.remote-containers/imageConfigs/kunj-sandbox%3a1.3.0.json` | Left by an early `kunj ct open` test run before it was made hermetic; the agent was not allowed to delete it |
-| Delete or keep the duplicate outline-only doc <https://claude.ai/artifact/VE9Ltof3P1N62yWZyyExDW> | Created by mistake while the original container spec was unreachable |
+| Delete the duplicate outline-only doc <https://claude.ai/artifact/VE9Ltof3P1N62yWZyyExDW> | Created by mistake; it is in a different claude.ai organization than the agent session, so delete it from claude.ai yourself |
 | Decide the workspace app runtime (Electron or native) | After reading the spike's `spikes/native-ide/REPORT.md` |
 
 The Claude Docs where the discussions started are no longer kept in step: container system
