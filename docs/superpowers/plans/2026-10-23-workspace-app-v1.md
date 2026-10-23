@@ -6,7 +6,7 @@
 
 **Architecture:** One AppKit process (Swift, SwiftPM, no Xcode). `KunjWorkspaceCore` (Foundation only, `swift test`) holds the CLI runner, the JSON mirrors, the environment model and store, the event stream, terminal specs, diff and file services and the layout file. `KunjWorkspace` holds the views, SwiftTerm terminals and two Monaco WKWebViews. State comes from `kunj … --json`, refreshed by `kunj events --json`; agents live in tmux sessions kunj names. The spec's Architecture section is the design; this plan is its task list.
 
-**Tech Stack:** Swift 6.4 toolchain (Command Line Tools, Swift 5 language mode), AppKit, WebKit, SwiftTerm 1.20.0 (vendored, patched), monaco-editor 0.57.0 (AMD `min/vs`), Inter + JetBrains Mono (bundled), XCTest; TypeScript/Jest for the CLI task.
+**Tech Stack:** Swift 6.4 toolchain (Command Line Tools, Swift 5 language mode), AppKit, WebKit, SwiftTerm 1.20.0 (vendored, patched), monaco-editor 0.57.0 (AMD `min/vs`), Inter + JetBrains Mono (bundled), Swift Testing (`import Testing`; the Command Line Tools do not reliably ship XCTest); TypeScript/Jest for the CLI task.
 
 **Spec:** `docs/specs/workspace-ide.md` (Layout, Architecture, Decisions) and `docs/workspace-app/design/` (DESIGN.md, tokens.json, mockups).
 
@@ -16,10 +16,12 @@
 - The CLI is the only contract: the app runs `kunj … --json` and never imports kunj's runtime, never runs `docker`, and runs `git` only read-only for diff content in worktrees, always with `GIT_OPTIONAL_LOCKS=0`.
 - Every kunj invocation runs with `currentDirectoryURL` = the repository `root` from `kunj repos --json` and names the branch explicitly.
 - `MIN_KUNJ_VERSION = "1.3.0"` (the first release after v1.2.0; `package.json` is `1.0.0` on main and the release workflow rewrites it). A kunj reporting `1.0.0` is a dev build: accepted, shown as `dev`.
-- macOS 14+, arm64 and x86_64 (`swift build --arch arm64 --arch x86_64` in `bundle.sh`), ad-hoc signed, not notarized.
+- macOS 14+, arm64 and x86_64 (`bundle.sh` builds each with `swift build --triple <arch>-apple-macosx14.0` in its own scratch dir and joins them with `lipo`; `--arch arm64 --arch x86_64` switches to XCBuild, which cannot link SwiftTerm's plugin for x86_64 under the Command Line Tools), ad-hoc signed, not notarized.
 - Terminal env for every PTY: `TERM=xterm-256color`, `COLORTERM=truecolor`, `LANG` from the user's environment or `en_US.UTF-8`, PATH from the login shell; `NO_COLOR`, `FORCE_COLOR`, `TERM_PROGRAM*`, `TERM_SESSION_ID` and every `CLAUDECODE*`/`CLAUDE_CODE*` variable removed.
 - Every colour, size and radius comes from `DesignTokens` (generated from `tokens.json`); no literal colours in views. Sans = Inter, mono = JetBrains Mono (bundled), with the system fonts as fallback when registration fails.
-- Append a line per change to `aj-log.md`; commit messages end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- Append a line per change to `aj-log.md`; commit messages end with the session's `Co-Authored-By:` attribution line (currently `Claude Opus 5.5 <noreply@anthropic.com>`).
+- Tests use Swift Testing: the snippets below are written as `func testX()`/`XCTAssert…` shorthand; write them as `@Test func x()` with `#expect`/`#require` (a throw check is `#expect(throws:)`, a skip is a `.enabled(if:)` trait). Shared helpers live in `Tests/KunjWorkspaceCoreTests/Support.swift` (`appRoot`, `repoRoot`, `fixturesDir`, `responsesDir`, `fakeKunjPath`, `fakeKunjResponseName`, `tempDirectory`, `runFakeKunj`).
+- Run `scripts/test.sh` and `scripts/bundle.sh` with your own `SCRATCH=.build/<name>` when other agents build at the same time (`ARCHS=arm64` while iterating); `build/` is shared, so screenshot right after your own bundle.
 - The app has no automated UI tests; every UI task ends with `scripts/bundle.sh`, a `--demo --screenshot` render compared against `warm.png`, and a run against the real kunj.
 
 ## Review Focus
@@ -110,13 +112,14 @@ git add -A src docs aj-log.md && git commit -m "kunj agent: report waiting-for-i
   - `public enum Layout { public static let sidebarWidth = 272.0, headerHeight = 52.0, tabbarHeight = 40.0, statusbarHeight = 28.0, changesFileListWidth = 196.0, sidebarRowPaddingV = 9.0, sidebarRowPaddingH = 10.0; public static let paneSplit: (Double, Double) = (11, 9) }`
   - `public enum Radius { public static let control = 5.0, card = 6.0, window = 12.0 }`
   - `public enum TypeScale { public static let body = 13.0, small = 12.0, caption = 11.0, monoTerminal = 12.5, monoDiff = 11.5, title = 14.0, hint = 10.5 }`
-  - `public enum Fonts { public static let sans = "Inter", mono = "JetBrainsMono" }` (PostScript family names)
+  - `public enum Fonts { public static let sans = "Inter", mono = "JetBrainsMono" }`: PostScript name prefixes, not family names; use `NSFont(name: "\(Fonts.mono)-Regular", …)` (`-Medium`, and `-SemiBold` for Inter)
 - `HexColor.swift`: `public struct RGBA: Equatable { r, g, b, a: Double }`, `public func parseHex(_ s: String) -> RGBA?` (`#rgb`, `#rrggbb`, `#rrggbbaa`).
 - `Package.swift`: tools 5.10, platforms `.macOS(.v14)`, dependency `.package(path: "vendor/SwiftTerm")`, targets `KunjWorkspaceCore` (no deps), `KunjWorkspace` (Core, SwiftTerm), `KunjWorkspaceCoreTests`.
 - `scripts/gen-tokens.js`: `node scripts/gen-tokens.js` reads `../docs/workspace-app/design/tokens.json` and writes `DesignTokens.swift` with a `// Generated by scripts/gen-tokens.js from docs/workspace-app/design/tokens.json; do not edit` header.
 - `scripts/fetch-fonts.sh`: downloads Inter 4.1 (`https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip`) and JetBrains Mono 2.304 (`https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip`), checks a pinned sha256 of each zip, extracts `Inter-Regular/Medium/SemiBold.ttf` (the static `extras/ttf` files, or `InterVariable.ttf`) and `JetBrainsMono-Regular/Medium.ttf` into `Resources/fonts/`, skipping when present. `Info.plist` has `ATSApplicationFontsPath` = `fonts`.
-- `scripts/bundle.sh`: like the spike's (SwiftTerm prepare, Monaco copy, fonts, release build for both arches with the SDK fallback, `build/Kunj Workspace.app`, Info.plist from `Resources/Info.plist` with `__VERSION__`, SwiftTerm resource bundle, `codesign --sign -`); `--install` copies to `/Applications/Kunj Workspace.app` and launches with `env -u NO_COLOR -u FORCE_COLOR open`.
-- `scripts/test.sh`: `swift test` with the SDK fallback.
+- `scripts/bundle.sh`: like the spike's (SwiftTerm prepare, Monaco copy, fonts, a release build per arch (`--triple`, `<SCRATCH>/release-<arch>`) joined with `lipo`, with the SDK fallback; `SCRATCH`, `ARCHS`, `VERSION`, `CODESIGN_IDENTITY`, `SDKROOT` documented in the README; `build/Kunj Workspace.app`, Info.plist from `Resources/Info.plist` with `__VERSION__`, SwiftTerm resource bundle, `codesign --sign -`); `--install` copies to `/Applications/Kunj Workspace.app` and launches with `env -u NO_COLOR -u FORCE_COLOR open`.
+- `scripts/test.sh`: `swift test` with the SDK fallback; `SCRATCH=<dir>` sets `--scratch-path`.
+- Also shipped here (moved forward from Task 3): `Tests/Fixtures/fake-kunj`, `Tests/KunjWorkspaceCoreTests/Support.swift` and `FakeKunjTests.swift`, which pin the fixture naming rule.
 - `.gitignore`: `.build/`, `build/`, `vendor/`, `web/node_modules/`, `Resources/web/vs/`, `Resources/fonts/`, `build.log`.
 - `main.swift` + `AppDelegate`: a 1440×900 window titled "Kunj Workspace", `titlebarAppearsTransparent`, `.fullSizeContentView`, `titleVisibility = .hidden`; `MainWindowController` lays out three empty regions with the token colours: sidebar 272 wide in `side` over an `NSVisualEffectView(.sidebar)`, a 52 px header strip, a left column and a right column separated by 1 px `border` lines, a 28 px status bar. `--screenshot <path>` writes a PNG of the window after the first layout and quits (snapshot code from `spikes/native-ide/Sources/NativeIDESpike/Workspace.swift`).
 
@@ -158,7 +161,8 @@ git add workspace-app aj-log.md && git commit -m "workspace-app: Swift package, 
 ### Task 3: `KunjCLI` with the login-shell PATH and the version check
 
 **Files:**
-- Create: `workspace-app/Sources/KunjWorkspaceCore/CLI/Version.swift`, `workspace-app/Sources/KunjWorkspaceCore/CLI/ShellEnvironment.swift`, `workspace-app/Sources/KunjWorkspaceCore/CLI/KunjCLI.swift`, `workspace-app/Tests/Fixtures/fake-kunj` (executable `sh`), `workspace-app/Tests/Fixtures/responses/version.txt`, `workspace-app/Tests/KunjWorkspaceCoreTests/Support.swift` (fixture paths, a `KunjCLI` pointed at `fake-kunj`)
+- Create: `workspace-app/Sources/KunjWorkspaceCore/CLI/Version.swift`, `workspace-app/Sources/KunjWorkspaceCore/CLI/ShellEnvironment.swift`, `workspace-app/Sources/KunjWorkspaceCore/CLI/KunjCLI.swift`, `workspace-app/Tests/Fixtures/responses/version.txt`
+- Modify: `workspace-app/Tests/KunjWorkspaceCoreTests/Support.swift` (add a `KunjCLI` pointed at `fakeKunjPath`); `fake-kunj` already exists (Task 2)
 - Test: `workspace-app/Tests/KunjWorkspaceCoreTests/VersionTests.swift`, `workspace-app/Tests/KunjWorkspaceCoreTests/KunjCLITests.swift`
 
 **Interfaces:**
@@ -170,7 +174,7 @@ git add workspace-app aj-log.md && git commit -m "workspace-app: Swift package, 
   - `public final class KunjCLI: @unchecked Sendable { public init(command: String, path: String); public static func discover(command: String, path: String) async throws -> (KunjCLI, KunjStatus)` (`kunj -V` → version; `ENOENT`/exit 127 → `notFound`; below min → `tooOld`); `public func run<T: Decodable>(_ args: [String], cwd: String, stdin: Data? = nil, timeout: TimeInterval = 120) async throws -> T` (appends `--json`, decodes; a `{"error": …}` document → `commandFailed` with `kunjCode` from `error.code` when present; non-JSON stdout → `badJSON`; the first `{` onwards is tried, as `macos-app` does); `public func runRaw(_ args: [String], cwd: String, stdin: Data?, timeout: TimeInterval) async throws -> (stdout: Data, stderr: String, exit: Int32)`; `public func spawnSpec(_ args: [String], cwd: String) -> SpawnSpec` }`
   - `public struct SpawnSpec: Equatable { public let executable: String /* "/usr/bin/env" */; public let arguments: [String] /* [command parts…] + args */; public let cwd: String; public let environment: [String: String] }`
   - `command` may be `"node /path/dist/index.js"` (split on spaces, double quotes honoured, as `macos-app`'s `splitArguments`).
-- `fake-kunj`: `-V` prints `responses/version.txt`; otherwise `cat`s `responses/<args joined by "_" with "/" → "-" and leading "--" stripped>.json` (e.g. `worktree list --json` → `worktree_list.json`), exit 1 with `{"error":{"code":"fixture-missing","message":"<name>"}}` when absent; `FAKE_KUNJ_STDOUT=<text>` overrides stdout (for the bad-JSON test).
+- `fake-kunj` (shipped in Task 2; its header is the reference): `-V` prints `$FAKE_KUNJ_VERSION` or `responses/version.txt`; otherwise `cat`s `responses/<name>.json`, where `<name>` is the arguments with `--json` dropped, a leading `--` stripped from the others, `/` → `-`, joined with `_` (`worktree list --json` → `worktree_list.json`, `ct file read feature/x src/a.ts --json` → `ct_file_read_feature-x_src-a.ts.json`); exit 1 with `{"error":{"code":"fixture-missing","message":"<name>"}}` when absent. Switches: `FAKE_KUNJ_STDOUT` (bad-JSON test), `FAKE_KUNJ_EXIT`, `FAKE_KUNJ_RESPONSES`, `FAKE_KUNJ_LOG` (`<cwd>\t<args>` per call: assert the cwd is the repo root).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -446,7 +450,7 @@ func testSummaryAndContentsInWorktree() async throws { … scope .base: files so
 
 - [ ] **Step 3: Run, implement, run**
 
-Run: `scripts/test.sh` → PASS (git is on the machine; skip the service test with `XCTSkip` when `/usr/bin/git` is missing).
+Run: `scripts/test.sh` → PASS (git is on the machine; skip the service test with `.enabled(if: FileManager.default.isExecutableFile(atPath: "/usr/bin/git"))` when it is missing).
 
 - [ ] **Step 4: Build the web page, the web view and the column**
 

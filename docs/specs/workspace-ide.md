@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native) |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41 |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -185,7 +185,7 @@ Kunj Workspace.app
 | --- | --- | --- |
 | `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout`, `DesignTokens` (generated), `RelativeTime` | Foundation only |
 | `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `TerminalTab` (SwiftTerm), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
-| `KunjWorkspaceCoreTests` | `swift test`, with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) | Core |
+| `KunjWorkspaceCoreTests` | `swift test` (Swift Testing), with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) and the helpers in `Support.swift` | Core |
 
 SwiftTerm is vendored at an exact tag by `scripts/prepare-swiftterm.sh` (the spike's one-line
 `Shaders.metal` patch, so it builds with the Command Line Tools). Monaco's `min/vs` build is copied
@@ -193,8 +193,11 @@ into `Resources/web/vs` by `web/copy-monaco.js`; Inter and JetBrains Mono (OFL) 
 versions into `Resources/fonts` by `scripts/fetch-fonts.sh` and registered through
 `ATSApplicationFontsPath`. `scripts/gen-tokens.js` turns `docs/workspace-app/design/tokens.json` into
 `Sources/KunjWorkspaceCore/Design/DesignTokens.swift` (committed; a test fails when they drift).
-`scripts/bundle.sh` builds `build/Kunj Workspace.app` (ad-hoc signed; `--install` copies it to
-/Applications) and `scripts/test.sh` runs `swift test` with the same SDK fallback as `macos-app/`.
+`scripts/bundle.sh` builds `build/Kunj Workspace.app` (one `swift build --triple` per architecture,
+joined with `lipo`; ad-hoc signed; `--install` copies it to /Applications) and `scripts/test.sh` runs
+`swift test` (Swift Testing, not XCTest) with the same SDK fallback as `macos-app/`; both take
+`SCRATCH=<dir>` so parallel builds do not share a build directory. `workspace-app/README.md` documents
+the scripts, their variables and `fake-kunj`'s fixture naming rule.
 
 **Data flow.** `EnvironmentStore` holds `[RepoEnvironments]` and is the only source for the views. A
 refresh runs `kunj repos --json` (hidden and missing repos skipped), then per repo `worktree list --json`
@@ -351,6 +354,14 @@ From the architecture review (2026-10-23):
 - [ ] Two WKWebViews may cost two Monaco web processes (the spike measured 340–420 MB for one);
   measure, and fall back to one view hosting both modes if it doubles.
 - [ ] Monaco 0.57's AMD build is deprecated; moving to the ESM build is a later cost.
+
+From the scaffold (Task 2):
+
+- [ ] The sidebar is `side` at 85 % over `NSVisualEffectView(.sidebar)`; the `--screenshot` render
+  samples `#242220` there against the mockup's `#201d1b`, and the blend depends on the desktop behind
+  the window. Task 6 decides: tune the alpha, or drop the vibrancy so the sidebar is exactly `side`.
+- [ ] The skeleton's status bar label uses the system monospaced font; Task 6's `Theme` must route
+  every font through the bundled Inter/JetBrains Mono (`DesignTokens.Fonts` are PostScript prefixes).
 
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).
