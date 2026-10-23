@@ -39,12 +39,11 @@ page only says where each thing stands.
 | `kunj events --json` with status poll | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 189d9ba, 3685ef6, ce5691d |
 | `kunj agent` checked with a real tmux 3.8: `-e` gives this branch's `KUNJ_*` with another tmux server running, a rerun reattaches (`-A`, same pane, no second agent), it starts from inside a tmux pane without the nesting error, the session has `window-size latest` | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | verified 2026-10-23 with tmux 3.8 on macOS, and 3.3a and 3.5a in Debian containers (`scripts/check-tmux-agent.sh`); no code change |
 | Specs merged into one folder and checked against the code | this folder | f3a5e35, d1eea00 |
+| Native IDE spike: SwiftTerm handles five live Claude TUIs (6% CPU idle), Monaco diff in one WKWebView in under 1 s, menu shortcuts work with the webview focused; caveat: hidden tabs still parse on the main thread | [spikes/native-ide/REPORT.md](../../spikes/native-ide/REPORT.md) | 1c2aaa3 |
 
 ## In progress
 
-| Work | Spec | Where it stands |
-| --- | --- | --- |
-| Native IDE spike (AppKit + SwiftTerm + Monaco in one WKWebView) | [workspace-ide.md](workspace-ide.md#runtime-options) | Running in `spikes/native-ide/`; verdict goes in its `REPORT.md` and decides the app's runtime |
+Nothing in progress.
 
 ## To do
 
@@ -70,7 +69,7 @@ page only says where each thing stands.
 | Verify Docker-in-Docker `sysbox` mode on a real daemon | Docker Desktop has no `sysbox-runc`; needs a Linux host or a VM with sysbox. `privileged` was only smoke-tested outside kunj |
 | Delete a stray test file: `~/Library/Application Support/Code/User/globalStorage/ms-vscode-remote.remote-containers/imageConfigs/kunj-sandbox%3a1.3.0.json` | Left by an early `kunj ct open` test run before it was made hermetic; the agent was not allowed to delete it |
 | Delete the duplicate outline-only doc <https://claude.ai/artifact/VE9Ltof3P1N62yWZyyExDW> | Created by mistake; it is in a different claude.ai organization than the agent session, so delete it from claude.ai yourself |
-| Decide the workspace app runtime (Electron or native) | After reading the spike's `spikes/native-ide/REPORT.md` |
+| Decide the workspace app runtime (Electron or native) | The spike finished: read `spikes/native-ide/REPORT.md` (verdict at the end). Manual checks it left: real key presses, the look while dragging a resize, `ct shell` in a running container |
 
 The Claude Docs where the discussions started are no longer kept in step: container system
 <https://claude.ai/artifact/TmtL5VdNYr55VaddMSVEwk>, branch containers

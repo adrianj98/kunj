@@ -857,3 +857,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - docs/specs/README.md is now the project tracker (done with commits, in progress, to do, waiting on you); CLAUDE.md says to keep it current. Why: the user asked to keep track of what is done in one place.
 - scripts/check-tmux-agent.sh: the tmux behaviour kunj agent relies on (-e on a running server, -A reattach runs set-option, window-size latest, nesting refusal and TMUX removal), run in a Debian container; passes on tmux 3.3a and 3.5a. Why: to cover the tmux versions Linux users get, besides the macOS 3.8 check.
 - spikes/native-ide/: native IDE spike (AppKit + SwiftTerm 1.20.0 + one WKWebView running Monaco 0.57 diff) with --bench scenarios, results/*.json, screenshots and REPORT.md. Why: measure whether a native shell can replace the planned Electron app.
+- docs/specs/README.md: native IDE spike moved to Done (1c2aaa3); runtime decision waits on the user. Why: the spike reported.
