@@ -16,6 +16,13 @@ Changes made with Claude, and why.
   VS Code's remote protocol is not used: it is internal to Microsoft's VS Code, and VS Code attaches to
   kunj containers on its own over `docker exec`, so kunj maintains no second protocol.
 
+## 2026-10-23 — Container spec: workspace IDE as phase 3
+
+- CLAUDE.md (Branch Containers) and the phase 2 design now name the workspace IDE as phase 3, after phase 2,
+  pointing at docs/superpowers/specs/2026-10-23-workspace-ide-design.md and stating the rule that it drives
+  `kunj … --json` and never imports `src/lib`. Why: user asked for the full container spec to include the IDE,
+  to be built once the current phase 2 work is done.
+
 ## 2026-10-23 — Containers: sidecar services (phase 2, Task 1)
 
 - New `src/lib/container/services.ts`: services from the blueprint's `services`, `container.services`

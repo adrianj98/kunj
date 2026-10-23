@@ -14,6 +14,13 @@ Six features, each shipped separately to `main`, in this order:
 5. **Docker-in-Docker** — `sysbox` and `privileged` modes.
 6. **Host MCP bridge** — Chrome DevTools MCP on the Mac, usable by the agent in the container.
 
+**Phase 3 (after this phase):** the workspace IDE, docs/superpowers/specs/2026-10-23-workspace-ide-design.md.
+An Electron app (`workspace-app/`) with an environment list (worktrees and containers) on the left and the
+terminals, agent sessions, editors and previews open for the selected environment on the right. It drives the
+installed `kunj` CLI through `--json` and spawns `kunj ct shell|agent <branch>` in its PTYs, so phase 2's
+`list --json` additions (services, forward `kind`/`pid`, orphans) and the `--json` progress stream it will ask
+for are the interface it consumes. Nothing in phase 2 depends on it.
+
 ## 1. Sidecar services
 
 - Declared in (first match wins, merged by name): blueprint `services`, then `container.services`, then the
