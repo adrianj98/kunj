@@ -286,11 +286,15 @@ v1 only `chrome`) into the container, for one container run (`containerRun()` St
 only `mkdir`/`chown`/`chmod 700` of `/run/kunj-mcp`; the listener (`socat UNIX-LISTEN:…sock,mode=600
 STDIO`, no `fork`: one session at a time), its pid file and its stop run as the user, and the stop
 checks the pid's cmdline. The host server (only `cfg.env` + PATH/HOME) starts on the first complete
-message. The agent drives a browser on the Mac's network, so the filter is deny by default:
-`BROWSER_TOOLS` only, no path-like argument (`isPathKey`) on any tool, `tools/list` rewritten to match,
-malformed lines dropped, lines capped at 4 MB, navigation only to the forwarded host ports unless
-`allowOrigins` (explicit navigation only, not a network boundary). Never widen that list with a tool
-that takes a host path. `kunj ct agent` (and start) merge `mcpServers.<name>` into the user's
+message; the default one is pinned (`CHROME_DEVTOOLS_MCP`) and gets a per-session `--userDataDir` and
+TMPDIR in a temp dir whose prefs refuse downloads, deleted afterwards. The agent drives a browser on
+the Mac's network, so the filter is deny by default: `BROWSER_TOOL_ARGS` (tools and, per tool, their
+arguments, checked against the pinned version), `isPathKey` at any depth (too deep is refused), ids
+short strings or safe integers, `tools/list` rewritten to match, the server's `roots/list` answered
+empty by the bridge, malformed lines dropped, lines capped at 4 MB, reading paused while either side
+does not drain (8 MB waiting for the container ends the session), navigation only to the forwarded host
+ports unless `allowOrigins` (explicit navigation only, not a network boundary). Never add a tool or an
+argument that takes a host path; bump the pin only after re-reading the new version's tools. `kunj ct agent` (and start) merge `mcpServers.<name>` into the user's
 `~/.claude.json`; agent spawns a detached `kunj ct mcp`, registered in `~/.kunj/container-bridges.json`
 (`pidRegistry`, shared with the forward registry).
 

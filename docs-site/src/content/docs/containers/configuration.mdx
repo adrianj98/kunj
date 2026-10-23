@@ -154,25 +154,32 @@ repository:
 }
 ```
 
-`{}` runs [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) as
-`npx -y chrome-devtools-mcp@latest --isolated --categoryPerformance=false --categoryMemory=false
---fileNavigations=false`: its own Chrome window with an empty, throwaway profile (no cookies, none of
-your logged-in sessions), without the tools that write trace and heap snapshot files, and refusing
-`file:` URLs. Each server takes:
+`{}` runs [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp), pinned to the
+version its tool list was checked against, as `npx -y chrome-devtools-mcp@1.12.0
+--categoryPerformance=false --categoryMemory=false --fileNavigations=false --no-usage-statistics`,
+with a profile of its own for each session (`--userDataDir` in a new temp directory): its own Chrome
+window, no cookies and none of your logged-in sessions, no tools that write trace or heap snapshot
+files, no `file:` URLs, and downloads refused. The temp directory, which also holds the server's own
+temp files such as large screenshots, is deleted when the session ends. Each server takes:
 
 | Key | Default | Meaning |
 |---|---|---|
 | `command` | `npx` | The server's stdio command on your machine |
-| `args` | the Chrome DevTools MCP arguments above | Its arguments (`[]` with your own `command`) |
+| `args` | the Chrome DevTools MCP arguments above | Its arguments (`[]` with your own `command`). Setting them for the default command drops the pinned version, the flags above and the per-session profile (kunj warns) |
 | `env` | `{}` | Its environment, next to `PATH` and `HOME`; nothing else from your shell or the container is passed |
 | `allowOrigins` | (the forwarded ports) | Origins `navigate_page` and `new_page` may open, instead of the default |
 
 What keeps the agent in check:
 
-- **No files.** Only a fixed list of browser tools passes the bridge (pages and navigation, input,
-  snapshots and screenshots, console and network reads, `evaluate_script`, emulation), and no tool may
-  get an argument that names a file. `upload_file`, heap snapshots, performance traces and Lighthouse
-  are not available. The agent cannot read or write files on your machine through the browser.
+- **No file paths.** Only a fixed list of browser tools passes the bridge (pages and navigation,
+  input, snapshots and screenshots, console and network reads, `evaluate_script`, emulation), each with
+  a fixed list of arguments, none of which names a file, so no path from the agent reaches the server.
+  `upload_file`, heap snapshots, performance traces and Lighthouse are not available.
+- **No downloads, by default.** A page the agent opens could start a download (a file it names, with
+  content it chose). The default browser's profile refuses downloads, and anything that got through
+  would stay in the session's temp directory, which is deleted afterwards. With your own `command` or
+  `args` there is no such profile: a download lands wherever that browser saves them, normally
+  `~/Downloads`.
 - **Explicit navigation only to your forwarded ports.** By default `navigate_page` and `new_page` may
   open `http(s)://localhost` or `127.0.0.1` only on the host ports [forwarded](#ports) (or published)
   for this container, checked at the moment of the call. `allowOrigins` replaces that list:

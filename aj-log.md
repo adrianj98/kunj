@@ -11,6 +11,34 @@ Changes made with Claude, and why.
   latest`. Moved the item to Done in `docs/specs/README.md`. Why: user installed tmux and asked for it.
 ## 2026-10-23 — Containers: host MCP bridge (phase 2, Task 6)
 
+Fix round 2 (security re-review), on top of round 1:
+
+- Backpressure on everything sent to the container, not only the server's output. While a write to the
+  container returns false, reading from the container (and the server's stdout) pauses until 'drain';
+  more than 8 MB waiting for a container that does not read ends the session. Why: refusal replies were
+  written without limit, so a container that sent refusable lines and never read grew host memory
+  (batches amplified it).
+- Watched requests (initialize, tools/list) are forgotten on any reply, error as well as result; at most
+  1024 are kept (oldest dropped). Ids must be strings of at most 256 characters or safe integers;
+  others get an error with id null (a response or notification is dropped).
+- Downloads: from an allowed page the agent could start a download that landed in the Mac's ~/Downloads.
+  chrome-devtools-mcp 1.12.0 has no download setting of its own but takes `--userDataDir`. So the default
+  browser now gets a profile per session (`makeThrowawayProfile()`): a temp dir whose
+  `Default/Preferences` set `download_restrictions: 3` (block all) and `download.default_directory`
+  inside it, plus the server's TMPDIR (large screenshots); deleted when the session ends. This replaces
+  `--isolated`. Checked with headless Chrome on this Mac: no prefs put the file in ~/Downloads, the
+  directory pref put it in the temp dir, and the restriction blocked it. Docs no longer claim "cannot
+  read or write files": they say no file path reaches the server, downloads are refused (by default),
+  and with your own command/args a download lands in ~/Downloads.
+- Pinned `chrome-devtools-mcp@1.12.0` (`CHROME_DEVTOOLS_MCP`, with how to bump it) and replaced the
+  name-pattern check with a per-tool argument allowlist (`BROWSER_TOOL_ARGS`, read from 1.12.0's
+  schemas; `pageId` on every tool). Unknown arguments such as `output` or `saveTo` are refused. The
+  tools/list rewrite keeps only those properties, and `isPathKey` stays as a second layer, refusing
+  past the depth limit (fail closed).
+- The bridge answers the server's `roots/list` with no roots and drops the container's
+  `notifications/roots/list_changed`; `--no-usage-statistics` added; custom `args` for the default
+  command warn that the pin, the flags and the throwaway profile are dropped; help text fixed.
+
 Fix round 1 (security review), on top of the entry below:
 
 - Sandbox escape closed. chrome-devtools-mcp tools take host paths (evaluate_script `filePath`/

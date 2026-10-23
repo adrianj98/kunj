@@ -236,13 +236,16 @@ which is why it is off by default. It adds
 `mcpServers.chrome = { command: "socat", args: ["-", "UNIX-CONNECT:/run/kunj-mcp/chrome.sock"] }` to
 the container user's `~/.claude.json` and starts a background `kunj ct mcp`, which keeps a
 `docker exec -u <user> … socat UNIX-LISTEN` open on that socket (only creating `/run/kunj-mcp` runs as
-root) and, when Claude Code connects, runs `npx -y chrome-devtools-mcp@latest --isolated
---categoryPerformance=false --categoryMemory=false --fileNavigations=false` (an empty, throwaway
-profile) here and pipes the two together. Every request is checked on the way: only a fixed list of
-browser tools passes (pages, navigation, input, snapshots and screenshots, console and network reads,
-`evaluate_script`, emulation; never `upload_file`, heap snapshots, traces or Lighthouse), and no
-argument naming a file (`filePath`, `sourcePath`, ...) on any tool, so the agent cannot read or write
-files on your Mac; `tools/list` is cut down to match. `navigate_page`/`new_page` may open only the host
+root) and, when Claude Code connects, runs `npx -y chrome-devtools-mcp@1.12.0
+--categoryPerformance=false --categoryMemory=false --fileNavigations=false --no-usage-statistics` here,
+with a profile per session in a temp directory (empty, refuses downloads, deleted with the server's
+temp files afterwards), and pipes the two together. Every request is checked on the way: only a fixed
+list of browser tools passes (pages, navigation, input, snapshots and screenshots, console and network
+reads, `evaluate_script`, emulation; never `upload_file`, heap snapshots, traces or Lighthouse), each
+with a fixed list of arguments, so no file path from the agent reaches the server (path-like keys are
+refused at any depth too); `tools/list` is cut down to match. With your own `command` or `args` there
+is no throwaway profile, and a download from an allowed page lands where that browser saves them
+(normally `~/Downloads`). `navigate_page`/`new_page` may open only the host
 ports forwarded for the container (`allowOrigins` lists origins instead; one without a port allows
 every port, which is broad). That limits explicit navigation only, not a network boundary: a click or
 `evaluate_script` can still take the page anywhere. Each server takes `command`, `args`, `env` (it gets

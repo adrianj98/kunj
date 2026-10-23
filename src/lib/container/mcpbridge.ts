@@ -13,6 +13,7 @@
 // Running bridges are recorded in ~/.kunj/container-bridges.json (dead pids pruned on read) so
 // `kunj ct list` can show them and `kunj ct agent` does not start a second one.
 import * as childProcess from 'child_process';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { PassThrough } from 'stream';
@@ -25,40 +26,79 @@ export interface McpServerConfig {
   env?: Record<string, string>;
   /** Origins navigate_page/new_page may open; unset: only the host ports forwarded for the container */
   allowOrigins?: string[];
+  /** Set for the default browser: each session gets its own Chrome profile and TMPDIR in a temp
+   * directory (downloads refused, else kept there), deleted when the session ends */
+  throwawayProfile?: boolean;
 }
 
 /** The only server v1 bridges: a browser on the host. */
 export const BROWSER_SERVER = 'chrome';
 
-// chrome-devtools-mcp (checked against 1.12.0's tool definitions and options): an empty throwaway
-// profile; the performance and memory tools (trace and heap snapshot files) and file: navigations
-// switched off; no config file discovery, so a global cd4a config cannot switch them back on. Defence
-// in depth only: the request filter below is what keeps the agent away from host files.
+/**
+ * The pinned chrome-devtools-mcp. BROWSER_TOOLS and BROWSER_TOOL_ARGS were checked against this
+ * version's tool definitions (build/src/tools/*.js in its npm package). To bump it: `npm pack
+ * chrome-devtools-mcp@<new>`, read the tools' names and schema keys, update both lists (never add a
+ * tool or argument that names a host path), then change this constant.
+ */
+export const CHROME_DEVTOOLS_MCP = 'chrome-devtools-mcp@1.12.0';
+
+// The performance and memory tools (trace and heap snapshot files) and file: navigations switched
+// off; no usage statistics; no config file discovery, so a global cd4a config cannot switch them back
+// on. Each session's own profile (throwawayProfile) replaces --isolated: an empty profile that also
+// refuses downloads. Defence in depth only: the request filter below is what keeps host paths out.
 const DEFAULT_BROWSER: McpServerConfig = {
   command: 'npx',
-  args: ['-y', 'chrome-devtools-mcp@latest', '--isolated', '--categoryPerformance=false', '--categoryMemory=false', '--fileNavigations=false'],
+  args: ['-y', CHROME_DEVTOOLS_MCP, '--categoryPerformance=false', '--categoryMemory=false', '--fileNavigations=false', '--no-usage-statistics'],
   env: { CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY: '1' },
+  throwawayProfile: true,
 };
 
 /**
- * The tools the agent may call through the bridge (chrome-devtools-mcp 1.12.0 names). Everything
- * else is refused and hidden from tools/list: upload_file, take_heapsnapshot and the memory tools,
+ * The tools the agent may call through the bridge and, for each, the arguments it may pass
+ * (chrome-devtools-mcp 1.12.0; `pageId` is accepted on every tool, it selects a page). Everything else
+ * is refused and hidden from tools/list: upload_file, take_heapsnapshot and the memory tools,
  * performance traces, lighthouse_audit, screencasts, extensions, PWAs, WebMCP and DevTools comments
- * all read or write host files or reach beyond a page. The path arguments of the tools here
+ * read or write host files or reach beyond a page; the path arguments of the tools here
  * (take_screenshot/take_snapshot/evaluate_script filePath, evaluate_script sourcePath,
- * get_network_request requestFilePath/responseFilePath) are refused by name, see isPathKey.
+ * get_network_request requestFilePath/responseFilePath) are left out. Nested values are checked
+ * once more by isPathKey.
  */
-export const BROWSER_TOOLS: readonly string[] = [
+export const BROWSER_TOOL_ARGS: Readonly<Record<string, readonly string[]>> = {
   // pages and navigation
-  'list_pages', 'select_page', 'new_page', 'navigate_page', 'close_page', 'wait_for',
+  list_pages: [],
+  select_page: ['bringToFront'],
+  new_page: ['url', 'background', 'isolatedContext', 'timeout'],
+  navigate_page: ['type', 'url', 'ignoreCache', 'handleBeforeUnload', 'initScript', 'timeout'],
+  close_page: [],
+  wait_for: ['text', 'visible', 'timeout'],
   // input
-  'click', 'hover', 'fill', 'fill_form', 'type_text', 'press_key', 'drag', 'handle_dialog',
+  click: ['uid', 'dblClick', 'includeSnapshot'],
+  hover: ['uid', 'includeSnapshot'],
+  fill: ['uid', 'value', 'includeSnapshot'],
+  fill_form: ['elements', 'includeSnapshot'],
+  type_text: ['text', 'submitKey'],
+  press_key: ['key', 'includeSnapshot'],
+  drag: ['from_uid', 'to_uid', 'includeSnapshot'],
+  handle_dialog: ['action', 'promptText'],
   // reading the page
-  'take_snapshot', 'take_screenshot', 'evaluate_script',
-  'list_console_messages', 'get_console_message', 'list_network_requests', 'get_network_request',
+  take_snapshot: ['verbose'],
+  take_screenshot: ['format', 'quality', 'uid', 'fullPage'],
+  evaluate_script: ['function', 'format', 'args', 'dialogAction', 'waitForStableDom', 'serviceWorkerId'],
+  list_console_messages: ['pageSize', 'pageIdx', 'types', 'includePreservedMessages', 'includeStackTraces', 'serviceWorkerId'],
+  get_console_message: ['msgid'],
+  list_network_requests: ['pageSize', 'pageIdx', 'resourceTypes', 'includePreservedRequests'],
+  get_network_request: ['reqid'],
   // emulation
-  'emulate', 'resize_page',
-];
+  emulate: ['networkConditions', 'cpuThrottlingRate', 'geolocation', 'userAgent', 'colorScheme', 'forcedColors', 'prefersContrast', 'prefersReducedMotion', 'viewport', 'extraHttpHeaders'],
+  resize_page: ['width', 'height'],
+};
+const ANY_TOOL_ARGS = ['pageId'];
+
+export const BROWSER_TOOLS: readonly string[] = Object.keys(BROWSER_TOOL_ARGS);
+
+function toolArgAllowed(tool: string, arg: string): boolean {
+  return ANY_TOOL_ARGS.includes(arg) || (BROWSER_TOOL_ARGS[tool] ?? []).includes(arg);
+}
 
 /** JSON-RPC methods the container may send; responses (no method) and notifications/* also pass. */
 const ALLOWED_METHODS = [
@@ -74,6 +114,11 @@ const USER_NAME = /^[a-z_][a-z0-9_.-]*$/i;
 const NAVIGATING_TOOLS = ['navigate_page', 'new_page'];
 /** A longer line from the container ends the session: the host does not buffer without bound. */
 export const MAX_LINE_BYTES = 4 * 1024 * 1024;
+/** Output to the container that it is not reading; past this the session ends. */
+export const MAX_BUFFERED_TO_CONTAINER = 8 * 1024 * 1024;
+/** Requests whose replies are rewritten are remembered by id, at most this many (oldest dropped). */
+const MAX_WATCHED = 1024;
+const MAX_ID_LENGTH = 256;
 const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
 
 const STATE_POLL_MS = 5000;
@@ -123,6 +168,12 @@ export function mcpServers(value: unknown, warn: (message: string) => void): Arr
       warn(`container.mcp.${name}: command must be a non-empty string, args and allowOrigins lists of strings, env strings; skipped`);
       continue;
     }
+    if (!custom && raw.args !== undefined) {
+      warn(
+        `container.mcp.${name}.args replaces the default arguments: the pinned ${CHROME_DEVTOOLS_MCP}, its hardening flags ` +
+          'and the throwaway profile (no downloads) are not added'
+      );
+    }
     servers.push({
       name,
       cfg: {
@@ -130,6 +181,7 @@ export function mcpServers(value: unknown, warn: (message: string) => void): Arr
         args: (raw.args as string[] | undefined) ?? (custom ? [] : DEFAULT_BROWSER.args),
         env: { ...(custom ? {} : DEFAULT_BROWSER.env), ...((raw.env as Record<string, string> | undefined) ?? {}) },
         ...(raw.allowOrigins !== undefined ? { allowOrigins: raw.allowOrigins as string[] } : {}),
+        ...(!custom && raw.args === undefined ? { throwawayProfile: true } : {}),
       },
     });
   }
@@ -202,9 +254,12 @@ export function isPathKey(key: string): boolean {
   return /^(path|paths|file|files|dir|dirs|directory)$/i.test(key) || /[a-z0-9](Path|Paths|File|Files|Dir|Dirs|Directory)$/.test(key);
 }
 
-/** The first path-like key anywhere in `value` (objects and arrays, recursively). */
+const MAX_DEPTH = 32;
+
+/** The first path-like key anywhere in `value` (objects and arrays, recursively); too deep counts as one. */
 function findPathKey(value: unknown, depth = 0): string | undefined {
-  if (depth > 32 || typeof value !== 'object' || value === null) return undefined;
+  if (typeof value !== 'object' || value === null) return undefined;
+  if (depth > MAX_DEPTH) return '(nested too deep)';
   if (Array.isArray(value)) {
     for (const v of value) {
       const k = findPathKey(v, depth + 1);
@@ -244,11 +299,19 @@ export function originPolicy(cfg: McpServerConfig, forwardedPorts: () => number[
 }
 
 /** Why a message must not reach the host server; undefined when it may. */
+/** A JSON-RPC id the bridge accepts: a string of at most 256 characters or a safe integer. */
+export function validId(id: unknown): boolean {
+  return (typeof id === 'string' && id.length <= MAX_ID_LENGTH) || (typeof id === 'number' && Number.isSafeInteger(id));
+}
+
 function refusal(msg: unknown, policy: RequestPolicy): string | undefined {
   if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) return 'kunj: not a JSON-RPC message';
-  const m = msg as { method?: unknown; params?: { name?: unknown; arguments?: unknown } };
+  const m = msg as { id?: unknown; method?: unknown; params?: { name?: unknown; arguments?: unknown } };
+  if ('id' in m && !validId(m.id)) return 'kunj: the id must be a string of at most 256 characters or a safe integer';
   if (m.method === undefined) return undefined; // a response to a request of the server's
   if (typeof m.method !== 'string') return 'kunj: not a JSON-RPC message';
+  // The bridge answers the server's roots/list itself: the container's roots are not the host's
+  if (m.method === 'notifications/roots/list_changed') return 'kunj: roots are not forwarded';
   if (m.method.startsWith('notifications/')) return undefined;
   if (!ALLOWED_METHODS.includes(m.method)) return `kunj: ${m.method} is not allowed through the bridge`;
   if (m.method !== 'tools/call') return undefined;
@@ -258,6 +321,9 @@ function refusal(msg: unknown, policy: RequestPolicy): string | undefined {
     return `kunj: the tool ${typeof name === 'string' ? name : '(none)'} is not available through the bridge`;
   }
   const args = m.params?.arguments;
+  if (args !== undefined && (typeof args !== 'object' || args === null || Array.isArray(args))) return 'kunj: arguments must be an object';
+  const unknownArg = Object.keys(args ?? {}).find(k => !toolArgAllowed(name, k));
+  if (unknownArg) return `kunj: ${name} does not take ${unknownArg} through the bridge`;
   const key = findPathKey(args);
   if (key) return `kunj: the argument ${key} is not allowed through the bridge: the browser runs on the host, and host files are out of reach`;
   if (NAVIGATING_TOOLS.includes(name) && typeof args === 'object' && args !== null && 'url' in args) {
@@ -271,7 +337,7 @@ function refusal(msg: unknown, policy: RequestPolicy): string | undefined {
 }
 
 function errorReply(id: unknown, message: string): object {
-  return { jsonrpc: '2.0', id: id ?? null, error: { code: -32602, message } };
+  return { jsonrpc: '2.0', id: validId(id) ? id : null, error: { code: -32602, message } };
 }
 
 export type Verdict = { pass: true } | { pass: false; malformed?: true; reply?: string };
@@ -301,8 +367,8 @@ export function makeRequestFilter(policy: RequestPolicy): (line: string) => Verd
     const reason = refusal(msg, policy);
     if (reason === undefined) return { pass: true };
     const m = msg as { id?: unknown; method?: unknown };
-    // A notification has no id and gets no reply
-    return m.id === undefined ? { pass: false } : { pass: false, reply: JSON.stringify(errorReply(m.id, reason)) };
+    // A notification (no id) and a response (no method) get no reply
+    return m.id === undefined || m.method === undefined ? { pass: false } : { pass: false, reply: JSON.stringify(errorReply(m.id, reason)) };
   };
 }
 
@@ -325,12 +391,24 @@ function stripPathProperties(schema: unknown, depth = 0): unknown {
   return out;
 }
 
-/** A tools/list result with only BROWSER_TOOLS, their path-like arguments removed from the schemas. */
+/** A tool's input schema with only the top-level arguments it may take, path-like ones removed below. */
+function allowedSchema(tool: string, schema: unknown): unknown {
+  if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) return schema;
+  const s = schema as { properties?: unknown; required?: unknown };
+  const properties =
+    typeof s.properties === 'object' && s.properties !== null && !Array.isArray(s.properties)
+      ? Object.fromEntries(Object.entries(s.properties).filter(([k]) => toolArgAllowed(tool, k)))
+      : s.properties;
+  const required = Array.isArray(s.required) ? s.required.filter(k => typeof k === 'string' && toolArgAllowed(tool, k)) : s.required;
+  return stripPathProperties({ ...s, ...(properties !== undefined ? { properties } : {}), ...(required !== undefined ? { required } : {}) });
+}
+
+/** A tools/list result with only BROWSER_TOOLS, each schema cut down to the arguments the bridge lets through. */
 export function filterToolsList(result: unknown): unknown {
   if (typeof result !== 'object' || result === null || !Array.isArray((result as { tools?: unknown }).tools)) return result;
   const tools = (result as { tools: unknown[] }).tools
     .filter((t): t is { name: string; inputSchema?: unknown } => !!t && typeof t === 'object' && BROWSER_TOOLS.includes((t as { name?: unknown }).name as string))
-    .map(t => ({ ...t, ...(t.inputSchema !== undefined ? { inputSchema: stripPathProperties(t.inputSchema) } : {}) }));
+    .map(t => ({ ...t, ...(t.inputSchema !== undefined ? { inputSchema: allowedSchema(t.name, t.inputSchema) } : {}) }));
   return { ...result, tools };
 }
 
@@ -534,6 +612,8 @@ export interface BridgeOptions {
   log?: (message: string) => void;
   restartDelayMs?: number;
   stateIntervalMs?: number;
+  /** Output waiting for the container past which the session ends (default MAX_BUFFERED_TO_CONTAINER) */
+  maxBufferedToContainer?: number;
 }
 
 /**
@@ -623,10 +703,34 @@ interface SessionContext {
   warnedMalformed: boolean;
 }
 
+/**
+ * A temp directory for one session of the default browser: a Chrome profile whose preferences refuse
+ * downloads (and would keep any in its own directory), and the server's TMPDIR (large screenshots).
+ * Removed when the session ends.
+ */
+export function makeThrowawayProfile(): { dir: string; profile: string; downloads: string; tmp: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-mcp-'));
+  const profile = path.join(dir, 'profile');
+  const downloads = path.join(dir, 'downloads');
+  const tmp = path.join(dir, 'tmp');
+  fs.mkdirSync(path.join(profile, 'Default'), { recursive: true });
+  fs.mkdirSync(downloads);
+  fs.mkdirSync(tmp);
+  const prefs = {
+    download: { default_directory: downloads, prompt_for_download: false, directory_upgrade: true },
+    savefile: { default_directory: downloads },
+    // DownloadRestrictions 3: block all downloads
+    download_restrictions: 3,
+  };
+  fs.writeFileSync(path.join(profile, 'Default', 'Preferences'), JSON.stringify(prefs));
+  return { dir, profile, downloads, tmp };
+}
+
 /** One listener and, once a client sends a message that may pass, one server process. True when a client connected. */
 async function session(ctx: SessionContext): Promise<boolean> {
   const { backend, containerId, name, user, cfg, filter, opts, log } = ctx;
   const spawn = opts.spawn ?? childProcess.spawn;
+  const maxBuffered = opts.maxBufferedToContainer ?? MAX_BUFFERED_TO_CONTAINER;
   const toContainer = new PassThrough();
   const fromContainer = new PassThrough();
   const stderr = new PassThrough();
@@ -638,8 +742,10 @@ async function session(ctx: SessionContext): Promise<boolean> {
 
   let server: childProcess.ChildProcess | undefined;
   let serverExited: Promise<void> = Promise.resolve();
+  let profileDir: string | undefined;
   let connected = false;
   let execDone = false;
+  let ended = false;
   // Requests whose replies are rewritten: initialize (the port hint) and tools/list (the allowlist)
   const watched = new Map<string, 'initialize' | 'tools/list'>();
   const idKey = (id: unknown) => JSON.stringify(id);
@@ -647,36 +753,77 @@ async function session(ctx: SessionContext): Promise<boolean> {
   const stopListener = () => {
     if (!execDone) backend.exec(containerId, stopCommand(name), { user }).catch(() => undefined);
   };
+  const endSession = (why: string) => {
+    if (ended) return;
+    ended = true;
+    log(`MCP ${name}: ${why}; session ended`);
+    fromContainer.pause();
+    server?.stdout?.pause();
+    stopListener();
+  };
 
+  // Reading from the container stops while either the server or the container is not keeping up
+  const holds = new Set<'server' | 'container'>();
+  const hold = (why: 'server' | 'container') => {
+    holds.add(why);
+    fromContainer.pause();
+  };
+  const release = (why: 'server' | 'container') => {
+    holds.delete(why);
+    if (!holds.size && !ended) fromContainer.resume();
+  };
+
+  // Everything to the container, the server's output and the bridge's own refusals alike
   const toClient = (line: string) => {
-    if (toContainer.writableEnded) return;
-    if (!toContainer.write(line + '\n') && server?.stdout && !server.stdout.isPaused()) {
-      server.stdout.pause();
-      toContainer.once('drain', () => server?.stdout?.resume());
+    if (ended || toContainer.writableEnded) return;
+    if (!toContainer.write(line + '\n')) {
+      if (toContainer.writableLength > maxBuffered) return endSession(`the container is not reading (over ${maxBuffered} bytes waiting)`);
+      if (!holds.has('container')) {
+        hold('container');
+        server?.stdout?.pause();
+        toContainer.once('drain', () => {
+          release('container');
+          if (!ended) server?.stdout?.resume();
+        });
+      }
     }
   };
 
-  // host → container: the server's replies, tools/list cut down to the allowlist, the port map added
+  const toServer = (line: string) => {
+    const stdin = server?.stdin;
+    if (stdin && !stdin.writableEnded && !stdin.write(line + '\n') && !holds.has('server')) {
+      hold('server');
+      stdin.once('drain', () => release('server'));
+    }
+  };
+
+  // host → container: the server's replies, tools/list cut down to the allowlist, the port map added;
+  // its roots/list is answered here (the container's roots mean nothing on the host)
   const fromServer = lineSplitter(line => {
-    if (watched.size) {
-      try {
-        const msg = JSON.parse(line);
-        const kind = msg && msg.id !== undefined ? watched.get(idKey(msg.id)) : undefined;
-        if (kind && msg.result && typeof msg.result === 'object') {
-          watched.delete(idKey(msg.id));
-          if (kind === 'tools/list') {
-            msg.result = filterToolsList(msg.result);
-          } else {
-            const extra = opts.instructions?.();
-            if (extra) {
-              const own = typeof msg.result.instructions === 'string' && msg.result.instructions ? `${msg.result.instructions}\n\n` : '';
-              msg.result.instructions = own + extra;
-            }
+    let msg: any;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      return toClient(line); // not JSON: passed on as it is (the host server is trusted)
+    }
+    if (msg && msg.method === 'roots/list' && msg.id !== undefined) {
+      return toServer(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { roots: [] } }));
+    }
+    const kind = msg && msg.method === undefined && msg.id !== undefined ? watched.get(idKey(msg.id)) : undefined;
+    if (kind) {
+      // Any reply ends the watch, an error as well as a result
+      watched.delete(idKey(msg.id));
+      if (msg.result && typeof msg.result === 'object') {
+        if (kind === 'tools/list') {
+          msg.result = filterToolsList(msg.result);
+        } else {
+          const extra = opts.instructions?.();
+          if (extra) {
+            const own = typeof msg.result.instructions === 'string' && msg.result.instructions ? `${msg.result.instructions}\n\n` : '';
+            msg.result.instructions = own + extra;
           }
-          line = JSON.stringify(msg);
         }
-      } catch {
-        // not JSON: passed on as it is (the host server is trusted)
+        line = JSON.stringify(msg);
       }
     }
     toClient(line);
@@ -684,10 +831,15 @@ async function session(ctx: SessionContext): Promise<boolean> {
 
   const startServer = () => {
     log(`MCP ${name}: client connected; starting ${cfg.command}`);
-    const child = spawn(cfg.command, cfg.args ?? [], {
-      stdio: ['pipe', 'pipe', 'inherit'],
-      env: serverEnv(cfg, opts.hostEnv ?? process.env),
-    });
+    let args = cfg.args ?? [];
+    let env = serverEnv(cfg, opts.hostEnv ?? process.env);
+    if (cfg.throwawayProfile) {
+      const p = makeThrowawayProfile();
+      profileDir = p.dir;
+      args = [...args, `--userDataDir=${p.profile}`];
+      env = { ...env, TMPDIR: p.tmp };
+    }
+    const child = spawn(cfg.command, args, { stdio: ['pipe', 'pipe', 'inherit'], env });
     server = child;
     serverExited = new Promise<void>(resolve => {
       child.once('exit', () => resolve());
@@ -709,6 +861,7 @@ async function session(ctx: SessionContext): Promise<boolean> {
   // container → host: through the request filter; the server starts on the first message that passes
   const fromClient = lineSplitter(
     line => {
+      if (ended) return;
       const verdict = filter(line);
       if (!verdict.pass) {
         if (verdict.malformed) {
@@ -723,24 +876,20 @@ async function session(ctx: SessionContext): Promise<boolean> {
       try {
         const msg = JSON.parse(line);
         if (msg && (msg.method === 'initialize' || msg.method === 'tools/list') && msg.id !== undefined) {
+          // Bounded: a client that never gets (or never waits for) its replies cannot grow it
+          if (watched.size >= MAX_WATCHED) watched.delete(watched.keys().next().value as string);
           watched.set(idKey(msg.id), msg.method);
         }
       } catch {
         // passed the filter, so it is JSON
       }
       if (!server) startServer();
-      const stdin = server?.stdin;
-      if (stdin && !stdin.writableEnded && !stdin.write(line + '\n') && !fromContainer.isPaused()) {
-        // The server is not keeping up: stop reading the container until it drains
-        fromContainer.pause();
-        stdin.once('drain', () => fromContainer.resume());
-      }
+      toServer(line);
     },
     MAX_LINE_BYTES,
     () => {
-      log(`MCP ${name}: a line from the container is longer than ${MAX_LINE_BYTES} bytes; session ended`);
       if (!toContainer.writableEnded) toContainer.end();
-      stopListener();
+      endSession(`a line from the container is longer than ${MAX_LINE_BYTES} bytes`);
     },
   );
   fromContainer.on('data', (chunk: Buffer) => {
@@ -769,6 +918,14 @@ async function session(ctx: SessionContext): Promise<boolean> {
       const killer = setTimeout(() => s.kill('SIGKILL'), SERVER_STOP_MS);
       await serverExited;
       clearTimeout(killer);
+    }
+  }
+  if (profileDir) {
+    try {
+      // Chrome may still be writing as it exits
+      fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (err) {
+      log(`MCP ${name}: could not remove ${profileDir}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   if (connected) log(`MCP ${name}: session ended`);

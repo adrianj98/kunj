@@ -284,20 +284,25 @@ The container cannot reach your machine, so the connection goes the other way: k
 `docker exec` open into the container, as the container user, that listens on
 `/run/kunj-mcp/chrome.sock` (mode 600; only creating the directory runs as root), and the container's
 `~/.claude.json` gets an `mcpServers.chrome` entry that connects to it with `socat`. When Claude Code
-connects, kunj starts the server's command on your machine (by default Chrome DevTools MCP with an
-isolated profile) and pipes the two together. The server gets only `PATH`, `HOME` and the `env` you
+connects, kunj starts the server's command on your machine (by default Chrome DevTools MCP 1.12.0
+with a throwaway profile of its own) and pipes the two together. The server gets only `PATH`, `HOME` and the `env` you
 configure, never the container's forwarded variables.
 
 Every request from the container is checked before it reaches the server:
 
 - only a fixed list of browser tools may be called (pages and navigation, clicks and typing, page
-  snapshots and screenshots, console and network reads, `evaluate_script`, emulation); everything
-  else, `upload_file` first of all, is refused, and `tools/list` only shows the allowed ones;
-- no tool may get an argument that names a file (`filePath`, `sourcePath`, `outputDirPath`, ...), so the
-  agent cannot read or write files on your machine;
+  snapshots and screenshots, console and network reads, `evaluate_script`, emulation), each with a
+  fixed list of arguments; everything else, `upload_file` first of all, is refused, and `tools/list`
+  only shows what is allowed;
+- so no file path from the agent ever reaches the server (and an argument that looks like one,
+  `filePath`, `sourcePath`, ..., is refused at any depth); the default browser refuses downloads, and
+  its profile and temp files live in a directory that is deleted when the session ends;
 - `navigate_page` and `new_page` may open only the host ports [forwarded](#automatic-forwarding) for the
   container, unless `allowOrigins` says otherwise;
-- a line that is not a JSON-RPC message is dropped, and a line over 4 MB ends the session.
+- a request id must be a short string or a safe integer; a line that is not a JSON-RPC message is
+  dropped; a line over 4 MB, or more than 8 MB of replies the container does not read, ends the session.
+
+The server's own `roots/list` request is answered by the bridge with no roots.
 
 A refused request gets a JSON-RPC error. The initialize result tells the agent which host port each
 forwarded container port is on.

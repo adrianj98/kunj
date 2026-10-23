@@ -6,7 +6,9 @@ import { FakeBackend } from './fake-backend';
 import { ExecIO } from '../backend';
 import {
   BROWSER_TOOLS,
+  BROWSER_TOOL_ARGS,
   BridgeRecord,
+  CHROME_DEVTOOLS_MCP,
   MAX_LINE_BYTES,
   RequestPolicy,
   bridgeFor,
@@ -16,6 +18,7 @@ import {
   installMcpConfig,
   isPathKey,
   listenCommand,
+  makeThrowawayProfile,
   makeRequestFilter,
   mcpServers,
   mergeClaudeConfig,
@@ -27,6 +30,7 @@ import {
   serverEnv,
   stopCommand,
   updateBridges,
+  validId,
   writeBridges,
 } from '../mcpbridge';
 
@@ -122,6 +126,40 @@ describe('makeRequestFilter', () => {
     expect(refused(call(4, 'fill_form', { elements: [{ uid: '1', value: 'x', nested: { outputDirPath: '/' } }] })).error.message).toContain('outputDirPath');
   });
 
+  it('refuses an argument a tool does not take, however harmless its name', () => {
+    expect(refused(call(1, 'take_screenshot', { fullPage: true, output: '/tmp/x' })).error.message).toContain('output');
+    expect(refused(call(2, 'evaluate_script', { function: '() => 1', saveTo: 'x' })).error.message).toContain('saveTo');
+    expect(filter(call(3, 'click', { uid: '1', pageId: 2 }))).toEqual({ pass: true });
+    expect(refused(call(4, 'click', 'not an object' as unknown as Record<string, unknown>)).id).toBe(4);
+  });
+
+  it('every allowed tool has an argument list, and none names a path', () => {
+    for (const [tool, args] of Object.entries(BROWSER_TOOL_ARGS)) {
+      expect([tool, args.filter(isPathKey)]).toEqual([tool, []]);
+    }
+  });
+
+  it('refuses nesting past the depth limit (fail closed)', () => {
+    let deep: unknown = 'x';
+    for (let i = 0; i < 40; i++) deep = [deep];
+    expect(refused(call(1, 'fill_form', { elements: deep })).error.message).toContain('too deep');
+  });
+
+  it('refuses ids that are not short strings or safe integers', () => {
+    expect(validId('a'.repeat(256))).toBe(true);
+    expect(validId('a'.repeat(257))).toBe(false);
+    expect(validId(2 ** 53)).toBe(false);
+    expect(validId(1.5)).toBe(false);
+    expect(validId({})).toBe(false);
+    const reply = refused(JSON.stringify({ jsonrpc: '2.0', id: 'x'.repeat(300), method: 'ping' }));
+    expect(reply.id).toBeNull();
+    expect(filter(JSON.stringify({ jsonrpc: '2.0', id: { a: 1 }, result: {} }))).toEqual({ pass: false });
+  });
+
+  it("drops the container's roots/list_changed notification", () => {
+    expect(filter(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/roots/list_changed' }))).toEqual({ pass: false });
+  });
+
   it('refuses methods that are not allowed, passes notifications and responses', () => {
     expect(refused(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: 'file:///etc/passwd' } })).id).toBe(1);
     expect(filter(JSON.stringify({ jsonrpc: '2.0', id: 6, method: 'tools/list' }))).toEqual({ pass: true });
@@ -160,7 +198,7 @@ describe('filterToolsList', () => {
   it('keeps only allowed tools and strips path-like properties from their schemas', () => {
     const result = {
       tools: [
-        { name: 'take_screenshot', inputSchema: { type: 'object', properties: { fullPage: { type: 'boolean' }, filePath: { type: 'string' } }, required: ['filePath'] } },
+        { name: 'take_screenshot', inputSchema: { type: 'object', properties: { fullPage: { type: 'boolean' }, filePath: { type: 'string' }, output: {} }, required: ['filePath', 'output'] } },
         { name: 'evaluate_script', inputSchema: { type: 'object', properties: { function: { type: 'string' }, sourcePath: {}, filePath: {} } } },
         { name: 'upload_file', inputSchema: { type: 'object', properties: { filePaths: {} } } },
         { name: 'take_heapsnapshot', inputSchema: {} },
@@ -183,13 +221,24 @@ describe('mcpServers', () => {
     expect(mcpServers({}, () => {})).toEqual([]);
   });
 
-  it('gives chrome the default command, with file-writing categories off and no allowOrigins', () => {
+  it('gives chrome the pinned server, its hardening flags, a throwaway profile and no allowOrigins', () => {
     const [server] = mcpServers({ chrome: {} }, () => {});
+    expect(CHROME_DEVTOOLS_MCP).toBe('chrome-devtools-mcp@1.12.0');
     expect(server.cfg.command).toBe('npx');
-    expect(server.cfg.args).toEqual(['-y', 'chrome-devtools-mcp@latest', '--isolated', '--categoryPerformance=false', '--categoryMemory=false', '--fileNavigations=false']);
+    expect(server.cfg.args).toEqual(['-y', 'chrome-devtools-mcp@1.12.0', '--categoryPerformance=false', '--categoryMemory=false', '--fileNavigations=false', '--no-usage-statistics']);
     expect(server.cfg.env).toEqual({ CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY: '1' });
+    expect(server.cfg.throwawayProfile).toBe(true);
     expect(server.cfg.allowOrigins).toBeUndefined();
     expect(mcpServers({ chrome: true }, () => {})).toHaveLength(1);
+  });
+
+  it('warns that custom args for the default command drop the hardening, and gives no throwaway profile', () => {
+    const warnings: string[] = [];
+    const [server] = mcpServers({ chrome: { args: ['-y', 'chrome-devtools-mcp@latest'] } }, m => warnings.push(m));
+    expect(warnings[0]).toMatch(/args replaces the default arguments.*hardening flags/);
+    expect(server.cfg.throwawayProfile).toBeUndefined();
+    expect(mcpServers({ chrome: { command: 'node', args: ['x'] } }, m => warnings.push(m))[0].cfg.throwawayProfile).toBeUndefined();
+    expect(warnings).toHaveLength(1);
   });
 
   it('takes a configured command, args, env and origins', () => {
@@ -292,6 +341,22 @@ describe('portHint', () => {
   });
 });
 
+describe('makeThrowawayProfile', () => {
+  it('makes a profile that refuses downloads and keeps any in its own directory', () => {
+    const p = makeThrowawayProfile();
+    try {
+      const prefs = JSON.parse(fs.readFileSync(path.join(p.profile, 'Default', 'Preferences'), 'utf8'));
+      expect(prefs.download_restrictions).toBe(3);
+      expect(prefs.download.default_directory).toBe(p.downloads);
+      expect(prefs.download.prompt_for_download).toBe(false);
+      expect(fs.statSync(p.tmp).isDirectory()).toBe(true);
+      expect(p.profile.startsWith(p.dir) && p.downloads.startsWith(p.dir) && p.tmp.startsWith(p.dir)).toBe(true);
+    } finally {
+      fs.rmSync(p.dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('bridge registry', () => {
   let dir: string;
   let file: string;
@@ -330,14 +395,26 @@ describe('bridge registry', () => {
 
 const ECHO_SERVER = `
 const rl = require('readline').createInterface({ input: process.stdin });
+const send = m => process.stdout.write(JSON.stringify(m) + '\\n');
+let initId;
 rl.on('line', line => {
   const m = JSON.parse(line);
   if (m.method === 'notifications/exit') process.exit(0);
+  // the answer to its own roots/list, sent when initialize arrived
+  if (m.id === 'roots-1' && m.method === undefined) {
+    return send({ jsonrpc: '2.0', id: initId, result: { protocolVersion: '2025-06-18', instructions: 'from the server', roots: m.result.roots } });
+  }
   if (m.id === undefined) return;
-  const result = m.method === 'initialize' ? { protocolVersion: '2025-06-18', instructions: 'from the server' }
-    : m.method === 'tools/list' ? { tools: [{ name: 'take_screenshot', inputSchema: { type: 'object', properties: { filePath: {}, fullPage: {} } } }, { name: 'upload_file', inputSchema: {} }] }
-    : { echo: m.method, env: process.env.GH_TOKEN || null };
-  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');
+  if (m.params && m.params.noreply) return;
+  if (m.params && m.params.fail) return send({ jsonrpc: '2.0', id: m.id, error: { code: -1, message: 'failed' } });
+  if (m.method === 'initialize') {
+    initId = m.id;
+    return send({ jsonrpc: '2.0', id: 'roots-1', method: 'roots/list' });
+  }
+  const result = m.method === 'tools/list' ? { tools: [{ name: 'take_screenshot', inputSchema: { type: 'object', properties: { filePath: {}, fullPage: {} } } }, { name: 'upload_file', inputSchema: {} }] }
+    : m.method === 'prompts/list' ? { tools: [{ name: 'upload_file' }] }
+    : { echo: m.method, env: process.env.GH_TOKEN || null, tmpdir: process.env.TMPDIR || null, args: process.argv.slice(1) };
+  send({ jsonrpc: '2.0', id: m.id, result });
 });
 `;
 
@@ -465,7 +542,7 @@ describe('runBridge', () => {
     ]);
     await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn, hostEnv: { PATH: '/bin', HOME: '/h', GH_TOKEN: 's' } });
 
-    expect(replies).toEqual([
+    expect(replies).toMatchObject([
       { jsonrpc: '2.0', id: 1, result: { echo: 'ping', env: null } },
       { jsonrpc: '2.0', id: 2, result: { echo: 'tools/call', env: null } },
     ]);
@@ -492,7 +569,7 @@ describe('runBridge', () => {
     await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn });
     expect(replies[0]).toMatchObject({ id: 9, error: { code: -32602 } });
     expect(replies[1]).toMatchObject({ id: 10, error: { code: -32602 } });
-    expect(replies[2]).toEqual({ jsonrpc: '2.0', id: 11, result: { echo: 'ping', env: null } });
+    expect(replies[2]).toMatchObject({ jsonrpc: '2.0', id: 11, result: { echo: 'ping', env: null } });
   });
 
   it('by default allows only the forwarded ports, read when the call arrives', async () => {
@@ -533,6 +610,8 @@ describe('runBridge', () => {
     ]);
     await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn: recordingSpawn().spawn, instructions: () => 'PORTS' });
     expect(init.result.instructions).toBe('from the server\n\nPORTS');
+    // The server's roots/list was answered by the bridge, never shown to the container
+    expect(init.result.roots).toEqual([]);
     expect(list.result.tools).toEqual([{ name: 'take_screenshot', inputSchema: { type: 'object', properties: { fullPage: {} } } }]);
   });
 
@@ -569,6 +648,90 @@ describe('runBridge', () => {
     await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn, log: m => logs.push(m) });
     expect(calls).toHaveLength(0);
     expect(logs.join('\n')).toMatch(/longer than 4194304 bytes; session ended/);
+  });
+
+  it('gives the default browser a throwaway profile and TMPDIR per session, removed afterwards', async () => {
+    const b = new FakeBackend();
+    const controller = new AbortController();
+    let result: any;
+    let dirDuring = '';
+    let prefsDuring = false;
+    scriptedListener(b, [
+      async c => {
+        c.send({ jsonrpc: '2.0', id: 1, method: 'ping' });
+        result = (await c.next()).result;
+        dirDuring = path.dirname(result.tmpdir ?? '');
+        prefsDuring = fs.existsSync(path.join(dirDuring, 'profile', 'Default', 'Preferences'));
+        controller.abort();
+      },
+    ]);
+    await runBridge(b, 'cid', 'chrome', { ...CFG, args: [...CFG.args, '--'], throwawayProfile: true }, { user: 'sandbox', signal: controller.signal, spawn: recordingSpawn().spawn });
+    expect(prefsDuring).toBe(true);
+    expect(result.args.slice(-1)).toEqual([`--userDataDir=${path.join(dirDuring, 'profile')}`]);
+    expect(path.basename(dirDuring)).toMatch(/^kunj-mcp-/);
+    expect(fs.existsSync(dirDuring)).toBe(false);
+  });
+
+  it('forgets a watched request on an error reply, and keeps at most 1024', async () => {
+    const b = new FakeBackend();
+    const controller = new AbortController();
+    const replies: any[] = [];
+    scriptedListener(b, [
+      async c => {
+        // tools/list that fails, then another reply under the same id: not rewritten
+        c.send({ jsonrpc: '2.0', id: 7, method: 'tools/list', params: { fail: true } });
+        replies.push(await c.next());
+        c.send({ jsonrpc: '2.0', id: 7, method: 'prompts/list' });
+        replies.push(await c.next());
+        // 1030 that are never answered: the first ones are evicted, the last ones still watched
+        for (let i = 0; i < 1030; i++) c.send({ jsonrpc: '2.0', id: 1000 + i, method: 'tools/list', params: { noreply: true } });
+        c.send({ jsonrpc: '2.0', id: 1000, method: 'prompts/list' });
+        replies.push(await c.next());
+        c.send({ jsonrpc: '2.0', id: 2029, method: 'prompts/list' });
+        replies.push(await c.next());
+        controller.abort();
+      },
+    ]);
+    await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn: recordingSpawn().spawn });
+    expect(replies[0]).toMatchObject({ id: 7, error: { message: 'failed' } });
+    expect(replies[1].result.tools).toEqual([{ name: 'upload_file' }]);
+    expect(replies[2].result.tools).toEqual([{ name: 'upload_file' }]);
+    expect(replies[3].result.tools).toEqual([]);
+  });
+
+  it('stops reading a container that does not read its replies, and ends the session past the cap', async () => {
+    const run = async (maxBufferedToContainer?: number) => {
+      const b = new FakeBackend();
+      const controller = new AbortController();
+      const logs: string[] = [];
+      let fromContainer: any;
+      let toContainer: any;
+      b.execHandler = (_id, cmd, io) => {
+        if (!cmd.join(' ').includes('exec socat UNIX-LISTEN')) return undefined;
+        // Never reads io.stdin: replies pile up there
+        toContainer = io.stdin;
+        fromContainer = io.stdout;
+        const refused = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'upload_file', arguments: {} } }) + '\n';
+        for (let i = 0; i < 5000; i++) fromContainer.write(refused); // about 570 KB
+        return new Promise(resolve => {
+          setTimeout(() => {
+            controller.abort();
+            resolve({ exitCode: 0, stdout: '' });
+          }, 100);
+        });
+      };
+      await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, log: m => logs.push(m), ...(maxBufferedToContainer ? { maxBufferedToContainer } : {}) });
+      return { fromContainer, toContainer, logs };
+    };
+
+    const paused = await run();
+    expect(paused.fromContainer.isPaused()).toBe(true);
+    // Most of the input is still unread, and what waits for the container stays at about its two buffers
+    expect(paused.fromContainer.readableLength + paused.fromContainer.writableLength).toBeGreaterThan(300_000);
+    expect(paused.toContainer.readableLength + paused.toContainer.writableLength).toBeLessThan(256 * 1024);
+
+    const capped = await run(1000);
+    expect(capped.logs.join('\n')).toMatch(/the container is not reading \(over 1000 bytes waiting\); session ended/);
   });
 
   it('stops reading the container while the server is not keeping up', async () => {
