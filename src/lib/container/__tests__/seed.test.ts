@@ -255,7 +255,9 @@ describe('seedScript', () => {
     const s = seedScript({ ...base, create: true, base: 'main' });
     expect(s).toContain("git fetch origin 'main'");
     expect(s).toContain("git switch -c 'feat' --no-track 'origin/main'");
-    expect(s).toContain("git switch 'feat' 2>/dev/null ||");
+    expect(s).toContain("git show-ref -q --verify 'refs/heads/feat'");
+    // never a bare switch that could pick up a remote-tracking ref
+    expect(s).not.toMatch(/git switch 'feat' 2>/);
   });
 
   it('switches to an existing branch otherwise', () => {
@@ -278,6 +280,21 @@ describe('seedScript', () => {
     expect(b).not.toContain('git fetch');
     expect(b).toContain(`git rev-parse -q --verify ${ref} >/dev/null || git update-ref ${ref} HEAD`);
     expect(b.indexOf('git switch')).toBeLessThan(b.indexOf('git update-ref'));
+  });
+
+  it('a snapshot copy drops stale remote-tracking refs before checkout (all but the base)', () => {
+    const drop = (s: string) => s.split('\n').find(l => l.includes('for-each-ref'))!;
+    const existing = seedScript({ ...base, seedFrom: '/opt/kunj/seed' });
+    expect(drop(existing)).toContain('if [ -f .kunj-fresh ]');
+    expect(drop(existing)).toContain("grep -vxF ''");
+    expect(drop(existing)).toContain('update-ref --no-deref -d');
+    expect(existing.indexOf('for-each-ref')).toBeLessThan(existing.indexOf('git fetch origin'));
+    const created = seedScript({ ...base, create: true, base: 'main', seedFrom: '/opt/kunj/seed' });
+    expect(drop(created)).toContain("grep -vxF 'refs/remotes/origin/main'");
+    expect(created.indexOf('for-each-ref')).toBeLessThan(created.indexOf('git switch'));
+    // other paths have nothing stale to drop
+    expect(seedScript(base)).not.toContain('for-each-ref');
+    expect(seedScript({ ...base, bundlePath: '/tmp/o.bundle' })).not.toContain('for-each-ref');
   });
 
   it('configures insteadOf only with a token', () => {

@@ -555,10 +555,10 @@ const BRANCH_ALLOW = 'it-allow';
         expect(started.image).toBe(tag);
         const r = await inside(
           started.containerId,
-          'test -f installed && test -f maintained && git rev-parse --abbrev-ref HEAD && git remote get-url origin && git rev-parse --verify -q refs/remotes/origin/it-bp-new >/dev/null && echo has-remote-ref'
+          'test -f installed && test -f maintained && git rev-parse --abbrev-ref HEAD && git remote get-url origin && git for-each-ref --format=\'%(refname)\' refs/remotes/origin'
         );
         expect(r.exitCode).toBe(0);
-        expect(r.stdout.trim().split('\n')).toEqual(['it-bp-new', originUrl, 'has-remote-ref']);
+        expect(r.stdout.trim().split('\n')).toEqual(['it-bp-new', originUrl, 'refs/remotes/origin/it-bp-new']);
         expect(rec.execs.filter(argv => argv.join(' ').includes('git clone'))).toEqual([]);
       } finally {
         await removeContainer(backend, started.names, ctx);

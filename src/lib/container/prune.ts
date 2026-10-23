@@ -87,8 +87,21 @@ export interface ApplyContext {
 
 const LS_REMOTE_TIMEOUT_MS = 15000;
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** A snapshot build does not take this long; a running temporary container older than it is a leftover */
-const SNAPSHOT_LEFTOVER_MS = 2 * 60 * 60 * 1000;
+/** No snapshot build takes this long; a temporary container still live after it is a leftover */
+const SNAPSHOT_LEFTOVER_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A snapshot build's temporary container is a leftover when it is dead or exited, was created and
+ * never started for longer than the orphan grace, or has been live for a day. A paused one is a
+ * build in `docker commit`, and a created one is a build starting: both are left alone while young.
+ */
+function isSnapshotLeftover(c: ContainerInfo, now: number): boolean {
+  const state = c.state.toLowerCase();
+  const age = now - createdTime(c.createdAt);
+  if (state === 'exited' || state === 'dead') return true;
+  if (state === 'created') return age > ORPHAN_GRACE_MS;
+  return age > SNAPSHOT_LEFTOVER_MS;
+}
 const KUNJ_IMAGE_REPOS = ['kunj-sandbox', 'kunj-nethelper', 'kunj-sandbox-dind'];
 
 function message(err: unknown): string {
@@ -180,7 +193,7 @@ export async function planPrune(backend: ContainerBackend, ctx: PruneContext): P
     // A snapshot build's temporary container (`<branch>:snapshot`) is not a branch. It holds nothing
     // to protect (no keep files, token or agent), so a leftover of a killed build goes without a guard.
     if (branch.endsWith(':snapshot')) {
-      if (c.state !== 'running' || now - createdTime(c.createdAt) > SNAPSHOT_LEFTOVER_MS) {
+      if (isSnapshotLeftover(c, now)) {
         plan.containers.push({ branch, names: namesOfContainer(c.name), reason: 'snapshot-leftover', image: c.image, user: recordedUser(c) });
       }
       continue;

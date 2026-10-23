@@ -226,6 +226,13 @@ export function seedScript(input: SeedInput): string {
     lines.push('cd /workspace');
     // The snapshot may have cloned another URL for the same repository (ssh vs https)
     lines.push(`git remote set-url origin ${q(input.originUrl)}`);
+    // The snapshot's clone knows every branch origin had when it was built. A branch since deleted and
+    // made again must not be checked out from a stale remote-tracking ref, and prune must not read
+    // one as "seen on origin". A fresh copy keeps only the base; this seed fetches the branch itself.
+    const keep = input.create ? q(`refs/remotes/origin/${input.base ?? ''}`) : "''";
+    lines.push(
+      `if [ -f ${SEED_FRESH} ]; then git for-each-ref --format='%(refname)' refs/remotes/origin | grep -vxF ${keep} | while read -r r; do git update-ref --no-deref -d "$r"; done; fi`
+    );
   } else if (bundle) {
     lines.push(`if [ ! -d /workspace/.git ]; then git clone --no-checkout -b ${q(input.branch)} ${q(bundle)} /workspace; fi`);
     lines.push('cd /workspace');
@@ -239,7 +246,9 @@ export function seedScript(input: SeedInput): string {
   if (input.create) {
     const base = q(input.base ?? '');
     lines.push(`git fetch origin ${base}`);
-    lines.push(`git switch ${branch} 2>/dev/null || git switch -c ${branch} --no-track ${q(`origin/${input.base ?? ''}`)}`);
+    // Never a bare `git switch <branch>` when the local branch is absent: it would check out a
+    // remote-tracking ref of the same name
+    lines.push(`if git show-ref -q --verify ${q(`refs/heads/${input.branch}`)}; then git switch ${branch}; else git switch -c ${branch} --no-track ${q(`origin/${input.base ?? ''}`)}; fi`);
   } else if (bundle) {
     // The bundle is origin's branch as the host just fetched it: no fetch, which could need a token
     lines.push(`git switch ${branch}`);

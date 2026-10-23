@@ -49,6 +49,11 @@ Changes made with Claude, and why.
 - prune.ts: a `<branch>:snapshot` container that is stopped or older than 2 hours is planned with reason
   `snapshot-leftover` and removed without a guard or hooks. Why: a killed snapshot build left it behind for ever.
   Docs: prune page and phase 2 spec section 4.
+- Review fixes: snapshot leftovers are now only `exited`/`dead`, `created` over 10 min, or live over 24 h (a
+  `paused` build is in `docker commit`; the 2 h rule could kill it). A snapshot-copy seed deletes every
+  `refs/remotes/origin/*` except the base before checkout, and the create path never runs a bare
+  `git switch <branch>` (it could check out a stale remote-tracking ref of a re-used branch name, and prune
+  would then call the branch gone). `:` in branch names needs no check: git refuses it in ref names.
 - Tests: `jest.setTimeout(30000)` in the snapshot, seed, blueprint, lifecycle, services, presets and both events
   test files (fixture repositories and spawned processes hit the 5 s default when the machine is busy).
   Why: spurious timeouts; tests share nothing between cases, so they were not restructured.

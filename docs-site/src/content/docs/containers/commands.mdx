@@ -440,7 +440,7 @@ It removes:
   can hold unpushed work that no check can see, so they are listed as kept and removed only with
   `--force`.
 - **snapshot build leftovers**: the temporary container of a [snapshot](../blueprints/) build that was
-  killed (Ctrl-C, a crash, a reboot), when it is stopped or has run for over two hours, with its helper,
+  killed (Ctrl-C, a crash, a reboot), when it has exited, was created but never started for over ten minutes, or has been alive for over a day (a paused one is a build committing its image), with its helper,
   services, volumes and network. There is no check for unpushed work: it holds none. In `--json` the
   entry has `reason: "snapshot-leftover"`.
 - **old snapshot images**: [blueprint snapshots](../blueprints/) whose hash is not the current one.

@@ -170,16 +170,28 @@ describe('planPrune', () => {
     expect((await planPrune(b, ctx())).containers).toEqual([]);
   });
 
-  it('removes snapshot build leftovers (stopped, or running over 2 hours) without a guard', async () => {
+  it('keeps live snapshot builds: paused (committing), created young, running young', async () => {
+    const b = backendWith([
+      main('p:snapshot', { state: 'paused', createdAt: '2026-10-23T09:00:00Z' }),
+      main('y:snapshot', { state: 'created', createdAt: '2026-10-23T11:55:00Z' }),
+      main('r:snapshot', { state: 'running', createdAt: '2026-10-22T13:00:00Z' }),
+    ]);
+    expect((await planPrune(b, ctx())).containers).toEqual([]);
+  });
+
+  it('removes snapshot build leftovers (exited, created over 10 min, live over 24 h) without a guard', async () => {
     const b = backendWith([
       main('a:snapshot', { state: 'exited', createdAt: '2026-10-23T11:59:00Z' }),
-      main('b:snapshot', { createdAt: '2026-10-23T09:00:00Z' }),
-      main('c:snapshot', { createdAt: '2026-10-23T11:00:00Z' }),
+      main('b:snapshot', { state: 'created', createdAt: '2026-10-23T11:40:00Z' }),
+      main('c:snapshot', { state: 'running', createdAt: '2026-10-22T11:00:00Z' }),
+      main('d:snapshot', { state: 'paused', createdAt: '2026-10-22T11:00:00Z' }),
     ]);
     const plan = await planPrune(b, ctx({ force: false }));
     expect(plan.containers.map(c => [c.branch, c.reason, c.kept, c.guard])).toEqual([
       ['a:snapshot', 'snapshot-leftover', undefined, undefined],
       ['b:snapshot', 'snapshot-leftover', undefined, undefined],
+      ['c:snapshot', 'snapshot-leftover', undefined, undefined],
+      ['d:snapshot', 'snapshot-leftover', undefined, undefined],
     ]);
     const hooks: string[] = [];
     const result = await applyPrune(b, plan, { repoId: REPO.id, kunjVersion: VERSION, force: false, forwardsFile: path.join(tmp, 'f.json'), hook: async n => { hooks.push(n); } });
