@@ -26,7 +26,8 @@ no state beyond UI layout.
 | `kunj ct file read\|write [branch] <path>` | Shipped (47fcefe, 5721f17) |
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
-| The app (`workspace-app/`) | Not started; plan being rewritten for the native runtime |
+| Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native) |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Not started (in the app plan) |
 
@@ -34,16 +35,48 @@ no state beyond UI layout.
 
 ### Layout
 
-*Drawing: environment list on the left, grouped by repository; on the right a header (branch, kind,
-ahead/behind, PR, ports, the main actions), a tab strip and a pane area that can be split.*
+The look is the design package in `docs/workspace-app/` (received 2026-10-23): `design/DESIGN.md`
+for principles, layout, type and themes, `design/tokens.json` for every colour and layout constant,
+and `design/mockups/warm.png` as the reference the app must match. The package is design only; its
+technical remarks (xterm.js, Electron, CSS variables) are superseded by the runtime below.
 
-- **Terminal tab:** a login shell in the worktree, or `kunj ct shell <branch>` for a container.
-- **Agent tab:** a terminal attached to the environment's tmux session, so a session started from the
-  CLI shows up in the app and the reverse.
-- **Diff tab:** Monaco's diff editor, default against the base branch (everything since the fork point
-  from `origin/<base>`, working tree included); a dropdown for uncommitted only and last commit.
+```
+┌──────────┬────────────────────────────────────────────────────┐
+│ sidebar  │ header  52px  (title, meta line, actions)           │
+│ 272px    ├─────────────────────────────┬──────────────────────┤
+│ ⌘K       │ tab bar 40px                │ Changes bar 40px     │
+│ sessions ├─────────────────────────────┼──────────┬───────────┤
+│ grouped  │ terminal (SwiftTerm)        │ file list│ diff      │
+│ by repo  │ 11fr                        │ 196px    │ (Monaco)  │
+│ + New    ├─────────────────────────────┴──────────┴───────────┤
+│ session  │ status bar 28px                                     │
+└──────────┴────────────────────────────────────────────────────┘
+```
+
+- **Sidebar:** sessions grouped by repository, one row per environment: status dot (green agent
+  running, amber waiting for input, idle otherwise), *title · relative time*, then *branch · status
+  verb* in mono. The title is the environment's task (the worktree description from kunj's branch
+  metadata, else the branch); the status verb is derived from state ("Waiting for input", "Running",
+  "Merged #398", "Clean", "Dirty", "Stopped"). A ⌘K search box on top, "+ New session" at the bottom,
+  the agent count and kunj version under it.
+- **Header:** title, then a mono meta line: repo / branch · kind · ahead/behind · PR (link) · ports.
+  Actions right-aligned: Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O (outlined) and Create PR ⌘⇧P (the one
+  filled button), plus an overflow menu with start/stop/remove and worktree remove.
+- **Tab bar (left column):** segmented pills, one per terminal; a dot when its process has a notable
+  state. Right side: `tmux <session> · uptime`, split and new-tab buttons.
+- **Terminal tabs:** a login shell in the worktree, or `kunj ct shell <branch>` for a container.
+- **Agent tab:** a terminal running `kunj agent <branch>` or `kunj ct agent <branch>`, which attaches
+  to the environment's tmux session, so a session started from the CLI shows up in the app and the
+  reverse.
+- **Changes column (right, always visible):** header `N files · +adds −dels` and a scope select
+  (vs origin/<base>, default: everything since the fork point, working tree included; Uncommitted;
+  Last commit); a file list (A/M/D letter, name, ± counts); Monaco's diff editor for the selected file.
+- **Status bar:** container name or worktree path · uptime · services · forwards; right side the agent
+  state and the ⌘1–9 hint.
 - **Editor tab** (v2): a file from the environment, edited in Monaco.
 - **Preview tab** (v2): a webview on a forwarded port. v1 shows the ports as links that open the browser.
+- **Themes:** warm (default, dark), light and graphite from `tokens.json`; light ↔ warm follow the
+  system appearance, with an override in settings. The `term*` tokens are the terminal theme.
 
 ### The CLI is the contract
 
@@ -171,6 +204,9 @@ All 2026-10-23.
 - **Refresh through `kunj events --json`,** built before the app; no polling in the app.
 - **Editor level: Monaco with the diff editor;** no language servers in v1; VS Code/Cursor as hand-off.
 - **Diff default against the base branch,** with uncommitted-only and last-commit options.
+- **The UI is the design package** (`docs/workspace-app/design/`, 2026-10-23): two columns under the
+  header, terminals left and the Changes column always on the right, sidebar rows titled by task with a
+  status verb, three themes from `tokens.json`. The package's technical remarks are ignored.
 - **Ports in v1 as links;** webview previews in v2.
 - **App state is UI layout only,** in `~/.kunj/<reponame>/workspace.json`.
 - **Long actions run in a terminal tab;** no NDJSON progress under `--json` for v1.
@@ -196,7 +232,7 @@ All 2026-10-23.
 
 - `docs/superpowers/plans/2026-10-23-workspace-cli-contract.md`: the CLI contract above. Done.
 - `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`: the app (environment list, terminals, agent
-  attach, diff viewer). Being rewritten in Swift for the native runtime.
+  attach, Changes column), native, rewritten 2026-10-23 from the Electron draft.
 
 ## Code map
 
@@ -209,6 +245,8 @@ All 2026-10-23.
 | `src/lib/events.ts`, `src/commands/events.ts` | `kunj events` |
 | `src/lib/command.ts` | The opt-in `jsonCode` error rule |
 | `spikes/native-ide/` | The native-shell spike and `REPORT.md` |
+| `docs/workspace-app/design/` | The design package: `DESIGN.md`, `tokens.json`, mockups |
+| `workspace-app/` | The app (Swift package, `scripts/bundle.sh`) |
 
 ## Sources
 

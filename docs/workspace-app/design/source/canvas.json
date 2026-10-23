@@ -1,0 +1,17 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-23T20:02:00Z"},
+  "title": "Kunj Workspace",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "Warm dark", "radius": 12},
+    "Light.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "Light", "radius": 12},
+    "Graphite.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "title": "Graphite", "radius": 12}
+  },
+  "order": ["Main.dc.html", "Light.dc.html", "Graphite.dc.html"],
+  "notes": {
+    "themes": {"x": 0, "y": -300, "text": "Kunj Workspace · themes", "kind": "title1", "maxW": 4480}
+  },
+  "designSystems": []
+}
