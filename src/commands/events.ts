@@ -87,7 +87,8 @@ export class EventsCommand extends BaseCommand {
       options: [{ flags: '--repo <path...>', description: 'Watch only these repositories (default: every known one)' }],
       helpText: [
         'Prints a hello line, then one line per change: git (refs, HEAD, index), sessions, forwards,',
-        'repos (files in ~/.kunj), container (Docker events), agent (tmux sessions), backend.',
+        'repos (files in ~/.kunj), container (Docker events, and action "status" from a 10 s poll),',
+        'agent (tmux sessions), backend. A 10 s poll also reports worktree changes (git status).',
         'With --json each line is one JSON object. Stops on Ctrl-C or when stdin closes.',
       ].join('\n'),
     });
@@ -113,8 +114,9 @@ export class EventsCommand extends BaseCommand {
       process.stdout.write((this.jsonMode ? JSON.stringify(e) : formatEvent(e)) + '\n');
     };
     try {
-      print({ type: 'hello', version: getVersion(), repos: repos.length, at: new Date().toISOString() });
-      await watchEvents({ repos, kunjDir: getGlobalKunjDir(), backend, onEvent: print, signal: controller.signal });
+      // hello once the sources are armed: a change made after it is reported
+      const onReady = () => print({ type: 'hello', version: getVersion(), repos: repos.length, at: new Date().toISOString() });
+      await watchEvents({ repos, kunjDir: getGlobalKunjDir(), backend, onEvent: print, onReady, signal: controller.signal });
     } finally {
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);

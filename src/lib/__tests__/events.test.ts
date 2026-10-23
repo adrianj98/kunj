@@ -1,10 +1,13 @@
-import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { gitPathMatters, watchEvents } from '../events';
 import { listTmuxSessions } from '../agent-session';
 import { FakeBackend } from '../container/__tests__/fake-backend';
+import { STATUS_SCRIPT } from '../container/env';
+import type { ContainerInfo } from '../container/backend';
 import type { KnownRepoInfo } from '../repos';
 import type { EventJson } from '../json-types';
 
@@ -36,6 +39,7 @@ function start(options: Partial<Parameters<typeof watchEvents>[0]> = {}): void {
     signal: controller.signal,
     debounceMs: 50,
     tmuxPollMs: 60_000,
+    statusPollMs: 60_000,
     backendRetryMs: 20,
     repoId: async () => 'github.com/acme/app',
     ...options,
@@ -69,6 +73,16 @@ async function prime(type: EventJson['type'], write: () => void, quietMs = 400):
   await settle(quietMs);
   events = [];
 }
+
+// The repo-id and status git calls inherit this: no user config (insteadOf, fsmonitor) in the tests
+const configBefore = process.env.GIT_CONFIG_GLOBAL;
+beforeAll(() => {
+  process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+});
+afterAll(() => {
+  if (configBefore === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+  else process.env.GIT_CONFIG_GLOBAL = configBefore;
+});
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-events-'));
@@ -251,5 +265,170 @@ describe('watchEvents', () => {
     const before = tmuxMock.mock.calls.length;
     await new Promise(r => setTimeout(r, 100));
     expect(tmuxMock.mock.calls.length).toBe(before);
+  });
+
+  it('onReady comes after the watchers are armed: a change right after it is reported', async () => {
+    let ready!: () => void;
+    const armed = new Promise<void>(r => (ready = r));
+    start({ onReady: ready });
+    await armed;
+    expect(tmuxMock).toHaveBeenCalled();
+    fs.writeFileSync(path.join(repo.gitCommonDir, 'refs', 'heads', 'z'), 'c'.repeat(40) + '\n');
+    await waitFor(() => ofType('git').length > 0);
+  });
+
+  it('a tmux failure (null) is not read as every agent ending', async () => {
+    tmuxMock.mockResolvedValueOnce(['kunj-app-x-abc123']).mockResolvedValueOnce(null).mockResolvedValue(['kunj-app-x-abc123']);
+    start({ tmuxPollMs: 10 });
+    await waitFor(() => tmuxMock.mock.calls.length >= 5);
+    expect(ofType('agent')).toEqual([]);
+  });
+
+  it('a subwatcher that errors is closed and restarted', async () => {
+    watchSpy = jest.spyOn(nodeFs, 'watch');
+    const refs = path.join(repo.gitCommonDir, 'refs');
+    start({ statusPollMs: 50 });
+    await prime('git', () => fs.writeFileSync(headFile(), 'ref: refs/heads/main\n'));
+    const index = watchSpy!.mock.calls.findIndex(([dir]) => String(dir) === refs);
+    const watcher = watchSpy!.mock.results[index].value as fs.FSWatcher;
+    const close = jest.spyOn(watcher, 'close');
+    watcher.emit('error', new Error('EMFILE'));
+    expect(close).toHaveBeenCalled();
+    await waitFor(() => watchSpy!.mock.calls.filter(([dir]) => String(dir) === refs).length >= 2);
+    await settle();
+    events = [];
+    await waitFor(() => ofType('git').length > 0, () => fs.writeFileSync(path.join(refs, 'heads', 'w'), 'd'.repeat(40) + '\n'));
+  });
+
+  it('a hung Docker daemon does not block exit', async () => {
+    const backend = new FakeBackend();
+    jest.spyOn(backend, 'events').mockRejectedValue(new Error('daemon down'));
+    jest.spyOn(backend, 'info').mockReturnValue(new Promise(() => undefined));
+    start({ backend });
+    await waitFor(() => (backend.info as jest.Mock).mock.calls.length > 0);
+    controller.abort();
+    const outcome = await Promise.race([running!.then(() => 'done'), new Promise(r => setTimeout(() => r('hung'), 1000))]);
+    expect(outcome).toBe('done');
+  });
+
+  it('a hung container list does not block exit', async () => {
+    const backend = new FakeBackend();
+    jest.spyOn(backend, 'list').mockReturnValue(new Promise(() => undefined));
+    start({ backend, statusPollMs: 20 });
+    await waitFor(() => (backend.list as jest.Mock).mock.calls.length > 0);
+    controller.abort();
+    const outcome = await Promise.race([running!.then(() => 'done'), new Promise(r => setTimeout(() => r('hung'), 1000))]);
+    expect(outcome).toBe('done');
+  });
+
+  it('the repo id defaults to origin\'s URL as git reports it (insteadOf), without userinfo', async () => {
+    const root = path.join(tmp, 'real');
+    git(['init', '-q', root]);
+    git(['-C', root, 'remote', 'add', 'origin', 'gh:Real.git']);
+    git(['-C', root, 'config', 'url.https://user:secret@github.com/acme/.insteadOf', 'gh:']);
+    repo = { ...repo, root, gitCommonDir: path.join(root, '.git'), name: 'real' };
+    const backend = new FakeBackend();
+    start({ backend, repoId: undefined });
+    await waitFor(() => backend.callsOf('events').length > 0);
+    backend.emitEvent({ action: 'start', name: 'kunj-real-x-1', labels: { 'kunj.repo': 'github.com/acme/real', 'kunj.branch': 'x' }, at: '2026-10-23T10:00:00.000Z' });
+    expect(ofType('container')).toEqual([expect.objectContaining({ repo: { name: 'real', root }, branch: 'x' })]);
+  });
+});
+
+function git(args: string[]): string {
+  return execFileSync('git', args, { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+}
+
+describe('watchEvents status poll', () => {
+  let root: string;
+  let ready: Promise<void>;
+
+  // A real repository with one commit and a linked worktree
+  beforeEach(() => {
+    root = path.join(tmp, 'real');
+    git(['init', '-q', '-b', 'main', root]);
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a\n');
+    git(['-C', root, 'add', 'a.txt']);
+    git(['-C', root, 'commit', '-q', '-m', 'a']);
+    git(['-C', root, 'worktree', 'add', '-q', '-b', 'side', path.join(tmp, 'side')]);
+    repo = { ...repo, root, gitCommonDir: path.join(root, '.git'), name: 'real' };
+  });
+
+  function startPolling(options: Partial<Parameters<typeof watchEvents>[0]> = {}): void {
+    let onReady!: () => void;
+    ready = new Promise<void>(r => (onReady = r));
+    start({ statusPollMs: 100, onReady, ...options });
+  }
+
+  it('primes on the first poll, then reports a change in a linked worktree as one git event', async () => {
+    startPolling();
+    await ready;
+    // macOS may still deliver the fixture's own git writes to the fresh watches: let them pass, then
+    // several polls (100 ms apart) of an unchanged repository must report nothing
+    await settle(600);
+    events = [];
+    await new Promise(r => setTimeout(r, 800));
+    expect(ofType('git')).toEqual([]);
+    fs.writeFileSync(path.join(tmp, 'side', 'new.txt'), 'x');
+    await waitFor(() => ofType('git').length > 0);
+    expect(ofType('git')[0]).toEqual({ type: 'git', repo: { name: 'real', root }, at: expect.any(String) });
+    await settle(600);
+    expect(ofType('git')).toHaveLength(1);
+  });
+
+  it('a worktree whose status fails is skipped, not fatal', async () => {
+    startPolling();
+    await ready;
+    fs.rmSync(path.join(tmp, 'side'), { recursive: true, force: true });
+    await settle(600);
+    events = [];
+    fs.writeFileSync(path.join(root, 'new.txt'), 'x');
+    await waitFor(() => ofType('git').length > 0);
+  });
+
+  describe('containers', () => {
+    const key = `sh -c ${STATUS_SCRIPT}`;
+    const main = (name: string, labels: Record<string, string>): ContainerInfo => ({
+      id: `id-${name}`, name, state: 'running', image: 'img', createdAt: '', ports: [],
+      labels: { 'kunj.repo': 'github.com/acme/app', 'kunj.branch': 'x', 'kunj.role': 'main', ...labels },
+    });
+
+    it('a changed agent, head, ahead or dirty state yields a container status event', async () => {
+      const backend = new FakeBackend();
+      backend.existing = [main('kunj-app-x-1', {}), main('kunj-app-x-1-net-helper', { 'kunj.role': 'helper' })];
+      backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=1\n# branch.oid ' + 'a'.repeat(40) + '\n' });
+      startPolling({ backend });
+      await ready;
+      await waitFor(() => backend.callsOf('exec').length > 0);
+      await settle(600);
+      expect(ofType('container')).toEqual([]);
+      expect(backend.callsOf('exec').every(([id]) => id === 'id-kunj-app-x-1')).toBe(true);
+      backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\n# branch.oid ' + 'a'.repeat(40) + '\n' });
+      await waitFor(() => ofType('container').length > 0);
+      expect(ofType('container')[0]).toEqual({
+        type: 'container', repo: { name: 'real', root }, branch: 'x', container: 'kunj-app-x-1', action: 'status', at: expect.any(String),
+      });
+      await settle(600);
+      expect(ofType('container')).toHaveLength(1);
+    });
+
+    it('a failing exec is skipped and polls never overlap', async () => {
+      const backend = new FakeBackend();
+      backend.existing = [main('kunj-app-x-1', {})];
+      let inFlight = 0;
+      let maxInFlight = 0;
+      jest.spyOn(backend, 'exec').mockImplementation(async () => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise(r => setTimeout(r, 120));
+        inFlight--;
+        throw new Error('container is not running');
+      });
+      startPolling({ backend, statusPollMs: 20 });
+      await ready;
+      await waitFor(() => (backend.exec as jest.Mock).mock.calls.length >= 3);
+      expect(maxInFlight).toBe(1);
+      expect(ofType('container')).toEqual([]);
+    });
   });
 });

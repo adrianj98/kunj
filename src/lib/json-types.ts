@@ -119,8 +119,11 @@ export interface AgentStopJson {
  * One line of `kunj events --json` (NDJSON). Each says what to refresh, not what changed:
  * `git` a repository's refs, HEAD or index; `sessions`/`forwards`/`repos` the registry file in
  * ~/.kunj (`repo` is reserved for per-repository files); `container` a Docker event of a kunj
- * container (`repo` null when it belongs to no watched repository); `agent` a host tmux session
+ * container, or `action: 'status'` when the poll saw its agent, HEAD, ahead count or dirty state
+ * change (`repo` null when it belongs to no watched repository); `agent` a host tmux session
  * (`kunj-…`) that appeared or went away; `backend` the container engine going away or coming back.
+ * The first line is `hello`; a first line of any other shape is an ErrorJson (the command failed
+ * before it started watching, e.g. `not-a-repo`).
  */
 export type EventJson = { at: string } & (
   | { type: 'hello'; version: string; repos: number }

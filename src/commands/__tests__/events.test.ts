@@ -37,6 +37,7 @@ beforeEach(() => {
   // Emits one event, then runs until aborted
   watchMock.mockReset();
   watchMock.mockImplementation(async (opts: any) => {
+    opts.onReady();
     opts.onEvent({ type: 'git', repo: { name: 'x', root: '/x' }, at: '2026-10-23T10:00:00.000Z' } satisfies EventJson);
     await new Promise<void>(resolve => opts.signal.addEventListener('abort', () => resolve()));
   });
@@ -91,4 +92,19 @@ test('a --repo that is not a git repository is an error with a code', async () =
   await expect(new EventsCommand().execute({ json: true, repo: ['/definitely/not/a/repo'] }))
     .rejects.toMatchObject({ jsonCode: 'not-a-repo' });
   expect(watchMock).not.toHaveBeenCalled();
+});
+
+test('hello is printed only once the watcher is ready', async () => {
+  let ready!: () => void;
+  watchMock.mockImplementation(async (opts: any) => {
+    ready = opts.onReady;
+    await new Promise<void>(resolve => opts.signal.addEventListener('abort', () => resolve()));
+  });
+  const run = new EventsCommand().execute({ json: true });
+  await new Promise(r => setImmediate(r));
+  expect(stdout.join('')).toBe('');
+  ready();
+  expect(lines()).toEqual([{ type: 'hello', version: expect.any(String), repos: 1, at: expect.any(String) }]);
+  stdin.end();
+  await run;
 });

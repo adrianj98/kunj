@@ -27,6 +27,8 @@ import {
   forwardedEnv,
   parseGuard,
   parseStatus,
+  SAFE_GIT,
+  STATUS_SCRIPT,
   truthy,
 } from './env';
 import { getKeepDir, listKeptFiles } from '../keep';
@@ -1089,8 +1091,6 @@ export async function stopContainer(backend: ContainerBackend, names: ContainerN
   if (owner) await stopServices(backend, names, owner, warn);
 }
 
-// The workspace's .git/config is the agent's: git must not run its fsmonitor or hooks for kunj
-const SAFE_GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
 const G = SAFE_GIT.join(' ');
 
 // Sections parsed by parseGuard; untracked files are not protected, as with `git worktree remove`.
@@ -1204,8 +1204,6 @@ export async function removeContainer(
   });
   return guard;
 }
-
-const STATUS_SCRIPT = `tmux has-session -t agent 2>/dev/null; echo "tmux=$?"; cd ${WORKSPACE} && ${G} status --porcelain=v2 --branch`;
 
 /** One exec per container, bounded by timeoutMs, so a listing never hangs on one container. */
 export async function containerStatus(backend: ContainerBackend, id: string, user: string, timeoutMs = 2000): Promise<ContainerStatus> {

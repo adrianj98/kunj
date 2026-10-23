@@ -72,6 +72,12 @@ export function emptyStatus(status: ContainerStatus['status']): ContainerStatus 
   return { agentRunning: null, head: null, ahead: null, dirty: null, status };
 }
 
+// The workspace's .git/config is the agent's: git must not run its fsmonitor or hooks for kunj
+export const SAFE_GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
+
+/** Run with `sh -c` in a main container (kunj ct list, kunj events); its output is for parseStatus. */
+export const STATUS_SCRIPT = `tmux has-session -t agent 2>/dev/null; echo "tmux=$?"; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
+
 /** Parse `tmux=<code>` followed by `git status --porcelain=v2 --branch`. */
 export function parseStatus(stdout: string): ContainerStatus {
   const result: ContainerStatus = { agentRunning: null, head: null, ahead: null, dirty: false, status: 'ok' };
