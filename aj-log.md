@@ -2,6 +2,12 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Merged branch containers + blueprints to main
+
+- Fast-forwarded `main` to `feature/blueprints` (2ee7853): phase 1 of `kunj container` (PR #15) plus
+  blueprints Tasks 1–10. Why: user asked to merge. Still open: Task 11 (zsh defaults, KUNJ_* env)
+  and a final whole-branch review of the blueprint work.
+
 ## 2026-10-23 — Blueprints: `kunj ct start` builds the snapshot itself (Task 10)
 
 What: before a new container (not on resume, not with `--no-snapshot` or `--image`), `kunj ct start`
