@@ -67,6 +67,7 @@ describe('image', () => {
     expect(fromSetting.tag).toBe('my/image:1');
     expect(fromSetting.build).toBeUndefined();
     expect(fromSetting.user).toBe('');
+    expect(() => resolveImage({ setting: '--privileged', devcontainer: null, repoName: 'repo', kunjVersion: '1.2.3' })).toThrow(/--image or container.image.*not a valid image reference/);
 
     const fromDc = resolveImage({ setting: '', devcontainer: dc, repoName: 'repo', kunjVersion: '1.2.3' });
     expect(fromDc.kind).toBe('devcontainer');

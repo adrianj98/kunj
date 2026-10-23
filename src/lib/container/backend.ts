@@ -3,6 +3,13 @@
 
 export interface Labels { [key: string]: string }
 
+/** An image reference as docker run takes it: never empty, never starting with '-' (it would be read as a flag), no spaces. */
+export const IMAGE_REF = /^[a-z0-9][a-z0-9._/:@-]*$/i;
+
+export function isImageRef(ref: string): boolean {
+  return IMAGE_REF.test(ref);
+}
+
 export interface ContainerInfo {
   id: string;
   name: string;

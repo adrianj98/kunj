@@ -258,8 +258,10 @@ From the branch container the database is `postgres:5432`. Services are read fro
 (all but the devcontainer's own `service`); the first to name a service wins. The compose import
 takes `image`, `environment`, `command`, `healthcheck`, `depends_on`, named volumes and the first
 port of `ports`/`expose`, and leaves out bind mounts, `build`, `privileged`, `cap_add`,
-`network_mode`, `env_file`, published ports and variables taken from your shell, with one warning
-listing what it dropped. `${VAR:-default}` becomes the default; nothing is read from your
+`network_mode`, `env_file`, `entrypoint`, `user`, `working_dir`, `tmpfs`, published ports and
+variables taken from your shell, with one warning listing what it dropped. A compose file with
+`include` or an `extends` that names another file is not imported at all (those read files from
+your machine). `${VAR:-default}` becomes the default; nothing is read from your
 environment.
 
 `start` runs the services before the branch container, in `dependsOn` order, and waits for each

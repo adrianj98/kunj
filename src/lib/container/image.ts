@@ -5,7 +5,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Readable } from 'stream';
-import { ContainerBackend } from './backend';
+import { ContainerBackend, isImageRef } from './backend';
 import { DevcontainerSpec } from './devcontainer';
 
 export interface ImageSource {
@@ -104,7 +104,10 @@ export function resolveImage(input: ResolveImageInput): ImageSource {
     const base = resolveImage({ ...input, snapshot: null });
     return { kind: 'blueprint', tag: input.snapshot.tag, user: input.snapshot.user, spec: base.spec };
   }
-  if (input.setting) return { kind: 'setting', tag: input.setting, user: '' };
+  if (input.setting) {
+    if (!isImageRef(input.setting)) throw new Error(`Image "${input.setting}" (--image or container.image) is not a valid image reference`);
+    return { kind: 'setting', tag: input.setting, user: '' };
+  }
 
   const dc = input.devcontainer;
   if (dc) {

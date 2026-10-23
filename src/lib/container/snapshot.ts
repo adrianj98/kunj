@@ -207,11 +207,13 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
   // A run killed before its cleanup (Ctrl-C during setup) leaves the temporary container and its
   // volumes; a kept workspace volume would skip the clone and snapshot an old checkout
   const names = containerNames(opts.repo.name, opts.repo.id, snapshotNamesFor(opts.branch));
+  // Leftover services are found by these labels even when the leftover container itself is gone
+  const owner = { repoId: opts.repo.id, branch: snapshotNamesFor(opts.branch) };
   let result: StartResult | undefined;
   let sha = '';
   let tools: SnapshotResult['tools'] = [];
   try {
-    await removeContainer(backend, names, { force: true, keepVolumes: false, user: '', kunjVersion: opts.kunjVersion, warn: opts.warn });
+    await removeContainer(backend, names, { force: true, keepVolumes: false, user: '', kunjVersion: opts.kunjVersion, warn: opts.warn, owner });
     result = await startContainer(backend, startOptions);
     tools = result.blueprint?.tools ?? [];
     const id = result.containerId;
@@ -235,6 +237,7 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
         user: result.user,
         kunjVersion: opts.kunjVersion,
         warn: opts.warn,
+        owner,
       }).catch(err => opts.warn(`Could not remove the temporary snapshot container: ${message(err)}`));
     }
   }

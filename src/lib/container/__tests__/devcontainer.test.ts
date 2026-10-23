@@ -104,6 +104,10 @@ describe('devcontainer', () => {
       expect(() => parseDevcontainer('{"dockerComposeFile":"../../x.yml"}', FILE)).toThrow(/dockerComposeFile must stay inside the repository/);
     });
 
+    it('rejects an image that would be read as a flag', () => {
+      expect(() => parseDevcontainer('{"image":"--privileged"}', FILE)).toThrow(`${FILE}: image "--privileged" is not a valid image reference`);
+    });
+
     it('rejects a non-object document', () => {
       expect(() => parseDevcontainer('[1]', FILE)).toThrow(`${FILE}: expected a JSON object`);
     });

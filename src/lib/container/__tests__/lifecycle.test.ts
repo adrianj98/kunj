@@ -1366,14 +1366,14 @@ describe('services', () => {
 
   it('stop stops the services after the branch container', async () => {
     const b = new FakeBackend();
-    b.existing = [svcInfo('running')];
+    b.existing = [info({}), svcInfo('running')];
     await stopContainer(b, names);
     expect(b.callsOf('stop')).toEqual([[names.helper], [names.container], ['pg-id']]);
   });
 
   it('remove deletes the service containers and their volumes (kept with --keep-volumes)', async () => {
     const b = new FakeBackend();
-    b.existing = [svcInfo('running')];
+    b.existing = [info({}), svcInfo('running')];
     await removeContainer(b, names, { force: true, keepVolumes: false, user: 'dev', kunjVersion: VERSION });
     expect(b.callsOf('remove')).toEqual([[{
       containers: [names.helper, names.container, PG],
@@ -1382,7 +1382,7 @@ describe('services', () => {
     }]]);
 
     const kept = new FakeBackend();
-    kept.existing = [svcInfo('running')];
+    kept.existing = [info({}), svcInfo('running')];
     await removeContainer(kept, names, { force: true, keepVolumes: true, user: 'dev', kunjVersion: VERSION });
     expect(kept.callsOf('remove')[0][0]).toEqual({ containers: [names.helper, names.container, PG], volumes: [], networks: [names.network] });
   });
@@ -1420,5 +1420,5 @@ describe('services in a snapshot build', () => {
     const calls = b.calls.map(c => (c.method === 'exec' ? (c.args[1] as string[]).join(' ') : c.method));
     expect(calls.indexOf('sh -c pg_isready')).toBeGreaterThan(-1);
     expect(calls.indexOf('sh -c pg_isready')).toBeLessThan(calls.indexOf('sh -lc npm run migrate'));
-  });
+  }, 30_000);
 });

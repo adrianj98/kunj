@@ -5,7 +5,11 @@ import { LABEL, containerNames, labelsFor } from '../names';
 import { runArgs } from '../docker';
 import {
   ServiceSpec,
+  composeRefusal,
   describeServices,
+  findServices,
+  resumeServices,
+  stopServices,
   mergeServices,
   parseServices,
   resolveServices,
@@ -294,7 +298,7 @@ describe('startServices', () => {
     });
     expect(Date.now() - started).toBeLessThan(2000);
     expect(b.callsOf('exec').length).toBeGreaterThan(1);
-    expect(warnings).toEqual(['Service db did not pass its health check within 0s; continuing']);
+    expect(warnings).toEqual(['Service db did not pass its health check within 0.06s; continuing']);
     // The start goes on
     expect(b.callsOf('run')).toHaveLength(2);
   });
@@ -318,5 +322,63 @@ describe('describeServices / serviceRemoval', () => {
     ]);
     expect(serviceRemoval(found, false)).toEqual({ containers: [found[0].name, found[1].name], volumes: ['v1', 'v2'] });
     expect(serviceRemoval(found, true).volumes).toEqual([]);
+  });
+});
+
+describe('fix round 1', () => {
+  it('an image that would be read as a docker run flag is refused, in a blueprint and in compose', () => {
+    expect(() => parseBlueprint(JSON.stringify({ services: { evil: { image: '--privileged', command: ['alpine', 'sh'] } } }), 'bp'))
+      .toThrow('bp: services.evil: image "--privileged" is not a valid image reference');
+    expect(() => parseServices({ evil: { image: '-v=/:/host' } }, 'f')).toThrow(/services\.evil: image "-v=\/:\/host" is not a valid image reference/);
+    expect(() => parseServices({ evil: { image: 'alpine --privileged' } }, 'f')).toThrow(/not a valid image reference/);
+    const { services, dropped } = servicesFromCompose({ services: { evil: { image: '--privileged', command: ['alpine'] }, ok: { image: 'ghcr.io/a/b:1@sha256:abc' } } });
+    expect(services.map(x => x.name)).toEqual(['ok']);
+    expect(dropped).toEqual(['evil (invalid image "--privileged")']);
+    // The last line of defence: runArgs never puts a flag where the image goes
+    expect(() => runArgs(serviceRunSpec(names, REPO, BRANCH, svc('x', { image: '--cap-add=SYS_ADMIN' })), '/tmp/env')).toThrow(/not a valid image reference/);
+  });
+
+  it('refuses compose files with include or an extends that names a file', async () => {
+    expect(composeRefusal('include:\n  - /etc/other/compose.yml\nservices: {}\n')).toBe('include is not supported');
+    expect(composeRefusal('services:\n  db:\n    extends:\n      file: /home/me/other/compose.yml\n      service: db\n')).toBe('extends with a file is not supported');
+    expect(composeRefusal('services:\n  db:\n    extends: { file: /x.yml, service: db }\n')).toBe('extends with a file is not supported');
+    expect(composeRefusal('{"services": {"db": {"extends": {\n  "file": "/x.yml", "service": "db"}}}}')).toBe('extends with a file is not supported');
+    // extends within the same file reads nothing from the host
+    expect(composeRefusal('services:\n  base:\n    image: redis\n  db:\n    extends:\n      service: base\n    image: redis:7\n')).toBeNull();
+
+    const b = new FakeBackend();
+    const warnings: string[] = [];
+    expect(await resolveServices(b, { compose: [{ path: 'c.yml', text: 'include:\n  - /x.yml\n' }], warn: m => warnings.push(m) })).toEqual([]);
+    expect(warnings).toEqual(["c.yml: include is not supported by kunj's compose import; its services are not started"]);
+    expect(b.methods()).not.toContain('composeConfig');
+  });
+
+  it('finds services by their labels, not a name prefix another branch can extend', async () => {
+    // Branch "x" and a branch named so its container name starts with x's: "<x container>-svc-..."
+    const other = { ...svcInfo('db'), id: 'other-id', labels: labelsFor(REPO, 'evil', { [LABEL.role]: 'service', [LABEL.service]: 'db' }) };
+    const mine = svcInfo('cache');
+    const b = new FakeBackend();
+    b.existing = [other, mine];
+    expect((await findServices(b, names, { repoId: REPO, branch: BRANCH })).map(c => c.id)).toEqual(['cache-id']);
+    await stopServices(b, names, { repoId: REPO, branch: BRANCH });
+    expect(b.callsOf('stop')).toEqual([['cache-id']]);
+  });
+
+  it('resume starts services dependencies first, as recorded in their labels', async () => {
+    const b = new FakeBackend();
+    const app = svcInfo('app', { state: 'exited' }, { dependsOn: ['db'] });
+    const db = svcInfo('db', { state: 'exited' }, {});
+    await resumeServices(b, [app, db], { warn: () => {} });
+    expect(b.callsOf('start')).toEqual([['db-id'], ['app-id']]);
+    expect(JSON.parse(serviceRunSpec(names, REPO, BRANCH, svc('app', { dependsOn: ['db'] })).labels[LABEL.options]).dependsOn).toEqual(['db']);
+  });
+
+  it('drops entrypoint, user, working_dir, tmpfs and relative volume targets with the warning', () => {
+    const { services, dropped } = servicesFromCompose({ services: { db: {
+      image: 'postgres', entrypoint: ['x'], user: 'root', working_dir: '/w', tmpfs: ['/t'],
+      volumes: [{ type: 'volume', source: 'data', target: 'relative' }],
+    } } });
+    expect(services[0].volumes).toEqual({});
+    expect(dropped).toEqual(['db.entrypoint', 'db.user', 'db.working_dir', 'db.tmpfs', 'db.volumes relative']);
   });
 });

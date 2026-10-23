@@ -12,6 +12,7 @@ import {
   ExecTimeoutError,
   ImageInfo,
   Labels,
+  isImageRef,
 } from './backend';
 
 // The only module in kunj that spawns `docker`. Every call is an argv array (never a shell),
@@ -34,6 +35,8 @@ function labelArgs(labels: Labels): string[] {
 
 /** `docker run` arguments for a spec; env goes through `envFile` so no value lands in argv. */
 export function runArgs(spec: ContainerSpec, envFile: string): string[] {
+  // The image is the first positional: anything starting with '-' would be taken as a flag
+  if (!isImageRef(spec.image)) throw new Error(`Refusing to run "${spec.image}": not a valid image reference`);
   const args = ['run', '-d', '--name', spec.name];
   if (spec.init !== false) args.push('--init');
   args.push(...labelArgs(spec.labels));

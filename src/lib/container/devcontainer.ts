@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { isImageRef } from './backend';
 
 export interface DevcontainerSpec {
   image?: string;
@@ -144,7 +145,11 @@ export function parseDevcontainer(text: string, filePath: string): DevcontainerS
     ignoredKeys: [],
   };
 
-  if (typeof doc.image === 'string') spec.image = doc.image;
+  if (typeof doc.image === 'string') {
+    // It reaches docker as an argument: a value starting with '-' would be read as a flag
+    if (!isImageRef(doc.image)) throw new Error(`${filePath}: image "${doc.image}" is not a valid image reference`);
+    spec.image = doc.image;
+  }
 
   if (isRecord(doc.build) && typeof doc.build.dockerfile === 'string') {
     spec.build = {

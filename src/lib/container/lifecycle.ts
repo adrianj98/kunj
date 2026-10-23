@@ -13,7 +13,7 @@ import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devco
 import { Blueprint, ResolvedBlueprint, SEED_DIR, computeBlueprintHash, resolveBlueprint } from './blueprint';
 import { Preset, orderTools, resolvePresets } from './presets';
 import { FoundSnapshot, findSnapshot, maintain, provisionNew } from './provision';
-import { ComposeSource, ServiceSpec, findServices, resolveServices, resumeServices, serviceRemoval, servicesOf, startServices, stopServices } from './services';
+import { ComposeSource, ServiceOwner, ServiceSpec, findServices, resolveServices, resumeServices, serviceRemoval, servicesOf, startServices, stopServices } from './services';
 import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
 import {
   CLAUDE_AUTH_KEYS,
@@ -971,7 +971,7 @@ async function resume(
   const main = found.find(c => c.name === names.container);
   if (!main) throw new StartError(`Container ${names.container} disappeared while starting`, 'docker');
   const helper: ContainerInfo | undefined = found.find(c => c.name === names.helper);
-  const services = servicesOf(found, names.container);
+  const services = servicesOf(found, names.container, { repoId: repo.id, branch: options.namesFor ?? options.branch });
   const firewall = firewallMode(options.config.container);
   const recorded = parseOptionsLabel(main.labels);
   const result: StartResult = {
@@ -1042,7 +1042,14 @@ async function resume(
 // ---------------------------------------------------------------------------------------------
 // stop, remove, status
 
+/** Whose services these are: the branch container's own labels (null when it is gone). */
+async function serviceOwner(backend: ContainerBackend, names: ContainerNames): Promise<ServiceOwner | null> {
+  const labels = await backend.inspectLabels(names.container);
+  return labels?.[LABEL.repo] && labels[LABEL.branch] ? { repoId: labels[LABEL.repo], branch: labels[LABEL.branch] } : null;
+}
+
 export async function stopContainer(backend: ContainerBackend, names: ContainerNames, warn?: (m: string) => void): Promise<void> {
+  const owner = await serviceOwner(backend, names);
   // The firewall rules live in the container's network namespace, so the helper can go first
   try {
     await backend.stop(names.helper);
@@ -1050,7 +1057,7 @@ export async function stopContainer(backend: ContainerBackend, names: ContainerN
     // no helper (or already stopped)
   }
   await backend.stop(names.container);
-  await stopServices(backend, names, warn);
+  if (owner) await stopServices(backend, names, owner, warn);
 }
 
 // The workspace's .git/config is the agent's: git must not run its fsmonitor or hooks for kunj
@@ -1087,6 +1094,8 @@ export interface RemoveContext {
   user: string;
   kunjVersion: string;
   warn?: (msg: string) => void;
+  /** Whose services to remove; default: the branch container's labels (none when it is gone) */
+  owner?: ServiceOwner;
 }
 
 /** Starts a stopped container (behind its firewall) to look inside, and stops it again. */
@@ -1142,7 +1151,8 @@ export async function removeContainer(
     if (problems.length) throw new Error(`Container has unpushed work: ${problems.join('; ')}; use --force`);
   }
   // Services and their data go with the branch; the guard above is about the branch's work only
-  const services = serviceRemoval(await findServices(backend, names), opts.keepVolumes);
+  const owner = opts.owner ?? (await serviceOwner(backend, names));
+  const services = serviceRemoval(owner ? await findServices(backend, names, owner) : [], opts.keepVolumes);
   await backend.remove({
     containers: [names.helper, names.container, ...services.containers],
     volumes: opts.keepVolumes ? [] : [names.workspaceVolume, names.homeVolume, ...services.volumes],

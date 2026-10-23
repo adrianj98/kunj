@@ -3,7 +3,7 @@
 // blueprint, container.services or the devcontainer's compose file. A service image comes from the
 // branch, so it gets nothing from the host: no env but its own, no mounts but its named volumes, no
 // added capabilities, no published ports.
-import { ContainerBackend, ContainerInfo, ContainerSpec, ExecTimeoutError, Labels } from './backend';
+import { ContainerBackend, ContainerInfo, ContainerSpec, ExecTimeoutError, Labels, isImageRef } from './backend';
 import { ContainerNames, LABEL, labelsFor } from './names';
 
 export interface ServiceSpec {
@@ -51,6 +51,7 @@ export function parseServices(raw: unknown, source: string): ServiceSpec[] {
     const unknown = Object.keys(def).filter(k => !KEYS.has(k));
     if (unknown.length) throw new Error(`${where}: unsupported keys ${unknown.sort().join(', ')}`);
     if (typeof def.image !== 'string' || !def.image.trim()) throw new Error(`${where}: image is required`);
+    if (!isImageRef(def.image.trim())) throw new Error(`${where}: image "${def.image}" is not a valid image reference`);
 
     const env: Record<string, string> = {};
     if (def.env !== undefined) {
@@ -99,10 +100,12 @@ export function parseServices(raw: unknown, source: string): ServiceSpec[] {
 // ---------------------------------------------------------------------------------------------
 // Compose import
 
-// Keys that would give a branch-controlled image host powers or host data; reported when dropped
-const DANGEROUS_KEYS = [
+// Keys that would give a branch-controlled image host powers or host data, or that change how the
+// service runs but are not supported; reported when dropped
+const DROPPED_KEYS = [
   'build', 'privileged', 'cap_add', 'network_mode', 'devices', 'pid', 'ipc', 'security_opt',
   'volumes_from', 'userns_mode', 'cgroup_parent', 'env_file', 'extra_hosts', 'sysctls', 'runtime',
+  'entrypoint', 'user', 'working_dir', 'tmpfs',
 ];
 
 /** `${NAME:-default}` and `${NAME-default}` become the default; any other `${...}` is null (never read from the host). */
@@ -195,7 +198,11 @@ export function servicesFromCompose(config: any, excludeService?: string): { ser
       dropped.push(`${name} (no image${raw.build !== undefined ? '; build is not supported' : ''})`);
       continue;
     }
-    for (const key of DANGEROUS_KEYS) if (raw[key] !== undefined) dropped.push(`${name}.${key}`);
+    if (!isImageRef(image)) {
+      dropped.push(`${name} (invalid image "${image}")`);
+      continue;
+    }
+    for (const key of DROPPED_KEYS) if (raw[key] !== undefined) dropped.push(`${name}.${key}`);
 
     const env: Record<string, string> = {};
     const environment = isRecord(raw.environment) ? raw.environment : {};
@@ -211,7 +218,7 @@ export function servicesFromCompose(config: any, excludeService?: string): { ser
 
     const volumes: Record<string, string> = {};
     for (const v of Array.isArray(raw.volumes) ? raw.volumes : []) {
-      if (isRecord(v) && v.type === 'volume' && typeof v.source === 'string' && VOLUME_NAME.test(v.source) && typeof v.target === 'string') {
+      if (isRecord(v) && v.type === 'volume' && typeof v.source === 'string' && VOLUME_NAME.test(v.source) && typeof v.target === 'string' && v.target.startsWith('/')) {
         volumes[v.source] = v.target;
       } else {
         const target = isRecord(v) ? v.target : v;
@@ -279,12 +286,18 @@ interface ServiceRecord {
   port?: number;
   healthcheck?: string;
   volumes: string[];
+  dependsOn?: string[];
 }
 
 function serviceRecord(info: ContainerInfo): ServiceRecord {
   try {
     const r = JSON.parse(info.labels[LABEL.options] ?? '{}');
-    return { port: r.port, healthcheck: r.healthcheck, volumes: Array.isArray(r.volumes) ? r.volumes : [] };
+    return {
+      port: r.port,
+      healthcheck: r.healthcheck,
+      volumes: Array.isArray(r.volumes) ? r.volumes : [],
+      dependsOn: isStringArray(r.dependsOn) ? r.dependsOn : [],
+    };
   } catch {
     return { volumes: [] };
   }
@@ -294,7 +307,12 @@ function serviceRecord(info: ContainerInfo): ServiceRecord {
 export function serviceRunSpec(names: ContainerNames, repoId: string, branch: string, svc: ServiceSpec, kunjVersion = ''): ContainerSpec {
   const sn = serviceNames(names, svc.name);
   const volumes = Object.entries(svc.volumes).map(([v, p]) => ({ name: sn.volume(v), path: p }));
-  const record: ServiceRecord = { port: svc.port, healthcheck: svc.healthcheck, volumes: volumes.map(v => v.name) };
+  const record: ServiceRecord = {
+    port: svc.port,
+    healthcheck: svc.healthcheck,
+    volumes: volumes.map(v => v.name),
+    ...(svc.dependsOn.length ? { dependsOn: svc.dependsOn } : {}),
+  };
   return {
     name: sn.container,
     image: svc.image,
@@ -316,14 +334,26 @@ export function serviceRunSpec(names: ContainerNames, repoId: string, branch: st
   };
 }
 
-/** The service containers of a branch container, among `all` (any listing that includes them). */
-export function servicesOf(all: ContainerInfo[], containerName: string): ContainerInfo[] {
-  const prefix = `${containerName}-svc-`;
-  return all.filter(c => c.labels[LABEL.role] === 'service' && c.name.startsWith(prefix));
+/** Whose services: the kunj.repo and kunj.branch labels of the branch container. */
+export interface ServiceOwner {
+  repoId: string;
+  branch: string;
 }
 
-export async function findServices(backend: ContainerBackend, names: ContainerNames): Promise<ContainerInfo[]> {
-  return servicesOf(await backend.list({ [LABEL.role]: 'service' }), names.container);
+/**
+ * The service containers of a branch container, among `all` (any listing that includes them). The
+ * labels decide; the name prefix alone could match another branch whose name extends this one's.
+ */
+export function servicesOf(all: ContainerInfo[], containerName: string, owner?: ServiceOwner): ContainerInfo[] {
+  const prefix = `${containerName}-svc-`;
+  return all.filter(c =>
+    c.labels[LABEL.role] === 'service' &&
+    c.name.startsWith(prefix) &&
+    (!owner || (c.labels[LABEL.repo] === owner.repoId && c.labels[LABEL.branch] === owner.branch)));
+}
+
+export async function findServices(backend: ContainerBackend, names: ContainerNames, owner: ServiceOwner): Promise<ContainerInfo[]> {
+  return servicesOf(await backend.list(labelsFor(owner.repoId, owner.branch, { [LABEL.role]: 'service' })), names.container, owner);
 }
 
 export interface ServiceState {
@@ -338,8 +368,8 @@ export function describeServices(found: ContainerInfo[]): ServiceState[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function serviceStates(backend: ContainerBackend, names: ContainerNames): Promise<ServiceState[]> {
-  return describeServices(await findServices(backend, names));
+export async function serviceStates(backend: ContainerBackend, names: ContainerNames, owner: ServiceOwner): Promise<ServiceState[]> {
+  return describeServices(await findServices(backend, names, owner));
 }
 
 /** Containers and volumes to remove with the branch container. */
@@ -362,6 +392,10 @@ export interface ServiceStartOptions {
   recreate?: boolean;
   /** Filled as objects are created, so a caller can roll back after a failure part way */
   created?: { containers: string[]; volumes: string[] };
+}
+
+function svcStub(name: string): ServiceSpec {
+  return { name, image: '', env: {}, volumes: {}, dependsOn: [] };
 }
 
 function message(err: unknown): string {
@@ -390,7 +424,8 @@ export async function waitHealthy(
       }
     }
     if (Date.now() >= deadline) {
-      opts.warn(`Service ${svc.name} did not pass its health check within ${Math.round(timeoutMs / 1000)}s; continuing`);
+      const secs = timeoutMs >= 1000 ? Math.round(timeoutMs / 1000) : timeoutMs / 1000;
+      opts.warn(`Service ${svc.name} did not pass its health check within ${secs}s; continuing`);
       return false;
     }
     await new Promise(r => setTimeout(r, intervalMs));
@@ -416,7 +451,7 @@ export async function startServices(
   };
   if (services.length === 0) return { created: [], volumes: [] };
   const ordered = serviceOrder(services);
-  const existing = new Map(servicesOf(await backend.list(labelsFor(repoId, branch, { [LABEL.role]: 'service' })), names.container).map(c => [c.name, c]));
+  const existing = new Map((await findServices(backend, names, { repoId, branch })).map(c => [c.name, c]));
   const volumeLabels: Labels = labelsFor(repoId, branch, { [LABEL.role]: 'service', ...(opts.kunjVersion ? { [LABEL.version]: opts.kunjVersion } : {}) });
 
   for (const svc of ordered) {
@@ -442,21 +477,37 @@ export async function startServices(
   return { created: created.containers, volumes: created.volumes };
 }
 
-/** Starts the stopped services among `found` (resume), in dependency order where it is known. */
+/** Starts the stopped services among `found` (resume), dependencies first (as recorded in their labels). */
 export async function resumeServices(
   backend: ContainerBackend,
   found: ContainerInfo[],
   opts: Pick<ServiceStartOptions, 'warn' | 'timeoutMs' | 'intervalMs'>
 ): Promise<void> {
-  for (const c of found) {
+  const byName = new Map(found.map(c => [c.labels[LABEL.service] ?? c.name, c]));
+  let ordered = found;
+  try {
+    const specs = [...byName].map(([name, c]) => ({
+      ...svcStub(name),
+      dependsOn: (serviceRecord(c).dependsOn ?? []).filter(d => byName.has(d)),
+    }));
+    ordered = serviceOrder(specs).map(s => byName.get(s.name)!);
+  } catch {
+    // A recorded cycle cannot happen (it was refused at start); keep the listing order if it does
+  }
+  for (const c of ordered) {
     if (c.state === 'running') continue;
     await backend.start(c.id);
     await waitHealthy(backend, c.id, { name: c.labels[LABEL.service] ?? c.name, healthcheck: serviceRecord(c).healthcheck }, opts);
   }
 }
 
-export async function stopServices(backend: ContainerBackend, names: ContainerNames, warn: (m: string) => void = () => {}): Promise<void> {
-  for (const c of await findServices(backend, names)) {
+export async function stopServices(
+  backend: ContainerBackend,
+  names: ContainerNames,
+  owner: ServiceOwner,
+  warn: (m: string) => void = () => {}
+): Promise<void> {
+  for (const c of await findServices(backend, names, owner)) {
     if (c.state !== 'running') continue;
     try {
       await backend.stop(c.id);
@@ -478,6 +529,21 @@ export interface ComposeSource {
  * Blueprint services, then container.services, then the devcontainer's compose services (without
  * its own `service`), merged by name. Throws on an invalid definition or dependency graph.
  */
+/**
+ * Why kunj will not import a compose file, or null. `include` and `extends.file` make docker compose
+ * read other files from the host (even with an empty project directory), so another project's
+ * compose env could end up in a service this branch controls. A check on the raw text: any
+ * `include:` key, and any `extends:` in a file that also has a `file:` key.
+ */
+export function composeRefusal(text: string): string | null {
+  // Unanchored, so flow style ({ extends: { file: ... } }) and JSON are caught as well as block style
+  const key = (name: string) => new RegExp(`(^|[\\s{,\\-])["']?${name}["']?\\s*:`, 'm');
+  if (key('include').test(text)) return 'include is not supported';
+  // Conservative: any extends in a file that has a `file:` key anywhere (extends within the file is fine)
+  if (key('extends').test(text) && key('file').test(text)) return 'extends with a file is not supported';
+  return null;
+}
+
 export async function resolveServices(
   backend: ContainerBackend,
   input: {
@@ -491,6 +557,11 @@ export async function resolveServices(
   const fromConfig = parseServices(input.config, 'container.services');
   const fromCompose: ServiceSpec[] = [];
   for (const file of input.compose ?? []) {
+    const refused = composeRefusal(file.text);
+    if (refused) {
+      input.warn(`${file.path}: ${refused} by kunj's compose import; its services are not started`);
+      continue;
+    }
     let json: unknown;
     try {
       json = await backend.composeConfig(file.text);

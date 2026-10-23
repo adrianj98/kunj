@@ -39,6 +39,16 @@ Changes made with Claude, and why.
 - Tests: services unit tests, lifecycle (order, rollback, resume, stop, remove, compose import, snapshot
   build), command (list JSON, logs, forward), Docker (reachable from its branch only, no host
   privileges/env, forward, migration during a snapshot, nothing left labelled).
+- Review fix round 1: image references are validated (no leading `-`, no spaces) in blueprint and
+  config services, compose services (dropped with the warning), devcontainer `image`, `--image` /
+  `container.image`, and in `runArgs` as a last line of defence. Why: the image is the first
+  positional of `docker run`, so `--privileged` as an image became a flag. Compose files with
+  `include` or an `extends` naming a file are refused before `docker compose config` (they read host
+  files, e.g. another project's passwords). `findServices` now matches services by `kunj.repo` and
+  `kunj.branch` labels, not only the name prefix, so a branch named like `<x>-svc-y` cannot make
+  stop/remove touch another branch's services. Also: resume starts services dependencies first
+  (`dependsOn` recorded in the label), compose `entrypoint`/`user`/`working_dir`/`tmpfs` and
+  relative volume targets are reported as dropped, sub-second health timeouts print correctly.
 
 ## 2026-10-23 — User docs site (MDX, Astro Starlight) in `docs-site/`
 

@@ -51,8 +51,10 @@ When `.devcontainer/devcontainer.json` has a `dockerComposeFile`, kunj starts th
 except the devcontainer's own `service`. It reads the file with `docker compose config` and takes
 `image`, `environment`, `command`, `healthcheck`, `depends_on`, named volumes and the first port of
 `ports` or `expose`. It leaves out bind mounts, `build`, `privileged`, `cap_add`, `network_mode`,
-`env_file`, published ports and variables that would come from your shell, and prints one warning
-listing them. `${VAR:-default}` becomes the default; nothing is read from your environment.
+`env_file`, `entrypoint`, `user`, `working_dir`, `tmpfs`, published ports and variables that would
+come from your shell, and prints one warning listing them. A compose file with `include`, or with an
+`extends` that names another file, is skipped with a warning: both make Docker read files from your
+machine. `${VAR:-default}` becomes the default; nothing is read from your environment.
 
 ## Lifecycle
 
@@ -61,7 +63,7 @@ listing them. `${VAR:-default}` becomes the default; nothing is read from your e
   before `setup` or `postCreateCommand` runs.
 - **Snapshots** start the services the same way, so a blueprint's `setup` can run migrations. Their
   data is never in the snapshot, and they are removed with the temporary container.
-- **stop** stops them; **start** on a stopped container starts them again.
+- **stop** stops them; **start** on a stopped container starts them again, dependencies first.
 - **remove** deletes them and their volumes (`--keep-volumes` keeps the volumes). The check for
   unpushed work is about the branch's clone only.
 - A start that fails removes the services and volumes it created.

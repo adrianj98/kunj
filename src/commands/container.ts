@@ -547,7 +547,7 @@ export class ContainerCommand extends BaseCommand {
       : false;
 
     // A service is tunnelled into through its own container, with whichever of socat, bash or nc it has
-    const services = specs.some(s => s.service) ? await findServices(ctx.backend, this.names(ctx, branch)) : [];
+    const services = specs.some(s => s.service) ? await findServices(ctx.backend, this.names(ctx, branch), { repoId: ctx.repo.id, branch }) : [];
     const tunnels = new Map<string, { id: string; tool: 'socat' | 'bash' | 'nc' }>();
     for (const name of new Set(specs.map(s => s.service).filter((s): s is string => !!s))) {
       const svc = services.find(c => c.name === serviceNames(this.names(ctx, branch), name).container);
@@ -607,7 +607,7 @@ export class ContainerCommand extends BaseCommand {
     const main = await this.requireMain(ctx, branch);
     let id = main.id;
     if (service) {
-      const services = await findServices(ctx.backend, this.names(ctx, branch));
+      const services = await findServices(ctx.backend, this.names(ctx, branch), { repoId: ctx.repo.id, branch });
       const svc = services.find(c => c.name === serviceNames(this.names(ctx, branch), service).container);
       if (!svc) throw new ContainerError(`${branch} has no service ${service}; services: ${describeServices(services).map(s => s.name).join(', ') || 'none'}`);
       id = svc.id;
@@ -659,7 +659,7 @@ export class ContainerCommand extends BaseCommand {
         agent: { running: s.agentRunning },
         workspace: { head: s.head ? s.head.slice(0, 7) : null, ahead: s.ahead, dirty: s.dirty },
         status: s.status,
-        services: describeServices(servicesOf(all, c.name)),
+        services: describeServices(servicesOf(all, c.name, { repoId: c.labels[LABEL.repo] ?? '', branch: c.labels[LABEL.branch] ?? '' })),
       };
     });
 
