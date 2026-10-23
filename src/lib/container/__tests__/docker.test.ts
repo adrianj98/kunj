@@ -3,7 +3,9 @@ import { EventEmitter } from 'events';
 import { PassThrough, Readable } from 'stream';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
-import { LocalDockerBackend, composeConfigArgs, runArgs, parsePsJson, parseInspect, parseImageLs, parseImageInspect } from '../docker';
+import { LocalDockerBackend, composeConfigArgs, runArgs, parsePsJson, parseInspect, parseImageLs, parseImageInspect, parseDockerEvent } from '../docker';
+import { FakeBackend } from './fake-backend';
+import { BackendEvent } from '../backend';
 import { ContainerSpec, ExecTimeoutError } from '../backend';
 
 jest.mock('child_process');
@@ -459,6 +461,75 @@ describe('docker backend', () => {
       results.push({ code: 0, stdout: '' });
       await expect(backend.listNetworks({})).resolves.toEqual([]);
       expect(spawnMock).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('events', () => {
+    const line = '{"status":"start","id":"abc","from":"img","Type":"container","Action":"start","Actor":{"ID":"abc","Attributes":{"image":"img","name":"kunj-app-x-abc123","kunj.repo":"github.com/acme/app","kunj.branch":"x","kunj.role":"main"}},"scope":"local","time":1760000000,"timeNano":1760000000000000000}';
+
+    it('parseDockerEvent maps Action, the name, the kunj.* attributes and timeNano', () => {
+      expect(parseDockerEvent(line)).toEqual({
+        action: 'start',
+        name: 'kunj-app-x-abc123',
+        labels: { 'kunj.repo': 'github.com/acme/app', 'kunj.branch': 'x', 'kunj.role': 'main' },
+        at: '2025-10-09T08:53:20.000Z',
+      });
+    });
+
+    it('parseDockerEvent returns null for a line that is not an event', () => {
+      expect(parseDockerEvent('not json')).toBeNull();
+      expect(parseDockerEvent('{"Type":"container"}')).toBeNull();
+      expect(parseDockerEvent('')).toBeNull();
+    });
+
+    it('events() runs docker events with the label filters and delivers each line', async () => {
+      const backend = new LocalDockerBackend({ context: 'remote' });
+      const controller = new AbortController();
+      const got: BackendEvent[] = [];
+      const done = backend.events({ 'kunj.repo': '', 'kunj.role': 'main' }, e => got.push(e), controller.signal);
+      expect(argvOf(0)).toEqual([
+        '--context', 'remote', 'events', '--format', '{{json .}}', '--filter', 'type=container',
+        '--filter', 'label=kunj.repo', '--filter', 'label=kunj.role=main',
+      ]);
+      const half = Math.floor(line.length / 2);
+      children[0].stdout.write(line.slice(0, half));
+      children[0].stdout.write(line.slice(half) + '\nnoise\n' + line + '\n');
+      await new Promise(r => setImmediate(r));
+      expect(got.map(e => e.name)).toEqual(['kunj-app-x-abc123', 'kunj-app-x-abc123']);
+      children[0].kill.mockImplementation(() => setImmediate(() => children[0].emit('close', null)));
+      controller.abort();
+      await expect(done).resolves.toBeUndefined();
+      expect(children[0].kill).toHaveBeenCalled();
+    });
+
+    it('events() rejects when docker exits without being aborted', async () => {
+      results.push({ code: 1, stderr: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n' });
+      const backend = new LocalDockerBackend();
+      await expect(backend.events({}, () => {}, new AbortController().signal))
+        .rejects.toThrow('docker events failed: Cannot connect to the Docker daemon');
+    });
+
+    it('events() resolves at once when the signal is already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(new LocalDockerBackend().events({}, () => {}, controller.signal)).resolves.toBeUndefined();
+      expect(spawnMock).not.toHaveBeenCalled();
+    });
+
+    it('FakeBackend.emitEvent reaches every subscriber and events() resolves on abort', async () => {
+      const backend = new FakeBackend();
+      const controller = new AbortController();
+      const a: string[] = [];
+      const b: string[] = [];
+      const pa = backend.events({}, e => a.push(e.name), controller.signal);
+      const pb = backend.events({}, e => b.push(e.name), controller.signal);
+      backend.emitEvent({ action: 'start', name: 'c1', labels: {}, at: '2026-01-01T00:00:00.000Z' });
+      expect(a).toEqual(['c1']);
+      expect(b).toEqual(['c1']);
+      controller.abort();
+      await expect(Promise.all([pa, pb])).resolves.toEqual([undefined, undefined]);
+      backend.emitEvent({ action: 'stop', name: 'c2', labels: {}, at: '2026-01-01T00:00:00.000Z' });
+      expect(a).toEqual(['c1']);
     });
   });
 });

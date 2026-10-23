@@ -146,6 +146,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
+- `kunj events [--json] [--repo <path>...]` - Stream changes to worktrees, containers and agents as NDJSON (see Events below)
 - `kunj install [vscode|macos|all]` - Download the VS Code extension / macOS app from the GitHub release and install them (also offered at the end of `kunj setup`)
 
 ## New Branches
@@ -331,6 +332,19 @@ older SDK because the Command Line Tools' newest SDK lacks the SwiftUI macro plu
 signed, not notarized. The release workflow's `macos-app` job attaches `Kunj-macos-<version>.zip`
 next to the `.vsix`; `kunj install` (src/lib/apps.ts) finds those assets by name pattern, preferring
 the release matching the CLI version, so keep the asset names in step with it.
+
+## Events
+
+`kunj events [--json] [--repo <path>...]` (src/commands/events.ts, watcher in src/lib/events.ts,
+`EventJson` in json-types.ts) is a long-lived NDJSON stream for the workspace app: `hello` first,
+then `git` (recursive `fs.watch` of each repo's git common dir, filtered by `gitPathMatters()`),
+`sessions`/`forwards`/`repos` (the registry files in `~/.kunj`), `agent` (a poll of `kunj-` tmux
+sessions, 5 s) and `container` (`ContainerBackend.events()`, filtered on `kunj.repo`; exec/attach/copy
+actions are dropped because `kunj ct list` execs and would trigger its own refresh). Changes are
+debounced per key (250 ms, the first change starts the timer). An unreachable backend gives one
+`backend unavailable`, then `info()` is retried every 10 s until `available`. Container events map to
+a repo through `repoIdentity().id`, the same id as the `kunj.repo` label. It stops on SIGINT/SIGTERM
+or when stdin ends, so a child dies with its parent. On the fast path; a missing directory is skipped.
 
 ## Hooks
 

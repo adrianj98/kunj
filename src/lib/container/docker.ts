@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  BackendEvent,
   BuildOptions,
   ContainerBackend,
   ContainerInfo,
@@ -130,6 +131,24 @@ export function parseImageInspect(json: string): ImageInfo[] {
     ((o.RepoTags ?? []) as string[])
       .filter(t => t && !t.startsWith('<none>'))
       .map(tag => ({ tag, id: o.Id, createdAt: o.Created, labels: o.Config?.Labels ?? {}, size: o.Size ?? 0 })));
+}
+
+/** One line of `docker events --format '{{json .}}'`; null when it is not a container event. */
+export function parseDockerEvent(line: string): BackendEvent | null {
+  let o: any;
+  try {
+    o = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const attributes = o?.Actor?.Attributes;
+  if (typeof o?.Action !== 'string' || typeof attributes?.name !== 'string') return null;
+  const labels: Labels = {};
+  for (const [k, v] of Object.entries(attributes)) {
+    if (k.startsWith('kunj.') && typeof v === 'string') labels[k] = v;
+  }
+  const ms = typeof o.timeNano === 'number' ? Math.floor(o.timeNano / 1e6) : typeof o.time === 'number' ? o.time * 1000 : Date.now();
+  return { action: o.Action, name: attributes.name, labels, at: new Date(ms).toISOString() };
 }
 
 function firstLine(out: Output): string {
@@ -463,6 +482,37 @@ export class LocalDockerBackend implements ContainerBackend {
       const child = spawn(this.dockerPath, this.argv(args), { stdio: ['ignore', 'inherit', 'inherit'] });
       child.on('error', reject);
       child.on('close', (code: number | null) => (code === 0 || code === null ? resolve() : reject(new Error(`docker logs failed: exit code ${code}`))));
+    });
+  }
+
+  events(filter: Labels, onEvent: (e: BackendEvent) => void, signal: AbortSignal): Promise<void> {
+    const args = ['events', '--format', '{{json .}}', '--filter', 'type=container'];
+    for (const [k, v] of Object.entries(filter)) args.push('--filter', v === '' ? `label=${k}` : `label=${k}=${v}`);
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) return resolve();
+      const child = spawn(this.dockerPath, this.argv(args), { stdio: ['ignore', 'pipe', 'pipe'] });
+      const onAbort = () => child.kill();
+      signal.addEventListener('abort', onAbort, { once: true });
+      let pending = '';
+      const stderr: Buffer[] = [];
+      child.stdout!.on('data', (d: Buffer) => {
+        const lines = (pending + d.toString()).split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines) {
+          const event = parseDockerEvent(line);
+          if (event) onEvent(event);
+        }
+      });
+      child.stderr!.on('data', (d: Buffer) => stderr.push(d));
+      child.on('error', err => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      });
+      child.on('close', (code: number | null) => {
+        signal.removeEventListener('abort', onAbort);
+        if (signal.aborted) return resolve();
+        reject(new Error(`docker events failed: ${firstLine({ code: code ?? 1, stdout: '', stderr: Buffer.concat(stderr).toString() })}`));
+      });
     });
   }
 

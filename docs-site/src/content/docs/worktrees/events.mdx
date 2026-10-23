@@ -1,0 +1,58 @@
+---
+title: Change events
+description: Stream changes to worktrees, branch containers and agents with kunj events, so an app can refresh instead of polling.
+sidebar:
+  order: 6
+---
+
+import CommandReference from '../../../components/CommandReference.astro';
+
+`kunj events` watches every repository kunj knows (see `kunj repos`) and prints one line per
+change. An app runs it as one long-lived child process and refreshes the repository each line
+names, instead of polling `kunj worktree list` and `kunj ct list`.
+
+```bash
+kunj events --json                 # every known, visible repository
+kunj events --json --repo ~/src/shop --repo ~/src/api
+```
+
+The first line is always `hello`. With `--json` every line is one JSON object (NDJSON):
+
+```json
+{"type":"hello","version":"1.4.0","repos":2,"at":"2026-10-23T19:19:05.671Z"}
+{"type":"git","repo":{"name":"shop","root":"/Users/me/src/shop"},"at":"2026-10-23T19:19:10.437Z"}
+{"type":"container","repo":{"name":"shop","root":"/Users/me/src/shop"},"branch":"fix/login","container":"kunj-shop-fix-login-3fa9c1","action":"start","at":"2026-10-23T19:20:01.000Z"}
+```
+
+## Event types
+
+| `type` | When | Fields |
+| --- | --- | --- |
+| `hello` | Once, at start | `version`, `repos` (how many are watched) |
+| `git` | A branch, HEAD, the index or a worktree changed in the repository's git directory | `repo` |
+| `sessions` | An editor opened or closed a worktree (`~/.kunj/worktree-sessions.json`) | |
+| `forwards` | A container port forward started or stopped (`~/.kunj/container-forwards.json`) | |
+| `repos` | The repository list changed (`~/.kunj/repos.json`) | |
+| `container` | Docker reported an event for a kunj container (start, die, destroy, …) | `repo` (null when it is not a watched repository), `branch`, `container`, `action` |
+| `agent` | A `kunj-…` tmux session appeared or ended | `session`, `running` |
+| `backend` | Docker became unreachable, or reachable again | `status` (`available` or `unavailable`), `message` |
+
+Every event has `at`, an ISO time. An event says what to refresh, not what changed: read the
+current state with the usual `--json` commands.
+
+Changes are debounced: a burst of writes in one repository (a commit, a rebase) gives one `git`
+event. Docker's exec, attach and copy events are left out, because `kunj ct list` execs into each
+container and would otherwise trigger its own refresh. When Docker is not running, `backend`
+`unavailable` is printed once and kunj retries every 10 seconds; the other events keep coming.
+
+## Stopping
+
+`kunj events` stops on Ctrl-C, SIGTERM, or when its stdin closes, so a child process ends with the
+app that started it. Started with stdin from `/dev/null` (`kunj events &` in a script), it stops at
+once; keep stdin open, for example with a pipe.
+
+Without `--json` each line is `<time> <type> <repo> …`, for watching by hand.
+
+## Options
+
+<CommandReference name="events" optionsOnly />

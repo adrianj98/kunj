@@ -427,6 +427,26 @@
     "helpText": null
   },
   {
+    "name": "events",
+    "usage": "events",
+    "description": "Stream changes to worktrees, containers and agents, one line each",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--repo <path...>",
+        "description": "Watch only these repositories (default: every known one)",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Prints a hello line, then one line per change: git (refs, HEAD, index), sessions, forwards,\nrepos (files in ~/.kunj), container (Docker events), agent (tmux sessions), backend.\nWith --json each line is one JSON object. Stops on Ctrl-C or when stdin closes."
+  },
+  {
     "name": "flow",
     "usage": "flow",
     "description": "Git Flow workflow management",

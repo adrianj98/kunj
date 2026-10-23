@@ -84,6 +84,14 @@ export class ExecTimeoutError extends Error {
   }
 }
 
+/** A container event: `action` as the engine names it (start, die, destroy, exec_start: …), `at` an ISO time. */
+export interface BackendEvent {
+  action: string;
+  name: string;
+  labels: Labels;
+  at: string;
+}
+
 export interface BuildOptions {
   dockerfile?: string;
   buildArgs?: Record<string, string>;
@@ -136,4 +144,9 @@ export interface ContainerBackend {
   composeConfig(yamlText: string): Promise<any>;
   /** A container's output, streamed to our stdout and stderr; with `follow` until it stops or we are interrupted. */
   logs(id: string, opts?: { follow?: boolean; tail?: number }): Promise<void>;
+  /**
+   * Container events carrying `filter`'s labels (a '' value matches any value of that label), until
+   * `signal` aborts (then it resolves). Rejects when the engine is unreachable or the stream ends.
+   */
+  events(filter: Labels, onEvent: (e: BackendEvent) => void, signal: AbortSignal): Promise<void>;
 }

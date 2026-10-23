@@ -1,6 +1,6 @@
 // In-memory ContainerBackend for lifecycle and port-forwarding tests. Records every call;
 // exec results are programmed by the joined command.
-import { ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecTimeoutError, ImageInfo, Labels } from '../backend';
+import { BackendEvent, ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecTimeoutError, ImageInfo, Labels } from '../backend';
 
 export type ExecResult = { exitCode: number; stdout: string };
 
@@ -191,6 +191,21 @@ export class FakeBackend implements ContainerBackend {
 
   async logs(id: string, opts?: { follow?: boolean; tail?: number }): Promise<void> {
     this.record('logs', [id, opts]);
+  }
+
+  private subscribers = new Set<(e: BackendEvent) => void>();
+
+  /** Resolves when the signal aborts; emitEvent() delivers to it until then. */
+  async events(filter: Labels, onEvent: (e: BackendEvent) => void, signal: AbortSignal): Promise<void> {
+    this.record('events', [filter]);
+    if (signal.aborted) return;
+    this.subscribers.add(onEvent);
+    await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+    this.subscribers.delete(onEvent);
+  }
+
+  emitEvent(e: BackendEvent): void {
+    for (const onEvent of this.subscribers) onEvent(e);
   }
 }
 

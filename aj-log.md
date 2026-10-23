@@ -636,3 +636,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - Fix round: restored the always-object `ct --json` error shape (see above) after it briefly became opt-in. Why: `kunj ct --json` documents every error as an object.
 
 - Merged the workspace CLI contract branch (JSON types, `kunj agent`, `kunj ct file`) into main; `ContainerListJson` gains main's `orphans` and `dind`, and `StartError`/`ContainerError` share src/lib/container/errors.ts. CLAUDE.md now says to work on main with no branches or worktrees. Why: the user works on main only, and the plan had been run in a worktree.
+- Added `kunj events [--json] [--repo <path>...]` (src/lib/events.ts, src/commands/events.ts, `EventJson`, `ContainerBackend.events()` with `docker events`): an NDJSON change stream of git dirs, ~/.kunj registry files, kunj- tmux sessions and Docker events, ended by SIGINT/SIGTERM or stdin closing. Why: the workspace app refreshes on events instead of polling every repository.

@@ -17,6 +17,7 @@ const FAST_COMMANDS: Record<string, () => Promise<BaseCommand>> = {
   agent: async () => new (await import('./agent')).AgentCommand(),
   worktree: async () => new (await import('./worktree')).WorktreeCommand(),
   repos: async () => new (await import('./repos')).ReposCommand(),
+  events: async () => new (await import('./events')).EventsCommand(),
   'prompt-info': async () => new (await import('./prompt-info')).PromptInfoCommand(),
 };
 

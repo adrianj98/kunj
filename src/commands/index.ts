@@ -24,6 +24,7 @@ export { ContainerCommand } from './container';
 export { AgentCommand } from './agent';
 export { HooksCommand } from './hooks';
 export { ReposCommand } from './repos';
+export { EventsCommand } from './events';
 export { InstallCommand } from './install';
 export { UICommand } from '../ui';
 
@@ -55,6 +56,7 @@ import { ContainerCommand } from './container';
 import { AgentCommand } from './agent';
 import { HooksCommand } from './hooks';
 import { ReposCommand } from './repos';
+import { EventsCommand } from './events';
 import { InstallCommand } from './install';
 import { UICommand } from '../ui';
 
@@ -87,6 +89,7 @@ export function getAllCommands(): BaseCommand[] {
     new AgentCommand(),
     new HooksCommand(),
     new ReposCommand(),
+    new EventsCommand(),
     new InstallCommand(),
     new UICommand(),
   ];

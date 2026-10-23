@@ -14,7 +14,7 @@ import type { ServiceState } from './container/services';
 import type { PruneOrphan } from './container/prune';
 import type { DindMode } from './container/dind';
 
-/** What a command prints (as JSON) when it fails in `--json` mode: `kunj ct` always gives { code, message } (code 'error' when the error has none); `kunj agent` gives it for errors with a `jsonCode`; the other commands a plain message string (BaseCommand's generic path is opt-in). */
+/** What a command prints (as JSON) when it fails in `--json` mode: `kunj ct` always gives { code, message } (code 'error' when the error has none); `kunj agent` and `kunj events` give it for errors with a `jsonCode`; the other commands a plain message string (BaseCommand's generic path is opt-in). */
 export interface ErrorJson {
   error: string | { code: string; message: string };
 }
@@ -110,3 +110,20 @@ export interface AgentStopJson {
   branch: string;
   session: string;
 }
+
+// ---- kunj events --json ----------------------------------------------------------------------
+
+/**
+ * One line of `kunj events --json` (NDJSON). Each says what to refresh, not what changed:
+ * `git` a repository's refs, HEAD or index; `sessions`/`forwards`/`repos` the registry file in
+ * ~/.kunj (`repo` is reserved for per-repository files); `container` a Docker event of a kunj
+ * container (`repo` null when it belongs to no watched repository); `agent` a host tmux session
+ * (`kunj-…`) that appeared or went away; `backend` the container engine going away or coming back.
+ */
+export type EventJson = { at: string } & (
+  | { type: 'hello'; version: string; repos: number }
+  | { type: 'git' | 'sessions' | 'forwards' | 'repos'; repo?: { name: string; root: string } }
+  | { type: 'container'; repo: { name: string; root: string } | null; branch: string | null; container: string; action: string }
+  | { type: 'agent'; session: string; running: boolean }
+  | { type: 'backend'; status: 'available' | 'unavailable'; message?: string }
+);
