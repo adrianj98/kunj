@@ -180,6 +180,14 @@ All 2026-10-23.
 - **Ports in v1 as links;** webview previews in v2.
 - **App state is UI layout only,** in `~/.kunj/<reponame>/workspace.json`.
 - **Long actions run in a terminal tab;** no NDJSON progress under `--json` for v1.
+- **tmux is optional for worktree agents.** With tmux, `kunj agent` and the app use a host tmux session,
+  so agents survive the app quitting, crashing or updating, and the CLI can attach. Without it,
+  `kunj agent` runs the agent directly and prints a hint, and `--no-tmux` forces that mode; the app then
+  runs `claude` in its own terminal tab (hidden tabs keep running while the app runs; the tab says
+  "install tmux to keep agents running when the app closes"), and on reopen offers `claude --continue`
+  in that worktree, since Claude Code saves the conversation itself. `worktree list --json` reports
+  `agent.running: null` when tmux is missing. Containers always use tmux inside the image. *Not yet in the
+  code:* today `kunj agent` fails with `tmux-missing` and has no `--no-tmux`.
 
 ## Open questions
 
