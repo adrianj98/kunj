@@ -54,6 +54,7 @@ import {
   stopContainer,
 } from '../lib/container/lifecycle';
 import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
+import { CONTAINER_AGENT_STATE_FILE, withAgentHooks } from '../lib/agent-session';
 import { stripUserinfo } from '../lib/container/seed';
 import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
@@ -563,7 +564,8 @@ export class ContainerCommand extends BaseCommand {
     }
     await this.ensureBridge(ctx, branch, main);
     const user = this.userOf(main) || undefined;
-    const command = agentCommandLine(ctx.config.container?.agentCommand, args);
+    // The Claude Code hooks write the agent's state into the container's state file (read by STATUS_SCRIPT)
+    const command = `KUNJ_AGENT_STATE=${CONTAINER_AGENT_STATE_FILE} ` + withAgentHooks(agentCommandLine(ctx.config.container?.agentCommand, args), CONTAINER_AGENT_STATE_FILE, ctx.config.agent?.hooks !== false);
     const probe = await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user });
     if (probe.exitCode !== 0) {
       this.warn('tmux is not installed in the container; running the agent directly (it stops when you leave)');
@@ -1014,7 +1016,7 @@ export class ContainerCommand extends BaseCommand {
           ...c.ports.map(p => ({ container: p.container, host: p.host, kind: 'publish' as const })),
           ...forwards.filter(r => recordIsFor(r, c)).map(r => ({ container: r.port, host: r.hostPort, kind: 'forward' as const, pid: r.pid, ...(r.service ? { service: r.service } : {}) })),
         ],
-        agent: { running: s.agentRunning },
+        agent: { running: s.agentRunning, state: s.agentState },
         workspace: { head: s.head ? s.head.slice(0, 7) : null, ahead: s.ahead, dirty: s.dirty },
         status: s.status,
         services: describeServices(servicesOf(all, c.name, { repoId: c.labels[LABEL.repo] ?? '', branch: c.labels[LABEL.branch] ?? '' })),

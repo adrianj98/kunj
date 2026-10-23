@@ -128,8 +128,16 @@ together are sized to the last one attached). Without tmux, or with `--no-tmux`,
 command directly through `$SHELL -lc` in the worktree with the same `KUNJ_*` environment, after a
 one-line stderr hint that the agent stops when the terminal closes. It needs a terminal (`no-tty`). `status --json` prints
 `AgentStatusJson`, `stop --json` `AgentStopJson`. `kunj worktree list --json` gives each existing,
-non-bare worktree on a branch `agent: { running, session }` from one `tmux list-sessions` per listing;
+non-bare worktree on a branch `agent: { running, session, state }` from one `tmux list-sessions` per listing;
 `running` is `null` only when tmux is not installed, and the field is absent with `--no-status`.
+
+**Agent state** (`agent.hooks`, default true): when the agent command is `claude`, `kunj agent` and
+`kunj ct agent` append `--settings` with Claude Code hooks that write `running` (UserPromptSubmit,
+PreToolUse) or `waiting` (Stop; Notification for permission, idle and elicitation prompts) into
+`$KUNJ_AGENT_STATE`, and remove it on SessionEnd. On the host the file is
+`~/.kunj/<repo>/agent-state/<session>`, in a container `/tmp/kunj-agent-state`. `worktree list --json`
+and `ct list --json` report it as `agent.state` (`running | waiting | null`); `kunj events` watches the
+host directory (an `agent` event with `state`) and includes it in the container status poll.
 
 **`kunj ct file read|write [branch] <path>`** (src/lib/container/files.ts): the path is relative to
 `/workspace` (absolute, `..`-escaping, empty and NUL paths are `bad-path`); it runs as the sandbox user
@@ -308,8 +316,6 @@ All 2026-10-23.
 
 ## Open questions
 
-- [ ] `kunj ct agent` does not set `window-size latest` on its session yet (`kunj agent` does), so the app
-  and a CLI terminal attached to a container agent are sized to the smaller one.
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).
 

@@ -1074,7 +1074,7 @@ describe('containerStatus', () => {
     const b = new FakeBackend();
     b.hangOn.add('__hang__');
     const status = await containerStatus(b, 'id', 'dev');
-    expect(status).toEqual({ agentRunning: null, head: null, ahead: null, dirty: null, status: 'timeout' });
+    expect(status).toEqual({ agentRunning: null, agentState: null, head: null, ahead: null, dirty: null, status: 'timeout' });
     expect((b.callsOf('exec')[0][2] as ExecIO).timeoutMs).toBe(2000);
   });
 
@@ -1084,13 +1084,13 @@ describe('containerStatus', () => {
     const key = STATUS_CMD(b);
 
     b.execResults.set(key, { exitCode: 0, stdout: 'tmux=1\n# branch.oid abc123\n# branch.head x\n# branch.upstream origin/x\n# branch.ab +3 -0\n' });
-    expect(await containerStatus(b, 'id', 'dev')).toEqual({ agentRunning: false, head: 'abc123', ahead: 3, dirty: false, status: 'ok' });
+    expect(await containerStatus(b, 'id', 'dev')).toEqual({ agentRunning: false, agentState: null, head: 'abc123', ahead: 3, dirty: false, status: 'ok' });
 
     b.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\n# branch.oid abc123\n? new.txt\n' });
-    expect(await containerStatus(b, 'id', 'dev')).toEqual({ agentRunning: true, head: 'abc123', ahead: null, dirty: true, status: 'ok' });
+    expect(await containerStatus(b, 'id', 'dev')).toEqual({ agentRunning: true, agentState: null, head: 'abc123', ahead: null, dirty: true, status: 'ok' });
 
     b.execErrors.set(key, new Error('docker exec failed: something broke'));
-    expect(await containerStatus(b, 'id', 'dev')).toEqual({ agentRunning: null, head: null, ahead: null, dirty: null, status: 'error' });
+    expect(await containerStatus(b, 'id', 'dev')).toEqual({ agentRunning: null, agentState: null, head: null, ahead: null, dirty: null, status: 'error' });
 
     b.execErrors.set(key, new Error('docker exec failed: Error response from daemon: container abc is not running'));
     expect((await containerStatus(b, 'id', 'dev')).status).toBe('stopped');

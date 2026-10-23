@@ -77,3 +77,47 @@ describe('listTmuxSessions', () => {
     await expect(readTmuxSessions()).resolves.toEqual([]);
   });
 });
+
+describe('agent state hooks', () => {
+  const { withAgentHooks, claudeHookSettings, readAgentState, agentStateFile, agentStateDir } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+  const fs = jest.requireActual<typeof import('fs')>('fs');
+  const os = jest.requireActual<typeof import('os')>('os');
+  const path = jest.requireActual<typeof import('path')>('path');
+
+  test('withAgentHooks appends --settings for claude', () => {
+    const cmd = withAgentHooks('claude', '/s', true);
+    expect(cmd).toMatch(/^claude --settings '\{"hooks":/);
+    expect(withAgentHooks('claude --dangerously-skip-permissions', '/s', true)).toMatch(/^claude --dangerously-skip-permissions --settings '/);
+    expect(withAgentHooks('/opt/bin/claude', '/s', true)).toMatch(/^\/opt\/bin\/claude --settings '/);
+  });
+
+  test('withAgentHooks leaves other commands and disabled alone', () => {
+    expect(withAgentHooks('aider', '/s', true)).toBe('aider');
+    expect(withAgentHooks('claude', '/s', false)).toBe('claude');
+  });
+
+  test('claudeHookSettings is valid JSON with the five hooks, quotable in single quotes', () => {
+    const json = claudeHookSettings();
+    expect(json).not.toContain("'");
+    const parsed = JSON.parse(json);
+    expect(Object.keys(parsed.hooks).sort()).toEqual(['Notification', 'PreToolUse', 'SessionEnd', 'Stop', 'UserPromptSubmit']);
+    expect(parsed.hooks.Notification[0].matcher).toBe('permission_prompt|idle_prompt|elicitation_dialog');
+    expect(parsed.hooks.Stop[0].hooks[0]).toEqual({ type: 'command', command: 'printf waiting > "$KUNJ_AGENT_STATE"' });
+    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].command).toBe('printf running > "$KUNJ_AGENT_STATE"');
+    expect(parsed.hooks.SessionEnd[0].hooks[0].command).toBe('rm -f "$KUNJ_AGENT_STATE"');
+  });
+
+  test('readAgentState reads running, waiting, else null', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-state-'));
+    fs.writeFileSync(path.join(dir, 'a'), 'waiting\n');
+    fs.writeFileSync(path.join(dir, 'b'), 'bogus');
+    expect(readAgentState(path.join(dir, 'a'))).toBe('waiting');
+    expect(readAgentState(path.join(dir, 'b'))).toBeNull();
+    expect(readAgentState(path.join(dir, 'missing'))).toBeNull();
+  });
+
+  test('agentStateFile lives in agent-state under the repo kunj dir', () => {
+    expect(agentStateDir('/h/.kunj/app')).toBe('/h/.kunj/app/agent-state');
+    expect(agentStateFile('/h/.kunj/app', 'kunj-app-x-1')).toBe('/h/.kunj/app/agent-state/kunj-app-x-1');
+  });
+});

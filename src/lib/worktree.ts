@@ -15,7 +15,7 @@ import { applyKeptFiles } from './keep';
 import { expandVariables, repoVariables } from './config-vars';
 import { DEFAULT_WORKTREE_BASE_DIR } from './worktree-defaults';
 import type { AgentState } from './json-types';
-import { agentRunning, agentSessionName, listTmuxSessions } from './agent-session';
+import { agentRunning, agentSessionName, agentStateFile, listTmuxSessions, readAgentState } from './agent-session';
 import { repoIdentity } from './repo-identity';
 
 const execAsync = promisify(exec);
@@ -331,7 +331,10 @@ export async function listWorktreesDetailed(options: ListWorktreesOptions = {}):
       }
       if (includeStatus && agentRepo && exists && !wt.bare && wt.branch) {
         const session = agentSessionName(agentRepo.name, agentRepo.id, wt.branch);
-        info.agent = { running: agentRunning(tmuxSessions, session), session };
+        const running = agentRunning(tmuxSessions, session);
+        // The hooks' state file (agent-session.ts) only means something while the session runs
+        const state = running ? readAgentState(agentStateFile(path.join(getGlobalKunjDir(), agentRepo.name), session)) : null;
+        info.agent = { running, session, state };
       }
       if (includePullRequests) {
         info.pullRequest = prResult.pullRequests && wt.branch ? pickPullRequest(prResult.pullRequests, wt.branch) : null;

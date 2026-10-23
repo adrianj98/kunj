@@ -76,7 +76,7 @@ manager stores secrets once, encrypted, and kunj delivers each one only where it
 **Goals.** No more hand-exported tokens (`GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, API keys). Per-repo and
 per-branch app secrets (`DATABASE_URL`, payment keys) replacing plaintext `.env` keep files. Import of
 existing `.env` files. **Non-goals for v1:** sharing with a team, SOPS or committed secret files (some
-repos cannot hold them), external vaults (1Password, AWS Secrets Manager), short-lived or per-container
+repos cannot hold them), externs (1Password, AWS Secrets Manager), short-lived or per-container
 tokens. Nothing is ever written into the repository.
 
 ### Storage

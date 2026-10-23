@@ -15,6 +15,7 @@ import type { EventJson } from '../json-types';
 jest.setTimeout(30000);
 
 jest.mock('../agent-session', () => ({
+  ...jest.requireActual<object>('../agent-session'),
   listTmuxSessions: jest.fn(async () => []),
 }));
 
@@ -249,6 +250,33 @@ describe('watchEvents', () => {
       { type: 'agent', session: 'kunj-app-x-abc123', running: true, at: expect.any(String) },
       { type: 'agent', session: 'kunj-app-x-abc123', running: false, at: expect.any(String) },
     ]);
+  });
+
+  it('a write to agent-state/<session> yields an agent event with the state', async () => {
+    const stateDir = path.join(kunjDir, 'app', 'agent-state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    start();
+    await prime('agent', () => fs.writeFileSync(path.join(stateDir, 'kunj-app-x-abc123'), 'running'));
+    fs.writeFileSync(path.join(stateDir, 'kunj-app-x-abc123'), 'waiting');
+    await waitFor(() => ofType('agent').length > 0);
+    expect(ofType('agent')[0]).toEqual({ type: 'agent', session: 'kunj-app-x-abc123', running: true, state: 'waiting', at: expect.any(String) });
+  });
+
+  it('a changed agent state in a container yields a container status event', async () => {
+    const key = `sh -c ${STATUS_SCRIPT}`;
+    const backend = new FakeBackend();
+    backend.existing = [{
+      id: 'id-1', name: 'kunj-app-x-1', state: 'running', image: 'img', createdAt: '', ports: [],
+      labels: { 'kunj.repo': 'github.com/acme/app', 'kunj.branch': 'x', 'kunj.role': 'main' },
+    }];
+    backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\nstate=running\n# branch.oid ' + 'a'.repeat(40) + '\n' });
+    let ready!: () => void;
+    const armed = new Promise<void>(r => (ready = r));
+    start({ backend, statusPollMs: 50, onReady: ready });
+    await armed;
+    await waitFor(() => backend.callsOf('exec').length > 1);
+    backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\nstate=waiting\n# branch.oid ' + 'a'.repeat(40) + '\n' });
+    await waitFor(() => ofType('container').some(e => (e as { action: string }).action === 'status'));
   });
 
   it('a missing directory is skipped, not fatal', async () => {

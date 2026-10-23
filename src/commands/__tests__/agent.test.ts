@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { AgentCommand } from '../agent';
-import { AgentError, agentArgv, agentSessionName, readTmuxSessions, runTmux, killTmuxSession } from '../../lib/agent-session';
+import { AgentError, agentArgv, agentSessionName, agentStateFile, readTmuxSessions, runTmux, killTmuxSession, withAgentHooks } from '../../lib/agent-session';
+import { loadResolvedConfig } from '../../lib/config';
 
 jest.mock('../../lib/worktree', () => ({
   ...jest.requireActual('../../lib/worktree'),
@@ -27,13 +28,19 @@ jest.mock('../../lib/agent-session', () => ({
 
 jest.mock('../../lib/config', () => ({
   loadResolvedConfig: jest.fn(async () => ({ agent: { command: 'claude' } })),
+  getKunjDir: jest.fn(() => '/h/.kunj/app'),
 }));
+
+// The state directory under the mocked kunj dir is never created on disk
+jest.mock('fs', () => ({ ...jest.requireActual<object>('fs'), mkdirSync: jest.fn() }));
 
 jest.mock('../../lib/git', () => ({
   getCurrentBranch: jest.fn(async () => 'feature-a'),
 }));
 
 const session = agentSessionName('app', 'github.com/acme/app', 'feature-a');
+const stateFile = agentStateFile('/h/.kunj/app', session);
+const claudeWithHooks = withAgentHooks('claude', stateFile, true);
 const tmuxSessions = readTmuxSessions as jest.Mock;
 let stdout: string[];
 let ttyBefore: boolean | undefined;
@@ -72,8 +79,8 @@ test('status without a branch uses the current branch and reports null without t
 test('start runs tmux in the worktree with agent.command', async () => {
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('start', 'feature-a', {});
-  const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a' };
-  expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', 'claude', vars), '/wt/feature-a', expect.objectContaining(vars));
+  const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile };
+  expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', claudeWithHooks, vars), '/wt/feature-a', expect.objectContaining(vars));
   // tmux takes a new session's environment from its server, not this client: the values go in argv
   expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(expect.arrayContaining(['-e', 'KUNJ_BRANCH=feature-a', '-e', 'KUNJ_WORKTREE=/wt/feature-a']));
 });
@@ -95,7 +102,7 @@ test('a bare branch name starts, and --command overrides the setting', async () 
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('feature-a', { command: 'aider' });
   expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(
-    agentArgv(session, '/wt/feature-a', 'aider', { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a' }),
+    agentArgv(session, '/wt/feature-a', 'aider', { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile }),
   );
 });
 
@@ -116,9 +123,9 @@ test('start without tmux runs the command directly, prints the hint, passes the 
     else process.env.SHELL = shellBefore;
   }
   const [argv, cwd, env] = (runTmux as jest.Mock).mock.calls[0];
-  expect(argv).toEqual(['/bin/zsh', '-lc', 'claude']);
+  expect(argv).toEqual(['/bin/zsh', '-lc', claudeWithHooks]);
   expect(cwd).toBe('/wt/feature-a');
-  expect(env).toEqual(expect.objectContaining({ KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a' }));
+  expect(env).toEqual(expect.objectContaining({ KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile }));
   expect(env).not.toHaveProperty('TMUX');
   expect(stderr.join('')).toBe('tmux is not installed: the agent stops when this terminal closes (brew install tmux to keep it running)\n');
   expect(process.exitCode).toBe(3);
@@ -128,8 +135,16 @@ test('--no-tmux runs the command directly even when tmux is installed', async ()
   tmuxSessions.mockResolvedValue([]);
   const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
   await new AgentCommand().execute('start', 'feature-a', { tmux: false });
-  expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual([process.env.SHELL || 'sh', '-lc', 'claude']);
+  expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual([process.env.SHELL || 'sh', '-lc', claudeWithHooks]);
   expect(stderr).not.toHaveBeenCalled();
+});
+
+test('agent.hooks false runs claude without --settings', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'claude', hooks: false } });
+  await new AgentCommand().execute('start', 'feature-a', {});
+  expect((runTmux as jest.Mock).mock.calls[0][0]).toContain('claude');
+  expect((runTmux as jest.Mock).mock.calls[0][0].join(' ')).not.toContain('--settings');
 });
 
 test('stop without tmux fails with tmux-missing', async () => {

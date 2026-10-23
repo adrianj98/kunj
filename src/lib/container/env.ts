@@ -62,6 +62,8 @@ export function firewallEnv(
 
 export interface ContainerStatus {
   agentRunning: boolean | null;
+  /** What the agent's Claude Code hooks last wrote (see agent-session.ts); null when unknown */
+  agentState: 'running' | 'waiting' | null;
   head: string | null;
   ahead: number | null;
   dirty: boolean | null;
@@ -69,22 +71,26 @@ export interface ContainerStatus {
 }
 
 export function emptyStatus(status: ContainerStatus['status']): ContainerStatus {
-  return { agentRunning: null, head: null, ahead: null, dirty: null, status };
+  return { agentRunning: null, agentState: null, head: null, ahead: null, dirty: null, status };
 }
 
 // The workspace's .git/config is the agent's: git must not run its fsmonitor or hooks for kunj
 export const SAFE_GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
 
 /** Run with `sh -c` in a main container (kunj ct list, kunj events); its output is for parseStatus. */
-export const STATUS_SCRIPT = `tmux has-session -t agent 2>/dev/null; echo "tmux=$?"; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
+export const STATUS_SCRIPT = `tmux has-session -t agent 2>/dev/null; echo "tmux=$?"; echo "state=$(cat /tmp/kunj-agent-state 2>/dev/null)"; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
 
 /** Parse `tmux=<code>` followed by `git status --porcelain=v2 --branch`. */
 export function parseStatus(stdout: string): ContainerStatus {
-  const result: ContainerStatus = { agentRunning: null, head: null, ahead: null, dirty: false, status: 'ok' };
+  const result: ContainerStatus = { agentRunning: null, agentState: null, head: null, ahead: null, dirty: false, status: 'ok' };
   for (const line of stdout.split('\n')) {
     const tmux = /^tmux=(\d+)$/.exec(line);
+    const state = /^state=(.*)$/.exec(line);
     if (tmux) {
       result.agentRunning = tmux[1] === '0' ? true : tmux[1] === '1' ? false : null;
+    } else if (state) {
+      const v = state[1].trim();
+      result.agentState = v === 'running' || v === 'waiting' ? v : null;
     } else if (line.startsWith('# branch.oid ')) {
       const oid = line.slice('# branch.oid '.length).trim();
       result.head = oid === '(initial)' ? null : oid;

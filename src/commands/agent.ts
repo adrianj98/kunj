@@ -4,11 +4,12 @@
 
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
-import { loadResolvedConfig } from '../lib/config';
+import * as fs from 'fs';
+import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, directArgv, killTmuxSession, readTmuxSessions, runTmux } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, agentStateDir, agentStateFile, directArgv, killTmuxSession, readTmuxSessions, runTmux, withAgentHooks } from '../lib/agent-session';
 import type { AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
@@ -95,8 +96,12 @@ export class AgentCommand extends BaseCommand {
 
     if (!process.stdin.isTTY) throw new AgentError('no-tty', 'kunj agent needs a terminal to attach to');
     const config = await loadResolvedConfig(process.cwd());
-    const command = opts.command || config.agent?.command || 'claude';
-    const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path };
+    // The Claude Code hooks report "waiting for input" into the state file (agent-session.ts)
+    const kunjDir = getKunjDir();
+    const stateFile = agentStateFile(kunjDir, session);
+    fs.mkdirSync(agentStateDir(kunjDir), { recursive: true });
+    const command = withAgentHooks(opts.command || config.agent?.command || 'claude', stateFile, config.agent?.hooks !== false);
+    const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile };
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;
     // Like kunj ct agent in an image without tmux: the agent runs here and ends with the terminal

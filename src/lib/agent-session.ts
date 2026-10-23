@@ -5,6 +5,8 @@
 // tmux, which treats `.` and `:` as target separators.
 
 import { execFile, spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import { promisify } from 'util';
 import { containerNames } from './container/names';
 
@@ -79,4 +81,58 @@ export function runTmux(argv: string[], cwd: string, env: Record<string, string 
 
 export async function killTmuxSession(name: string): Promise<void> {
   await execFileAsync('tmux', ['kill-session', '-t', name]);
+}
+
+// ---------------------------------------------------------------------------
+// Agent state: "waiting for input" through Claude Code hooks
+//
+// tmux says whether an agent runs; whether it waits for the user is written by Claude Code hooks
+// that kunj passes with `--settings` (only when the command is claude). Each hook is a printf into
+// the file named by KUNJ_AGENT_STATE: on the host ~/.kunj/<repo>/agent-state/<session>, in a
+// container /tmp/kunj-agent-state (read by the status script). `kunj events` watches the directory.
+// ---------------------------------------------------------------------------
+
+export type AgentHookState = 'running' | 'waiting';
+
+export const CONTAINER_AGENT_STATE_FILE = '/tmp/kunj-agent-state';
+
+export function agentStateDir(kunjDir: string): string {
+  return path.join(kunjDir, 'agent-state');
+}
+
+export function agentStateFile(kunjDir: string, session: string): string {
+  return path.join(agentStateDir(kunjDir), session);
+}
+
+// The hooks as `claude --settings` takes them. No single quotes anywhere, so the JSON can be
+// single-quoted for the shell tmux runs the command through.
+export function claudeHookSettings(): string {
+  const hook = (command: string, matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] }];
+  const write = (state: AgentHookState) => `printf ${state} > "$KUNJ_AGENT_STATE"`;
+  return JSON.stringify({
+    hooks: {
+      UserPromptSubmit: hook(write('running')),
+      PreToolUse: hook(write('running')),
+      Stop: hook(write('waiting')),
+      Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),
+      SessionEnd: hook('rm -f "$KUNJ_AGENT_STATE"'),
+    },
+  });
+}
+
+// `command` with the hooks appended when it is claude (the setting agent.hooks, default on)
+export function withAgentHooks(command: string, _stateFile: string, enabled: boolean): string {
+  if (!enabled) return command;
+  const first = command.trim().split(/\s+/)[0] ?? '';
+  if (path.basename(first) !== 'claude') return command;
+  return `${command.trim()} --settings '${claudeHookSettings().replace(/'/g, "'\\''")}'`;
+}
+
+export function readAgentState(stateFile: string): AgentHookState | null {
+  try {
+    const s = fs.readFileSync(stateFile, 'utf8').trim();
+    return s === 'running' || s === 'waiting' ? s : null;
+  } catch {
+    return null;
+  }
 }

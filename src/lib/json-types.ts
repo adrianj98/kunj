@@ -19,10 +19,15 @@ export interface ErrorJson {
   error: string | { code: string; message: string };
 }
 
-/** The agent session of a worktree or container. `running` is null when it could not be determined. */
+/**
+ * The agent session of a worktree or container. `running` is null when it could not be determined.
+ * `state` is what the Claude Code hooks kunj installs last wrote: 'waiting' when the agent waits for
+ * input, 'running' while it works, null when unknown (no hooks, not claude, or not running).
+ */
 export interface AgentState {
   running: boolean | null;
   session: string;
+  state?: 'running' | 'waiting' | null;
 }
 
 // ---- kunj worktree list --json ---------------------------------------------------------------
@@ -131,6 +136,6 @@ export type EventJson = { at: string } & (
   | { type: 'hello'; version: string; repos: number }
   | { type: 'git' | 'sessions' | 'forwards' | 'repos'; repo?: { name: string; root: string } }
   | { type: 'container'; repo: { name: string; root: string } | null; branch: string | null; container: string; action: string }
-  | { type: 'agent'; session: string; running: boolean }
+  | { type: 'agent'; session: string; running: boolean; state?: 'running' | 'waiting' | null }
   | { type: 'backend'; status: 'available' | 'unavailable'; message?: string }
 );

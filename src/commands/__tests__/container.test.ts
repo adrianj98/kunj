@@ -140,6 +140,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { Command } from 'commander';
 import { ContainerCommand, agentCommandLine } from '../container';
+import { CONTAINER_AGENT_STATE_FILE, withAgentHooks } from '../../lib/agent-session';
+
+// The agent command as ct agent runs it: the state file in the env and the Claude Code hooks appended
+const agentShell = (command: string) => `KUNJ_AGENT_STATE=${CONTAINER_AGENT_STATE_FILE} ` + withAgentHooks(command, CONTAINER_AGENT_STATE_FILE, true);
 import * as lifecycle from '../../lib/container/lifecycle';
 import * as snapshot from '../../lib/container/snapshot';
 import { inferBlueprint } from '../../lib/container/infer';
@@ -297,7 +301,7 @@ describe('ContainerCommand', () => {
     expect(cmds).toEqual([
       ['sh', '-c', 'command -v tmux'],
       [
-        'tmux', '-u', 'new-session', '-A', '-s', 'agent', `claude --append-system-prompt "be brief" 'it'\\''s'`,
+        'tmux', '-u', 'new-session', '-A', '-s', 'agent', agentShell(`claude --append-system-prompt "be brief" 'it'\\''s'`),
         ';', 'set-option', '-t', 'agent', 'window-size', 'latest',
       ],
     ]);
@@ -307,7 +311,7 @@ describe('ContainerCommand', () => {
     backend.existing = [mainContainer('feat')];
     backend.execResults.set('sh -c command -v tmux', { exitCode: 1, stdout: '' });
     await new ContainerCommand().execute('agent', 'feat', [], {});
-    expect(backend.callsOf('exec')[1][1]).toEqual(['sh', '-lc', agentCommandLine(undefined, [])]);
+    expect(backend.callsOf('exec')[1][1]).toEqual(['sh', '-lc', agentShell(agentCommandLine(undefined, []))]);
   });
 
   describe('auto forwarding', () => {

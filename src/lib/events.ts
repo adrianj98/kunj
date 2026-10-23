@@ -22,7 +22,7 @@ import { stripUserinfo } from './container/seed';
 import { forwardsFile } from './container/autoforward';
 import { WORKTREE_SESSIONS_FILE } from './worktree';
 import { REPOS_FILE } from './repos';
-import { listTmuxSessions } from './agent-session';
+import { agentStateDir, listTmuxSessions, readAgentState } from './agent-session';
 
 const execFileAsync = promisify(execFile);
 
@@ -228,6 +228,24 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
     }
   }
 
+  // The agent state files the Claude Code hooks write (agent-session.ts): one directory per repo,
+  // created by kunj agent; watched once it exists (resynced with the git watches)
+  const stateWatchers = new Map<string, fs.FSWatcher>();
+  const syncStateWatch = (repo: KnownRepoInfo) => {
+    const dir = agentStateDir(path.join(kunjDir, repo.name));
+    if (stateWatchers.has(dir) || !fs.existsSync(dir)) return;
+    const watcher = watch(dir, false, file => {
+      if (!file || !file.startsWith('kunj-')) return;
+      debounce(`agent-state:${dir}/${file}`, () => {
+        const state = readAgentState(path.join(dir, file));
+        emit({ type: 'agent', session: file, running: true, state, at: at() });
+      });
+    }, () => stateWatchers.delete(dir));
+    if (watcher) stateWatchers.set(dir, watcher);
+  };
+  for (const repo of repos) syncStateWatch(repo);
+  resyncs.push(() => repos.forEach(syncStateWatch));
+
   const registryFiles: Record<string, 'sessions' | 'forwards' | 'repos'> = {
     [WORKTREE_SESSIONS_FILE]: 'sessions',
     [path.basename(forwardsFile())]: 'forwards',
@@ -328,7 +346,7 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
         } catch {
           return;
         }
-        const h = JSON.stringify({ agentRunning: status.agentRunning, head: status.head, ahead: status.ahead, dirty: status.dirty });
+        const h = JSON.stringify({ agentRunning: status.agentRunning, agentState: status.agentState, head: status.head, ahead: status.ahead, dirty: status.dirty });
         const before = containerHashes.get(c.name);
         containerHashes.set(c.name, h);
         if (before !== undefined && before !== h) {

@@ -37,6 +37,7 @@ page only says where each thing stands.
 | Phase 2 cross-feature fixes: forwards and polls through the network helper, forwarder bound to one container run, compose deps on dropped services, 10-minute orphan grace, migrations in `maintain`, manual forwards registered | [container-phase-2.md](container-phase-2.md) | a32bc90 |
 | Published JSON types | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 36e64a5, d0a490a, 22a8444 |
 | `kunj agent` for worktrees, tmux optional | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 2974aef, 75380f3, ce52ad8, 453f241, e5b15a4 |
+| Agent waiting-for-input state (`agent.hooks`: Claude Code hooks write `agent.state`, reported by `worktree list`, `ct list` and `kunj events`) | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | this commit |
 | `kunj ct file read\|write` | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 47fcefe, 5721f17 |
 | `kunj events --json` with status poll; exits when stopped even while Docker hangs | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 189d9ba, 3685ef6, ce5691d, e1078df |
 | `kunj agent` checked with a real tmux 3.8: `-e` gives this branch's `KUNJ_*` with another tmux server running, a rerun reattaches (`-A`, same pane, no second agent), it starts from inside a tmux pane without the nesting error, the session has `window-size latest` | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | verified 2026-10-23 with tmux 3.8 on macOS, and 3.3a and 3.5a in Debian containers (`scripts/check-tmux-agent.sh`); no code change |
