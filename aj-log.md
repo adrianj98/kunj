@@ -974,3 +974,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - spikes/native-ide/: native IDE spike (AppKit + SwiftTerm 1.20.0 + one WKWebView running Monaco 0.57 diff) with --bench scenarios, results/*.json, screenshots and REPORT.md. Why: measure whether a native shell can replace the planned Electron app.
 - docs/specs/README.md: native IDE spike moved to Done (1c2aaa3); runtime decision waits on the user. Why: the spike reported.
 - docs/specs/README.md: spike row lists 1730cd1; the runtime decision row says key presses and live resize passed the user's manual check, and what is still unmeasured. Why: the user ran the manual checks in the demo app.
+- docs/specs/README.md: spike closed (0e41a24), remaining checks dropped as not needed. Why: the user closed the spike.
