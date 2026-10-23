@@ -1,0 +1,7 @@
+.build/
+build/
+vendor/
+web/node_modules/
+Resources/web/vs/
+Resources/fonts/
+build.log

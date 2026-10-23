@@ -1,0 +1,11 @@
+{
+  "name": "kunj-workspace-web",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "node copy-monaco.js"
+  },
+  "dependencies": {
+    "monaco-editor": "0.57.0"
+  }
+}

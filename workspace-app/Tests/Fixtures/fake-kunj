@@ -1,0 +1,61 @@
+#!/bin/sh
+# fake-kunj: stands in for the kunj CLI in KunjWorkspaceCoreTests (KunjCLI tests point
+# `command` at this file). It answers from canned files; it never runs git or docker.
+#
+# Naming rule: `kunj <args>` prints responses/<name>.json, where <name> is the arguments with
+# `--json` dropped, a leading `--` stripped from the others, every `/` replaced by `-`, and
+# the results joined with `_`:
+#   kunj worktree list --json                      -> worktree_list.json
+#   kunj worktree list --no-pr --json              -> worktree_list_no-pr.json
+#   kunj ct file read feature/x src/a.ts --json    -> ct_file_read_feature-x_src-a.ts.json
+# A missing file prints {"error":{"code":"fixture-missing","message":"<name>"}} and exits 1,
+# the shape kunj prints for an error in --json mode.
+# (fakeKunjResponseName() in Tests/KunjWorkspaceCoreTests/Support.swift mirrors this rule.)
+#
+# `kunj -V` prints $FAKE_KUNJ_VERSION, else responses/version.txt.
+#
+# Switches (environment):
+#   FAKE_KUNJ_RESPONSES=<dir>  answer from <dir> instead of responses/ next to this script
+#   FAKE_KUNJ_VERSION=<v>      the version `-V` prints
+#   FAKE_KUNJ_STDOUT=<text>    print <text> (no newline added) instead of any file
+#   FAKE_KUNJ_EXIT=<n>         exit with <n> after printing (default 0, 1 for a missing fixture)
+#   FAKE_KUNJ_LOG=<file>       append "<cwd><TAB><args joined by spaces>" for every call
+#
+# Later tasks add cases here (Task 5: `events` streams responses/events.ndjson).
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+responses=${FAKE_KUNJ_RESPONSES:-$here/responses}
+
+if [ -n "${FAKE_KUNJ_LOG:-}" ]; then
+  printf '%s\t%s\n' "$(pwd -P)" "$*" >> "$FAKE_KUNJ_LOG"
+fi
+
+if [ -n "${FAKE_KUNJ_STDOUT+set}" ]; then
+  printf '%s' "$FAKE_KUNJ_STDOUT"
+  exit "${FAKE_KUNJ_EXIT:-0}"
+fi
+
+if [ "${1:-}" = "-V" ]; then
+  if [ -n "${FAKE_KUNJ_VERSION:-}" ]; then
+    echo "$FAKE_KUNJ_VERSION"
+  else
+    cat "$responses/version.txt" || exit 1
+  fi
+  exit "${FAKE_KUNJ_EXIT:-0}"
+fi
+
+name=""
+for a in "$@"; do
+  [ "$a" = "--json" ] && continue
+  part=$(printf '%s' "${a#--}" | tr '/' '-')
+  if [ -z "$name" ]; then name=$part; else name="${name}_$part"; fi
+done
+
+file="$responses/$name.json"
+if [ -f "$file" ]; then
+  cat "$file"
+  exit "${FAKE_KUNJ_EXIT:-0}"
+fi
+escaped=$(printf '%s' "$name" | sed 's/\\/\\\\/g; s/"/\\"/g')
+printf '{"error":{"code":"fixture-missing","message":"%s"}}\n' "$escaped"
+exit "${FAKE_KUNJ_EXIT:-1}"
