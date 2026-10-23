@@ -85,16 +85,18 @@ kunj CLI → git, docker exec → tmux → claude ; VS Code via `kunj ct open` /
 
 ## CLI additions (plan: workspace-cli-contract)
 
+Shipped on main (merge 9822cc6): items 1 to 4. Item 5 belongs to the app plan.
+
 1. `src/lib/json-types.ts`: `ReposJson`, `WorktreeListJson`, `ContainerListJson`, `AgentStatusJson`, `EventJson`,
-   `ErrorJson`; `package.json` `types` entry.
+   `ErrorJson`; `package.json` `types` entry. Shipped: 36e64a5.
 2. `kunj agent [branch]`, `kunj agent status|stop [branch]`, setting `agent.command` (default `claude`, no
    permission skipping on the host), `worktree list --json` gains `agent: { running: boolean | null }` from one
-   `tmux list-sessions` per listing (null when tmux is missing or `--no-status`).
-3. `kunj ct file read|write <branch> <path>`: path relative to `/workspace`, no `..`, runs as the sandbox user.
+   `tmux list-sessions` per listing (null when tmux is missing or `--no-status`). Shipped: 2974aef, 75380f3, ce52ad8.
+3. `kunj ct file read|write <branch> <path>`: path relative to `/workspace`, no `..`, runs as the sandbox user. Shipped: 47fcefe, 5721f17.
 4. `kunj events --json`: NDJSON stream of `git` (per repo, `.git` watched), `sessions`, `forwards`, `repos`,
    `container` (docker events through the backend), `agent` (host tmux sessions polled) and `backend` events,
-   debounced; ends on SIGINT or when stdin closes.
-5. `kunj install workspace` and a `workspace-app` release job (in the app plan, with the packaging).
+   debounced; ends on SIGINT or when stdin closes. Shipped: 189d9ba, 3685ef6.
+5. `kunj install workspace` and a `workspace-app` release job (in the app plan, with the packaging); not part of this plan.
 
 Nothing else in `src/lib` changes for the app.
 

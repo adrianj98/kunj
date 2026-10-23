@@ -176,6 +176,15 @@ fatals there, so ask git for `--git-common-dir` first. Pull requests are fetched
 
 The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
 
+**Workspace app contract:** the types in src/lib/json-types.ts (`WorktreeListJson`, `ContainerListJson`,
+`ReposJson`, `ErrorJson`, `AgentStatusJson`, `AgentStopJson`, `FileReadJson`, `FileWriteJson`, `EventJson`) are the
+published, type-only JSON contract (`types` in package.json; consumers import `from 'kunj'`). Commands build their
+JSON with `satisfies` so the compiler checks it against the type, and fields are only ever added, never renamed or
+removed. Consumers: the VS Code extension, the macOS app and the workspace app. Errors in `--json` mode are
+`{ error: { code, message } }` when the error has a string `jsonCode`, else `{ error: "<message>" }`; `kunj ct`
+always prints the object shape. `kunj events --json` is the NDJSON change stream, `kunj ct file read|write` the
+container file access.
+
 **Worktree agents:** `kunj agent` (src/commands/agent.ts, src/lib/agent-session.ts) runs `agent.command`
 (default `claude`) in a host tmux session for a worktree. One tmux server serves the host, so the
 session name is `agentSessionName()`: the container name from `containerNames()` with `.` and `:`
