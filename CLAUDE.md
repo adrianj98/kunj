@@ -176,10 +176,8 @@ The VS Code extension in `vscode-extension/` is a separate npm package (own `pac
 own clone, mainly to run an agent with permissions skipped. Origin is the only channel in and out;
 nothing from the host is bind-mounted. Design: docs/superpowers/specs/2026-10-21-branch-containers-design.md.
 Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sidecar services and `open`; no
-`prune`, Docker-in-Docker or `--auto` yet. Phase 3, after phase 2, is the workspace IDE
-(docs/superpowers/specs/2026-10-23-workspace-ide-design.md): an Electron app in `workspace-app/` that lists
-environments (worktrees and containers) and drives everything through `kunj … --json`, never by importing
-`src/lib`, so the CLI stays the one contract for it, the VS Code extension and the macOS app.
+`prune`, Docker-in-Docker or `--auto` yet. Phase 3 (not started) is the workspace IDE:
+docs/superpowers/specs/2026-10-23-workspace-ide-design.md.
 
 **Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,services,editor}.ts`.
 The images' build contexts live in `src/container/{sandbox,nethelper}/` and are copied to
