@@ -416,7 +416,7 @@ export class ContainerCommand extends BaseCommand {
   }
 
   /** Creates or resumes the branch's container, with the create hooks and the snapshot; `start` and `open` share it. */
-  private async startOrResume(ctx: Context, branch: string, options: ContainerOptions): Promise<StartResult> {
+  private async startOrResume(ctx: Context, branch: string, options: ContainerOptions, extra: { keepStaleHelper?: boolean } = {}): Promise<StartResult> {
     const names = this.names(ctx, branch);
     const { config } = ctx;
     const publish = parsePublish(options.publish);
@@ -471,6 +471,7 @@ export class ContainerCommand extends BaseCommand {
       skipHooks: options.hooks === false,
       keepOnError: !!options.keepOnError,
       keepVolumes: !!options.keepVolumes,
+      ...(extra.keepStaleHelper ? { keepStaleHelper: true } : {}),
       confirmPush: () => this.confirmPush(branch),
       warn: this.warn,
       defaultBranch,
@@ -597,9 +598,10 @@ export class ContainerCommand extends BaseCommand {
     const main = found.find(c => c.name === names.container);
     if (!main) throw new ContainerError(`No container for ${branch}; run kunj ct start ${branch}`);
     // Only resumed: start's --rebuild, --create, --image and --publish never apply to open. Also when
-    // just the helper (or an out-of-date one) or a service is down, so the editor finds it all up.
-    if (needsResume(found, names, getVersion())) {
-      await this.startOrResume(ctx, branch, { hooks: options.hooks, context: options.context, json: options.json });
+    // just the helper or a service is down, so the editor finds it all up; a running helper is never
+    // replaced here (an out-of-date one is only replaced by kunj ct start)
+    if (needsResume(found, names)) {
+      await this.startOrResume(ctx, branch, { hooks: options.hooks, context: options.context, json: options.json }, { keepStaleHelper: true });
     }
 
     const editor = (ctx.config.worktree?.editorCommand ?? 'code').trim();

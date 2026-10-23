@@ -89,6 +89,8 @@ function options(over: Partial<StartOptions> = {}): StartOptions {
     keepOnError: false,
     confirmPush: async () => true,
     warn: () => {},
+    // Never the developer's ~/.kunj registries
+    registryFiles: { forwards: path.join(tmp, 'forwards.json'), bridges: path.join(tmp, 'bridges.json') },
     ...over,
   };
 }
@@ -664,9 +666,67 @@ describe('startContainer', () => {
     const b = backend();
     b.existing = [info({}), helperInfo({ image: 'kunj-nethelper:9.9.8-0ldhash' })];
     b.execErrors.set(READY, new Error('docker exec failed: not running'));
-    await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'firewall' });
+    await expect(startContainer(b, options())).rejects.toMatchObject({
+      code: 'firewall',
+      message: `Stopped ${names.container}: its firewall could not be re-applied (Network helper failed before the firewall was ready: docker exec failed: not running); kunj ct start ${BRANCH} retries`,
+    });
     expect(b.callsOf('stop')).toEqual([['main-id']]);
     expect(execCmds(b).filter(c => c !== READY)).toEqual([]);
+  });
+
+  it('keeps the old running helper when the current helper image cannot be built, and carries on', async () => {
+    const b = backend();
+    b.existingImages.delete(NETHELPER_IMAGE(VERSION));
+    b.failOn = 'buildImage';
+    b.existing = [info({}), helperInfo({ image: 'kunj-nethelper:9.9.8-0ldhash' })];
+    const warnings: string[] = [];
+    const result = await startContainer(b, options({ warn: m => warnings.push(m) }));
+    expect(result.created).toBe(false);
+    expect(warnings.join('\n')).toMatch(/Could not build the current network helper image .*keeping the old helper/);
+    expect(b.methods().filter(m => ['run', 'remove', 'stop', 'exec'].includes(m))).toEqual([]);
+  });
+
+  it('stops a running container whose helper was gone when the new one cannot be made', async () => {
+    const b = backend();
+    b.existingImages.delete(NETHELPER_IMAGE(VERSION));
+    b.failOn = 'buildImage';
+    b.existing = [info({})];
+    await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'firewall', message: expect.stringMatching(/^Stopped .*: its firewall could not be re-applied \(buildImage failed\)/) });
+    expect(b.callsOf('stop')).toEqual([['main-id']]);
+  });
+
+  it('keepStaleHelper (open) leaves a running helper on an older image alone', async () => {
+    const b = backend();
+    b.existing = [info({}), helperInfo({ image: 'kunj-nethelper:9.9.8-0ldhash' })];
+    await startContainer(b, options({ keepStaleHelper: true }));
+    expect(b.methods().filter(m => ['run', 'remove', 'stop', 'start', 'exec'].includes(m))).toEqual([]);
+  });
+
+  it('ends the forwarders and MCP bridges of a running container whose helper it replaces, and says so', async () => {
+    const { spawn } = await import('child_process');
+    const procs = [spawn('sleep', ['30']), spawn('sleep', ['30']), spawn('sleep', ['30'])];
+    const exited = procs.map(p => new Promise(resolve => p.on('exit', (_c, signal) => resolve(signal))));
+    const files = { forwards: path.join(tmp, 'forwards.json'), bridges: path.join(tmp, 'bridges.json') };
+    fs.writeFileSync(files.forwards, JSON.stringify([
+      { pid: procs[0].pid, container: names.container, containerId: 'main-id', port: 0, hostPort: 0, kind: 'forward' },
+      { pid: procs[0].pid, container: names.container, containerId: 'main-id', port: 3000, hostPort: 3000, kind: 'forward' },
+      // Another container's forwarder is left alone
+      { pid: procs[2].pid, container: 'other', containerId: 'other-id', port: 4000, hostPort: 4000, kind: 'forward' },
+    ]));
+    fs.writeFileSync(files.bridges, JSON.stringify([{ pid: procs[1].pid, container: names.container, name: 'chrome' }]));
+    try {
+      const b = backend();
+      b.existing = [info({}), helperInfo({ image: 'kunj-nethelper:9.9.8-0ldhash' })];
+      const warnings: string[] = [];
+      await startContainer(b, options({ warn: m => warnings.push(m), registryFiles: files }));
+      expect(await exited[0]).toBe('SIGTERM');
+      expect(await exited[1]).toBe('SIGTERM');
+      expect(procs[2].exitCode).toBeNull();
+      expect(procs[2].signalCode).toBeNull();
+      expect(warnings).toContain(`Replacing the network helper of ${names.container}: stopped 2 port forwarder/MCP bridge processes that ran through it (kunj ct agent starts them again)`);
+    } finally {
+      for (const p of procs) p.kill();
+    }
   });
 
   it('streams keep files and container.files in and lists them', async () => {
@@ -1568,6 +1628,33 @@ describe('services', () => {
     expect(runSpecs(b).map(s => s.name)).toEqual([`${names.container}-svc-redis`, names.container, names.helper]);
     expect(warnings).toContain('.devcontainer/compose.yml: ignoring redis.ports (published)');
     expect(warnings.some(w => /dockerComposeFile is not supported/.test(w))).toBe(false);
+  });
+
+  it("resume reads the devcontainer's compose services only when the container was made without an image setting", async () => {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: tmp, env: GIT_ENV });
+    git('init', '-q');
+    fs.mkdirSync(path.join(tmp, '.devcontainer'));
+    fs.writeFileSync(path.join(tmp, '.devcontainer', 'devcontainer.json'), JSON.stringify({ dockerComposeFile: 'compose.yml', service: 'dev' }));
+    fs.writeFileSync(path.join(tmp, '.devcontainer', 'compose.yml'), 'services: {}\n');
+    git('add', '.');
+    git('commit', '-qm', 'dc');
+    git('update-ref', `refs/remotes/origin/${BRANCH}`, 'HEAD');
+    const made = (imageKind: string) => [
+      info({ labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main', [LABEL.options]: JSON.stringify({ imageKind }) }) }),
+      helperInfo(),
+    ];
+
+    // Made from a devcontainer: its compose file counts, whatever container.image says now
+    const dc = backend();
+    dc.existing = made('devcontainer');
+    await startContainer(dc, options({ config: { container: { image: 'other:1' } } as unknown as KunjConfig }));
+    expect(dc.methods()).toContain('composeConfig');
+
+    // Made from container.image: it never had the devcontainer's services
+    const setting = backend();
+    setting.existing = made('setting');
+    await startContainer(setting, options());
+    expect(setting.methods()).not.toContain('composeConfig');
   });
 });
 

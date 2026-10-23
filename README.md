@@ -317,7 +317,7 @@ port of `ports`/`expose`, and leaves out bind mounts, `build`, `privileged`, `ca
 `network_mode`, `env_file`, `entrypoint`, `user`, `working_dir`, `tmpfs`, published ports and
 variables taken from your shell, with one warning listing what it dropped. A compose file with
 `include` or an `extends` that names another file is not imported at all (those read files from
-your machine), nor is one with an escaped double-quoted key (`"\x69nclude":`) or an alias as a key. `${VAR:-default}` becomes the default; nothing is read from your
+your machine), judged on the parsed file (so explicit, alias and escaped keys count), nor is one that does not parse. `${VAR:-default}` becomes the default; nothing is read from your
 environment.
 
 `start` runs the services before the branch container, in `dependsOn` order, and waits for each

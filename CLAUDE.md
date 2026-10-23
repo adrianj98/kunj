@@ -262,8 +262,10 @@ imports light, load inquirer lazily and do not import the AWS or LangChain modul
 `/tmp/kunj-ready`. The main container runs with all capabilities dropped except CHOWN, DAC_OVERRIDE,
 FOWNER, SETUID and SETGID (`MAIN_CAPABILITIES` in lifecycle.ts); never give it NET_ADMIN or NET_RAW
 (Docker-in-Docker is the one opt-in exception). Nothing may be exec'd in the main container
-before that file exists. Resume replaces a running helper whose image is not the current
-`kunj-nethelper` tag the same way (a running main whose helper replacement fails is stopped).
+before that file exists. `start` (not `open`, `keepStaleHelper`) replaces a running helper whose image is
+not the current `kunj-nethelper` tag the same way, after ending that container's registered forwarders and
+bridges; a running main whose helper replacement fails is stopped. firewall.sh builds its rules in
+`KUNJ-OUT-NEW` and swaps the chain in, so reloading on a running container never opens a gap.
 
 **Secrets:** they travel only in the `docker run` env-file. Never pass them with `docker exec -e`
 (visible in `ps` and `inspect`) and never put them in labels. The git credential helper
@@ -330,7 +332,7 @@ volumes unless `--keep-volumes`, `stopContainer` stops them and
 bind mount, a capability or `--privileged`: its image is chosen by the branch.
 
 **Editor:** `kunj ct open` resumes through `startOrResume()` (never rebuilds) when `needsResume()` says the container,
-its helper or a service is down or the helper is out of date, writes the
+its helper or a service is down (never for an out-of-date running helper), writes the
 Dev Containers extension's per-image config (`imageConfigs/<image>.json`, `:`/`/`/`%` escaped as lowercase
 `%xx`, with `remoteUser` and `workspaceFolder`) and launches `worktree.editorCommand` via `buildOpenCommand`
 with `--folder-uri vscode-remote://attached-container+<hex of {"containerName":"/<name>"}>/workspace`. An

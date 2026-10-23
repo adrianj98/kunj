@@ -396,6 +396,13 @@ describe('fix round 1', () => {
     expect(composeRefusal('x: |\n  echo "\n"\\x69nclude": [/x.yml]\n')).toBe(escaped);
     // An alias as a key is whatever its anchor says
     expect(composeRefusal('x: &k include\n*k : [/x.yml]\n')).toBe('an alias as a key is not supported');
+    // Explicit and alias keys (they parse in js-yaml and yaml.v3)
+    expect(composeRefusal('? include # c\n: [ /etc/other.yml ]\n')).not.toBeNull();
+    expect(composeRefusal('x-a: &a include\n? *a\n: [ /etc/other.yml ]\n')).not.toBeNull();
+    expect(composeRefusal('? |-\n  include\n# c\n: [ /etc/other.yml ]\n')).not.toBeNull();
+    expect(composeRefusal('services:\n  db:\n    extends:\n      ? file # c\n      : /etc/x.yml\n')).not.toBeNull();
+    expect(composeRefusal('- ? a\n  : b\n')).toBe('an explicit key (?) is not supported');
+    expect(composeRefusal('{ ? a : b }\n')).toBe('an explicit key (?) is not supported');
     // Escapes in values, and merge keys, are fine
     expect(composeRefusal('services:\n  db:\n    image: redis\n    command: "sh -c \\"echo a: b\\""\n    "environment": { "A": "x\\ty" }\n')).toBeNull();
     expect(composeRefusal('x: &d { image: redis }\nservices:\n  db:\n    <<: *d\n')).toBeNull();
@@ -406,6 +413,29 @@ describe('fix round 1', () => {
     expect(await resolveServices(b, { compose: [{ path: 'c.yml', text: 'include:\n  - /x.yml\n' }], warn: m => warnings.push(m) })).toEqual([]);
     expect(warnings).toEqual(["c.yml: include is not supported by kunj's compose import; its services are not started"]);
     expect(b.methods()).not.toContain('composeConfig');
+  });
+
+  it('decides on the parsed document: include, extends with a file, tags, more documents; fails closed', () => {
+    // Refused by the parse (some also by the text backstop)
+    expect(composeRefusal('<<: { "inc\\u006cude": [x] }\n')).not.toBeNull();
+    expect(composeRefusal('base: &b { file: /x.yml, service: db }\nservices:\n  db:\n    extends: *b\n')).toBe('extends with a file is not supported');
+    expect(composeRefusal('services:\n  db:\n    extends: { service: db, other: 1 }\n')).toBe('extends with a file is not supported');
+    expect(composeRefusal('services:\n  db:\n    extends: [db]\n')).toBe('extends with a file is not supported');
+    expect(composeRefusal('x-k: !!binary aW5jbHVkZQ==\n')).toBe('the YAML tag !!binary is not supported');
+    expect(composeRefusal('x-k: !custom v\n')).toBe('the YAML tag !custom is not supported');
+    expect(composeRefusal('services: {}\n---\nservices: {}\n')).toBe('more than one YAML document is not supported');
+    expect(composeRefusal('services:\n  db: [unclosed\n')).toMatch(/^it could not be parsed/);
+    expect(composeRefusal('services:\n  db:\n    image: a\n    image: b\n')).toMatch(/^it could not be parsed/);
+
+    // Ordinary compose files still pass
+    const ordinary = [
+      'services:\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: dev\n    healthcheck:\n      test: ["CMD-SHELL", "pg_isready -U postgres"]\n      interval: 5s\n    volumes:\n      - data:/var/lib/postgresql/data\n  app:\n    build: .\n    depends_on:\n      db:\n        condition: service_healthy\nvolumes:\n  data: {}\n',
+      'x-env: &env\n  TZ: UTC\nservices:\n  base:\n    image: redis\n  cache:\n    extends: base\n    environment:\n      <<: *env\n  other:\n    extends: { service: base }\n    command: ["redis-server", "--save", ""]\n',
+      'services:\n  db:\n    image: redis\n    ports: !override\n      - "6379"\n    labels: !reset {}\n',
+      '{"services": {"db": {"image": "redis", "command": "echo \\"why? because\\""}}}',
+      '',
+    ];
+    for (const text of ordinary) expect(composeRefusal(text)).toBeNull();
   });
 
   it('finds services by their labels, not a name prefix another branch can extend', async () => {

@@ -206,30 +206,57 @@ rebuild_sets() { # <strict> <union>
 # --- Rules -----------------------------------------------------------------------------------
 
 # kunj's rules live in their own chain, jumped to first from OUTPUT, so a restarted helper
-# replaces them instead of stacking duplicates and Docker's own rules are left alone.
-reset_chain() { # <iptables|ip6tables>
-  "$1" -N "$CHAIN" 2>/dev/null || "$1" -F "$CHAIN"
+# replaces them instead of stacking duplicates and Docker's own rules are left alone. A new helper
+# on a running container must never leave a gap, so the rules are built in $BUILD while the live
+# chain stays in force, then swapped in: jump to the new chain first, drop the old one, rename.
+BUILD="$CHAIN-NEW"
+
+# Leftovers of a helper that died part way through a swap
+recover_chain() { # <iptables|ip6tables>
+  "$1" -L "$BUILD" -n >/dev/null 2>&1 || return 0
+  if "$1" -L "$CHAIN" -n >/dev/null 2>&1; then
+    # The old chain is only removed once the new one is jumped to: drop the half-built one
+    while "$1" -D OUTPUT -j "$BUILD" 2>/dev/null; do :; done
+    "$1" -F "$BUILD"
+    "$1" -X "$BUILD"
+  else
+    # The swap had removed the old chain already: this one is the live one
+    "$1" -E "$BUILD" "$CHAIN"
+  fi
+}
+
+start_chain() { # <iptables|ip6tables>
+  recover_chain "$1"
+  "$1" -N "$BUILD"
+}
+
+swap_chain() { # <iptables|ip6tables>
+  "$1" -I OUTPUT 1 -j "$BUILD"
   while "$1" -D OUTPUT -j "$CHAIN" 2>/dev/null; do :; done
-  "$1" -I OUTPUT 1 -j "$CHAIN"
+  if "$1" -L "$CHAIN" -n >/dev/null 2>&1; then
+    "$1" -F "$CHAIN"
+    "$1" -X "$CHAIN"
+  fi
+  "$1" -E "$BUILD" "$CHAIN"
 }
 
 # Rules common to both families: loopback (where Docker's DNS proxy listens), replies to
 # connections already accepted, and DNS only via Docker's embedded resolver, so DNS cannot be
 # used to reach arbitrary resolvers.
 base_rules() { # <iptables|ip6tables>
-  "$1" -A "$CHAIN" -o lo -j ACCEPT
-  "$1" -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  "$1" -A "$BUILD" -o lo -j ACCEPT
+  "$1" -A "$BUILD" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
   if [ "$1" = iptables ]; then
-    "$1" -A "$CHAIN" -d "$DOCKER_DNS" -p udp --dport 53 -j ACCEPT
-    "$1" -A "$CHAIN" -d "$DOCKER_DNS" -p tcp --dport 53 -j ACCEPT
+    "$1" -A "$BUILD" -d "$DOCKER_DNS" -p udp --dport 53 -j ACCEPT
+    "$1" -A "$BUILD" -d "$DOCKER_DNS" -p tcp --dport 53 -j ACCEPT
   fi
-  "$1" -A "$CHAIN" -p udp --dport 53 -j REJECT
-  "$1" -A "$CHAIN" -p tcp --dport 53 -j REJECT
+  "$1" -A "$BUILD" -p udp --dport 53 -j REJECT
+  "$1" -A "$BUILD" -p tcp --dport 53 -j REJECT
 }
 
 # Origin's addresses on origin's port, ahead of the host and private-range rejects.
 origin_rules() { # <iptables|ip6tables> <addresses>
-  for addr in $2; do "$1" -A "$CHAIN" -d "$addr" -p tcp --dport "$ORIGIN_PORT" -j ACCEPT; done
+  for addr in $2; do "$1" -A "$BUILD" -d "$addr" -p tcp --dport "$ORIGIN_PORT" -j ACCEPT; done
 }
 
 # The host and the LAN: blocked unless allowHost (then explicitly accepted, which allowlist mode
@@ -238,21 +265,23 @@ origin_rules() { # <iptables|ip6tables> <addresses>
 host_rules() { # <iptables|ip6tables> <gateway and host addresses> <subnet> <ranges>
   verdict=REJECT
   if [ "$ALLOW_HOST" = 1 ]; then verdict=ACCEPT; fi
-  for addr in $2; do "$1" -A "$CHAIN" -d "$addr" -j "$verdict"; done
-  if [ -n "$3" ]; then "$1" -A "$CHAIN" -d "$3" -j ACCEPT; fi
-  for net in $4; do "$1" -A "$CHAIN" -d "$net" -j "$verdict"; done
+  for addr in $2; do "$1" -A "$BUILD" -d "$addr" -j "$verdict"; done
+  if [ -n "$3" ]; then "$1" -A "$BUILD" -d "$3" -j ACCEPT; fi
+  for net in $4; do "$1" -A "$BUILD" -d "$net" -j "$verdict"; done
 }
 
 # allowlist: only the sets get out; everything else is rejected (fast failure for the agent)
 # and OUTPUT's policy is DROP as a backstop. default: everything not blocked above is allowed.
 final_rules() { # <iptables|ip6tables> <set>
   if [ "$MODE" = allowlist ]; then
-    "$1" -A "$CHAIN" -m set --match-set "$2" dst -j ACCEPT
-    "$1" -A "$CHAIN" -j REJECT
-    "$1" -P OUTPUT DROP
-  else
-    "$1" -P OUTPUT ACCEPT
+    "$1" -A "$BUILD" -m set --match-set "$2" dst -j ACCEPT
+    "$1" -A "$BUILD" -j REJECT
   fi
+}
+
+# After the swap: OUTPUT's policy is DROP as a backstop in allowlist mode
+set_policy() { # <iptables|ip6tables>
+  if [ "$MODE" = allowlist ]; then "$1" -P OUTPUT DROP; else "$1" -P OUTPUT ACCEPT; fi
 }
 
 if [ "$MODE" = allowlist ]; then
@@ -262,22 +291,26 @@ if [ "$MODE" = allowlist ]; then
   log "allowlist: $(members "$SET4" | grep -c .) IPv4 / $(members "$SET6" | grep -c .) IPv6 entries"
 fi
 
-reset_chain iptables
+start_chain iptables
 base_rules iptables
 origin_rules iptables "$ORIGIN4"
 host_rules iptables "$GW4 $HOST4" "$SUBNET" "$PRIVATE4"
 final_rules iptables "$SET4"
+swap_chain iptables
+set_policy iptables
 
 if [ "$V6" = 1 ]; then
-  reset_chain ip6tables
+  start_chain ip6tables
   base_rules ip6tables
   # Neighbour discovery uses link-local addresses; without it IPv6 stops working entirely.
   for type in neighbour-solicitation neighbour-advertisement router-solicitation; do
-    ip6tables -A "$CHAIN" -p ipv6-icmp --icmpv6-type "$type" -j ACCEPT
+    ip6tables -A "$BUILD" -p ipv6-icmp --icmpv6-type "$type" -j ACCEPT
   done
   origin_rules ip6tables "$ORIGIN6"
   host_rules ip6tables "$GW6 $HOST6" "$SUBNET6" "$PRIVATE6"
   final_rules ip6tables "$SET6"
+  swap_chain ip6tables
+  set_policy ip6tables
 fi
 
 # --- Verify ----------------------------------------------------------------------------------

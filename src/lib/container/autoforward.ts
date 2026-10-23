@@ -214,8 +214,9 @@ export const HELPER_NO_SOCAT =
 
 /**
  * Forwards the listeners of the branch container `target.main` until `signal` aborts or that run of
- * the container ends: the first state check that finds it not running, or started again (another
- * .State.StartedAt), ends it; only a failed `docker inspect` gets a second chance. Listeners are read
+ * the container or its network helper ends: the first state check that finds either not running, or
+ * started again (another .State.StartedAt), ends it; only a failed `docker inspect` (which is also what
+ * a removed container gives) gets a second chance. Listeners are read
  * and tunnelled through `target.helper`, the network helper sharing its network namespace. Every
  * forward is closed on the way out. A failed poll keeps the current forwards; `onError` is told once
  * each time reading starts failing.
@@ -242,6 +243,10 @@ export async function runAutoForward(
   // The run this forwarder belongs to; a restart is a new run with its own forwarder
   const run = await backend.containerRun(target.main);
   if (!run || run.state !== 'running') return;
+  // The helper too: `kunj ct start` may replace it (an out-of-date image), and the tunnels die with it
+  const helperRun = await backend.containerRun(target.helper);
+  if (!helperRun || helperRun.state !== 'running') return;
+  const ended = (now: typeof run, was: typeof run) => now.state !== 'running' || now.startedAt !== was.startedAt;
   if ((await backend.exec(target.helper, ['sh', '-c', 'command -v socat'])).exitCode !== 0) throw new Error(HELPER_NO_SOCAT);
   let lastStateCheck = Date.now();
   let failedInspects = 0;
@@ -252,10 +257,12 @@ export async function runAutoForward(
       if (Date.now() - lastStateCheck >= stateIntervalMs) {
         lastStateCheck = Date.now();
         const now = await backend.containerRun(target.main);
-        if (now === null) {
+        const helperNow = await backend.containerRun(target.helper);
+        if ((now && ended(now, run)) || (helperNow && ended(helperNow, helperRun))) return;
+        if (now === null || helperNow === null) {
+          // A failed inspect, or a container gone (a replaced helper's old id): a second chance only
           if (++failedInspects >= 2) return;
         } else {
-          if (now.state !== 'running' || now.startedAt !== run.startedAt) return;
           failedInspects = 0;
         }
       }
@@ -271,7 +278,9 @@ export async function runAutoForward(
       if (!listening && !unreadable && !signal.aborted) {
         // The read fails while the container goes away: end quietly if it stopped or restarted
         const now = await backend.containerRun(target.main);
-        if (now && (now.state !== 'running' || now.startedAt !== run.startedAt)) return;
+        if (now && ended(now, run)) return;
+        const helperNow = await backend.containerRun(target.helper);
+        if (helperNow && ended(helperNow, helperRun)) return;
         opts.onError?.("Cannot read the container's listening ports (/proc/net/tcp); nothing new is forwarded until it can be read");
       }
       unreadable = !listening;

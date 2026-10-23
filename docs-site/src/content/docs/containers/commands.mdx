@@ -56,7 +56,10 @@ kunj ct start feature/search --rebuild
 Resuming a stopped container starts it behind a fresh network helper, runs the blueprint's
 `maintain` commands and the devcontainer's `postStartCommand`, and leaves the clone as it was.
 Resuming a container that is already running does nothing, unless its network helper was made by
-an older kunj (one without what port forwarding needs): then the helper is replaced, firewall first.
+an older kunj (one without what port forwarding needs): then `start` replaces the helper, swapping the
+firewall rules in without a gap, and ends the port forwarders and MCP bridges that ran through the old
+one (`kunj ct agent` starts them again). When the new helper's image cannot be built, the old helper is
+kept; when the new helper fails, the container is stopped and `start` says so.
 
 With [Docker inside](../configuration/#docker-inside-the-container) (`container.dockerInDocker`),
 `start` first checks that the Docker host may run it and refuses, before creating anything, when it
@@ -111,7 +114,8 @@ It fails with `No agent session` when the agent is not running; start it with `k
 ## open
 
 Opens the container in your editor, attached over Docker. A stopped container is started first, the
-same way `kunj ct start` resumes it, and so is a running one whose network helper or a service is down.
+same way `kunj ct start` resumes it, and so is a running one whose network helper or a service is down
+(an out-of-date helper that is running is left to `kunj ct start`).
 
 ```bash
 kunj ct open feature/search

@@ -36,7 +36,8 @@ import { getGlobalKunjDir, getKunjDir } from '../config';
 import { ConfigVariables, expandVariables } from '../config-vars';
 import { KunjConfig } from '../../types';
 import { StartError, StartErrorCode } from './errors';
-import { installMcpConfig, mcpServers } from './mcpbridge';
+import { installMcpConfig, mcpServers, readBridges } from './mcpbridge';
+import { readForwards, recordIsFor } from './autoforward';
 import { DIND_DATA, DIND_DOMAINS, DindMode, checkDind, checkRecordedDind, composeHint, dindHostInfo, dindMode, dindSource, startDockerd } from './dind';
 
 export { forwardedEnv, firewallEnv } from './env';
@@ -100,6 +101,10 @@ export interface StartOptions {
   /** A snapshot build: the DinD image is still used (the hash covers it), but dockerd never runs and
    * there is no docker volume, so /var/lib/docker never ends up in an image */
   withoutDind?: boolean;
+  /** `kunj ct open`: a running helper on an older image is left alone (only `start` replaces it) */
+  keepStaleHelper?: boolean;
+  /** The forwarder and bridge registries (tests); default ~/.kunj/container-{forwards,bridges}.json */
+  registryFiles?: { forwards?: string; bridges?: string };
 }
 
 export interface StartResult {
@@ -1005,11 +1010,14 @@ function parseOptionsLabel(labels: Record<string, string>): {
 async function declaredServices(
   backend: ContainerBackend,
   options: StartOptions,
-  blueprint: ResolvedBlueprint | null
+  blueprint: ResolvedBlueprint | null,
+  imageKind: ImageSource['kind'] | undefined
 ): Promise<ServiceSpec[] | null> {
   try {
-    const setting = options.imageOverride || options.config.container?.image || '';
-    const devcontainer = setting ? null : await readDevcontainer(hostRef(options.branch, false, undefined), options.cwd);
+    // As the container was made: a start with an image setting read no devcontainer, one without did.
+    // A snapshot (or an older container without the record) does not say, so the current setting decides.
+    const fromSetting = imageKind === 'setting' || ((imageKind === undefined || imageKind === 'blueprint') && !!options.config.container?.image);
+    const devcontainer = fromSetting ? null : await readDevcontainer(hostRef(options.branch, false, undefined), options.cwd);
     return await resolveServices(backend, {
       blueprint: blueprint?.blueprint.services,
       config: options.config.container?.services,
@@ -1024,14 +1032,14 @@ async function declaredServices(
 }
 
 /**
- * True when a running container should be resumed before it is used (`kunj ct open`): the branch
- * container, its network helper or one of its services is not running, or the helper runs an older
- * kunj-nethelper image (one without socat cannot forward ports).
+ * True when a container should be resumed before it is used (`kunj ct open`): the branch container,
+ * its network helper or one of its services is not running. An out-of-date helper does not count:
+ * only `kunj ct start` replaces a running one.
  */
-export function needsResume(found: ContainerInfo[], names: ContainerNames, kunjVersion: string): boolean {
+export function needsResume(found: ContainerInfo[], names: ContainerNames): boolean {
   const main = found.find(c => c.name === names.container);
   const helper = found.find(c => c.name === names.helper);
-  if (main?.state !== 'running' || helper?.state !== 'running' || helper.image !== NETHELPER_TAG(kunjVersion)) return true;
+  if (main?.state !== 'running' || helper?.state !== 'running') return true;
   const owner = { repoId: main.labels[LABEL.repo], branch: main.labels[LABEL.branch] };
   return servicesOf(found, names.container, owner).some(c => c.state !== 'running');
 }
@@ -1070,7 +1078,7 @@ async function resume(
     blueprintError = err;
   }
   // Services declared since the container was made are added; none is removed here (--rebuild does that)
-  const declared = await declaredServices(backend, options, resolved);
+  const declared = await declaredServices(backend, options, resolved, recorded.imageKind);
   const declaredNames = new Set((declared ?? []).map(d => serviceNames(names, d.name).container));
   const serviceList = [...new Set([...services.map(c => c.labels[LABEL.service] ?? c.name), ...(declared ?? []).map(d => d.name)])];
   const result: StartResult = {
@@ -1087,14 +1095,18 @@ async function resume(
     ...(serviceList.length ? { services: serviceList } : {}),
     ...(dind !== 'off' ? { dind } : {}),
   };
-  // A helper made by an older kunj may lack what forwards need (socat): replaced like a stopped one
-  const helperCurrent = helper?.state === 'running' && helper.image === NETHELPER_TAG(options.kunjVersion);
   const mainWasRunning = main.state === 'running';
+  const helperRunning = helper?.state === 'running';
+  // A helper made by an older kunj may lack what forwards need (socat): `start` replaces it like a
+  // stopped one; `open` (keepStaleHelper) leaves a running one alone
+  let keepHelper = helperRunning && (helper.image === NETHELPER_TAG(options.kunjVersion) || options.keepStaleHelper === true);
 
   // The service containers this call started (or created), stopped again when the resume fails
   const startedServices: string[] = [];
   const state: UpState = { startedMain: false, helperCreated: false };
   let ready = false;
+  // Set once the helper is about to be (re)made: from there on a running container that fails is stopped
+  let helperStep = false;
   try {
     // Before the branch container, as on a new start; a service that will not start fails the start
     const health = { warn, ...options.serviceHealth, started: startedServices };
@@ -1103,12 +1115,23 @@ async function resume(
       await step('docker', () =>
         startServices(backend, names, repo.id, labelBranch, declared, { ...health, kunjVersion: options.kunjVersion }));
     }
-    if (mainWasRunning && helperCurrent) return result;
+    if (mainWasRunning && helperRunning && !keepHelper) {
+      // The old helper keeps the firewall up meanwhile: without the new image, keep it and carry on
+      try {
+        await ensureImage(backend, resolveHelperImage(options.kunjVersion), warn);
+      } catch (err) {
+        warn(`Could not build the current network helper image (${message(err)}); keeping the old helper, so ports may not forward until kunj ct start succeeds`);
+        keepHelper = true;
+      }
+    }
+    if (mainWasRunning && keepHelper) return result;
 
+    if (mainWasRunning) stopHelperUsers(main, warn, options.registryFiles);
+    helperStep = true;
     await bringUp(backend, names, main, helperEnv(options, origin, env, dind !== 'off'), options.kunjVersion, warn, state);
     ready = true;
     // A running container whose helper was only out of date: nothing else to do
-    if (mainWasRunning && helper?.state === 'running') return result;
+    if (mainWasRunning && helperRunning) return result;
     if (dind !== 'off') await startDockerd(backend, main.id, warn);
 
     const user = recorded.user ?? '';
@@ -1138,8 +1161,9 @@ async function resume(
     return result;
   } catch (err) {
     // Never left running without its firewall: a container that was already running is stopped too
-    // once its helper was replaced, since the new one may have failed half way through the rules
-    const unfirewalled = !ready && (state.startedMain || (mainWasRunning && state.helperCreated));
+    // once its helper was being replaced (or was gone), since a new one may have failed half way
+    // through the rules
+    const unfirewalled = !ready && (state.startedMain || (mainWasRunning && helperStep));
     if (!options.keepOnError) {
       await undoUp(backend, names, main.id, { ...state, startedMain: unfirewalled }, warn);
       // Only what this call started: services that were already running stay up
@@ -1154,7 +1178,38 @@ async function resume(
       // Keep the helper and the services to debug, but stop the container without a firewall
       await undoUp(backend, names, main.id, { startedMain: true, helperCreated: false }, warn);
     }
+    if (unfirewalled && mainWasRunning) {
+      // It was running before this call, so say why it no longer is
+      throw new StartError(
+        `Stopped ${names.container}: its firewall could not be re-applied (${message(err)}); kunj ct start ${options.branch} retries`,
+        'firewall'
+      );
+    }
     throw err;
+  }
+}
+
+/**
+ * Before the network helper of a running container is replaced: the port forwarders (automatic and
+ * `kunj ct forward`) and MCP bridges registered for it tunnel through the old one, so they are ended
+ * (`kunj ct agent` starts them again). One line says so.
+ */
+function stopHelperUsers(main: ContainerInfo, warn: (m: string) => void, files: StartOptions['registryFiles'] = {}): void {
+  const pids = new Set<number>();
+  for (const r of readForwards(files.forwards)) if (recordIsFor(r, main)) pids.add(r.pid);
+  for (const r of readBridges(files.bridges)) if (r.container === main.name) pids.add(r.pid);
+  pids.delete(process.pid);
+  let stopped = 0;
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+      stopped++;
+    } catch {
+      // already gone
+    }
+  }
+  if (stopped) {
+    warn(`Replacing the network helper of ${main.name}: stopped ${stopped} port forwarder/MCP bridge process${stopped === 1 ? '' : 'es'} that ran through it (kunj ct agent starts them again)`);
   }
 }
 

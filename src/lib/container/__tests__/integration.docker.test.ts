@@ -369,6 +369,29 @@ const BRANCH_ALLOW = 'it-allow';
       const blocked = await inside(started.containerId, `curl -s --max-time 5 http://host.docker.internal:${other}/`);
       expect([7, 28]).toContain(blocked.exitCode);
       expect(blocked.stdout).not.toContain('open');
+
+      // Re-applying the rules on the running container (a replaced helper) leaves no gap: a loop in
+      // the container keeps trying the host and the gateway while the firewall is loaded five times
+      const names = containerNames(REPO_NAME, repoId, BRANCH_GW);
+      const gateway = docker(['network', 'inspect', '-f', '{{(index .IPAM.Config 0).Gateway}}', names.network]).trim();
+      const probe = `rm -f /tmp/probe-*; touch /tmp/probe-run; while [ -e /tmp/probe-run ]; do ` +
+        `for h in host.docker.internal ${gateway}; do curl -s --max-time 1 http://$h:${other}/ >>/tmp/probe-hits && echo "$h" >>/tmp/probe-open; done; ` +
+        `echo x >>/tmp/probe-count; done`;
+      const looping = inside(started.containerId, probe);
+      await waitFor(async () => (await inside(started.containerId, 'test -s /tmp/probe-count')).exitCode === 0, 'the probe loop');
+      const reload = await backend.exec(names.helper, ['sh', '-c',
+        'for i in 1 2 3 4 5; do /firewall.sh >/tmp/fw$i.log 2>&1 & pid=$!; ' +
+        'n=0; until grep -q READY /tmp/fw$i.log; do n=$((n+1)); [ $n -lt 600 ] || { cat /tmp/fw$i.log; exit 1; }; sleep 0.1; done; ' +
+        'kill $pid; done; iptables -S OUTPUT | grep -c KUNJ-OUT; iptables -L KUNJ-OUT-NEW -n >/dev/null 2>&1 && echo leftover || true']);
+      await inside(started.containerId, 'rm -f /tmp/probe-run');
+      await looping;
+      expect(reload.exitCode).toBe(0);
+      // One jump to the live chain, and no half-built chain left behind
+      expect(reload.stdout.trim()).toBe('1');
+      const result = await inside(started.containerId, 'wc -l </tmp/probe-count; cat /tmp/probe-open 2>/dev/null; cat /tmp/probe-hits 2>/dev/null');
+      const [count, ...opened] = result.stdout.trim().split('\n');
+      expect(parseInt(count, 10)).toBeGreaterThan(0);
+      expect(opened).toEqual([]);
     } finally {
       server.close();
       await removeContainer(backend, containerNames(REPO_NAME, repoId, BRANCH_GW), {

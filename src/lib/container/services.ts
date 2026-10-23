@@ -557,14 +557,11 @@ export interface ComposeSource {
 }
 
 /**
- * Blueprint services, then container.services, then the devcontainer's compose services (without
- * its own `service`), merged by name. Throws on an invalid definition or dependency graph.
- */
-/**
  * Why kunj will not import a compose file, or null. `include` and `extends.file` make docker compose
  * read other files from the host (even with an empty project directory), so another project's
- * compose env could end up in a service this branch controls. A check on the raw text: any
- * `include:` key, and any `extends:` in a file that also has a `file:` key.
+ * compose env could end up in a service this branch controls. The parsed document decides (an
+ * explicit key, an alias key or an escaped key all read as `include` there); the text checks are a
+ * backstop for anything a YAML parser and compose's might read differently.
  */
 export function composeRefusal(text: string): string | null {
   // Unanchored, so flow style ({ extends: { file: ... } }) and JSON are caught as well as block style
@@ -572,40 +569,90 @@ export function composeRefusal(text: string): string | null {
   if (key('include').test(text)) return 'include is not supported';
   // Conservative: any extends in a file that has a `file:` key anywhere (extends within the file is fine)
   if (key('extends').test(text) && key('file').test(text)) return 'extends with a file is not supported';
-  // A key the text check above cannot read: compose decodes "\x69nclude" to include, and an alias
-  // key (*a :) is whatever its anchor says
+  // Keys the text checks above cannot read: compose decodes "\x69nclude" to include, an alias key
+  // (*a :) is whatever its anchor says, and an explicit key (? include) can sit on its own line
   if (escapedKey(text)) return 'a double-quoted key with a backslash escape is not supported';
   if (/(^|[\s{,?])\*[^\s,[\]{}]+[ \t]+:/m.test(text)) return 'an alias as a key is not supported';
+  if (/(^[ \t]*(-[ \t]+)*|[{,][ \t]*)\?([ \t]|$)/m.test(text)) return 'an explicit key (?) is not supported';
+  return structuralRefusal(text);
+}
+
+// Tags compose itself uses in override files; any other (!!binary decodes to bytes) is refused
+const COMPOSE_TAGS = new Set(['!reset', '!override']);
+
+/** The parsed document: a top-level include, or an extends that is not a service name. Unparsable: refused. */
+function structuralRefusal(text: string): string | null {
+  // Loaded here: only a start that imports a compose file needs it
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const YAML = require('yaml') as typeof import('yaml');
+  let value: unknown;
+  try {
+    const docs = YAML.parseAllDocuments(text, { merge: true });
+    if (!Array.isArray(docs)) return 'it could not be parsed';
+    if (docs.length > 1) return 'more than one YAML document is not supported';
+    const doc = docs[0];
+    if (!doc) return null;
+    if (doc.errors.length) return `it could not be parsed (${doc.errors[0].message.split('\n')[0]})`;
+    let tag: string | undefined;
+    YAML.visit(doc, (_key, node) => {
+      const t = (node as { tag?: string }).tag;
+      if (t === 'tag:yaml.org,2002:binary') tag = '!!binary';
+      else if (t && !COMPOSE_TAGS.has(t) && !t.startsWith('tag:yaml.org,2002:')) tag = t;
+      return tag ? YAML.visit.BREAK : undefined;
+    });
+    if (tag) return `the YAML tag ${tag} is not supported`;
+    value = doc.toJS({ maxAliasCount: 100 });
+  } catch (err) {
+    return `it could not be parsed (${message(err).split('\n')[0]})`;
+  }
+  // Not a mapping: nothing to read files with (docker compose rejects it)
+  if (!isRecord(value)) return null;
+  if ('include' in value) return 'include is not supported';
+  const services = isRecord(value.services) ? value.services : {};
+  for (const svc of Object.values(services)) {
+    if (!isRecord(svc) || !('extends' in svc)) continue;
+    const ext = svc.extends;
+    const plain = typeof ext === 'string' || (isRecord(ext) && Object.keys(ext).every(k => k === 'service'));
+    if (!plain) return 'extends with a file is not supported';
+  }
   return null;
 }
 
 /**
  * True when a double-quoted scalar in a key position (its closing quote followed by `:`, past any
- * whitespace and comments) contains a backslash. Each unescaped quote followed by a colon is scanned
- * back to its opening quote on its own, so a stray quote elsewhere cannot shift the pairing.
+ * whitespace and comments) contains a backslash. Each unescaped quote followed by a colon is paired
+ * with the unescaped quote before it, so a stray quote elsewhere cannot shift the pairing. One pass.
  */
 function escapedKey(text: string): boolean {
-  const unescaped = (i: number) => {
-    let n = 0;
-    while (i - 1 - n >= 0 && text[i - 1 - n] === '\\') n++;
-    return n % 2 === 0;
-  };
-  for (let close = text.indexOf('"'); close !== -1; close = text.indexOf('"', close + 1)) {
-    if (!unescaped(close)) continue;
-    let j = close + 1;
+  let backslashes = 0;
+  let lastQuote = -1;
+  let lastBackslash = -1;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '\\') {
+      backslashes++;
+      lastBackslash = i;
+      continue;
+    }
+    const escaped = backslashes % 2 === 1;
+    backslashes = 0;
+    if (c !== '"' || escaped) continue;
+    let j = i + 1;
     for (;;) {
       while (j < text.length && /\s/.test(text[j])) j++;
       if (text[j] !== '#') break;
       while (j < text.length && text[j] !== '\n') j++;
     }
-    if (text[j] !== ':') continue;
-    let open = close - 1;
-    while (open >= 0 && !(text[open] === '"' && unescaped(open))) open--;
-    if (open >= 0 && text.slice(open + 1, close).includes('\\')) return true;
+    if (text[j] === ':' && lastQuote >= 0 && lastBackslash > lastQuote) return true;
+    lastQuote = i;
   }
   return false;
 }
 
+/**
+ * Blueprint services, then container.services, then the devcontainer's compose services (without
+ * its own `service`), merged by name. Throws on an invalid definition or dependency graph.
+ */
 export async function resolveServices(
   backend: ContainerBackend,
   input: {

@@ -403,7 +403,29 @@ describe('runAutoForward', () => {
     await until(() => backend.callsOf('exec').length >= 2);
     backend.states.set('cid', 'exited');
     await run;
-    expect(backend.callsOf('containerRun').at(-1)).toEqual(['cid']);
+    expect(backend.callsOf('containerRun').slice(-2)).toEqual([['cid'], ['hid']]);
+  });
+
+  it('returns when its network helper is replaced, restarted or stopped', async () => {
+    for (const change of ['gone', 'restarted', 'exited'] as const) {
+      const b = new FakeBackend();
+      b.execResults.set(PROC, { exitCode: 0, stdout: procNet() });
+      const run = runAutoForward(b, T, { ignore: [], intervalMs: 2, stateIntervalMs: 1, signal: new AbortController().signal });
+      await until(() => b.callsOf('exec').length >= 2);
+      if (change === 'gone') b.states.set('hid', null);
+      else if (change === 'restarted') b.startedAt.set('hid', '2026-02-02T00:00:00Z');
+      else b.states.set('hid', 'exited');
+      await run;
+      // A removed helper (a failed inspect) gets the second chance; a changed one ends it at once
+      const helperChecks = b.callsOf('containerRun').filter(a => a[0] === 'hid');
+      expect(helperChecks.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('does not start when its network helper is not running', async () => {
+    backend.states.set('hid', 'exited');
+    await runAutoForward(backend, T, { ignore: [], intervalMs: 2, signal: new AbortController().signal });
+    expect(backend.callsOf('exec')).toEqual([]);
   });
 
   it('survives a single failed inspect, and returns after two in a row', async () => {
@@ -413,7 +435,7 @@ describe('runAutoForward', () => {
     // the first call is the start; then fail, succeed, fail, fail
     const results = [true, false, true, false, false];
     let n = 0;
-    jest.spyOn(backend, 'containerRun').mockImplementation(async id => (results[n++] ?? true) ? real(id) : null);
+    jest.spyOn(backend, 'containerRun').mockImplementation(async id => (id !== 'cid' || (results[n++] ?? true) ? real(id) : null));
     await runAutoForward(backend, T, { ignore: [], intervalMs: 2, stateIntervalMs: 1, signal: controller.signal });
     expect(n).toBe(5);
   });

@@ -22,6 +22,29 @@ Changes made with Claude, and why.
 - `start --rebuild` removes the volumes of services no longer declared unless `--keep-volumes`. Why: they
   were left for `prune --force` only.
 - Docs (services and commands pages, README), the phase 2 spec and CLAUDE.md updated; `npm run gen`.
+
+Fix round (review of the above):
+
+- Compose refusal is now structural: the text is parsed with `yaml` (new dependency, loaded lazily)
+  and refused on a top-level `include`, an `extends` that is not a service name, a parse error, more
+  than one document or a tag other than `!reset`/`!override` (`!!binary` decodes to a key). The text
+  checks stay as a backstop, plus explicit-key indicators (`? `). `escapedKey` is one pass. Why:
+  explicit and alias keys (`? include`, `? *a`, a block-scalar key) bypassed the text checks.
+- The auto-forwarder also watches the helper's run and ends when it is replaced, restarted or gone,
+  and `start` ends the registered forwarders and MCP bridges of a running container before replacing
+  its helper (one line says so). Why: they kept looping on the old helper's id and `agent` would not
+  respawn them.
+- firewall.sh builds its rules in `KUNJ-OUT-NEW` and swaps the chain in (jump to the new chain, drop
+  the old, rename), recovering a half-done swap. The Docker test reloads the rules five times while the
+  container probes the host and gateway; it fails on the old script. Why: flushing the live chain opened
+  a short default-mode gap whose connections survived as ESTABLISHED.
+- Only `start` replaces an out-of-date running helper (`open` passes `keepStaleHelper`); when the new
+  helper image cannot be built the old helper is kept with a warning; when the old helper was gone or
+  the new one failed, the container is stopped with "Stopped <container>: its firewall could not be
+  re-applied (...); kunj ct start <branch> retries". Why: `open` could kill a running agent over a
+  helper refresh.
+- Resume reads the devcontainer's compose services according to how the container was made (its
+  recorded image kind), not the current `container.image`.
 ## 2026-10-23 — Containers: phase 2 follow-ups (visible forwarder errors, agent window size, logs --json, bridge minors)
 
 - `kunj ct agent` runs the foreground forwarder's checks (network helper running, socat present) before

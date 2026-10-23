@@ -1321,7 +1321,7 @@ describe('ContainerCommand', () => {
       expect(JSON.parse(stdout.join(''))).toMatchObject({ success: true, branch: 'feat' });
     });
 
-    it('resumes a running container first when its helper or a service is down, or the helper is out of date', async () => {
+    it('resumes a running container first when its helper or a service is down, never replacing a running helper', async () => {
       const names = containerNames('app', REPO_ID, 'feat');
       const svc = (state: ContainerInfo['state']): ContainerInfo => ({
         id: 'pg-id',
@@ -1335,7 +1335,6 @@ describe('ContainerCommand', () => {
       const cases: ContainerInfo[][] = [
         [mainContainer('feat')],
         [mainContainer('feat'), { ...helperContainer('feat'), state: 'exited' }],
-        [mainContainer('feat'), { ...helperContainer('feat'), image: 'kunj-nethelper:0.0.1-old' }],
         [mainContainer('feat'), helperContainer('feat'), svc('exited')],
       ];
       for (const existing of cases) {
@@ -1344,13 +1343,15 @@ describe('ContainerCommand', () => {
         backend.existing = existing;
         await new ContainerCommand().execute('open', 'feat', { json: true });
         expect((lifecycle.startContainer as jest.Mock).mock.calls).toHaveLength(1);
-        expect((lifecycle.startContainer as jest.Mock).mock.calls[0][1]).toMatchObject({ branch: 'feat', rebuild: false });
+        expect((lifecycle.startContainer as jest.Mock).mock.calls[0][1]).toMatchObject({ branch: 'feat', rebuild: false, keepStaleHelper: true });
       }
-      // Everything up and current: straight to the editor
-      (lifecycle.startContainer as jest.Mock).mockClear();
-      backend.existing = [mainContainer('feat'), helperContainer('feat'), svc('running')];
-      await new ContainerCommand().execute('open', 'feat', { json: true });
-      expect(lifecycle.startContainer).not.toHaveBeenCalled();
+      // Everything up, even on an out-of-date helper (only kunj ct start replaces a running one): straight to the editor
+      for (const helper of [helperContainer('feat'), { ...helperContainer('feat'), image: 'kunj-nethelper:0.0.1-old' }]) {
+        (lifecycle.startContainer as jest.Mock).mockClear();
+        backend.existing = [mainContainer('feat'), helper, svc('running')];
+        await new ContainerCommand().execute('open', 'feat', { json: true });
+        expect(lifecycle.startContainer).not.toHaveBeenCalled();
+      }
       expect(mockSpawned).toHaveLength(5);
     });
 

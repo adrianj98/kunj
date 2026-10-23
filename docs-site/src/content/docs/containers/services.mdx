@@ -54,8 +54,9 @@ except the devcontainer's own `service`. It reads the file with `docker compose 
 `env_file`, `entrypoint`, `user`, `working_dir`, `tmpfs`, published ports and variables that would
 come from your shell, and prints one warning listing them. A compose file with `include`, or with an
 `extends` that names another file, is skipped with a warning: both make Docker read files from your
-machine. So is one with a double-quoted key that uses a backslash escape (`"\x69nclude":`) or an alias
-as a key, which that check could not read. `${VAR:-default}` becomes the default; nothing is read from your environment.
+machine. kunj decides on the parsed file, so an explicit (`? include`), alias or escaped
+(`"\x69nclude":`) key counts too, and a file that does not parse, has more than one document or uses a
+YAML tag other than `!reset`/`!override` is skipped as well. `${VAR:-default}` becomes the default; nothing is read from your environment.
 
 ## Lifecycle
 
