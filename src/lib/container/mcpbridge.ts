@@ -744,9 +744,9 @@ export function makeThrowawayProfile(): { dir: string; profile: string; download
   return { dir, profile, downloads, tmp };
 }
 
-/** A bounded insertion-ordered set of id keys: past `max` the oldest is dropped. */
 const REFUSED_LOG_MS = 1000;
 
+/** A bounded insertion-ordered set of id keys: past `max` the oldest is dropped. */
 function boundedKeys(max: number) {
   const keys = new Set<string>();
   return {
@@ -999,7 +999,8 @@ async function session(ctx: SessionContext): Promise<boolean> {
   try {
     const r = await backend.exec(containerId, listenCommand(name), { user, stdin: toContainer, stdout: fromContainer, stderr });
     if (!connected && !opts.signal.aborted) {
-      const detail = errText.trim().split('\n')[0];
+      // container-supplied text: no control characters in the log line
+      const detail = errText.trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 300);
       log(`MCP ${name}: listener ended without a client (exit ${r.exitCode})${detail ? `: ${detail}` : ''}`);
     }
   } catch (err) {

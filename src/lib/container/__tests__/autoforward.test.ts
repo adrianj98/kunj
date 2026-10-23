@@ -23,6 +23,7 @@ import {
   HELPER_NO_SOCAT,
   autoForwardIgnore,
   detachedLogFile,
+  openLog,
   diffPorts,
   forwarderFor,
   ignoredPorts,
@@ -202,6 +203,30 @@ describe('spawnDetached', () => {
       spawnDetached(['ct'], path.join(dir, 'file', 'x.log'));
       expect(mockSpawn.mock.calls.at(-1)[2].stdio).toBe('ignore');
       expect(detachedLogFile('kunj-app-feat-1', 'mcp')).toBe(path.join(os.homedir(), '.kunj', 'logs', 'kunj-app-feat-1-mcp.log'));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates the log directory 0700 and the file 0600, fixes existing modes, and refuses a symlink', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-log-'));
+    try {
+      const logs = path.join(dir, 'logs');
+      fs.mkdirSync(logs, { mode: 0o755 });
+      const log = path.join(logs, 'c-forward.log');
+      fs.writeFileSync(log, 'old\n', { mode: 0o644 });
+      fs.closeSync(openLog(log));
+      expect(fs.statSync(logs).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(log).mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(log, 'utf8')).toBe('old\n');
+      const fresh = path.join(dir, 'new', 'x.log');
+      fs.closeSync(openLog(fresh));
+      expect(fs.statSync(path.dirname(fresh)).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(fresh).mode & 0o777).toBe(0o600);
+      const link = path.join(logs, 'link.log');
+      fs.symlinkSync(path.join(dir, 'target'), link);
+      expect(() => openLog(link)).toThrow();
+      expect(fs.existsSync(path.join(dir, 'target'))).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

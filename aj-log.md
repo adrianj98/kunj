@@ -20,6 +20,9 @@ Changes made with Claude, and why.
 - MCP bridge: a container reply is dropped unless the server issued that id (not only when the bridge had
   answered it); the "refused a request" log is limited to one per second with a count of the rest; removed a
   stale docstring sentence.
+- Review fixes: the log directory is created 0700 and the files 0600 (fixed if they exist, `O_NOFOLLOW`);
+  the container-supplied listener error text is stripped of control characters and capped before it is
+  logged; the `boundedKeys` doc comment is back above it. Why: the logs hold container output.
 
 ## 2026-10-23 — MCP bridge landed; specs updated
 

@@ -164,16 +164,24 @@ export function detachedLogFile(container: string, kind: 'forward' | 'mcp'): str
   return path.join(os.homedir(), '.kunj', 'logs', `${container}-${kind}.log`);
 }
 
-/** Opens `file` for appending; a file past 1 MB is truncated first, so the log never grows without bound. */
+/**
+ * Opens `file` for appending; a file past 1 MB is truncated first, so the log never grows without
+ * bound. The directory is 0700 and the file 0600 (fixed when they already exist), and a symlink is
+ * not followed: the log holds a container's output.
+ */
 export function openLog(file: string): number {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  let flags = 'a';
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
+  const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600);
   try {
-    if (fs.statSync(file).size > MAX_LOG_BYTES) flags = 'w';
-  } catch {
-    // no log yet
+    fs.fchmodSync(fd, 0o600);
+    if (fs.fstatSync(fd).size > MAX_LOG_BYTES) fs.ftruncateSync(fd, 0);
+  } catch (err) {
+    fs.closeSync(fd);
+    throw err;
   }
-  return fs.openSync(file, flags);
+  return fd;
 }
 
 // ---------------------------------------------------------------------
