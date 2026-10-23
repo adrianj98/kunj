@@ -1,4 +1,4 @@
-<!-- On-disk copy of the Claude Doc "Kunj Workspace IDE Spec" (https://claude.ai/artifact/Ti4R8bsdxtZC5YJ1J21z1y), exported 2026-10-23. Drawings are noted in italics. -->
+<!-- On-disk copy of the Claude Doc "Kunj Workspace IDE Spec" (https://claude.ai/artifact/Ti4R8bsdxtZC5YJ1J21z1y), exported 2026-10-23. Drawings are noted in italics. The 2026-10-23 review decisions (Package layout, Decisions) are recorded here first; the Claude Doc still needs the same edits. -->
 
 # Kunj Workspace IDE Spec
 
@@ -135,7 +135,7 @@ With the CLI as the contract, Electron's margin over Tauri narrows to the termin
 
 *(drawing: architecture · renderer, main process, host targets)*
 
-The renderer never touches the OS: it asks the main process for a PTY, a file or a list and renders what comes back. The main process is the only place kunj's code runs, which keeps the sandbox and context-isolation defaults on. Agent sessions are tmux sessions, named `kunj-<branch>`, so the CLI and the app attach to the same thing and nothing is lost when either closes.
+The renderer never touches the OS: it asks the main process for a PTY, a file or a list and renders what comes back. The main process is the only place child processes are spawned, which keeps the sandbox and context-isolation defaults on. Agent sessions are tmux sessions owned and named by kunj (`agent` inside a container, which has its own tmux server; `kunj-<readable>-<hash>` on the host, where one tmux server is shared), so the CLI and the app attach to the same thing and nothing is lost when either closes.
 
 *(drawing: agent sessions · one tmux session shared by the CLI and the app)*
 
@@ -151,34 +151,36 @@ The open standards in that space are the Dev Container spec (kunj already reads 
 
 ### Package layout
 
-- `workspace-app/` next to `vscode-extension/` and `macos-app/`: its own `package.json`, electron-vite or Vite + electron-builder, React, xterm.js, Monaco. It depends on the `kunj` package for its TypeScript JSON types only.
-- A `KunjCli` service in the main process resolves the `kunj` binary from a login-shell PATH (as `macos-app/` does), checks `kunj -V` against the minimum version the app needs, and runs `kunj repos --json`, `kunj worktree list --json`, `kunj ct list --json`, `ct start|stop|remove|forward`, `worktree add|remove|open`. Nothing else in the app asks git or Docker for state.
-- Terminals: a `PtyManager` in main keyed by environment and tab id; `node-pty` spawns `kunj ct shell <branch>` or `kunj ct agent <branch>` for containers and `zsh` (or `tmux new -A -s kunj-<branch>`) for worktrees, so the app never knows container or session names. Resize, data and exit go over IPC.
-- Files: v1 reads and writes through `kunj ct exec <branch> -- cat …` and `docker cp`-style commands; if that is too slow or too crude, `kunj ct file read|write` becomes a small CLI addition that scripts can use too.
-- State: `~/.kunj/workspace/<repo>/<branch>.json` with the open tabs and splits; nothing else, since tmux and Docker hold the real state.
-- CLI additions the app will ask for, each useful on its own: an NDJSON progress stream for `ct start` and `blueprint snapshot` under `--json`; later an event stream (`kunj events --json`) so the list can stop polling.
+- `workspace-app/` next to `vscode-extension/` and `macos-app/`: its own `package.json`, electron-vite + electron-builder, React, xterm.js, Monaco. It depends on the `kunj` package for its TypeScript JSON types only (`import type` from the package's `types` entry, `src/lib/json-types.ts`).
+- A `KunjCli` service in the main process resolves the `kunj` binary from a login-shell PATH (as `macos-app/` does), checks `kunj -V` against the minimum version the app needs (a `1.0.0` dev build is accepted with a warning), and runs `kunj repos --json`, `kunj worktree list --json`, `kunj ct list --json`, `ct start|stop|remove|open`, `worktree add|remove|open`. Every call runs with the working directory set to the repository root from `kunj repos --json` and names the branch explicitly, because kunj resolves both from where it is run. Nothing else in the app asks git or Docker for state.
+- Terminals: a `PtyManager` in main keyed by environment and tab id; `node-pty` spawns `kunj ct shell <branch>` or `kunj ct agent <branch>` for containers and the login shell or `kunj agent <branch>` for worktrees, so the app never knows container or session names. Resize, data and exit go over IPC. Long actions (`ct start`, `ct remove`, `blueprint snapshot`) run in a terminal tab too, so their progress shows as in a shell.
+- Files: `kunj ct file read|write <branch> <path>` for containers (a small CLI addition that scripts can use too), `fs` for worktrees.
+- Diff content: read-only `git` in a worktree, `kunj ct exec <branch> -- git …` in a container; parsed and shown in Monaco's diff editor.
+- Ports: whatever `ct list --json` reports (published ports, and forwards once phase 2's `forward --auto` lands); the app never reads `~/.kunj/container-forwards.json` itself.
+- State: `~/.kunj/<reponame>/workspace.json`, one file per repository keyed by branch, with the open tabs and splits; nothing else, since tmux and Docker hold the real state.
+- CLI additions the app needs, each useful on its own: `kunj agent` for worktrees, `kunj ct file`, and `kunj events --json` so the list never polls.
 - Release: a `workspace-app` job in the release workflow attaching `Kunj-workspace-<version>.dmg`, and `kunj install workspace` next to `vscode` and `macos`.
 
 ## Decisions and open questions
 
-Settled by this spec unless you push back:
+Decided 2026-10-23 (spec review in Claude Code; engineering detail in `docs/superpowers/specs/2026-10-23-workspace-ide-design.md`):
 
-- Electron, in `workspace-app/`, driving the kunj CLI through `--json`; the app imports only kunj's JSON types, never its runtime.
+- Electron, in `workspace-app/`, macOS only in v1, driving the kunj CLI through `--json`; the app imports only kunj's JSON types, never its runtime. Tauri 2 stays a viable fallback if footprint ever outweighs terminal fidelity.
 - Editor level: Monaco with the diff editor; no language servers in v1; VS Code/Cursor as the hand-off.
-- Agent persistence lives in tmux, named `kunj-<branch>`, shared with `kunj ct agent`.
-- Containers are reached only through kunj commands (`ct shell`, `ct agent`, `ct exec`); no new process inside the sandbox image.
-- State the app owns is UI layout only, under `~/.kunj/workspace/`.
+- Agent persistence lives in tmux owned by kunj: `agent` inside containers (as today) and a new `kunj agent [branch]` for worktrees, whose sessions `worktree list --json` reports as `agent.running`.
+- Containers are reached only through kunj commands (`ct shell`, `ct agent`, `ct exec`, and a new `ct file read|write`); no new process inside the sandbox image.
+- Ports: v1 lists what `ct list --json` reports and opens the browser; webview preview tabs are v2.
+- Refresh: `kunj events --json` is built before the app; the app subscribes instead of polling.
+- Diff viewer default: against the base branch (everything since the fork point from `origin/<base>`, working tree included); dropdown for uncommitted only and last commit.
+- State the app owns is UI layout only, in `~/.kunj/<reponame>/workspace.json`.
 
 Still open:
 
-- [ ] **Preview tabs**: webview per forwarded port, or just a button that opens the browser? A webview means Chromium devtools inside the app, which agents and people both like; it also means more memory per environment.
-- [ ] **Worktree agents**: `kunj ct agent` already uses tmux for containers. For local worktrees there is no equivalent yet; the app would start `tmux new -A -s kunj-<branch>` itself, or kunj gains `kunj agent` for worktrees so the CLI and app match there too.
-- [ ] **Notifications**: when an agent in a background environment stops and waits for input, the list should show it. tmux can run a hook on silence/activity; Claude Code hooks can write a marker file. Which one to rely on.
+- [ ] **Notifications**: when an agent in a background environment stops and waits for input, the list should show it. tmux can run a hook on silence/activity; Claude Code hooks can write a marker file. Which one to rely on (v2).
 - [ ] **Linux**: Electron makes it nearly free; the macOS menu bar app does not exist there. Worth deciding whether this app replaces `macos-app/` eventually.
-- [ ] **Diff source**: show `git diff` against the base branch, against the last commit, or the agent's own file list? Probably all three as a dropdown, but the default matters.
-- [ ] **Multiple windows**: one window with the list, or allow tearing an environment out into its own window for a second monitor.
+- [ ] **Multiple windows**: one window with the list, or allow tearing an environment out into its own window for a second monitor (v2).
 
-Next step if this is approved: a short brainstorm on the open questions, then a plan for a v1 that is the environment list, terminals, agent attach and the diff viewer, with the editor and previews as v2.
+Plans: `docs/superpowers/plans/2026-10-23-workspace-cli-contract.md` (CLI additions, first), then `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (the app: environment list, terminals, agent attach, diff viewer; editor and previews as v2).
 
 ## Sources
 
