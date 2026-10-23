@@ -246,6 +246,12 @@ either design.
    process (`results/*.json`, saved after each bench) and did not crash in 9 more runs. It looks
    like a teardown race in the spike, but it is a WebKit-in-AppKit crash worth watching.
 
+## Manual check by the user (2026-10-23)
+
+The user ran the demo app (`open build/NativeIDESpike.app`) and reported "all good" for checks 1
+and 2 below: real Cmd+F, Cmd+C, Cmd+Shift+] and Cmd+W in the diff and terminal tabs, and the
+on-screen look while dragging the window to resize it. Checks 3 to 5 are still open.
+
 ## Manual checks left for you
 
 1. **Real keystrokes.** Run `spikes/native-ide/scripts/bundle.sh`, then `open
@@ -287,7 +293,7 @@ for `seq` and `cat` and trails it on single-character-line floods.
 
 **A single WKWebView is good enough for the editor.** Monaco's diff editor boots and renders a
 1400-line diff 0.5 to 0.95 s after the webview is created. Cmd+F, Cmd+C and the app's menu shortcuts
-all route correctly with nothing more than a standard Edit menu (not yet checked with real HID
-events). Its memory cost (about 170 MB without the TypeScript worker, about 400 MB with it) belongs
+all route correctly with nothing more than a standard Edit menu (confirmed by the user with real
+key presses). Its memory cost (about 170 MB without the TypeScript worker, about 400 MB with it) belongs
 to Monaco and would be the same in Electron. The native shell itself is about 37 MB plus 22 MB of
 WebKit helpers, against Chromium's about 150 MB baseline.
