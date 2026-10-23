@@ -56,6 +56,15 @@ Resuming a stopped container starts it behind a fresh network helper, runs the b
 `maintain` commands and the devcontainer's `postStartCommand`, and leaves the clone as it was.
 Resuming a container that is already running does nothing.
 
+With [Docker inside](../configuration/#docker-inside-the-container) (`container.dockerInDocker`),
+`start` first checks that the Docker host may run it and refuses, before creating anything, when it
+may not: `sysbox` without the `sysbox-runc` runtime, `privileged` without
+`container.allowPrivileged` or on Docker Desktop, and either with a devcontainer or a custom image.
+The message says which setting to change. Once the firewall is up it starts `dockerd` in the
+container (again on every resume) and prints `docker <mode>` in its summary. When the repository has
+a compose file and Docker inside is off, `start` prints a one-line hint pointing at
+[services](../services/).
+
 ## agent
 
 Starts the agent in a `tmux` session named `agent`, or reattaches to it if it is already running.
@@ -254,7 +263,9 @@ automatically forwarded ports (`host→container`; in `--json`, `ports` entries 
 or `"forward"` with the forwarder's `pid`). `[blueprint stale]` means the
 container was started from a snapshot that no longer matches the blueprint, and
 `[firewall helper down]` means the network helper is not running (start the container again to bring
-it back).
+it back). `[dind sysbox]` or `[dind privileged]` marks a container with
+[Docker inside](../configuration/#docker-inside-the-container); `--json` has `dind` (`"off"`,
+`"sysbox"` or `"privileged"`) on every container.
 
 | Flag | Use it to |
 |---|---|

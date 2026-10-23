@@ -164,6 +164,8 @@ describe('snapshotBlueprint', () => {
       namesFor: 'main:snapshot',
       noSnapshot: true,
       ignoreForwardPorts: true,
+      // DinD never runs in a snapshot: /var/lib/docker must not end up in an image
+      withoutDind: true,
       skipHooks: true,
       keepOnError: false,
       rebuild: true,
@@ -202,7 +204,7 @@ describe('snapshotBlueprint', () => {
     b.volumes.add(NAMES.homeVolume);
     await snapshotBlueprint(b, options());
     expect(b.callsOf('remove')[0]).toEqual([
-      { containers: [NAMES.helper, NAMES.container], volumes: [NAMES.workspaceVolume, NAMES.homeVolume], networks: [NAMES.network] },
+      { containers: [NAMES.helper, NAMES.container], volumes: [NAMES.workspaceVolume, NAMES.homeVolume, NAMES.dockerVolume], networks: [NAMES.network] },
     ]);
     expect(mocked.removeContainer.mock.invocationCallOrder[0]).toBeLessThan(mocked.startContainer.mock.invocationCallOrder[0]);
     expect(mocked.removeContainer.mock.calls[0][2]).toMatchObject({ force: true, keepVolumes: false });

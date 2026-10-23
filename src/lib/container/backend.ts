@@ -53,6 +53,10 @@ export interface ContainerSpec {
   capabilities?: string[];
   capDrop?: string[];
   securityOpt?: string[];
+  /** --runtime, e.g. sysbox-runc for Docker-in-Docker */
+  runtime?: string;
+  /** --privileged: only for Docker-in-Docker's privileged mode, which the caller has checked */
+  privileged?: boolean;
   /** --add-host entries, e.g. host.docker.internal:host-gateway */
   extraHosts?: string[];
   networkOf?: string;
@@ -85,10 +89,21 @@ export interface BuildOptions {
   buildArgs?: Record<string, string>;
 }
 
+/** What `docker info` says about the daemon. */
+export interface EngineInfo {
+  serverVersion: string;
+  /** Names of the runtimes the daemon has, e.g. runc, sysbox-runc */
+  runtimes: string[];
+  /** e.g. "Docker Desktop", "Ubuntu 24.04.1 LTS", "OrbStack" */
+  operatingSystem: string;
+}
+
 export interface ContainerBackend {
   readonly features: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
   /** Throws Error('Docker is not available: <stderr>') */
-  info(): Promise<{ serverVersion: string }>;
+  info(): Promise<EngineInfo>;
+  /** The Docker context in use: the configured one, else `docker context show`. */
+  contextName(): Promise<string>;
   imageExists(tag: string): Promise<boolean>;
   buildImage(tag: string, context: NodeJS.ReadableStream, opts?: BuildOptions): Promise<void>;
   /** Snapshot a container as an image; each label becomes a LABEL instruction, each of `changes` (Dockerfile syntax, e.g. ENV) another --change. */

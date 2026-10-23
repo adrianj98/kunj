@@ -179,6 +179,8 @@ export async function planSnapshot(opts: Omit<SnapshotOptions, 'rebuild' | 'log'
     blueprint: opts.blueprint,
     namesFor: snapshotNamesFor(opts.branch),
     ignoreForwardPorts: true,
+    // Same (DinD) image as a start, but dockerd never runs: /var/lib/docker must not end up in the image
+    withoutDind: true,
     presets,
   };
 

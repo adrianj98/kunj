@@ -15,7 +15,7 @@ const walk = dir => {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) walk(full);
-    else if (entry.name.endsWith('.sh') || entry.name === 'git-credential-kunj') fs.chmodSync(full, 0o755);
+    else if (entry.name.endsWith('.sh') || entry.name === 'git-credential-kunj' || entry.name === 'kunj-dind-start') fs.chmodSync(full, 0o755);
   }
 };
 walk(dest);

@@ -105,6 +105,12 @@ describe('docker backend', () => {
       expect(args.join(' ')).toContain('--cpus 1 --memory 256m --cap-add NET_ADMIN --cap-add NET_RAW kunj/default:1');
     });
 
+    it('runArgs passes --runtime and --privileged for Docker-in-Docker', () => {
+      expect(runArgs({ ...baseSpec, runtime: 'sysbox-runc' }, '/tmp/x/env').join(' ')).toContain('--runtime sysbox-runc kunj/default:1');
+      expect(runArgs({ ...baseSpec, privileged: true }, '/tmp/x/env').join(' ')).toContain('--privileged kunj/default:1');
+      expect(runArgs(baseSpec, '/tmp/x/env')).not.toContain('--privileged');
+    });
+
     it('runArgs passes --network-alias after the network, and no --workdir when it is empty', () => {
       const args = runArgs({ ...baseSpec, aliases: ['postgres'], workdir: '' }, '/tmp/x/env');
       expect(args.join(' ')).toContain('--network kunj-app-main-abc123-net --network-alias postgres --user dev');
@@ -220,11 +226,24 @@ describe('docker backend', () => {
     });
 
     it('prepends --context to every invocation when a context is set', async () => {
-      results.push({ stdout: '27.0.1\n' });
+      results.push({ stdout: '{"ServerVersion":"27.0.1","OperatingSystem":"Ubuntu 24.04 LTS","Runtimes":{"runc":{},"sysbox-runc":{}}}\n' });
       const backend = new LocalDockerBackend({ context: 'remote', dockerPath: '/usr/local/bin/docker' });
-      await expect(backend.info()).resolves.toEqual({ serverVersion: '27.0.1' });
+      await expect(backend.info()).resolves.toEqual({ serverVersion: '27.0.1', runtimes: ['runc', 'sysbox-runc'], operatingSystem: 'Ubuntu 24.04 LTS' });
       expect(spawnMock.mock.calls[0][0]).toBe('/usr/local/bin/docker');
-      expect(argvOf(0)).toEqual(['--context', 'remote', 'info', '--format', '{{.ServerVersion}}']);
+      expect(argvOf(0)).toEqual(['--context', 'remote', 'info', '--format', '{{json .}}']);
+    });
+
+    it('info fails when the daemon reported errors in its JSON', async () => {
+      results.push({ stdout: '{"ServerErrors":["Cannot connect to the Docker daemon"]}\n' });
+      await expect(new LocalDockerBackend().info()).rejects.toThrow('Docker is not available: Cannot connect to the Docker daemon');
+    });
+
+    it('contextName is the configured context, else docker context show', async () => {
+      await expect(new LocalDockerBackend({ context: 'colima' }).contextName()).resolves.toBe('colima');
+      expect(spawnMock).not.toHaveBeenCalled();
+      results.push({ stdout: 'desktop-linux\n' });
+      await expect(new LocalDockerBackend().contextName()).resolves.toBe('desktop-linux');
+      expect(argvOf(0)).toEqual(['context', 'show']);
     });
 
     it('info reports Docker as unavailable with the first line of stderr', async () => {

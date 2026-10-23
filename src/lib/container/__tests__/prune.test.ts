@@ -233,13 +233,15 @@ describe('planPrune', () => {
       image('kunj-sandbox:0.9.0', 30, {}, 'shared'),
       image('kunj-nethelper:1.2.3-bbb', 40),
       image('kunj-nethelper:1.0.0-x', 50),
+      image('kunj-sandbox-dind:1.2.3-ccc', 5),
+      image('kunj-sandbox-dind:1.0.0-y', 7),
       image('other:1', 60),
     ];
-    const plan = await planPrune(b, ctx());
-    expect(plan.images).toEqual(['kunj-sandbox:1.0.0-older', 'kunj-sandbox:0.9.0', 'kunj-nethelper:1.0.0-x']);
+    const plan = await planPrune(b, ctx({ currentImages: ['kunj-sandbox:1.2.3-aaa', 'kunj-nethelper:1.2.3-bbb', 'kunj-sandbox-dind:1.2.3-ccc'] }));
+    expect(plan.images).toEqual(['kunj-sandbox:1.0.0-older', 'kunj-sandbox:0.9.0', 'kunj-nethelper:1.0.0-x', 'kunj-sandbox-dind:1.0.0-y']);
     // One image with two tags counts once
-    expect(plan.bytes).toBe(80);
-    expect(b.callsOf('listImages')).toContainEqual([{}, { references: ['kunj-sandbox', 'kunj-nethelper'] }]);
+    expect(plan.bytes).toBe(87);
+    expect(b.callsOf('listImages')).toContainEqual([{}, { references: ['kunj-sandbox', 'kunj-nethelper', 'kunj-sandbox-dind'] }]);
   });
 
   it('checks images in use against every container, not only this repository\'s', async () => {
@@ -313,7 +315,7 @@ describe('applyPrune', () => {
       ['post-container-delete', { branch: 'gone', container: n('gone').container, image: 'kunj-sandbox:1.2.3-aaa' }],
     ]);
     expect(b.callsOf('remove')).toEqual([
-      [{ containers: [n('gone').helper, n('gone').container], volumes: [n('gone').workspaceVolume, n('gone').homeVolume], networks: [n('gone').network] }],
+      [{ containers: [n('gone').helper, n('gone').container], volumes: [n('gone').workspaceVolume, n('gone').homeVolume, n('gone').dockerVolume], networks: [n('gone').network] }],
       [{ containers: [gone.helper] }],
       [{ networks: [gone.network] }],
     ]);

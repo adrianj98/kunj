@@ -1,0 +1,46 @@
+#!/bin/sh
+# Start dockerd in a kunj Docker-in-Docker container and wait until it answers. kunj runs this as
+# root with `docker exec`, only after the network helper has reported the firewall ready, and again
+# on every start of a stopped container. Idempotent: a running daemon is left alone.
+# Exits 0 once `docker info` works, 1 when dockerd is not up within KUNJ_DIND_WAIT seconds (30).
+set -u
+
+SOCK=/var/run/docker.sock
+LOG=/var/log/kunj-dockerd.log
+WAIT=${KUNJ_DIND_WAIT:-30}
+
+[ "$(id -u)" = 0 ] || { echo "kunj-dind-start must run as root" >&2; exit 1; }
+
+up() { docker -H "unix://$SOCK" info >/dev/null 2>&1; }
+
+# A daemon that is still coming up (an earlier run of this script) is waited for, not started twice
+if ! up && ! pgrep -x dockerd >/dev/null 2>&1; then
+  # /var/run is not a tmpfs here, so a stopped container keeps the pid files, sockets and containerd
+  # state of the daemon it had; dockerd and its containerd do not start over them
+  rm -rf /var/run/docker /var/run/docker.pid "$SOCK" /run/containerd
+
+  # cgroup v2: move our processes out of the root cgroup and enable its controllers there, so the
+  # inner daemon can create child cgroups (what docker:dind's entrypoint does)
+  if [ -f /sys/fs/cgroup/cgroup.controllers ] && [ -w /sys/fs/cgroup/cgroup.subtree_control ]; then
+    mkdir -p /sys/fs/cgroup/init
+    xargs -rn1 < /sys/fs/cgroup/cgroup.procs > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null || :
+    sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || :
+  fi
+
+  # Detached from this exec, so it outlives it
+  setsid nohup dockerd --host="unix://$SOCK" >"$LOG" 2>&1 < /dev/null &
+fi
+
+i=0
+while ! up; do
+  i=$((i + 1))
+  if [ "$i" -gt "$WAIT" ]; then
+    echo "dockerd did not answer within ${WAIT}s; last log line: $(tail -n 1 "$LOG" 2>/dev/null)"
+    exit 1
+  fi
+  sleep 1
+done
+
+# dockerd already gives the socket to the docker group; make sure of it in case the group was missing
+chgrp docker "$SOCK" && chmod 0660 "$SOCK"
+echo "dockerd is up"

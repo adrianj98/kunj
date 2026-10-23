@@ -152,6 +152,64 @@ check for unpushed work:
 kunj config --set container.pruneAfterDays=30
 ```
 
+## Docker inside the container
+
+By default there is no Docker inside a branch container: the host's Docker socket is never mounted.
+For a repository whose development needs `docker build` or `docker compose up`, set
+`container.dockerInDocker` and each branch container runs its own `dockerd`. Two branches running
+the same compose file then never clash: they have separate daemons, so the same project names, ports
+and volumes are fine. If all you need is a database or a broker, [services](../services/) are lighter
+and need none of this; `kunj ct start` suggests them when the repository has a compose file and
+Docker-in-Docker is off.
+
+| `container.dockerInDocker` | What kunj does | Where it runs |
+|---|---|---|
+| `off` (default) | Nothing; capabilities are dropped as usual | Everywhere |
+| `sysbox` | `docker run --runtime sysbox-runc` | A Linux Docker host with [sysbox](https://github.com/nestybox/sysbox) installed; refused when `docker info` does not list the `sysbox-runc` runtime |
+| `privileged` | `docker run --privileged` | Only with `container.allowPrivileged: true`, and never on Docker Desktop (refused even then) |
+
+Either mode:
+
+- uses the `kunj-sandbox-dind` image, the sandbox plus Docker Engine, the docker CLI and the compose
+  plugin from Docker's apt repository, built from the sandbox the first time (a new sandbox image
+  rebuilds it). A devcontainer, `container.image` or `--image` is refused in this version;
+- keeps `/var/lib/docker` on a per-branch volume, `<container>-docker`, so inner images survive
+  `stop` and `--rebuild`; `remove` and `prune` delete it with the other volumes;
+- keeps the container's capabilities, which `dockerd` needs, and sets `KUNJ_DIND=<mode>` in its
+  environment;
+- starts `dockerd` as root once the firewall is up, on every start, before the blueprint's `setup`
+  and `maintain`. When it does not answer within 30 seconds, the start warns and carries on; its log
+  is `/var/log/kunj-dockerd.log` in the container. The sandbox user reaches it through the `docker`
+  group, so `docker` works in `kunj ct shell` and for the agent;
+- adds Docker Hub (`registry-1.docker.io`, `auth.docker.io`, `index.docker.io`,
+  `production.cloudflare.docker.com`), `ghcr.io` and `pkg-containers.githubusercontent.com` to the
+  [allowlist](../security/#allowlist-mode) when you use one.
+
+A [blueprint snapshot](../blueprints/) is built on the `kunj-sandbox-dind` image but never runs
+`dockerd`, so no inner images end up in it. `kunj ct list` tags these containers `[dind sysbox]` or
+`[dind privileged]`; `--json` has `dind` on every container. The mode is fixed when a container is
+created: after changing the setting, `kunj ct start <branch> --rebuild` applies it.
+
+Read [what Docker inside costs](../security/#docker-inside-the-container) before turning it on.
+
+### A dedicated VM for privileged mode
+
+On a Mac, `privileged` is root on the Docker VM. Docker Desktop's VM shares your home directory,
+which is why kunj refuses it there. Give it a VM of its own that shares nothing of yours, for
+example a Colima profile that mounts only an empty directory instead of your home:
+
+```bash
+mkdir -p ~/.colima-dind-empty
+colima start dind --mount ~/.colima-dind-empty   # replaces the default $HOME mount
+colima ssh -p dind -- ls -R /Users             # check: only the empty directory
+kunj config --set container.dockerContext=colima-dind
+kunj config --set container.dockerInDocker=privileged
+kunj config --set container.allowPrivileged=true
+```
+
+These go in the repository's configuration (the default for `kunj config --set`), so only the
+repository that needs Docker inside runs in that VM.
+
 ## devcontainer.json
 
 When neither `--image` nor `container.image` is set, kunj looks for `.devcontainer/devcontainer.json`

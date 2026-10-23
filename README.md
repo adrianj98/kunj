@@ -201,6 +201,8 @@ Settings (`kunj config`):
 | `container.forward.ignore` | none | Container ports `forward --auto` never forwards |
 | `container.services` | none | Sidecar services by name (see [Services](#services)) |
 | `container.pruneAfterDays` | `0` (off) | `kunj ct prune` also removes stopped containers created longer ago |
+| `container.dockerInDocker` | `off` | Docker inside the container: `off`, `sysbox` or `privileged` (see [Docker inside](#docker-inside-the-container)) |
+| `container.allowPrivileged` | `false` | Allow `privileged`; still refused on Docker Desktop |
 
 Network: by default the internet is open but the Docker host, the LAN and private ranges are
 blocked, except origin itself on its own port (so a self-hosted origin on the LAN still works). Set `container.network.allow` to restrict egress to a list of domains (plus GitHub, npm
@@ -309,6 +311,47 @@ no forwarded variables (only the `env` it declares), no bind mounts, no added ca
 `--privileged` and no published ports. Services are not behind the firewall (they need no helper:
 nothing of yours is in them), so they can reach the internet; only containers on the same branch's
 network can reach them.
+
+#### Docker inside the container
+
+With `container.dockerInDocker` the branch container runs its own `dockerd`, so `docker build` and
+`docker compose up` work inside it as on a laptop, and two branches running the same compose file
+never clash. Its `/var/lib/docker` is a per-branch volume (`<container>-docker`, removed with the
+container), so each branch has its own image cache. Off by default; when the repository has a
+compose file and it is off, `start` suggests [services](#services) instead, which need no Docker inside.
+
+| Mode | How | Where |
+|---|---|---|
+| `sysbox` | `--runtime sysbox-runc`: inner containers stay in the sandbox's user namespace | Linux hosts with [sysbox](https://github.com/nestybox/sysbox) installed; refused when `docker info` does not list the runtime |
+| `privileged` | `--privileged`: an escape is root on the Docker host (on a Mac, its VM) | Needs `container.allowPrivileged: true`; refused on Docker Desktop, whose VM shares your home directory |
+
+Both modes keep the container's capabilities (dockerd needs them). `dockerd` starts as root only
+after the firewall is up, on every start, before `setup`; if it does not answer within 30 s the start
+warns and goes on. The sandbox user reaches it through the `docker` group. It uses the
+`kunj-sandbox-dind` image (the sandbox plus Docker Engine, the CLI and the compose plugin, built
+the first time); a devcontainer or `container.image` is refused in this version. Blueprint
+snapshots are built on that image but never run `dockerd`, so no inner images end up in a snapshot.
+With `container.network.allow`, Docker Hub, its CDN and `ghcr.io` are added to the allowlist.
+`kunj ct list` tags such containers `[dind <mode>]` (JSON: `dind`).
+
+For `privileged` on a Mac, use a dedicated VM that does not share your files, for example a Colima
+profile that mounts only an empty directory instead of your home:
+
+```bash
+mkdir -p ~/.colima-dind-empty
+colima start dind --mount ~/.colima-dind-empty   # replaces the default $HOME mount
+colima ssh -p dind -- ls -R /Users             # check: only the empty directory
+kunj config --set container.dockerContext=colima-dind
+kunj config --set container.dockerInDocker=privileged
+kunj config --set container.allowPrivileged=true
+```
+
+What it costs: with Docker inside, the firewall is no longer a boundary. The sandbox user can
+start a privileged inner container on the host network and change the rules, and inner containers on
+their own bridge network are routed, not sent from the container, so kunj's rules (on outgoing
+traffic) do not apply to them. In `privileged` mode an escape from an inner container reaches the
+Docker host's kernel; `sysbox` keeps inner containers inside the sandbox's own namespaces. Use it
+for branches whose code you would run on your laptop anyway.
 
 ### Blueprints
 

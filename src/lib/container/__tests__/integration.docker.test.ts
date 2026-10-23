@@ -22,6 +22,7 @@ import { getVersion } from '../../version';
 import { parseBlueprint, resolveBlueprint, snapshotTag, SEED_DIR } from '../blueprint';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint } from '../snapshot';
 import { KEPT_VOLUME, PruneContext, applyPrune, parseLsRemoteHeads, planPrune } from '../prune';
+import { isDockerDesktop } from '../dind';
 import { KunjConfig } from '../../../types';
 
 let dockerUp = false;
@@ -792,6 +793,64 @@ const BRANCH_ALLOW = 'it-allow';
         await removeContainer(backend, wip.names, ctx);
       }
       expect(labelledFor(WIP)).toEqual([]);
+    });
+  });
+
+  // A real Docker-in-Docker start needs a daemon that may run one: sysbox-runc installed, or a
+  // throwaway non-Desktop daemon (run the suite with DOCKER_CONTEXT=<a Colima profile>) and
+  // KUNJ_TEST_DIND_PRIVILEGED=1. Elsewhere the refusal is checked against the real daemon instead.
+  describe('docker in docker', () => {
+    const DIND = 'it-dind';
+    const ctx = { user: USER, kunjVersion: VERSION, force: true, keepVolumes: false };
+    let mode: 'sysbox' | 'privileged' | null = null;
+    let desktop = false;
+    let runtimes: string[] = [];
+
+    function withDind(m: string, allowPrivileged = false): KunjConfig {
+      return { container: { network: { allowHost: true }, keepFiles: false, env: [], dockerInDocker: m, allowPrivileged } } as unknown as KunjConfig;
+    }
+
+    beforeAll(async () => {
+      const info = await backend.info();
+      runtimes = info.runtimes;
+      desktop = isDockerDesktop(info);
+      if (runtimes.includes('sysbox-runc')) mode = 'sysbox';
+      else if (process.env.KUNJ_TEST_DIND_PRIVILEGED === '1' && !desktop) mode = 'privileged';
+      if (!mode) {
+        process.stderr.write(
+          'docker in docker: skipping the real DinD start (no sysbox-runc runtime, and KUNJ_TEST_DIND_PRIVILEGED=1 is not set on a non-Desktop daemon)\n'
+        );
+      }
+      const work = path.join(tmp, 'dind-work');
+      git(['clone', '-q', bare, work], tmp);
+      git(['push', '-q', 'origin', `origin/main:refs/heads/${DIND}`], work);
+      git(['fetch', '-q', bare, '+refs/heads/*:refs/remotes/origin/*'], hostClone);
+    });
+
+    it('refuses what this daemon must not run, before creating anything', async () => {
+      if (!runtimes.includes('sysbox-runc')) {
+        await expect(startContainer(backend, startOptions(DIND, withDind('sysbox')))).rejects.toMatchObject({ code: 'dind' });
+      }
+      await expect(startContainer(backend, startOptions(DIND, withDind('privileged')))).rejects.toMatchObject({ code: 'dind' });
+      if (desktop) {
+        await expect(startContainer(backend, startOptions(DIND, withDind('privileged', true)))).rejects.toThrow(/Docker Desktop/);
+      }
+      expect(labelledFor(DIND)).toEqual([]);
+    });
+
+    it('runs docker inside, with /var/lib/docker on the branch volume', async () => {
+      if (!mode) return;
+      const r = await startContainer(backend, startOptions(DIND, withDind(mode, mode === 'privileged')));
+      try {
+        expect(r.dind).toBe(mode);
+        const run = await inside(r.containerId, 'docker run --rm alpine true');
+        expect(run.exitCode).toBe(0);
+        const mounts = JSON.parse(docker(['inspect', '--format', '{{json .Mounts}}', r.containerId])) as Array<{ Name?: string; Destination: string }>;
+        expect(mounts.find(m => m.Destination === '/var/lib/docker')?.Name).toBe(r.names.dockerVolume);
+      } finally {
+        await removeContainer(backend, r.names, ctx);
+      }
+      expect(labelledFor(DIND)).toEqual([]);
     });
   });
 });

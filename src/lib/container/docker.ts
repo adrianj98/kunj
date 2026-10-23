@@ -8,6 +8,7 @@ import {
   ContainerBackend,
   ContainerInfo,
   ContainerSpec,
+  EngineInfo,
   ExecIO,
   ExecTimeoutError,
   ImageInfo,
@@ -57,6 +58,8 @@ export function runArgs(spec: ContainerSpec, envFile: string): string[] {
   for (const cap of spec.capDrop ?? []) args.push('--cap-drop', cap);
   for (const cap of spec.capabilities ?? []) args.push('--cap-add', cap);
   for (const opt of spec.securityOpt ?? []) args.push('--security-opt', opt);
+  if (spec.runtime) args.push('--runtime', spec.runtime);
+  if (spec.privileged) args.push('--privileged');
   if (spec.entrypoint?.length) args.push('--entrypoint', spec.entrypoint[0]);
   args.push(spec.image, ...(spec.entrypoint?.slice(1) ?? []), ...spec.command);
   return args;
@@ -170,7 +173,7 @@ export function composeConfigArgs(projectDir: string): string[] {
 }
 
 export class LocalDockerBackend implements ContainerBackend {
-  readonly features = { localPorts: true, editorAttach: true, dockerInDocker: [] as Array<'sysbox' | 'privileged'> };
+  readonly features = { localPorts: true, editorAttach: true, dockerInDocker: ['sysbox', 'privileged'] as Array<'sysbox' | 'privileged'> };
   private readonly context?: string;
   private readonly dockerPath: string;
 
@@ -222,15 +225,33 @@ export class LocalDockerBackend implements ContainerBackend {
     return out;
   }
 
-  async info(): Promise<{ serverVersion: string }> {
+  async info(): Promise<EngineInfo> {
     let out: Output;
     try {
-      out = await this.spawnDocker(['info', '--format', '{{.ServerVersion}}']);
+      out = await this.spawnDocker(['info', '--format', '{{json .}}']);
     } catch (err) {
       throw new Error(`Docker is not available: ${(err as Error).message}`);
     }
     if (out.code !== 0) throw new Error(`Docker is not available: ${firstLine(out)}`);
-    return { serverVersion: out.stdout.trim() };
+    let info: any;
+    try {
+      info = JSON.parse(out.stdout);
+    } catch {
+      throw new Error(`Docker is not available: docker info printed no JSON`);
+    }
+    // An unreachable daemon can still exit 0 with only the client's half filled in
+    const serverError = (info.ServerErrors ?? [])[0];
+    if (serverError || !info.ServerVersion) throw new Error(`Docker is not available: ${serverError ?? 'no server version'}`);
+    return {
+      serverVersion: String(info.ServerVersion),
+      runtimes: Object.keys(info.Runtimes ?? {}),
+      operatingSystem: String(info.OperatingSystem ?? ''),
+    };
+  }
+
+  async contextName(): Promise<string> {
+    if (this.context) return this.context;
+    return (await this.checked(['context', 'show'])).stdout.trim();
   }
 
   async imageExists(tag: string): Promise<boolean> {

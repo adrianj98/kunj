@@ -18,7 +18,12 @@ describe('container settings', () => {
       services: {},
       forward: { auto: true, ignore: [] },
       pruneAfterDays: 0,
+      dockerInDocker: 'off',
+      allowPrivileged: false,
     });
+    expect(settingsRegistry.get('container.dockerInDocker')?.validate?.('sysbox')).toBe(true);
+    expect(settingsRegistry.get('container.dockerInDocker')?.validate?.('privileged')).toBe(true);
+    expect(settingsRegistry.get('container.dockerInDocker')?.validate?.('yes')).toBe(false);
     expect(settingsRegistry.get('container.pruneAfterDays')?.validate?.(30)).toBe(true);
     expect(settingsRegistry.get('container.pruneAfterDays')?.validate?.(-1)).toBe(false);
     expect(settingsRegistry.get('container.services')?.validate?.({ pg: { image: 'p' } })).toBe(true);

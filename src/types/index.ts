@@ -71,6 +71,9 @@ export interface KunjConfig {
     pruneAfterDays?: number;
     // Sidecar services by name (validated by parseServices in src/lib/container/services.ts)
     services?: Record<string, unknown>;
+    // Docker inside the branch container (src/lib/container/dind.ts); privileged needs allowPrivileged
+    dockerInDocker?: 'off' | 'sysbox' | 'privileged';
+    allowPrivileged?: boolean;
   };
   // Commands run by kunj hooks, keyed by hook name (see src/lib/hook-defs.ts)
   hooks?: Partial<Record<HookName, string | string[]>>;

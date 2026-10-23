@@ -318,7 +318,7 @@ export class ContainerCommand extends BaseCommand {
     return main;
   }
 
-  private recordedOptions(info: ContainerInfo): { firewall?: string; user?: string; imageKind?: string; blueprintHash?: string } {
+  private recordedOptions(info: ContainerInfo): { firewall?: string; user?: string; imageKind?: string; blueprintHash?: string; dind?: string } {
     try {
       return JSON.parse(info.labels[LABEL.options] ?? '{}');
     } catch {
@@ -389,6 +389,7 @@ export class ContainerCommand extends BaseCommand {
     for (const file of result.copiedFiles) console.log(`  copied    ${file}`);
     for (const port of result.publish) console.log(`  port      localhost:${port.host} → :${port.container}`);
     if (result.services?.length) console.log(`  services  ${result.services.join(', ')} (reach them by name from the container)`);
+    if (result.dind) console.log(`  docker    ${result.dind} (dockerd inside the container)`);
     console.log('');
     console.log(`Next: kunj ct agent ${branch}`);
     console.log(`      kunj ct shell ${branch}`);
@@ -849,6 +850,7 @@ export class ContainerCommand extends BaseCommand {
         ...(recorded.imageKind === 'blueprint' ? { blueprint: { hash: recorded.blueprintHash ?? '', stale } } : {}),
         createdAt: c.createdAt,
         firewall: this.recordedOptions(c).firewall || 'default',
+        dind: recorded.dind || 'off',
         ports: [
           ...c.ports.map(p => ({ container: p.container, host: p.host, kind: 'publish' as const })),
           ...forwards.filter(r => r.container === c.name).map(r => ({ container: r.port, host: r.hostPort, kind: 'forward' as const, pid: r.pid })),
@@ -879,6 +881,7 @@ export class ContainerCommand extends BaseCommand {
       const running = c.state === 'running';
       let line = `${running ? chalk.green('●') : chalk.gray('○')} ${chalk.white(c.branch)}  ${running ? chalk.green(c.state) : chalk.gray(c.state)}  ${chalk.gray(c.image)}`;
       if (c.blueprint) line += c.blueprint.stale ? chalk.yellow('  [blueprint stale]') : chalk.cyan('  [blueprint]');
+      if (c.dind !== 'off') line += chalk.magenta(`  [dind ${c.dind}]`);
       if (c.agent.running) line += chalk.cyan('  [agent]');
       if (c.workspace.ahead) line += chalk.cyan(`  +${c.workspace.ahead} ahead`);
       if (c.workspace.dirty) line += chalk.yellow('  dirty');

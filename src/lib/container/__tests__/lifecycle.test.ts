@@ -7,6 +7,7 @@ import { FakeBackend } from './fake-backend';
 import { ContainerInfo, ContainerSpec, ExecIO, ImageInfo } from '../backend';
 import { containerNames, labelsFor, LABEL } from '../names';
 import { SANDBOX_IMAGE, NETHELPER_IMAGE } from '../image';
+import { DIND_DOMAINS, DIND_IMAGE } from '../dind';
 import { SEED_MARKER } from '../seed';
 import { describeGuard } from '../env';
 import { ResolvedBlueprint, blueprintHash, parseBlueprint, snapshotTag } from '../blueprint';
@@ -826,7 +827,7 @@ describe('remove', () => {
     await removeContainer(forced, names, { force: true, keepVolumes: false, user: 'dev', kunjVersion: VERSION });
     expect(forced.callsOf('remove')).toEqual([[{
       containers: [names.helper, names.container],
-      volumes: [names.workspaceVolume, names.homeVolume],
+      volumes: [names.workspaceVolume, names.homeVolume, names.dockerVolume],
       networks: [names.network],
     }]]);
   });
@@ -1377,7 +1378,7 @@ describe('services', () => {
     await removeContainer(b, names, { force: true, keepVolumes: false, user: 'dev', kunjVersion: VERSION });
     expect(b.callsOf('remove')).toEqual([[{
       containers: [names.helper, names.container, PG],
-      volumes: [names.workspaceVolume, names.homeVolume, PG_DATA],
+      volumes: [names.workspaceVolume, names.homeVolume, names.dockerVolume, PG_DATA],
       networks: [names.network],
     }]]);
 
@@ -1421,4 +1422,162 @@ describe('services in a snapshot build', () => {
     expect(calls.indexOf('sh -c pg_isready')).toBeGreaterThan(-1);
     expect(calls.indexOf('sh -c pg_isready')).toBeLessThan(calls.indexOf('sh -lc npm run migrate'));
   }, 30_000);
+});
+
+describe('docker in docker', () => {
+  const DIND_START = '/usr/local/bin/kunj-dind-start';
+
+  function dindBackend(runtimes = ['runc', 'sysbox-runc']): FakeBackend {
+    const b = backend();
+    b.existingImages.add(DIND_IMAGE(VERSION));
+    b.infoResult = { serverVersion: '27', runtimes, operatingSystem: 'Ubuntu 24.04 LTS' };
+    return b;
+  }
+
+  function dindOptions(mode: string, over: Partial<StartOptions> = {}, container: Record<string, unknown> = {}): StartOptions & { warnings: string[] } {
+    const warnings: string[] = [];
+    const config = { container: { dockerInDocker: mode, ...container } } as unknown as KunjConfig;
+    return { ...options({ config, warn: m => warnings.push(m), ...over }), warnings };
+  }
+
+  it('sysbox: the sysbox runtime, capabilities kept, a docker volume, KUNJ_DIND and the DinD image', async () => {
+    const b = dindBackend();
+    const result = await startContainer(b, dindOptions('sysbox'));
+    expect(result.dind).toBe('sysbox');
+    const [main] = runSpecs(b);
+    expect(main.image).toBe(DIND_IMAGE(VERSION));
+    expect(main.runtime).toBe('sysbox-runc');
+    expect(main.privileged).toBeUndefined();
+    expect(main.capDrop).toBeUndefined();
+    expect(main.capabilities).toBeUndefined();
+    expect(main.volumes).toContainEqual({ name: names.dockerVolume, path: '/var/lib/docker' });
+    expect(main.env.KUNJ_DIND).toBe('sysbox');
+    expect(JSON.parse(main.labels[LABEL.options]).dind).toBe('sysbox');
+    // Labelled like the other volumes, so list and prune see it
+    expect(b.volumeLabels.get(names.dockerVolume)).toEqual(b.volumeLabels.get(names.workspaceVolume));
+  });
+
+  it('privileged: --privileged with allowPrivileged', async () => {
+    const b = dindBackend(['runc']);
+    await startContainer(b, dindOptions('privileged', {}, { allowPrivileged: true }));
+    const [main] = runSpecs(b);
+    expect(main.privileged).toBe(true);
+    expect(main.runtime).toBeUndefined();
+    expect(main.capDrop).toBeUndefined();
+    expect(main.env.KUNJ_DIND).toBe('privileged');
+  });
+
+  it('off: caps dropped, no docker volume, no KUNJ_DIND, no dind label', async () => {
+    const b = dindBackend();
+    await startContainer(b, dindOptions('off'));
+    const [main] = runSpecs(b);
+    expect(main.capDrop).toEqual(['ALL']);
+    expect(main.volumes.map(v => v.name)).not.toContain(names.dockerVolume);
+    expect(main.env.KUNJ_DIND).toBeUndefined();
+    expect(JSON.parse(main.labels[LABEL.options]).dind).toBeUndefined();
+    expect(execCmds(b)).not.toContain(DIND_START);
+  });
+
+  it('refuses before anything is created', async () => {
+    for (const [mode, container, info] of [
+      ['sysbox', {}, { runtimes: ['runc'], operatingSystem: 'Ubuntu' }],
+      ['privileged', {}, { runtimes: ['runc'], operatingSystem: 'Ubuntu' }],
+      ['privileged', { allowPrivileged: true }, { runtimes: ['runc'], operatingSystem: 'Docker Desktop' }],
+    ] as const) {
+      const b = dindBackend();
+      b.infoResult = { serverVersion: '27', ...info, runtimes: [...info.runtimes] };
+      await expect(startContainer(b, dindOptions(mode, {}, container))).rejects.toMatchObject({ code: 'dind' });
+      expect(b.methods().filter(m => ['createNetwork', 'createVolume', 'run', 'buildImage'].includes(m))).toEqual([]);
+      expect(mocked.pushBranch).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses a custom or devcontainer image: DinD needs the kunj image', async () => {
+    const b = dindBackend();
+    b.existingImages.add('custom:1');
+    await expect(startContainer(b, dindOptions('sysbox', { imageOverride: 'custom:1' }))).rejects.toThrow(/kunj sandbox image/);
+    expect(b.methods()).not.toContain('run');
+  });
+
+  it('starts dockerd as root only after the helper is ready, before the seed', async () => {
+    const b = dindBackend();
+    await startContainer(b, dindOptions('sysbox'));
+    const execs = b.callsOf('exec');
+    const cmds = execs.map(a => (a[1] as string[]).join(' '));
+    const at = cmds.indexOf(DIND_START);
+    expect(at).toBeGreaterThan(cmds.indexOf(READY));
+    expect(at).toBeLessThan(cmds.findIndex(c => c.startsWith('sh -c set -e')));
+    expect(execs[at][0]).toBe('id-1');
+    expect((execs[at][2] as ExecIO).user).toBe('root');
+  });
+
+  it('warns and carries on when dockerd does not come up', async () => {
+    const b = dindBackend();
+    b.execResults.set(DIND_START, { exitCode: 1, stdout: '' });
+    const opts = dindOptions('sysbox');
+    const result = await startContainer(b, opts);
+    expect(result.created).toBe(true);
+    expect(opts.warnings.some(w => /Docker inside the container did not start/.test(w))).toBe(true);
+  });
+
+  it('builds the sandbox image before the DinD image built on it', async () => {
+    const b = dindBackend();
+    b.existingImages.delete(DIND_IMAGE(VERSION));
+    b.existingImages.delete(SANDBOX_IMAGE(VERSION));
+    await startContainer(b, dindOptions('sysbox'));
+    const builds = b.callsOf('buildImage');
+    expect(builds.map(a => a[0])).toEqual([SANDBOX_IMAGE(VERSION), DIND_IMAGE(VERSION)]);
+    expect((builds[1][1] as { buildArgs: Record<string, string> }).buildArgs).toEqual({ BASE_IMAGE: SANDBOX_IMAGE(VERSION) });
+  });
+
+  it('adds the registries to the allowlist only in allowlist mode', async () => {
+    const allow = dindBackend();
+    await startContainer(allow, dindOptions('sysbox', {}, { network: { allow: ['example.org'] } }));
+    const domains = runSpecs(allow)[1].env.KUNJ_FW_DOMAINS.split(' ');
+    expect(domains).toEqual(['example.org', ...DIND_DOMAINS]);
+
+    const open = dindBackend();
+    await startContainer(open, dindOptions('sysbox'));
+    expect(runSpecs(open)[1].env.KUNJ_FW_DOMAINS).toBe('');
+  });
+
+  it('resume starts dockerd again after the helper is ready', async () => {
+    const b = dindBackend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.existing = [info({ state: 'exited', labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main', [LABEL.options]: JSON.stringify({ user: 'dev', dind: 'sysbox' }) }) })];
+    await startContainer(b, dindOptions('sysbox'));
+    const cmds = execCmds(b);
+    expect(cmds.indexOf(DIND_START)).toBeGreaterThan(cmds.indexOf(READY));
+    expect(b.callsOf('exec').find(a => (a[1] as string[]).join(' ') === DIND_START)?.[2]).toMatchObject({ user: 'root' });
+  });
+
+  it('a snapshot build (withoutDind) uses the DinD image but never runs dockerd or creates the docker volume', async () => {
+    const b = dindBackend();
+    await startContainer(b, dindOptions('sysbox', { withoutDind: true }));
+    const [main] = runSpecs(b);
+    expect(main.image).toBe(DIND_IMAGE(VERSION));
+    expect(main.runtime).toBeUndefined();
+    expect(main.capDrop).toEqual(['ALL']);
+    expect(main.volumes.map(v => v.name)).not.toContain(names.dockerVolume);
+    expect(execCmds(b)).not.toContain(DIND_START);
+  });
+
+  it('with a compose file and DinD off, suggests services once', async () => {
+    fs.writeFileSync(path.join(tmp, 'compose.yaml'), 'services: {}\n');
+    const off = dindOptions('off');
+    await startContainer(dindBackend(), off);
+    expect(off.warnings.filter(w => w.includes('compose file'))).toHaveLength(1);
+    expect(off.warnings.find(w => w.includes('compose file'))).toContain('container.services');
+
+    const on = dindOptions('sysbox');
+    await startContainer(dindBackend(), on);
+    expect(on.warnings.some(w => w.includes('compose file'))).toBe(false);
+  });
+
+  it('remove deletes the docker volume with the others', async () => {
+    const b = new FakeBackend();
+    b.existing = [info({})];
+    await removeContainer(b, names, { force: true, keepVolumes: false, user: 'dev', kunjVersion: VERSION });
+    expect((b.callsOf('remove')[0][0] as { volumes: string[] }).volumes).toContain(names.dockerVolume);
+  });
 });

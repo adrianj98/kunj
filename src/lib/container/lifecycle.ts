@@ -33,8 +33,12 @@ import { getKeepDir, listKeptFiles } from '../keep';
 import { getGlobalKunjDir, getKunjDir } from '../config';
 import { ConfigVariables, expandVariables } from '../config-vars';
 import { KunjConfig } from '../../types';
+import { StartError, StartErrorCode } from './errors';
+import { DIND_DATA, DIND_DOMAINS, DindMode, checkDind, composeHint, dindHostInfo, dindMode, dindSource, startDockerd } from './dind';
 
 export { forwardedEnv, firewallEnv } from './env';
+export { StartError } from './errors';
+export type { StartErrorCode } from './errors';
 export type { ContainerStatus, RemoveGuard } from './env';
 export { findSnapshot } from './provision';
 
@@ -49,25 +53,6 @@ const CREDENTIAL_HELPER = 'git-credential-kunj';
 // Everything else is dropped: NET_RAW (an AF_PACKET socket skips the helper's OUTPUT rules) above
 // all. These keep chown, file ownership fixes and sudo in devcontainer images working.
 export const MAIN_CAPABILITIES = ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID'];
-
-export type StartErrorCode =
-  | 'unpushed'
-  | 'base-missing'
-  | 'origin'
-  | 'no-token'
-  | 'docker'
-  | 'image'
-  | 'seed'
-  | 'firewall'
-  | 'collision'
-  | 'setup';
-
-export class StartError extends Error {
-  constructor(message: string, readonly code: StartErrorCode) {
-    super(message);
-    this.name = 'StartError';
-  }
-}
 
 export interface StartOptions {
   branch: string;
@@ -107,6 +92,9 @@ export interface StartOptions {
   bundle?: { hostPath: string; containerPath: string };
   /** Service health checks: how long to wait for each, and how often to ask (tests) */
   serviceHealth?: { timeoutMs?: number; intervalMs?: number };
+  /** A snapshot build: the DinD image is still used (the hash covers it), but dockerd never runs and
+   * there is no docker volume, so /var/lib/docker never ends up in an image */
+  withoutDind?: boolean;
 }
 
 export interface StartResult {
@@ -136,6 +124,8 @@ export interface StartResult {
   };
   /** The branch's sidecar services, in start order; only when it has any */
   services?: string[];
+  /** Docker-in-Docker mode; only when it is on */
+  dind?: Exclude<DindMode, 'off'>;
 }
 
 function message(err: unknown): string {
@@ -252,7 +242,10 @@ async function baseSource(
     }
   }
   const input = { setting, devcontainer, repoName: options.repo.name, kunjVersion: options.kunjVersion };
-  return { input, base: resolveImage(input), devcontainer };
+  const plain = resolveImage(input);
+  // Docker-in-Docker swaps the sandbox for the image built on it; snapshots hash and build on it too
+  const base = dindMode(options.config.container) === 'off' ? plain : dindSource(plain, options.kunjVersion);
+  return { input, base, devcontainer };
 }
 
 /** The image a start would use without a blueprint snapshot; the snapshot hashes the same tag. */
@@ -395,10 +388,15 @@ async function waitForHelper(backend: ContainerBackend, helperId: string): Promi
   }
 }
 
-function helperEnv(options: StartOptions, origin: { originUrl: string; originHost: string }, env: Record<string, string>): Record<string, string> {
+function helperEnv(
+  options: StartOptions,
+  origin: { originUrl: string; originHost: string },
+  env: Record<string, string>,
+  dind: boolean
+): Record<string, string> {
   const bedrockRegion = truthy(env.CLAUDE_CODE_USE_BEDROCK) ? env.AWS_REGION || env.AWS_DEFAULT_REGION : undefined;
   // The port lets the allowlist check reach origin wherever it listens (git://, https on :8443, ssh on :2222)
-  return firewallEnv(options.config.container, '', origin.originHost, bedrockRegion, originPort(origin.originUrl));
+  return firewallEnv(options.config.container, '', origin.originHost, bedrockRegion, originPort(origin.originUrl), dind ? DIND_DOMAINS : []);
 }
 
 function helperSpec(
@@ -700,7 +698,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   const names = containerNames(repo.name, repo.id, labelBranch);
   const vars = variables(options);
 
-  await step('docker', () => backend.info());
+  const engine = await step('docker', () => backend.info());
 
   // An existing container is resumed whatever origin now has: its clone is the source of truth
   const labels = await step('docker', () => backend.inspectLabels(names.container));
@@ -718,6 +716,13 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
 
   if (labels && !options.rebuild) {
     return resume(backend, options, names, origin, env, hasToken);
+  }
+
+  // Docker-in-Docker is refused here, before anything is pushed or created, when it cannot or must not run
+  const dind: DindMode = options.withoutDind ? 'off' : dindMode(cfg);
+  if (dind !== 'off') {
+    const host = await step('dind', () => dindHostInfo(backend, engine));
+    await checkDind(backend, dind, { allowPrivileged: cfg?.allowPrivileged === true }, host);
   }
 
   if (!labels) {
@@ -754,8 +759,13 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
 
   // 4. Images
   const { source, plan, services } = await step('image', () => resolveSource(backend, options, warn));
+  if (dindMode(cfg) === 'off' && !options.withoutDind && !services.length) {
+    const hint = composeHint(options.worktreeRoot ?? options.cwd);
+    if (hint) warn(hint);
+  }
   await step('image', () => warnOnChangedBuild(backend, options, source));
   const image = await step('image', async () => {
+    if (options.rebuild && source.base) await ensureImage(backend, source.base, warn);
     if (options.rebuild && source.build) await backend.buildImage(source.tag, source.build.contextTar(), {
       dockerfile: source.build.dockerfile,
       buildArgs: source.build.buildArgs,
@@ -772,7 +782,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   const home = homeFor(source);
   const publish = await mapPorts(requestedPorts(options, source.spec));
   const firewall = firewallMode(cfg);
-  const fwEnv = helperEnv(options, origin, env);
+  const fwEnv = helperEnv(options, origin, env, dind !== 'off');
   // What this run created, and so what a failure removes. Volumes kept by `remove --keep-volumes`
   // existed before and are never removed here.
   const created: { containers: string[]; volumes: string[]; networks: string[] } = { containers: [], volumes: [], networks: [] };
@@ -794,6 +804,8 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     const volumes = [{ name: names.workspaceVolume, path: WORKSPACE }];
     if (home) volumes.push({ name: names.homeVolume, path: home });
     else warn('The image has no known user, so its home directory is not kept in a volume');
+    // The inner dockerd's images and containers: a volume, so overlayfs works and they outlive --rebuild
+    if (dind !== 'off') volumes.push({ name: names.dockerVolume, path: DIND_DATA });
     for (const v of volumes) {
       if (await step('docker', () => backend.volumeExists(v.name))) continue;
       await step('docker', () => backend.createVolume(v.name, objLabels));
@@ -811,8 +823,9 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
         ...options.serviceHealth,
       }));
 
-    // 6. Main container: all capabilities dropped except MAIN_CAPABILITIES, and the image's ENTRYPOINT (branch-controlled for a
-    // devcontainer) replaced by sleep, so nothing of the image's runs before the firewall is up
+    // 6. Main container: all capabilities dropped except MAIN_CAPABILITIES (Docker-in-Docker keeps them: dockerd
+    // needs them), and the image's ENTRYPOINT (branch-controlled for a devcontainer) replaced by sleep, so nothing
+    // of the image's runs before the firewall is up
     const spec: ContainerSpec = {
       name: names.container,
       image,
@@ -832,6 +845,8 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
           // For `list`, and the seed of a resumed container that never finished seeding
           imageKind: source.kind,
           blueprintHash: plan?.hash,
+          // Absent when off; resume starts dockerd again when set
+          dind: dind === 'off' ? undefined : dind,
         }),
         [LABEL.role]: 'main',
       }),
@@ -842,6 +857,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
         KUNJ_CONTAINER: '1',
         KUNJ_BRANCH: branch,
         KUNJ_REPO: repo.name,
+        ...(dind === 'off' ? {} : { KUNJ_DIND: dind }),
       },
       network: names.network,
       user: user || undefined,
@@ -850,8 +866,11 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       publish,
       cpus: cfg?.cpus || undefined,
       memory: cfg?.memory || undefined,
-      capDrop: ['ALL'],
-      capabilities: MAIN_CAPABILITIES,
+      ...(dind === 'off'
+        ? { capDrop: ['ALL'], capabilities: MAIN_CAPABILITIES }
+        : dind === 'sysbox'
+          ? { runtime: 'sysbox-runc' }
+          : { privileged: true }),
       // Docker Desktop resolves it anyway; Linux engines need the mapping (the firewall still
       // blocks it unless allowHost)
       extraHosts: ['host.docker.internal:host-gateway'],
@@ -870,6 +889,9 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     const helperId = await step('docker', () => backend.run(helperSpec(names, id, spec.labels, options.kunjVersion, fwEnv)));
     await waitForHelper(backend, helperId);
     ready = true;
+
+    // dockerd only now that the firewall is up, and before setup so setup can use it
+    if (dind !== 'off') await startDockerd(backend, id, warn);
 
     // 8. Nothing runs in the container before this point. Seed, once the firewall is in place
     const seededBefore = await step('docker', () => hasSeedMarker(backend, id));
@@ -917,6 +939,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       firewall,
       ...(blueprint ? { blueprint } : {}),
       ...(services.length ? { services: services.map(s => s.name) } : {}),
+      ...(dind !== 'off' ? { dind } : {}),
     };
   } catch (err) {
     if (options.keepOnError && mainRun && !ready) {
@@ -950,6 +973,7 @@ function parseOptionsLabel(labels: Record<string, string>): {
   postStartCommand?: string;
   imageKind?: ImageSource['kind'];
   blueprintHash?: string;
+  dind?: DindMode;
 } {
   try {
     return JSON.parse(labels[LABEL.options] ?? '{}');
@@ -974,6 +998,10 @@ async function resume(
   const services = servicesOf(found, names.container, { repoId: repo.id, branch: options.namesFor ?? options.branch });
   const firewall = firewallMode(options.config.container);
   const recorded = parseOptionsLabel(main.labels);
+  const dind = recorded.dind ?? 'off';
+  if (!options.withoutDind && dind !== dindMode(options.config.container)) {
+    warn(`container.dockerInDocker is "${dindMode(options.config.container)}" but this container was created with "${dind}"; kunj ct start --rebuild applies it`);
+  }
   const result: StartResult = {
     names,
     containerId: main.id,
@@ -986,6 +1014,7 @@ async function resume(
     publish: main.ports.length ? main.ports : recorded.publish ?? [],
     firewall,
     ...(services.length ? { services: services.map(c => c.labels[LABEL.service] ?? c.name) } : {}),
+    ...(dind !== 'off' ? { dind } : {}),
   };
   // Before the branch container, as on a new start; a service that will not start fails the start
   await step('docker', () => resumeServices(backend, services, { warn, ...options.serviceHealth }));
@@ -994,8 +1023,9 @@ async function resume(
   const state: UpState = { startedMain: false, helperCreated: false };
   let ready = false;
   try {
-    await bringUp(backend, names, main, helperEnv(options, origin, env), options.kunjVersion, warn, state);
+    await bringUp(backend, names, main, helperEnv(options, origin, env, dind !== 'off'), options.kunjVersion, warn, state);
     ready = true;
+    if (dind !== 'off') await startDockerd(backend, main.id, warn);
 
     const user = recorded.user ?? '';
     const home = user ? `/home/${user}` : null;
@@ -1158,7 +1188,8 @@ export async function removeContainer(
   const services = serviceRemoval(owner ? await findServices(backend, names, owner) : [], opts.keepVolumes);
   await backend.remove({
     containers: [names.helper, names.container, ...services.containers],
-    volumes: opts.keepVolumes ? [] : [names.workspaceVolume, names.homeVolume, ...services.volumes],
+    // The docker volume exists only with Docker-in-Docker; removing a missing volume is not an error
+    volumes: opts.keepVolumes ? [] : [names.workspaceVolume, names.homeVolume, names.dockerVolume, ...services.volumes],
     networks: [names.network],
   });
   return guard;

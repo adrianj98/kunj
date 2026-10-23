@@ -56,6 +56,11 @@ describe('container names', () => {
       expect(n.homeVolume).toBe(`${n.container}-home`);
     });
 
+    it("names the inner Docker's volume <container>-docker", () => {
+      const n = containerNames('kunj', 'github.com/o/kunj', 'main');
+      expect(n.dockerVolume).toBe(`${n.container}-docker`);
+    });
+
     it('nameHash is 6 hex chars and stable', () => {
       expect(nameHash('r', 'b')).toMatch(/^[0-9a-f]{6}$/);
       expect(nameHash('r', 'b')).toBe(nameHash('r', 'b'));

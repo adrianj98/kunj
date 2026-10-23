@@ -21,6 +21,8 @@ export interface ContainerNames {
   helper: string;
   workspaceVolume: string;
   homeVolume: string;
+  /** The inner dockerd's /var/lib/docker (Docker-in-Docker only) */
+  dockerVolume: string;
   network: string;
 }
 
@@ -40,6 +42,7 @@ export function containerNames(repoName: string, repoId: string, branch: string)
     helper: `${container}-net-helper`,
     workspaceVolume: `${container}-ws`,
     homeVolume: `${container}-home`,
+    dockerVolume: `${container}-docker`,
     network: `${container}-net`,
   };
 }

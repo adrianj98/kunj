@@ -1432,6 +1432,42 @@
     "sensitive": false
   },
   {
+    "key": "container.dockerInDocker",
+    "type": "enum",
+    "category": "container",
+    "default": "off",
+    "description": "Docker inside branch containers: off, sysbox (needs the sysbox-runc runtime on the Docker host) or privileged (needs container.allowPrivileged; refused on Docker Desktop)",
+    "detailedDescription": "Each container then runs its own dockerd, its /var/lib/docker on a per-branch volume, so docker compose up works inside. The container keeps its capabilities. sysbox keeps inner containers inside the sandbox's user namespace; privileged gives the container root on the Docker host (on a Mac, its VM), so use it only on a dedicated Docker context. Needs the kunj sandbox image (no devcontainer or container.image).",
+    "options": [
+      "off",
+      "sysbox",
+      "privileged"
+    ],
+    "examples": [
+      "sysbox",
+      "privileged"
+    ],
+    "relatedSettings": [
+      "container.allowPrivileged",
+      "container.dockerContext"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "container.allowPrivileged",
+    "type": "boolean",
+    "category": "container",
+    "default": false,
+    "description": "Allow container.dockerInDocker \"privileged\" (root on the Docker host or its VM); it is still refused on Docker Desktop",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": [
+      "container.dockerInDocker"
+    ],
+    "sensitive": false
+  },
+  {
     "key": "container.services",
     "type": "string",
     "category": "container",

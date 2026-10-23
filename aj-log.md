@@ -2,6 +2,46 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Containers: Docker-in-Docker (phase 2, Task 5)
+
+- New settings `container.dockerInDocker` (`off` | `sysbox` | `privileged`, default `off`) and
+  `container.allowPrivileged` (default `false`). Why: phase 2 spec section 5, so a branch whose
+  development needs `docker compose up` can run it inside its container, with its own daemon per branch.
+- New `src/lib/container/dind.ts`: `checkDind()` refuses before anything is pushed or created (StartError
+  code `dind`): `sysbox` unless `docker info` lists `sysbox-runc`, `privileged` unless `allowPrivileged`,
+  `privileged` on Docker Desktop even with it. Docker Desktop is detected by `docker info`'s operating
+  system and refused whatever the context is called (stricter than "desktop-linux/default", because a
+  custom context to Desktop is the same shared VM). The messages name the setting to change.
+- `StartError` moved to `src/lib/container/errors.ts` (re-exported by lifecycle.ts) so dind.ts can throw it
+  without an import cycle.
+- Backend: `info()` now reads `docker info --format '{{json .}}'` and returns `{ serverVersion, runtimes,
+  operatingSystem }`; new `contextName()` (the configured context, else `docker context show`), so only
+  docker.ts spawns docker. `ContainerSpec` gains `runtime` and `privileged`. FakeBackend gets both.
+- New image `kunj-sandbox-dind:<version>-<hash>` from `src/container/sandbox-dind/` (FROM the sandbox via
+  `BASE_IMAGE`; docker-ce, CLI, containerd, compose plugin, iptables; `dev` in the `docker` group;
+  `kunj-dind-start`). Its hash covers the context and the base tag, so a new sandbox rebuilds it;
+  `ImageSource.base` makes `ensureImage` build the sandbox first. A devcontainer/custom image is refused
+  (documented limit).
+- Run spec with DinD: no cap-drop (dockerd needs the capabilities), `--runtime sysbox-runc` or
+  `--privileged`, `/var/lib/docker` on `<container>-docker` (labelled like the other volumes, so `list`
+  orphans and `prune` see it; `remove` deletes it), `KUNJ_DIND=<mode>`, `dind` in `kunj.options`.
+- `kunj-dind-start` (root, via exec) runs only after the helper's READY, on start and resume, before
+  seed/setup/maintain; idempotent, clears the stale pid files and `/var/run/docker` a stopped container
+  keeps (found by a manual restart test: containerd timed out otherwise), and waits 30 s; a daemon that
+  does not come up is a warning, not a failure.
+- Snapshots: `StartOptions.withoutDind` keeps the DinD image (the hash must match a start's) but never
+  runs dockerd or creates the docker volume, so nothing of the inner daemon reaches the image.
+- Allowlist mode adds Docker Hub, its CDN, `ghcr.io` and `pkg-containers.githubusercontent.com`
+  (`firewallEnv`'s new `dindDomains`). `kunj ct list` shows `[dind <mode>]` and JSON `dind` (additive);
+  `start` prints `docker <mode>` and a one-line services hint when the repo has a compose file and
+  DinD is off (and no services). Resume warns when the setting differs from the container's mode.
+- `prune` also knows `kunj-sandbox-dind` tags. Docker test: refusal against the real daemon always;
+  a real DinD start (`docker run --rm alpine true` inside, `/var/lib/docker` on the branch volume) only
+  with `sysbox-runc` or `KUNJ_TEST_DIND_PRIVILEGED=1` on a non-Desktop daemon.
+- Docs: README (section, Colima profile with only an empty directory mounted), docs-site configuration,
+  security (threat model of each mode: the firewall is not a boundary with Docker inside), commands,
+  overview; regenerated settings.json; CLAUDE.md.
+
 ## 2026-10-23 — Containers: `kunj ct prune` (phase 2, Task 4)
 
 - New `src/lib/container/prune.ts`: `planPrune()` builds a serialisable `PrunePlan` (`containers` with

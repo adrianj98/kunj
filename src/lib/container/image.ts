@@ -15,6 +15,8 @@ export interface ImageSource {
   /** User to run as; '' means the image's own USER (no --user is passed). */
   user: string;
   spec?: DevcontainerSpec;
+  /** The kunj image this one is built FROM (the DinD image's sandbox): ensured before the build */
+  base?: ImageSource;
 }
 
 export interface ResolveImageInput {
@@ -141,13 +143,14 @@ export function resolveHelperImage(kunjVersion: string): ImageSource {
   return { kind: 'sandbox', tag: NETHELPER_IMAGE(kunjVersion), build: assetBuild('nethelper'), user: '' };
 }
 
-function assetBuild(name: string): NonNullable<ImageSource['build']> {
-  return { contextTar: () => tarDirectory(path.join(sandboxAssetsDir(), name)), dockerfile: 'Dockerfile', buildArgs: {} };
+export function assetBuild(name: string, buildArgs: Record<string, string> = {}): NonNullable<ImageSource['build']> {
+  return { contextTar: () => tarDirectory(path.join(sandboxAssetsDir(), name)), dockerfile: 'Dockerfile', buildArgs };
 }
 
 export async function ensureImage(backend: ContainerBackend, source: ImageSource, warn: (msg: string) => void): Promise<string> {
   if (await backend.imageExists(source.tag)) return source.tag;
   if (!source.build) throw new Error(`Image not found: ${source.tag} (pull it or set container.image)`);
+  if (source.base) await ensureImage(backend, source.base, warn);
   warn(`Building image ${source.tag} (first use; this can take a few minutes)…`);
   await backend.buildImage(source.tag, source.build.contextTar(), {
     dockerfile: source.build.dockerfile,

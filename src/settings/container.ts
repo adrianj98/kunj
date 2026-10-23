@@ -117,6 +117,30 @@ export function registerContainerSettings(): void {
       examples: ['30'],
     },
     {
+      key: 'container.dockerInDocker',
+      description: 'Docker inside branch containers: off, sysbox (needs the sysbox-runc runtime on the Docker host) or privileged (needs container.allowPrivileged; refused on Docker Desktop)',
+      detailedDescription:
+        'Each container then runs its own dockerd, its /var/lib/docker on a per-branch volume, so docker compose up works inside. ' +
+        'The container keeps its capabilities. sysbox keeps inner containers inside the sandbox\'s user namespace; privileged ' +
+        'gives the container root on the Docker host (on a Mac, its VM), so use it only on a dedicated Docker context. ' +
+        'Needs the kunj sandbox image (no devcontainer or container.image).',
+      type: 'enum',
+      options: ['off', 'sysbox', 'privileged'],
+      defaultValue: 'off',
+      category: 'container',
+      relatedSettings: ['container.allowPrivileged', 'container.dockerContext'],
+      validate: (value: unknown) => value === 'off' || value === 'sysbox' || value === 'privileged',
+      examples: ['sysbox', 'privileged'],
+    },
+    {
+      key: 'container.allowPrivileged',
+      description: 'Allow container.dockerInDocker "privileged" (root on the Docker host or its VM); it is still refused on Docker Desktop',
+      type: 'boolean',
+      relatedSettings: ['container.dockerInDocker'],
+      defaultValue: false,
+      category: 'container',
+    },
+    {
       key: 'container.services',
       description: 'Sidecar services (Postgres, Redis, ...) started next to each branch container, by name',
       type: 'string',

@@ -176,10 +176,10 @@ The VS Code extension in `vscode-extension/` is a separate npm package (own `pac
 own clone, mainly to run an agent with permissions skipped. Origin is the only channel in and out;
 nothing from the host is bind-mounted. Design: docs/superpowers/specs/2026-10-21-branch-containers-design.md.
 Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sidecar services, `open` and
-`forward --auto` and `prune`; no Docker-in-Docker yet. Phase 3 (not started) is the workspace IDE:
+`forward --auto`, `prune` and Docker-in-Docker (`container.dockerInDocker`). Phase 3 (not started) is the workspace IDE:
 docs/superpowers/specs/2026-10-23-workspace-ide-design.md.
 
-**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor,prune}.ts`.
+**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor,prune,dind,errors}.ts`.
 `prune.ts` (`planPrune`/`applyPrune`) removes containers of branches gone from origin (missing from one
 `git ls-remote --heads origin` and present as `refs/remotes/origin/<b>` in the clone; unreachable origin
 removes none) only when the remove guard is clean, checked at plan and again at removal, or `--force`;
@@ -190,10 +190,17 @@ tags and stopped containers older than `container.pruneAfterDays`; never an imag
 `autoforward.ts` polls `/proc/net/tcp{,6}` (not `ss`, which most images lack) and forwards new listeners (127.0.0.1 only); running forwarders are in
 `~/.kunj/container-forwards.json` (dead pids pruned on read, atomic writes), and `agent` spawns a detached
 one unless `container.forward.auto` is `false` or one is registered for the container.
-The images' build contexts live in `src/container/{sandbox,nethelper}/` and are copied to
+`dind.ts`: `sysbox` (`--runtime sysbox-runc`, refused unless `docker info` lists it) or `privileged`
+(needs `container.allowPrivileged`, refused on Docker Desktop whatever the context): capabilities kept,
+`/var/lib/docker` on `<container>-docker`, the `kunj-sandbox-dind` image (only on top of kunj's sandbox;
+a devcontainer or custom image is refused). `dockerd` is started by `kunj-dind-start` as root only after
+READY (start and resume), and never in a snapshot (`StartOptions.withoutDind`: same image, so the hash
+agrees, but no dockerd and no docker volume).
+The images' build contexts live in `src/container/{sandbox,nethelper,sandbox-dind}/` and are copied to
 `dist/container` by `scripts/copy-container-assets.js` as part of the build. Their tags are
 `kunj-sandbox:<version>-<hash>` / `kunj-nethelper:<version>-<hash>`, the hash covering the build
-context's files (`assetHash()` in image.ts), so editing a Dockerfile or `firewall.sh` rebuilds.
+context's files (`assetHash()` in image.ts), so editing a Dockerfile or `firewall.sh` rebuilds;
+`kunj-sandbox-dind:<version>-<hash>` also hashes the sandbox tag it is built FROM.
 
 **Backend rule:** only `docker.ts` spawns `docker`. Everything else programs against the
 `ContainerBackend` interface (backend.ts) so a remote backend can be added later; unit tests use
@@ -210,7 +217,8 @@ imports light, load inquirer lazily and do not import the AWS or LangChain modul
 **No code before READY:** the main container runs with `--entrypoint sleep`, and the network helper
 (a sidecar sharing its network namespace, holding NET_ADMIN) applies the firewall and then touches
 `/tmp/kunj-ready`. The main container runs with all capabilities dropped except CHOWN, DAC_OVERRIDE,
-FOWNER, SETUID and SETGID (`MAIN_CAPABILITIES` in lifecycle.ts); never give it NET_ADMIN or NET_RAW. Nothing may be exec'd in the main container
+FOWNER, SETUID and SETGID (`MAIN_CAPABILITIES` in lifecycle.ts); never give it NET_ADMIN or NET_RAW
+(Docker-in-Docker is the one opt-in exception). Nothing may be exec'd in the main container
 before that file exists.
 
 **Secrets:** they travel only in the `docker run` env-file. Never pass them with `docker exec -e`

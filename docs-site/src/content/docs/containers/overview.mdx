@@ -115,6 +115,7 @@ For each branch kunj creates a small set of Docker objects, all named
 | Workspace volume (`…-ws`) | The clone at `/workspace`. Survives `stop` and `--rebuild`. |
 | Home volume (`…-home`) | The user's home directory: shell history, the agent's login and settings. |
 | Network (`…-net`) | A network of its own, so containers of different branches cannot reach each other. |
+| Docker volume (`…-docker`) | Only with [Docker inside](../configuration/#docker-inside-the-container): the inner daemon's images and containers. |
 
 kunj keeps no state file: these objects and their `kunj.*` labels are the state, so `docker ps` and
 `kunj ct list` always agree.
@@ -150,5 +151,4 @@ Branch containers can run [services](../services/) (databases, queues) next to t
 supported yet:
 
 - **`kunj ct prune`**: removing containers whose branches are merged.
-- **Docker inside the container** (Docker-in-Docker). The host's Docker socket is never mounted.
 - **SSH agent forwarding**: an SSH origin is cloned over HTTPS with a token instead.

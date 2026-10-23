@@ -1,11 +1,15 @@
 // In-memory ContainerBackend for lifecycle and port-forwarding tests. Records every call;
 // exec results are programmed by the joined command.
-import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutError, ImageInfo, Labels } from '../backend';
+import { ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecTimeoutError, ImageInfo, Labels } from '../backend';
 
 export type ExecResult = { exitCode: number; stdout: string };
 
 export class FakeBackend implements ContainerBackend {
-  readonly features = { localPorts: true, editorAttach: false, dockerInDocker: [] as Array<'sysbox' | 'privileged'> };
+  readonly features = { localPorts: true, editorAttach: false, dockerInDocker: ['sysbox', 'privileged'] as Array<'sysbox' | 'privileged'> };
+  /** What info() returns */
+  infoResult: EngineInfo = { serverVersion: 'fake', runtimes: ['runc'], operatingSystem: 'Fake Linux' };
+  /** What contextName() returns */
+  context = 'default';
   calls: Array<{ method: string; args: unknown[] }> = [];
   /** Keyed by cmd.join(' '); unlisted commands exit 0 with no output. */
   execResults = new Map<string, ExecResult>();
@@ -52,9 +56,14 @@ export class FakeBackend implements ContainerBackend {
     return this.calls.filter(c => c.method === method).map(c => c.args);
   }
 
-  async info(): Promise<{ serverVersion: string }> {
+  async info(): Promise<EngineInfo> {
     this.record('info', []);
-    return { serverVersion: 'fake' };
+    return this.infoResult;
+  }
+
+  async contextName(): Promise<string> {
+    this.record('contextName', []);
+    return this.context;
   }
 
   async imageExists(tag: string): Promise<boolean> {

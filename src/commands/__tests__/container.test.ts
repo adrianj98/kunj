@@ -390,6 +390,23 @@ describe('ContainerCommand', () => {
     });
   });
 
+  it('list marks the Docker-in-Docker mode in JSON and text', async () => {
+    const main = mainContainer('feat');
+    main.labels['kunj.options'] = JSON.stringify({ firewall: 'default', user: 'dev', dind: 'sysbox' });
+    backend.existing = [main];
+    (lifecycle.containerStatus as jest.Mock).mockResolvedValue({ agentRunning: false, head: null, ahead: 0, dirty: false, status: 'ok' });
+    await new ContainerCommand().execute('list', { json: true });
+    expect(JSON.parse(stdout.join('')).containers[0].dind).toBe('sysbox');
+
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await new ContainerCommand().execute('list', {});
+      expect(log.mock.calls.map(c => String(c[0])).join('\n')).toContain('[dind sysbox]');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('prints the list json shape', async () => {
     backend.existing = [mainContainer('feat-x'), helperContainer('feat-x')];
     (lifecycle.containerStatus as jest.Mock).mockResolvedValue({
@@ -417,6 +434,7 @@ describe('ContainerCommand', () => {
           imageInfo: { tag: 'kunj-sandbox:1.3.0' },
           createdAt: '2026-10-21T10:00:00Z',
           firewall: 'default',
+          dind: 'off',
           ports: [{ container: 3000, host: 13000, kind: 'publish' }],
           agent: { running: true },
           workspace: { head: 'a1b2c3d', ahead: 2, dirty: true },

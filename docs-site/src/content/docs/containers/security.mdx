@@ -114,6 +114,37 @@ therefore treats it as untrusted:
 A devcontainer image that ships `sudo` lets the agent become root inside its own container. That root
 still has no `NET_ADMIN`, so the firewall holds.
 
+## Docker inside the container
+
+[Docker-in-Docker](../configuration/#docker-inside-the-container) is off by default because it
+changes the picture above. With `container.dockerInDocker` on:
+
+- **The container keeps its capabilities**, which `dockerd` needs, and the sandbox user can use that
+  daemon through the `docker` group. Anyone who can run `docker` can start a container as root, so
+  inside the branch container the agent is effectively root.
+- **The firewall is no longer a boundary.** kunj's rules filter what the container itself sends.
+  Inner containers on their own bridge network are routed through the container's network
+  namespace rather than sending from it, so those rules do not apply to them, and the agent can
+  start an inner container with `--privileged --network host` and change the rules outright. Treat
+  the network as open, whatever `container.network.allow` says.
+- **`privileged`** (`docker run --privileged`) gives the container every capability and the host's
+  devices. An escape from it, or from an inner container, is root on the Docker host: on a Mac, the
+  VM that runs Docker. That is why it needs a second opt-in, `container.allowPrivileged`, and why
+  kunj refuses it on Docker Desktop, whose VM shares your home directory, even then. Run it in a VM
+  of its own that shares nothing of yours (see [a dedicated VM](../configuration/#a-dedicated-vm-for-privileged-mode)).
+- **`sysbox`** runs the container under the sysbox runtime, which maps its root to an unprivileged
+  user on the host. Inner containers stay inside the sandbox's own user, mount and network
+  namespaces, so an escape from them lands in the sandbox, not on the host. It is the safer mode
+  where it is available (Linux hosts with sysbox installed).
+
+What does not change: nothing from your machine is mounted (the inner daemon's data is a volume of
+its own), secrets still travel only in the `docker run` environment, `dockerd` starts only after the
+firewall helper is ready, and blueprint snapshots never run it, so no inner images or containers end
+up in a snapshot.
+
+Turn it on only for repositories whose code you would run on your laptop anyway, and prefer
+[services](../services/) when all a branch needs is a database.
+
 ## How secrets reach the container
 
 Secrets travel one way only: in the environment of `docker run`, written to a temporary file that
@@ -164,8 +195,8 @@ that small.
 - read or write any file on your machine, including your repository and its `.git`;
 - reach your other branches' containers, the Docker host, your LAN or private networks
   (unless `allowHost`);
-- use the Docker daemon;
-- change or switch off the firewall;
+- use the Docker daemon (the host's is never mounted; with Docker-in-Docker it has its own);
+- change or switch off the firewall (with Docker-in-Docker it can: see above);
 - become root in the default image;
 - use the forwarded git token against any host other than origin through git.
 

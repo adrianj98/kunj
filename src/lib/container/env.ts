@@ -42,10 +42,13 @@ export function firewallEnv(
   subnet: string,
   originHost: string,
   bedrockRegion: string | undefined,
-  originPort = 0
+  originPort = 0,
+  /** Registries the container's own dockerd pulls from (Docker-in-Docker); only the allowlist needs them */
+  dindDomains: string[] = []
 ): Record<string, string> {
   const domains = [...(config?.network?.allow ?? [])];
   if (bedrockRegion) domains.push(`bedrock-runtime.${bedrockRegion}.amazonaws.com`);
+  if (firewallMode(config) === 'allowlist') domains.push(...dindDomains);
   return {
     KUNJ_FW_MODE: firewallMode(config),
     KUNJ_FW_ALLOW_HOST: config?.network?.allowHost ? '1' : '0',

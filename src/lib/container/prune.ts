@@ -3,7 +3,7 @@
 // Removes branch containers whose branch is gone from origin (or that have been stopped longer than
 // container.pruneAfterDays) when their remove guard is clean; orphans (helpers, services and
 // networks labelled for a branch that has no main container; such volumes only with --force);
-// snapshot images of another blueprint hash; and kunj-sandbox / kunj-nethelper tags of other
+// snapshot images of another blueprint hash; and kunj-sandbox / kunj-nethelper / kunj-sandbox-dind tags of other
 // versions. Every rule fails safe: origin unreachable -> no branch is gone, a branch the clone never
 // saw on origin -> not gone, hash unknown -> every snapshot is kept, an image in use or a guard that
 // cannot run -> kept. The guard runs again at removal time.
@@ -15,6 +15,7 @@ import { RemoveGuard, describeGuard } from './env';
 import { inspectForRemove, removeContainer } from './lifecycle';
 import { NETHELPER_IMAGE, SANDBOX_IMAGE } from './image';
 import { SNAPSHOT_REPO } from './blueprint';
+import { DIND_IMAGE } from './dind';
 import { forwardsFile, updateForwards } from './autoforward';
 import { nonInteractiveEnv } from './seed';
 
@@ -64,7 +65,7 @@ export interface PruneContext {
   remoteBranches?: () => Promise<string[] | null>;
   /** The blueprint hash a snapshot would have now; null (or no function) keeps every snapshot. */
   currentBlueprintHash?: () => Promise<string | null>;
-  /** The kunj image tags of this version (default: the sandbox and network helper tags) */
+  /** The kunj image tags of this version (default: the sandbox, network helper and DinD tags) */
   currentImages?: string[];
   /** Look for superseded kunj images (default true; they are not per repository, so --all asks once) */
   kunjImages?: boolean;
@@ -82,7 +83,7 @@ export interface ApplyContext {
 
 const LS_REMOTE_TIMEOUT_MS = 15000;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const KUNJ_IMAGE_REPOS = ['kunj-sandbox', 'kunj-nethelper'];
+const KUNJ_IMAGE_REPOS = ['kunj-sandbox', 'kunj-nethelper', 'kunj-sandbox-dind'];
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -111,6 +112,7 @@ export function namesOfContainer(container: string): ContainerNames {
     helper: `${container}-net-helper`,
     workspaceVolume: `${container}-ws`,
     homeVolume: `${container}-home`,
+    dockerVolume: `${container}-docker`,
     network: `${container}-net`,
   };
 }
@@ -224,7 +226,7 @@ export async function planPrune(backend: ContainerBackend, ctx: PruneContext): P
       for (const i of snapshots) if (i.labels[LABEL.blueprintHash] !== hash && !inUse.has(i.tag)) take(i.tag, i.id, i.size);
     }
   }
-  const current = new Set(ctx.currentImages ?? [SANDBOX_IMAGE(ctx.kunjVersion), NETHELPER_IMAGE(ctx.kunjVersion)]);
+  const current = new Set(ctx.currentImages ?? [SANDBOX_IMAGE(ctx.kunjVersion), NETHELPER_IMAGE(ctx.kunjVersion), DIND_IMAGE(ctx.kunjVersion)]);
   const kunjImages = ctx.kunjImages === false ? [] : await backend.listImages({}, { references: KUNJ_IMAGE_REPOS });
   for (const i of kunjImages) {
     if (!current.has(i.tag) && !inUse.has(i.tag)) take(i.tag, i.id, i.size);
