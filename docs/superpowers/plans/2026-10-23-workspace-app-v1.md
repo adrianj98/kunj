@@ -1,448 +1,557 @@
-# Workspace App v1 Implementation Plan
+# Workspace App v1 Implementation Plan (native)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** An Electron app, `workspace-app/`, that lists every worktree and branch container as an environment, keeps terminals and agent sessions per environment alive, shows a diff viewer, and runs every action through the installed `kunj` CLI.
+**Goal:** A native macOS app, `workspace-app/`, that lists every worktree and branch container as an environment, keeps terminals and agent sessions per environment alive, shows the Changes column with Monaco, edits files, and runs every action through the installed `kunj` CLI, looking like `docs/workspace-app/design/mockups/warm.png`.
 
-**Architecture:** A sandboxed React renderer talks over typed IPC to the main process. Main owns four services: `KunjCli` (finds and runs `kunj … --json` with `cwd` = repository root), `EnvironmentStore` (repos → worktrees + containers, refreshed by `kunj events --json`), `PtyManager` (node-pty per tab; shells and agents are kunj commands), and `Layout` (which tabs are open, per repo). Diff content comes from `git` in a worktree and `kunj ct exec … git` in a container; files from `fs` or `kunj ct file`. The app never imports kunj's runtime, only its JSON types.
+**Architecture:** One AppKit process (Swift, SwiftPM, no Xcode). `KunjWorkspaceCore` (Foundation only, `swift test`) holds the CLI runner, the JSON mirrors, the environment model and store, the event stream, terminal specs, diff and file services and the layout file. `KunjWorkspace` holds the views, SwiftTerm terminals and two Monaco WKWebViews. State comes from `kunj … --json`, refreshed by `kunj events --json`; agents live in tmux sessions kunj names. The spec's Architecture section is the design; this plan is its task list.
 
-**Tech Stack:** Electron (current stable), electron-vite, React 18, TypeScript, `@xterm/xterm` + `@xterm/addon-webgl` + `@xterm/addon-fit`, `node-pty`, `monaco-editor` via `@monaco-editor/react`, `parse-diff`, electron-builder, vitest (+ `@testing-library/react`, jsdom for renderer smoke tests).
+**Tech Stack:** Swift 6.4 toolchain (Command Line Tools, Swift 5 language mode), AppKit, WebKit, SwiftTerm 1.20.0 (vendored, patched), monaco-editor 0.57.0 (AMD `min/vs`), Inter + JetBrains Mono (bundled), XCTest; TypeScript/Jest for the CLI task.
 
-**Spec:** `docs/specs/workspace-ide.md`. Requires the CLI additions from `docs/superpowers/plans/2026-10-23-workspace-cli-contract.md` (`kunj agent`, `kunj ct file`, `kunj events`, published types).
+**Spec:** `docs/specs/workspace-ide.md` (Layout, Architecture, Decisions) and `docs/workspace-app/design/` (DESIGN.md, tokens.json, mockups).
 
 ## Global Constraints
 
-- Work on `main`, one commit per task. `workspace-app/` is its own npm package (like `vscode-extension/`); nothing in the root `package.json` or `src/` changes except in Task 10.
-- The CLI is the only contract: no `import` from `kunj` except `import type`; no `docker` or kunj library calls; `git` only for diff content in worktrees (Task 8), read-only.
-- Every kunj invocation runs with `cwd` set to the repository root from `kunj repos --json` and names the branch explicitly.
-- Electron security defaults on: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; the renderer reaches main only through the `window.kunj` API exposed by the preload.
-- `MIN_KUNJ_VERSION` = the first released version containing the CLI contract plan (set it when that release is tagged; `0.0.0` until then). A kunj reporting `1.0.0` is a dev build: accepted, flagged `dev: true`.
-- macOS arm64 only in v1. Ad-hoc signed, not notarized (as `macos-app/`).
-- Terminal env for every PTY: `TERM=xterm-256color`, `COLORTERM=truecolor`, `LANG` from the user's environment or `en_US.UTF-8`, `PATH` from the login shell.
+- Work on `main`, one commit per task, push after each (user rule). `workspace-app/` is its own package; nothing in `src/` changes except in Tasks 1 and 12.
+- The CLI is the only contract: the app runs `kunj … --json` and never imports kunj's runtime, never runs `docker`, and runs `git` only read-only for diff content in worktrees, always with `GIT_OPTIONAL_LOCKS=0`.
+- Every kunj invocation runs with `currentDirectoryURL` = the repository `root` from `kunj repos --json` and names the branch explicitly.
+- `MIN_KUNJ_VERSION = "1.4.0"` (the next release; `package.json` is `1.0.0` on main and the release workflow rewrites it). A kunj reporting `1.0.0` is a dev build: accepted, shown as `dev`.
+- macOS 14+, arm64 and x86_64 (`swift build --arch arm64 --arch x86_64` in `bundle.sh`), ad-hoc signed, not notarized.
+- Terminal env for every PTY: `TERM=xterm-256color`, `COLORTERM=truecolor`, `LANG` from the user's environment or `en_US.UTF-8`, PATH from the login shell; `NO_COLOR`, `FORCE_COLOR`, `TERM_PROGRAM*`, `TERM_SESSION_ID` and every `CLAUDECODE*`/`CLAUDE_CODE*` variable removed.
+- Every colour, size and radius comes from `DesignTokens` (generated from `tokens.json`); no literal colours in views. Sans = Inter, mono = JetBrains Mono (bundled), with the system fonts as fallback when registration fails.
 - Append a line per change to `aj-log.md`; commit messages end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- The app has no automated UI tests; every UI task ends with `scripts/bundle.sh`, a `--demo --screenshot` render compared against `warm.png`, and a run against the real kunj.
 
 ## Review Focus
 
-1. kunj missing from the login-shell PATH, or older than `MIN_KUNJ_VERSION`: the window must show one clear message with the install command, not an empty list (Task 2 tests `not-found`, `too-old`; Task 5 renders the error state).
-2. Docker stopped: worktrees still list, containers show as unavailable, the events stream keeps running after its backend retry (Task 3 test `container listing fails`).
-3. An environment whose worktree directory is gone (`exists: false`) or whose container is stopped: opening a shell must be refused in the UI with a reason, never spawn a PTY that exits at once (Task 6 `terminalSpec` test).
-4. Quitting the app with ten PTYs and the events child open must not leave orphan `kunj events` or `kunj ct shell` processes (Task 6 test `closeAll` and Task 4 `stop()` closes stdin and waits for exit).
-5. A branch name with `/` must round-trip through the layout file and the environment id (Task 7 test `feature/x`).
+1. kunj missing from the login-shell PATH, or older than `MIN_KUNJ_VERSION`: the window shows one message with `npm install -g kunj`, not an empty list (Task 3 tests `not-found` and `too-old`; Task 6 renders the error state).
+2. Docker stopped: worktrees still list, that repo's containers show as unavailable, the event stream keeps running after its `backend` event (Task 4 test `container listing fails`, Task 5 test `backend event refreshes all`).
+3. An environment whose worktree is gone (`exists == false`) or whose container is stopped: Shell and Agent are refused with a reason, never a PTY that exits at once (Task 7 `TerminalSpec` tests).
+4. Quitting with ten PTYs and the events child open leaves no orphan `kunj events`, `kunj ct shell` or `claude` (Task 5 test `stop closes stdin and waits`; Task 7 terminates every tab on quit; `kunj events` ends when stdin closes).
+5. A branch named `feature/x` round-trips through the environment id, the layout file key and the tmux attach (Task 4 test `slash id`, Task 8 test `slash key`).
 
 ---
 
-### Task 1: Scaffold the Electron package
+### Task 1: CLI: agent waiting state through Claude Code hooks
 
 **Files:**
-- Create: `workspace-app/package.json`, `workspace-app/electron.vite.config.ts`, `workspace-app/tsconfig.json`, `workspace-app/tsconfig.node.json`, `workspace-app/tsconfig.web.json`, `workspace-app/vitest.config.ts`, `workspace-app/src/main/index.ts`, `workspace-app/src/preload/index.ts`, `workspace-app/src/shared/ipc.ts`, `workspace-app/src/renderer/index.html`, `workspace-app/src/renderer/main.tsx`, `workspace-app/src/renderer/App.tsx`, `workspace-app/README.md`, `workspace-app/.gitignore`
-- Test: `workspace-app/src/shared/ipc.test.ts`
+- Modify: `src/lib/json-types.ts` (`AgentState.state`, `EventJson` agent `state`), `src/lib/agent-session.ts`, `src/commands/agent.ts`, `src/commands/container.ts` (the `agent` case), `src/lib/container/env.ts` (`STATUS_SCRIPT`, `parseStatus`, `ContainerStatus.agentState`), `src/lib/worktree.ts` (`agent.state`), `src/lib/events.ts`, `src/settings/agent.ts` (`agent.hooks`), `docs/specs/workspace-ide.md` (CLI contract paragraph), docs-site reference JSON (`npm run gen`)
+- Test: `src/lib/__tests__/agent-session.test.ts`, `src/lib/container/__tests__/env.test.ts`, `src/lib/__tests__/events.test.ts`, `src/commands/__tests__/agent.test.ts` (extend the existing files)
 
 **Interfaces:**
-- Produces: `src/shared/ipc.ts` exporting `Channels` (string constants, one per IPC call this plan adds; start with `'app:version'`) and `KunjApi` (the type of `window.kunj`, initially `{ appVersion(): Promise<string> }`); the preload exposes `window.kunj` with `contextBridge.exposeInMainWorld('kunj', …)` and a `src/renderer/global.d.ts` declares `window.kunj: KunjApi`.
-- `package.json` scripts: `dev` (electron-vite dev), `build` (electron-vite build), `test` (vitest run), `lint` (tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json), `package` (electron-builder, Task 10), `postinstall: electron-builder install-app-deps`.
-- `devDependencies` include `kunj: file:..` for the types.
+- Produces (`agent-session.ts`):
+  - `export type AgentHookState = 'running' | 'waiting'`
+  - `export function agentStateDir(kunjDir: string): string` → `<kunjDir>/agent-state`
+  - `export function agentStateFile(kunjDir: string, session: string): string`
+  - `export function claudeHookSettings(stateFile: string): string` → JSON text with `hooks.UserPromptSubmit`, `hooks.PreToolUse` (command `printf running > "$KUNJ_AGENT_STATE"`), `hooks.Stop`, `hooks.Notification` (matcher `permission_prompt|idle_prompt|elicitation_dialog`, command `printf waiting > "$KUNJ_AGENT_STATE"`), `hooks.SessionEnd` (`rm -f "$KUNJ_AGENT_STATE"`); every command is `sh -c '…'`-safe with no quotes inside
+  - `export function withAgentHooks(command: string, stateFile: string, enabled: boolean): string` → `command` unchanged unless `enabled` and its first word's basename is `claude`; then `<command> --settings '<json>'` with the JSON single-quoted for the shell (`'` → `'\''`)
+  - `export function readAgentState(stateFile: string): AgentHookState | null` (trimmed file content when it is one of the two states, else null)
+  - `tmuxNewSessionArgs(...)` gains `-e KUNJ_AGENT_STATE=<file>`; the no-tmux path sets it in the env
+- `kunj ct agent`: the command string becomes `KUNJ_AGENT_STATE=/tmp/kunj-agent-state <withAgentHooks(command)>`; `STATUS_SCRIPT` prints `state=$(cat /tmp/kunj-agent-state 2>/dev/null)`; `parseStatus` sets `agentState: 'running' | 'waiting' | null`; `ct list --json` `agent: { running, state }`.
+- `worktree list --json`: `agent: { running, session, state }` with `state` from `readAgentState(agentStateFile(kunjDir, session))` when `running` is true, else null.
+- `kunj events`: `fs.watch` on `agentStateDir` of every repo (created on demand, like `refs/`), emitting `{ type: 'agent', session, running: true, state }` on change; the container poll hash includes `agentState` and the `container` status event carries nothing new (the app refreshes).
+- `json-types.ts`: `AgentState { running; session; state?: 'running' | 'waiting' | null }`; `EventJson` agent variant gains `state?: 'running' | 'waiting' | null`.
+- Setting `agent.hooks` (boolean, default `true`, category `ai`? no: category `core` next to `agent.command`): "Install Claude Code hooks that report when the agent waits for input".
 
-- [ ] **Step 1: Create the package and the config files**
+- [ ] **Step 1: Write the failing unit tests**
 
-`npm init` in `workspace-app/` with `"private": true`, `"name": "kunj-workspace"`, `"main": "out/main/index.js"`; install `electron`, `electron-vite`, `vite`, `@vitejs/plugin-react`, `react`, `react-dom`, `typescript`, `vitest`, `jsdom`, `@testing-library/react`, `electron-builder`, `kunj@file:..`. electron-vite config with the three entry points. The renderer `App.tsx` renders a two-column layout: left column "Environments" (empty), right "Select an environment", and the app version from `window.kunj.appVersion()` in a status bar.
+```ts
+// agent-session.test.ts
+test('withAgentHooks appends --settings for claude', () => expect(withAgentHooks('claude', '/s', true)).toMatch(/^claude --settings '\{"hooks":/));
+test('withAgentHooks leaves other commands and disabled alone', …);          // 'aider' unchanged; enabled false unchanged
+test('claudeHookSettings is valid JSON with the five hooks', …);             // JSON.parse, keys UserPromptSubmit, PreToolUse, Stop, Notification, SessionEnd; Notification matcher as above
+test('readAgentState reads running, waiting, else null', …);                 // temp files: 'waiting\n' → 'waiting'; 'bogus' → null; missing → null
+test('tmuxNewSessionArgs carries KUNJ_AGENT_STATE', …);
+// env.test.ts
+test('parseStatus reads state=waiting', …);                                  // 'tmux=0\nstate=waiting\n# branch.oid abc' → agentRunning true, agentState 'waiting'
+test('parseStatus with no state line gives null', …);
+// events.test.ts
+test('a write to agent-state/<session> emits an agent event with state', …); // temp HOME, fake tmux list: write 'waiting' → { type: 'agent', session, running: true, state: 'waiting' }
+```
 
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 2: Run them to see them fail**
 
-`src/shared/ipc.test.ts`: `expect(Channels.appVersion).toBe('app:version')` and that every value in `Channels` is unique.
+Run: `npm test -- agent-session env events`
+Expected: FAIL on the missing exports.
 
-- [ ] **Step 3: Run, implement, run**
+- [ ] **Step 3: Implement the helpers, the setting, the three commands, `STATUS_SCRIPT`, `worktree list` and `events`**
 
-Run: `cd workspace-app && npm test`
-Expected: FAIL then PASS after `src/shared/ipc.ts` exists.
+In `src/commands/agent.ts` the state file is `agentStateFile(getKunjDir(), name)` and its directory is created before start. In `src/commands/container.ts` `agent` case, build the command with `withAgentHooks(cfg.agentCommand ?? CONTAINER_AGENT_COMMAND_DEFAULT, '/tmp/kunj-agent-state', config.agent.hooks)` and prefix the env assignment. Keep `src/commands/agent.ts` on the fast path (no new heavy imports).
 
-- [ ] **Step 4: Build and open the window**
+- [ ] **Step 4: Run the tests, the type check and the docs generator**
 
-Run: `npm run build && npm run lint`
-Expected: `out/` produced, no type errors. Run `npm run dev` manually: a window titled "Kunj Workspace" with the two columns and the version in the status bar.
+Run: `npm test && npm run lint && (cd docs-site && npm run gen)`
+Expected: PASS; `docs-site/src/data/*.json` updated with `agent.hooks`.
+
+- [ ] **Step 5: Check it live**
+
+Run: `npm run build && node dist/index.js agent start main` in a spare terminal, ask claude something, then `cat ~/.kunj/kunj/agent-state/kunj-main-*` while it answers (`running`) and after (`waiting`); `node dist/index.js worktree list --json | jq '.worktrees[] | select(.branch=="main").agent'` shows `state`.
+
+- [ ] **Step 6: Update the spec and commit**
+
+Add the agent-state paragraph to the spec's CLI contract (shipped) and the tracker line in `docs/specs/README.md`; remove the `ct agent window-size latest` open question (it is already set, container.ts line 575).
+
+```bash
+git add -A src docs aj-log.md && git commit -m "kunj agent: report waiting-for-input through Claude Code hooks" && git push
+```
+
+---
+
+### Task 2: Scaffold the Swift package, tokens and build scripts
+
+**Files:**
+- Create: `workspace-app/Package.swift`, `workspace-app/.gitignore`, `workspace-app/README.md`, `workspace-app/Resources/Info.plist`, `workspace-app/Resources/web/index.html` (placeholder page, replaced in Task 9), `workspace-app/web/package.json`, `workspace-app/web/copy-monaco.js`, `workspace-app/scripts/prepare-swiftterm.sh`, `workspace-app/scripts/fetch-fonts.sh`, `workspace-app/scripts/gen-tokens.js`, `workspace-app/scripts/bundle.sh`, `workspace-app/scripts/test.sh`, `workspace-app/Sources/KunjWorkspaceCore/Design/DesignTokens.swift` (generated), `workspace-app/Sources/KunjWorkspaceCore/Design/HexColor.swift`, `workspace-app/Sources/KunjWorkspace/main.swift`, `workspace-app/Sources/KunjWorkspace/AppDelegate.swift`, `workspace-app/Sources/KunjWorkspace/Views/MainWindowController.swift`
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/DesignTokensTests.swift`
+
+**Interfaces:**
+- Produces (`DesignTokens.swift`, generated, `public enum DesignTokens`):
+  - `public struct ThemeTokens: Equatable { public let name: String; public let bg, side, raised, raised2, border, borderStrong, text, text2, muted, faint, faintest, idle, amber, green, red, addBg, link, primaryBg, primaryFg, primaryHint, term, termText, termMuted, termAccent: String }` (hex strings as in the JSON)
+  - `public static let warm, light, graphite: ThemeTokens`; `public static let themes: [ThemeTokens]`
+  - `public enum Layout { public static let sidebarWidth = 272.0, headerHeight = 52.0, tabbarHeight = 40.0, statusbarHeight = 28.0, changesFileListWidth = 196.0, sidebarRowPaddingV = 9.0, sidebarRowPaddingH = 10.0; public static let paneSplit: (Double, Double) = (11, 9) }`
+  - `public enum Radius { public static let control = 5.0, card = 6.0, window = 12.0 }`
+  - `public enum TypeScale { public static let body = 13.0, small = 12.0, caption = 11.0, monoTerminal = 12.5, monoDiff = 11.5, title = 14.0, hint = 10.5 }`
+  - `public enum Fonts { public static let sans = "Inter", mono = "JetBrainsMono" }` (PostScript family names)
+- `HexColor.swift`: `public struct RGBA: Equatable { r, g, b, a: Double }`, `public func parseHex(_ s: String) -> RGBA?` (`#rgb`, `#rrggbb`, `#rrggbbaa`).
+- `Package.swift`: tools 5.10, platforms `.macOS(.v14)`, dependency `.package(path: "vendor/SwiftTerm")`, targets `KunjWorkspaceCore` (no deps), `KunjWorkspace` (Core, SwiftTerm), `KunjWorkspaceCoreTests`.
+- `scripts/gen-tokens.js`: `node scripts/gen-tokens.js` reads `../docs/workspace-app/design/tokens.json` and writes `DesignTokens.swift` with a `// Generated by scripts/gen-tokens.js from docs/workspace-app/design/tokens.json; do not edit` header.
+- `scripts/fetch-fonts.sh`: downloads Inter 4.1 (`https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip`) and JetBrains Mono 2.304 (`https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip`), checks a pinned sha256 of each zip, extracts `Inter-Regular/Medium/SemiBold.ttf` (the static `extras/ttf` files, or `InterVariable.ttf`) and `JetBrainsMono-Regular/Medium.ttf` into `Resources/fonts/`, skipping when present. `Info.plist` has `ATSApplicationFontsPath` = `fonts`.
+- `scripts/bundle.sh`: like the spike's (SwiftTerm prepare, Monaco copy, fonts, release build for both arches with the SDK fallback, `build/Kunj Workspace.app`, Info.plist from `Resources/Info.plist` with `__VERSION__`, SwiftTerm resource bundle, `codesign --sign -`); `--install` copies to `/Applications/Kunj Workspace.app` and launches with `env -u NO_COLOR -u FORCE_COLOR open`.
+- `scripts/test.sh`: `swift test` with the SDK fallback.
+- `.gitignore`: `.build/`, `build/`, `vendor/`, `web/node_modules/`, `Resources/web/vs/`, `Resources/fonts/`, `build.log`.
+- `main.swift` + `AppDelegate`: a 1440×900 window titled "Kunj Workspace", `titlebarAppearsTransparent`, `.fullSizeContentView`, `titleVisibility = .hidden`; `MainWindowController` lays out three empty regions with the token colours: sidebar 272 wide in `side` over an `NSVisualEffectView(.sidebar)`, a 52 px header strip, a left column and a right column separated by 1 px `border` lines, a 28 px status bar. `--screenshot <path>` writes a PNG of the window after the first layout and quits (snapshot code from `spikes/native-ide/Sources/NativeIDESpike/Workspace.swift`).
+
+- [ ] **Step 1: Write the failing tokens test**
+
+```swift
+func testTokensMatchDesignJSON() throws {
+    // ../../docs/workspace-app/design/tokens.json relative to #filePath
+    let json = try JSONSerialization.jsonObject(with: Data(contentsOf: tokensURL)) as! [String: Any]
+    let themes = json["themes"] as! [String: [String: String]]
+    for t in DesignTokens.themes { XCTAssertEqual(Mirror(reflecting: t).children.filter { $0.label != "name" }.map { ($0.label!, $0.value as! String) }.sorted { $0.0 < $1.0 }, themes[t.name]!.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }) }
+    XCTAssertEqual(DesignTokens.Layout.sidebarWidth, 272); XCTAssertEqual(DesignTokens.Layout.changesFileListWidth, 196)
+}
+func testParseHex() { XCTAssertEqual(parseHex("#1a1816"), RGBA(r: 26/255, g: 24/255, b: 22/255, a: 1)); XCTAssertNil(parseHex("nope")) }
+```
+
+- [ ] **Step 2: Run it to see it fail**
+
+Run: `cd workspace-app && scripts/test.sh`
+Expected: build failure (no `DesignTokens`).
+
+- [ ] **Step 3: Write `gen-tokens.js`, run it, write `HexColor.swift`, the package, the scripts and the skeleton app**
+
+Copy `prepare-swiftterm.sh` and `copy-monaco.js` from the spike; `web/package.json` pins `monaco-editor` `0.57.0`.
+
+- [ ] **Step 4: Run the tests and build the app**
+
+Run: `scripts/test.sh && scripts/bundle.sh && "build/Kunj Workspace.app/Contents/MacOS/KunjWorkspace" --screenshot /tmp/ws-skeleton.png`
+Expected: PASS; the PNG shows the three regions in the warm colours; `fc-list | grep -i jetbrains` is not needed: `NSFont(name: "JetBrainsMono-Regular", size: 12)` is non-nil in the app (log it at startup).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add workspace-app aj-log.md
-git commit -m "workspace-app: Electron scaffold"
+git add workspace-app aj-log.md && git commit -m "workspace-app: Swift package, design tokens and build scripts" && git push
 ```
 
 ---
 
-### Task 2: `KunjCli` service
+### Task 3: `KunjCLI` with the login-shell PATH and the version check
 
 **Files:**
-- Create: `workspace-app/src/main/kunj/loginPath.ts`, `workspace-app/src/main/kunj/cli.ts`, `workspace-app/src/main/kunj/version.ts`
-- Test: `workspace-app/src/main/kunj/version.test.ts`, `workspace-app/src/main/kunj/cli.test.ts`, `workspace-app/test/fixtures/fake-kunj` (executable shell script) and `workspace-app/test/fixtures/responses/*.json`
+- Create: `workspace-app/Sources/KunjWorkspaceCore/CLI/Version.swift`, `workspace-app/Sources/KunjWorkspaceCore/CLI/ShellEnvironment.swift`, `workspace-app/Sources/KunjWorkspaceCore/CLI/KunjCLI.swift`, `workspace-app/Tests/Fixtures/fake-kunj` (executable `sh`), `workspace-app/Tests/Fixtures/responses/version.txt`, `workspace-app/Tests/KunjWorkspaceCoreTests/Support.swift` (fixture paths, a `KunjCLI` pointed at `fake-kunj`)
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/VersionTests.swift`, `workspace-app/Tests/KunjWorkspaceCoreTests/KunjCLITests.swift`
 
 **Interfaces:**
-- Produces:
-  - `loginPath(): Promise<string>` — runs `${SHELL || '/bin/zsh'} -l -i -c 'printf "<KUNJ-PATH>%s<KUNJ-PATH>" "$PATH"'` (the same trick as `macos-app/Sources/KunjBar/CLI/KunjCLI.swift`) and returns the PATH between the markers; falls back to `process.env.PATH` on error.
-  - `version.ts`: `parseVersion(s: string): [number, number, number] | null`, `MIN_KUNJ_VERSION`, `checkVersion(v: string): { ok: boolean; dev: boolean }` (`dev` when `v === '1.0.0'`, then `ok` is true).
-  - `cli.ts`: `class KunjCliError extends Error { code: 'not-found' | 'too-old' | 'command-failed' | 'bad-json'; args: string[]; kunjCode?: string }`; `class KunjCli { static discover(opts?: { path?: string; binary?: string }): Promise<KunjCli>; readonly binary: string; readonly version: string; readonly dev: boolean; readonly env: NodeJS.ProcessEnv /* PATH set to the login path */; run<T>(args: string[], opts: { cwd: string; stdin?: string }): Promise<T> /* appends --json, parses stdout; a parsed { error } → KunjCliError('command-failed', kunjCode = error.code) */; spawnSpec(args: string[], cwd: string): { command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } /* for PTYs and the events stream */ }`.
-- `test/fixtures/fake-kunj`: a `sh` script that prints `1.2.3` for `-V`, and otherwise `cat`s `responses/<args joined by _ with / replaced by -_>.json`, exiting 1 with `{"error":{"code":"fixture-missing","message":…}}` when there is no fixture. Fixtures added by later tasks.
-
-- [ ] **Step 1: Write the failing version tests**
-
-```ts
-test.each([['1.2.3', [1,2,3]], ['v1.2.3', [1,2,3]], ['garbage', null]])('parseVersion %s', …);
-test('1.0.0 is a dev build and accepted', () => expect(checkVersion('1.0.0')).toEqual({ ok: true, dev: true }));
-test('below the minimum is rejected', …);  // use a MIN_KUNJ_VERSION override argument: checkVersion(v, min)
-```
-
-- [ ] **Step 2: Run, implement `version.ts`, run**
-
-Run: `npm test -- version`
-Expected: FAIL then PASS.
-
-- [ ] **Step 3: Write the failing cli tests**
-
-`cli.test.ts` with `PATH` pointing at `test/fixtures` (the script is named `kunj` there, or pass `binary`):
-
-```ts
-test('discover finds kunj and reads its version', …)                 // version '1.2.3', dev false
-test('discover fails with not-found when kunj is absent', …)         // PATH = empty dir → KunjCliError code 'not-found'
-test('run parses JSON and appends --json', …)                        // fixture repos.json → { repos: [...] }
-test('run turns a kunj error document into command-failed', …)       // fixture-missing → code 'command-failed', kunjCode 'fixture-missing'
-test('run rejects non-JSON stdout with bad-json', …)                 // fixture prints "not json"
-test('spawnSpec carries the login PATH and cwd', …)
-```
-
-- [ ] **Step 4: Run, implement `loginPath.ts` and `cli.ts`, run**
-
-`run` uses `execFile` with `maxBuffer: 16 MiB`, `stdin` written then ended when given, otherwise `'ignore'`.
-
-Run: `npm test -- cli`
-Expected: PASS.
-
-- [ ] **Step 5: Wire discovery into main**
-
-In `src/main/index.ts` discover the CLI at startup; expose `kunj:status` → `{ binary, version, dev } | { error: { code, message } }` over IPC; `App.tsx` status bar shows `kunj 1.2.3` or the error with `npm install -g kunj` as the hint.
-
-Run: `npm run lint && npm run build`
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add workspace-app aj-log.md
-git commit -m "workspace-app: KunjCli service with login-shell PATH and version check"
-```
-
----
-
-### Task 3: Environment model
-
-**Files:**
-- Create: `workspace-app/src/shared/environment.ts`, `workspace-app/src/main/environments.ts`
-- Modify: `workspace-app/src/shared/ipc.ts`, `workspace-app/src/preload/index.ts`, `workspace-app/src/main/index.ts`
-- Test: `workspace-app/src/main/environments.test.ts`, fixtures `repos.json`, `worktree_list.json`, `ct_list.json`, `ct_list_error.json`
-
-**Interfaces:**
-- Consumes: `KunjCli.run` (Task 2); types `ReposJson`, `WorktreeListJson`, `ContainerListJson`, `WorktreeJson`, `ContainerJson` from `kunj`.
-- Produces (`src/shared/environment.ts`):
-  - `Environment { id: string /* `${repo.name}|${kind}|${branch}` */; kind: 'worktree' | 'container'; repo: { name: string; root: string }; branch: string; path: string | null; state: 'running' | 'stopped' | 'ok' | 'missing'; isMain: boolean; agent: boolean | null; dirty: boolean | null; ahead: number | null; behind: number | null; pullRequest: { number: number; url: string; state: string } | null; ports: Array<{ container: number; host: number; kind: 'publish' | 'forward' }>; containerName: string | null }`
-  - `RepoEnvironments { repo: { name: string; root: string; bare: boolean }; backend: 'docker' | 'unavailable'; environments: Environment[] }`
-  - `main/environments.ts`: `listEnvironments(cli: KunjCli, opts?: { repoRoot?: string }): Promise<RepoEnvironments[]>` — `repos --json` filtered to `!hidden && exists`; per repo, in parallel, `worktree list --json` and `ct list --json` with `cwd: repo.root`; a failing `ct list` → `backend: 'unavailable'`, no container environments; a failing `worktree list` → that repo reported with `environments: []` and the error logged; `toEnvironments(repo, worktrees: WorktreeListJson, containers: ContainerListJson | null): Environment[]` (pure; a detached or branchless worktree gets `branch = wt.name` and `kind 'worktree'`, state `missing` when `!exists`).
-- IPC: `environments:list` → `RepoEnvironments[]`.
+- `Version.swift`: `public struct SemVer: Comparable { major, minor, patch: Int; public init?(_ s: String) }` (accepts `v1.2.3`, `1.2.3`, ignores a `-pre` suffix); `public let MIN_KUNJ_VERSION = SemVer("1.4.0")!`; `public struct VersionCheck: Equatable { ok: Bool; dev: Bool }`; `public func checkVersion(_ s: String, min: SemVer = MIN_KUNJ_VERSION) -> VersionCheck` (`1.0.0` → `ok: true, dev: true`; unparsable → `ok: false`).
+- `ShellEnvironment.swift`: `public enum ShellEnvironment { public static func loginPath(timeout: TimeInterval = 5) async -> String` (the `macos-app` marker trick, fallback `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin` appended); `public static func terminalEnvironment(path: String) -> [String: String]` (Global Constraints) }`.
+- `KunjCLI.swift`:
+  - `public struct KunjCLIError: Error, Equatable { public enum Code: String { case notFound = "not-found", tooOld = "too-old", commandFailed = "command-failed", badJSON = "bad-json" }; public let code: Code; public let message: String; public let kunjCode: String? }`
+  - `public struct KunjStatus: Equatable { public let binary: String; public let version: String; public let dev: Bool }`
+  - `public final class KunjCLI: @unchecked Sendable { public init(command: String, path: String); public static func discover(command: String, path: String) async throws -> (KunjCLI, KunjStatus)` (`kunj -V` → version; `ENOENT`/exit 127 → `notFound`; below min → `tooOld`); `public func run<T: Decodable>(_ args: [String], cwd: String, stdin: Data? = nil, timeout: TimeInterval = 120) async throws -> T` (appends `--json`, decodes; a `{"error": …}` document → `commandFailed` with `kunjCode` from `error.code` when present; non-JSON stdout → `badJSON`; the first `{` onwards is tried, as `macos-app` does); `public func runRaw(_ args: [String], cwd: String, stdin: Data?, timeout: TimeInterval) async throws -> (stdout: Data, stderr: String, exit: Int32)`; `public func spawnSpec(_ args: [String], cwd: String) -> SpawnSpec` }`
+  - `public struct SpawnSpec: Equatable { public let executable: String /* "/usr/bin/env" */; public let arguments: [String] /* [command parts…] + args */; public let cwd: String; public let environment: [String: String] }`
+  - `command` may be `"node /path/dist/index.js"` (split on spaces, double quotes honoured, as `macos-app`'s `splitArguments`).
+- `fake-kunj`: `-V` prints `responses/version.txt`; otherwise `cat`s `responses/<args joined by "_" with "/" → "-" and leading "--" stripped>.json` (e.g. `worktree list --json` → `worktree_list.json`), exit 1 with `{"error":{"code":"fixture-missing","message":"<name>"}}` when absent; `FAKE_KUNJ_STDOUT=<text>` overrides stdout (for the bad-JSON test).
 
 - [ ] **Step 1: Write the failing tests**
 
-```ts
-test('toEnvironments merges worktrees and containers of one repo', …)   // 2 worktrees + 1 container (same branch as one worktree) → 3 environments, ids distinct, container one has state 'running', ports from the fixture, agent from agent.running
-test('a worktree agent comes from worktree agent.running', …)
-test('container listing failure marks the backend unavailable', …)     // fake-kunj fixture ct_list_error.json → backend 'unavailable', worktree environments still present
-test('hidden and missing repos are skipped', …)
-test('branch with a slash makes a stable id', …)                        // 'feature/x' → id 'app|worktree|feature/x'
+```swift
+// VersionTests
+func testParse() { XCTAssertEqual(SemVer("v1.2.3"), SemVer("1.2.3")); XCTAssertNil(SemVer("garbage")) }
+func testDevBuildAccepted() { XCTAssertEqual(checkVersion("1.0.0"), VersionCheck(ok: true, dev: true)) }
+func testTooOld() { XCTAssertEqual(checkVersion("1.3.9", min: SemVer("1.4.0")!), VersionCheck(ok: false, dev: false)) }
+// KunjCLITests
+func testDiscoverReadsVersion() async throws { … version "1.4.2", dev false }
+func testDiscoverNotFound() async { … command "kunj", path: an empty temp dir → code .notFound }
+func testDiscoverTooOld() async { … version.txt overridden by env FAKE_KUNJ_VERSION=1.3.0 → .tooOld }
+func testRunDecodesAndAppendsJson() async throws { struct R: Decodable { let repos: [String] }; … ["repos"] → fixture repos.json }
+func testRunTurnsErrorDocumentIntoCommandFailed() async { … ["nope"] → .commandFailed, kunjCode "fixture-missing" }
+func testRunRejectsNonJson() async { … FAKE_KUNJ_STDOUT="not json" → .badJSON }
+func testSpawnSpecCarriesPathAndCwd() { … environment["PATH"] == path, cwd set, arguments.first == "kunj" }
 ```
 
 - [ ] **Step 2: Run, implement, run**
 
-Run: `npm test -- environments`
-Expected: FAIL then PASS.
+Run: `scripts/test.sh`
+Expected: FAIL then PASS. `runRaw` reads stdout and stderr on background file handles, writes `stdin` then closes it, kills the process at `timeout`.
 
-- [ ] **Step 3: Wire IPC and show a raw list**
+- [ ] **Step 3: Wire discovery into the app**
 
-Preload gains `listEnvironments()`; `App.tsx` calls it on mount and renders repo names with environment branches as plain text (styling is Task 5).
+`AppDelegate` resolves `loginPath()` then `KunjCLI.discover(command: UserDefaults "kunjCommand" ?? "kunj", path:)` off the main thread; the status bar's right side shows `kunj 1.4.2` (`kunj 1.0.0 dev` for a dev build) or the error (`kunj not found on your PATH: npm install -g kunj`).
 
-Run: `npm run lint && npm run build`; `npm run dev` shows your repos.
+Run: `scripts/bundle.sh && open "build/Kunj Workspace.app"`
+Expected: the status bar shows `kunj 1.0.0 dev` on this machine.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add workspace-app aj-log.md
-git commit -m "workspace-app: environment model from repos, worktree list and ct list"
+git add workspace-app aj-log.md && git commit -m "workspace-app: KunjCLI with login-shell PATH and version check" && git push
 ```
 
 ---
 
-### Task 4: Event-driven refresh
+### Task 4: JSON mirrors and the environment model
 
 **Files:**
-- Create: `workspace-app/src/main/events.ts`, `workspace-app/src/main/store.ts`
-- Modify: `workspace-app/src/shared/ipc.ts`, `workspace-app/src/preload/index.ts`, `workspace-app/src/main/index.ts`
-- Test: `workspace-app/src/main/events.test.ts`, `workspace-app/src/main/store.test.ts`
+- Create: `workspace-app/Sources/KunjWorkspaceCore/JSON/KunjJSON.swift`, `workspace-app/Sources/KunjWorkspaceCore/Model/Environment.swift`, `workspace-app/Sources/KunjWorkspaceCore/Model/EnvironmentList.swift`, fixtures `Tests/Fixtures/responses/repos.json`, `worktree_list.json`, `ct_list.json`, `ct_list_error.json` (realistic output copied from `node dist/index.js … --json` on this machine, with the mockup's branch names)
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/EnvironmentTests.swift`
 
 **Interfaces:**
-- Consumes: `EventJson` from `kunj`; `KunjCli.spawnSpec` (Task 2); `listEnvironments` (Task 3).
-- Produces:
-  - `events.ts`: `class EventStream { constructor(cli: KunjCli, onEvent: (e: EventJson) => void, opts?: { backoffMs?: [number, number] /* [1000, 30000] */ }); start(): void; stop(): Promise<void> /* closes the child's stdin, waits up to 2 s, then SIGTERM */ }` — spawns `kunj events --json` with `cwd: os.homedir()`, splits stdout on newlines, ignores unparsable lines, restarts with exponential backoff when the child exits while started; `parseEventLines(buffer: string): { events: EventJson[]; rest: string }`.
-  - `store.ts`: `class EnvironmentStore { constructor(cli: KunjCli, opts?: { coalesceMs?: number /* 300 */ }); get(): RepoEnvironments[]; refreshAll(): Promise<void>; refreshRepo(root: string): Promise<void>; onChange(fn: (all: RepoEnvironments[]) => void): () => void; handleEvent(e: EventJson): void }` — `git`/`sessions`/`container` events with a `repo` refresh that repo (coalesced per repo); `repos` refreshes all; `agent` and `forwards` refresh all; `backend` events refresh all once.
-- IPC: main pushes `environments:changed` with the full `RepoEnvironments[]`; `environments:refresh` → `refreshAll()`.
+- `KunjJSON.swift` (all `public struct … : Decodable`, optional where the TypeScript type is optional or nullable, unknown keys ignored): `ReposJson { repos: [KnownRepo] }`, `KnownRepo { root, gitCommonDir, name: String; bare: Bool; hidden: Bool?; exists: Bool; lastSeen: String }`, `WorktreeListJson { repoRoot: String; worktrees: [WorktreeJson] }`, `WorktreeJson { path, name: String; head, branch: String?; detached, bare, isMain, exists, isCurrent: Bool; status: WorktreeStatus?; pullRequest: PullRequestInfo?; sessions: [WorktreeSession]; agent: AgentState?; openCount: Int; changedFiles: Int? }`, `WorktreeStatus { dirty: Bool; changedFiles: Int; ahead, behind: Int?; upstream: String? }`, `PullRequestInfo { provider: String; number: Int; title, state, url: String; draft: Bool; baseBranch: String?; headBranch: String; reviewDecision: String?; checks: String?; updatedAt: String? }`, `WorktreeSession { id, path: String; pid: Int; editor: String; label: String? }`, `AgentState { running: Bool?; session: String?; state: String? }`, `ContainerListJson { repo: String; backend: Backend; containers: [ContainerJson] }`, `ContainerJson { branch, name, id, state, image, createdAt, firewall, status: String; ports: [ContainerPortJson]; agent: AgentState; workspace: ContainerWorkspace; services: [ServiceState]; blueprint: Blueprint? }`, `ContainerPortJson { container, host: Int; kind: String; service: String? }`, `ContainerWorkspace { head: String?; ahead: Int?; dirty: Bool? }`, `ServiceState { name, state: String; port: Int? }`, `FileReadJson { path, content: String }`, `FileWriteJson { success: Bool; path: String }`, `SuccessJson { success: Bool }`, `ErrorJson` (decodes both `{ "error": "msg" }` and `{ "error": { code, message } }` into `code: String?, message: String`).
+- `Environment.swift`:
+  - `public enum EnvironmentKind: String, Codable { case worktree, container }`
+  - `public enum AgentActivity: Equatable { case none, running, waiting, unknown }`; `public enum DotColor: Equatable { case green, amber, idle }`; `public enum EnvState: Equatable { case running, stopped, ok, missing }`
+  - `public struct PortInfo: Equatable { container, host: Int; kind: String; service: String? }`
+  - `public struct Environment: Equatable, Identifiable { public let id: String; kind; repo: RepoRef; branch: String; path: String? /* worktree path */; containerName: String?; state: EnvState /* .running, .stopped, .ok, .missing */; agent: AgentActivity; agentSession: String?; dirty: Bool?; changedFiles: Int?; ahead, behind: Int?; upstream: String?; pullRequest: PullRequestInfo?; ports: [PortInfo]; services: [ServiceState]; createdAt: Date?; exists: Bool; isMain: Bool }`; `public struct RepoRef: Equatable, Hashable { name, root: String; bare: Bool }`
+  - `public static func environmentId(repo: String, kind: EnvironmentKind, branch: String) -> String` → `"\(repo)|\(kind.rawValue)|\(branch)"`
+  - `public var statusVerb: String` (spec order: `Missing`, `Stopped`, `Waiting for input`, `Running`, `Merged #N`, `PR #N open` (`PR #N draft` when draft), `N changed files` (`1 changed file`), `↑N unpushed`, `Clean`); `public var dot: DotColor` (`.amber` waiting, `.green` running, `.idle` otherwise)
+  - `public var metaLine: [String]` → `[repo.name + " / " + branch, kind.rawValue, "↑3 ↓1 from main"?, "#412 open ✓"?, ":3000"…]` (empty parts omitted; checks `✓` success, `✗` failure, `…` pending)
+- `EnvironmentList.swift`: `public struct RepoEnvironments: Equatable { repo: RepoRef; backend: BackendState /* .docker, .unavailable(String) */; environments: [Environment] }`; `public func mergeEnvironments(repo: RepoRef, worktrees: WorktreeListJson?, containers: Result<ContainerListJson, KunjCLIError>) -> RepoEnvironments` (worktrees that are `bare` or detached skipped; order: worktrees by branch, then containers); `public func listEnvironments(cli: KunjCLI) async -> ([RepoEnvironments], KunjCLIError?)` (repos → per repo in a task group; hidden or non-existing repos skipped; a `worktree list` failure drops that repo with the error logged).
+- `Environment.lastActivity` is not here (Task 8).
 
 - [ ] **Step 1: Write the failing tests**
 
-```ts
-test('parseEventLines splits complete lines and keeps the remainder', …)
-test('EventStream restarts the child after exit with backoff', …)       // fake-kunj 'events' fixture prints two lines and exits; expect 2 events, then a second spawn
-test('stop closes stdin and resolves', …)
-test('store coalesces three git events for one repo into one refresh', …)   // stub listEnvironments; advance fake timers
-test('store refreshes everything on a repos event', …)
+```swift
+func testMergeWorktreesAndContainers() { … 3 worktrees + 1 container on one of the branches → 4 environments; container id "kunj|container|feat/llm-insights"; its state .running; ports [PortInfo(3000, 3000, "forward", nil)] }
+func testStatusVerbOrder() { … waiting beats running beats PR beats dirty; merged PR → "Merged #398"; dirty 3 → "3 changed files"; ahead 2 clean → "↑2 unpushed"; nothing → "Clean" }
+func testMissingWorktree() { … exists false → .missing, "Missing" }
+func testContainerListingFails() { … .failure → backend .unavailable, worktree rows kept }
+func testSlashId() { XCTAssertEqual(environmentId(repo: "app", kind: .worktree, branch: "feature/x"), "app|worktree|feature/x") }
+func testDecodeFixtures() throws { … all four fixtures decode; ErrorJson decodes both shapes }
 ```
 
 - [ ] **Step 2: Run, implement, run**
 
-Run: `npm test -- events store`
+Run: `scripts/test.sh`
 Expected: PASS.
 
-- [ ] **Step 3: Wire into main**
-
-`index.ts` creates the store, starts the stream after discovery, broadcasts `environments:changed` to all windows on change, stops the stream on `before-quit`. Renderer subscribes via `window.kunj.onEnvironmentsChanged(cb)` (preload `ipcRenderer.on`, returns an unsubscribe).
-
-Run: `npm run lint && npm run build`; in `npm run dev`, `git commit --allow-empty` in a repo updates ahead counts without a manual refresh.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add workspace-app aj-log.md
-git commit -m "workspace-app: refresh environments from kunj events"
+git add workspace-app aj-log.md && git commit -m "workspace-app: JSON mirrors and environment model" && git push
 ```
 
 ---
 
-### Task 5: Environment list and header
+### Task 5: Event stream and the environment store
 
 **Files:**
-- Create: `workspace-app/src/renderer/state/AppState.tsx` (React context: environments, selected id, kunj status), `workspace-app/src/renderer/components/EnvironmentList.tsx`, `workspace-app/src/renderer/components/EnvironmentHeader.tsx`, `workspace-app/src/renderer/components/StatusBar.tsx`, `workspace-app/src/renderer/styles.css`
-- Modify: `workspace-app/src/renderer/App.tsx`
-- Test: `workspace-app/src/renderer/components/EnvironmentList.test.tsx`
+- Create: `workspace-app/Sources/KunjWorkspaceCore/CLI/EventStream.swift`, `workspace-app/Sources/KunjWorkspaceCore/Model/EnvironmentStore.swift`, fixture `Tests/Fixtures/responses/events.ndjson` (a `hello`, a `git`, a `container`, a `backend`), `fake-kunj` `events` case: prints the fixture line by line with 20 ms gaps and then waits for stdin EOF unless `FAKE_KUNJ_EVENTS_EXIT=1`
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/EventStreamTests.swift`, `workspace-app/Tests/KunjWorkspaceCoreTests/EnvironmentStoreTests.swift`
 
 **Interfaces:**
-- Consumes: `RepoEnvironments`, `Environment` (Task 3).
-- Produces: `EnvironmentList({ repos, selectedId, onSelect })` grouped by repo with per row: kind glyph (`⌂` worktree, `▣` container), branch, running dot (green when `state === 'running'`, grey when stopped), agent dot (blue when `agent === true`), `dirty` marker, `+ahead/-behind`, `#PR`, first port, a repo header with a "Docker unavailable" badge when `backend === 'unavailable'`; `EnvironmentHeader({ env, actions })` with branch, kind, state, PR link and the action buttons wired in Task 9 (disabled until then); `StatusBar` with the kunj version or error. Empty state: "No repositories yet. Run kunj in one." Error state: the kunj status error with its hint.
+- `EventStream.swift`: `public enum KunjEvent: Equatable { case hello(version: String, repos: Int); case git(repoRoot: String?); case registry(kind: String, repoRoot: String?); case container(repoRoot: String?, branch: String?, container: String, action: String); case agent(session: String, running: Bool, state: String?); case backend(available: Bool, message: String?); case error(code: String?, message: String) }`; `public func parseEventLine(_ line: String) -> KunjEvent?` (nil for a malformed line); `public final class EventStream { public init(cli: KunjCLI, onEvent: @escaping @Sendable (KunjEvent) -> Void, backoff: ClosedRange<TimeInterval> = 1...30); public func start(); public func stop() async` (closes the child's stdin, waits up to 2 s, then SIGTERM); restarts after exit with doubling backoff while started; `public private(set) var restarts: Int` }`.
+- `EnvironmentStore.swift`: `@MainActor public final class EnvironmentStore { public init(cli: KunjCLI, coalesceMs: Int = 300, lister: @escaping (KunjCLI) async -> ([RepoEnvironments], KunjCLIError?) = listEnvironments); public private(set) var repos: [RepoEnvironments]; public private(set) var lastError: KunjCLIError?; public var onChange: (() -> Void)?; public func refreshAll() async; public func refreshRepo(root: String) async; public func handle(_ event: KunjEvent)` (git/container/agent → the repo (agent: all, the session names no repo), registry/backend/hello → all; coalesced per key with a timer) ; `public func environment(id: String) -> Environment?`; `public func start(events: EventStream)` }`.
 
-- [ ] **Step 1: Write the failing render test** (vitest + jsdom + testing-library)
+- [ ] **Step 1: Write the failing tests**
 
-```ts
-test('groups environments by repo and marks running agents', …)   // two repos; one row has the agent dot (query by aria-label "agent running"); the unavailable repo shows the badge
-test('clicking a row selects it', …)
-test('renders the kunj error state', …)
+```swift
+func testParseEventLines() { … hello, git with repo, container with null repo, agent with state, backend, malformed → nil }
+func testStreamDeliversAndRestarts() async { … FAKE_KUNJ_EVENTS_EXIT=1, backoff 0.05...0.1: ≥ 4 events, restarts ≥ 1 within 1 s }
+func testStopClosesStdinAndWaits() async { … start, stop(): child pid gone (kill(pid, 0) == -1) }
+func testStoreCoalescesGitEvents() async { … lister counting calls; three .git for one root within 20 ms, coalesceMs 50 → 1 call }
+func testBackendEventRefreshesAll() async { … }
+func testStoreKeepsWorktreesWhenContainersFail() async { … lister returns backend .unavailable → environments non-empty }
 ```
 
 - [ ] **Step 2: Run, implement, run**
 
-Run: `npm test -- EnvironmentList`
-Expected: PASS. Use plain CSS (dark theme, system font, 13px), no UI library.
+Run: `scripts/test.sh`
+Expected: PASS.
 
-- [ ] **Step 3: Build and look**
+- [ ] **Step 3: Wire into the app**
 
-Run: `npm run lint && npm run build`; `npm run dev`: list on the left, selecting a row fills the header.
+`AppDelegate` creates the store after discovery, `refreshAll()`, starts the stream, stops it in `applicationShouldTerminate` (returning `.terminateLater` until `stop()` resolves). The status bar's left side shows `N environments · M agents running` for now.
+
+Run: `scripts/bundle.sh && open "build/Kunj Workspace.app"`; `git commit --allow-empty -m x && git reset HEAD~1` in this repo updates the count within a second; `pgrep -f "kunj events"` is empty after quitting.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add workspace-app aj-log.md
-git commit -m "workspace-app: environment list and header"
+git add workspace-app aj-log.md && git commit -m "workspace-app: kunj events stream and environment store" && git push
 ```
 
 ---
 
-### Task 6: Terminals and agent tabs
+### Task 6: Sidebar, header, status bar and window chrome to the design
 
 **Files:**
-- Create: `workspace-app/src/main/pty.ts`, `workspace-app/src/main/terminalSpec.ts`, `workspace-app/src/renderer/components/TerminalPane.tsx`, `workspace-app/src/renderer/components/TabStrip.tsx`, `workspace-app/src/renderer/components/PaneArea.tsx`, `workspace-app/src/renderer/state/tabs.ts`
-- Modify: `workspace-app/src/shared/ipc.ts`, `workspace-app/src/preload/index.ts`, `workspace-app/src/main/index.ts`, `workspace-app/src/renderer/App.tsx`, `workspace-app/package.json` (`node-pty`, `@xterm/*`)
-- Test: `workspace-app/src/main/pty.test.ts`, `workspace-app/src/main/terminalSpec.test.ts`
+- Create: `workspace-app/Sources/KunjWorkspaceCore/Design/RelativeTime.swift`, `workspace-app/Sources/KunjWorkspace/Theme/Theme.swift`, `workspace-app/Sources/KunjWorkspace/Views/Controls.swift`, `workspace-app/Sources/KunjWorkspace/Views/SidebarView.swift`, `workspace-app/Sources/KunjWorkspace/Views/SidebarRowView.swift`, `workspace-app/Sources/KunjWorkspace/Views/HeaderView.swift`, `workspace-app/Sources/KunjWorkspace/Views/StatusBarView.swift`, `workspace-app/Sources/KunjWorkspace/Demo/DemoData.swift` (the mockup's environments, built from `Environment` values)
+- Modify: `workspace-app/Sources/KunjWorkspace/Views/MainWindowController.swift`, `AppDelegate.swift`
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/RelativeTimeTests.swift`
 
 **Interfaces:**
-- Consumes: `KunjCli.spawnSpec` (Task 2), `Environment` (Task 3).
-- Produces:
-  - `terminalSpec.ts`: `TabKind = 'shell' | 'agent' | 'action'`; `terminalSpec(cli: KunjCli, env: Environment, kind: TabKind, action?: string[]): { command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; title: string } | { refused: string }` — worktree shell: `${SHELL || '/bin/zsh'} -l` in `env.path`; worktree agent: `kunj agent <branch>` in `env.path`; container shell/agent: `kunj ct shell|agent <branch>` with `cwd: env.repo.root`; action: `kunj <action…>` with `cwd: env.repo.root`; refused when a worktree is `missing` ("worktree directory is gone") or a container is not `running` for shell/agent ("container is stopped; start it first").
-  - `pty.ts`: `class PtyManager { open(spec: { id: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; cols: number; rows: number }, handlers: { onData(d: string): void; onExit(code: number): void }): void; write(id, data): void; resize(id, cols, rows): void; close(id): void; closeAll(): void; has(id): boolean }` over `node-pty`.
-  - Tab ids: `${env.id}#${kind}#${n}`; the renderer keeps `tabs: Record<envId, { tabs: Tab[]; active: string | null }>` in `state/tabs.ts`.
-- IPC: `pty:open`, `pty:write`, `pty:resize`, `pty:close` (renderer → main); `pty:data`, `pty:exit` (main → renderer, payload `{ id, data | code }`).
-- Renderer: `TerminalPane` mounts one `Terminal` (xterm) with the WebGL addon (fall back to the default renderer when `loadAddon` throws), the fit addon and a `ResizeObserver`; `PaneArea` keeps a `TerminalPane` mounted for every open tab of every environment and shows only the active tab of the selected environment (`display: none` for the rest), so background environments keep their scrollback; `TabStrip` shows the selected environment's tabs with `+ Shell` and `+ Agent` buttons and a close button per tab.
+- `RelativeTime.swift`: `public func relativeTime(_ date: Date, now: Date = Date()) -> String` → `now` (< 45 s), `2m`, `1h`, `3d`, `2w`, `3mo`.
+- `Theme.swift`: `struct Theme { let tokens: ThemeTokens; func color(_ key: KeyPath<ThemeTokens, String>) -> NSColor; static func sans(_ size: CGFloat, weight: NSFont.Weight) -> NSFont; static func mono(_ size: CGFloat, weight: NSFont.Weight) -> NSFont }` (Inter / JetBrains Mono by PostScript name, else `.systemFont` / `.monospacedSystemFont`); `enum ThemeChoice: String { auto, warm, light, graphite }`; `final class ThemeManager { static let shared; var choice: ThemeChoice (UserDefaults "theme"); var current: Theme; var onChange: [(Theme) -> Void]; observes NSApp.effectiveAppearance for `auto` }`.
+- `Controls.swift`: `final class OutlinedButton: NSButton` (30 px tall, `borderStrong` 1 px, radius 5, label sans 12.5 + hint mono 10.5 in `muted`), `final class FilledButton` (`primaryBg`/`primaryFg`, hint `primaryHint`), `final class PillView` (26 px, `raised` when active), `final class DotView` (7 px circle in `green`/`amber`/`idle`), `final class HairlineView` (1 px `border`), `final class SearchField` (30 px, `⌘K` badge).
+- `SidebarView`: an `NSOutlineView`-free `NSTableView` with two row kinds: a group row (repo name in `muted` 11 px, count right) and `SidebarRowView` (`padding 9px 10px`, radius 6; dot · branch 13 px/500 in `text` · relative time mono 11 px `muted`; second line indented 15 px: `kind` mono 11 px `muted` · ` · ` `faintest` · status verb sans 11 px (`amber` for waiting, `muted` otherwise); selected: `raised` fill + `borderStrong` border; hover `raised` at 50 %). Top: 52 px traffic-light area, the search field (filters rows by branch/repo substring), bottom: `+ New session ⌘N` button (full width, outlined) and a line `N agents running · kunj 1.4.2`. API: `var repos: [RepoEnvironments]`, `var selectedId: String?`, `var onSelect: (String) -> Void`, `var lastActivity: (String) -> Date?`.
+- `HeaderView`: title 14 px/600 (the branch), meta line mono 11 px `muted` with ` · ` in `faintest` from `Environment.metaLine` (the PR part is a link in `link` opening `pullRequest.url`, ports are links opening `http://localhost:<host>`), actions right: `Shell ⌘T`, `Agent ⌘⇧A`, `Open in VS Code ⌘O` (outlined), `Create PR ⌘⇧P` (filled), `…` (outlined, 30×30). Callbacks `onAction: (HeaderAction) -> Void` with `enum HeaderAction { shell, agent, open, createPR, more(NSView) }`.
+- `StatusBarView`: left mono 11 px `muted`: dot + container name or worktree path · `up 2h 14m` (from `createdAt`) · services · forwards (`3000 → 3000`); right: agent state (`● agent waiting for input` in `amber`, `● agent running` in `green`) · `⌘1–N switch session` in `faintest`; a kunj error replaces the left side in `red`.
+- `MainWindowController`: `func render(repos:, selected:)`; when nothing is selected the right side shows "Select an environment" in `muted`; the Changes column shows its header bar placeholder (`Changes`) until Task 9; the left column shows the tab bar placeholder until Task 7.
+- `--demo`: the store is replaced by `DemoData.repos` (alertd-core with four rows and kunj with two, matching the mockup, the first selected); `--screenshot <png>` as in Task 2.
+
+- [ ] **Step 1: Write the failing `relativeTime` test and make it pass**
+
+```swift
+func testRelativeTime() { let now = Date(); XCTAssertEqual(relativeTime(now, now: now), "now"); XCTAssertEqual(relativeTime(now - 120, now: now), "2m"); XCTAssertEqual(relativeTime(now - 3600, now: now), "1h"); XCTAssertEqual(relativeTime(now - 3*86400, now: now), "3d") }
+```
+
+Run: `scripts/test.sh` → PASS.
+
+- [ ] **Step 2: Build the views, bound to the store (live) and to `DemoData` (`--demo`)**
+
+Fonts, sizes and colours exactly per `DESIGN.md` Layout; the window background is `bg` and the sidebar sits on an `NSVisualEffectView` (`.sidebar`, `.behindWindow`) with a `side` overlay at 85 % alpha.
+
+- [ ] **Step 3: Compare with the mockup**
+
+Run: `scripts/bundle.sh && "build/Kunj Workspace.app/Contents/MacOS/KunjWorkspace" --demo --screenshot /tmp/ws-demo.png`
+Expected: side by side with `docs/workspace-app/design/mockups/warm.png` the sidebar rows, header, actions and status bar match in position, size, colour and type; fix differences before moving on. Then `open "build/Kunj Workspace.app"`: the real repositories list, selecting a row fills the header, the PR link opens the browser.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add workspace-app aj-log.md && git commit -m "workspace-app: sidebar, header and status bar from the design" && git push
+```
+
+---
+
+### Task 7: Terminals, agent tabs and the tab bar
+
+**Files:**
+- Create: `workspace-app/Sources/KunjWorkspaceCore/Terminal/TerminalSpec.swift`, `workspace-app/Sources/KunjWorkspace/Terminal/TerminalTab.swift`, `workspace-app/Sources/KunjWorkspace/Views/TabBarView.swift`, `workspace-app/Sources/KunjWorkspace/Views/TerminalColumn.swift`, `workspace-app/Sources/KunjWorkspace/Model/TabRegistry.swift`
+- Modify: `MainWindowController.swift`, `AppDelegate.swift` (menu: Tabs ⌘⇧] ⌘⇧[ ⌘W, Environment ⌘T ⌘⇧A, Edit menu as in the spike), `HeaderView` wiring
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/TerminalSpecTests.swift`
+
+**Interfaces:**
+- `TerminalSpec.swift`: `public enum TabKind: String, Codable { case shell, agent, action, editor }`; `public struct TerminalSpec: Equatable { executable: String; arguments: [String]; cwd: String; environment: [String: String]; title: String; closeOnExitZero: Bool }`; `public enum TerminalSpecError: Error, Equatable { case worktreeMissing, containerStopped(String), noWorktree }`; `public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: [String] = [], shell: String, terminalEnv: [String: String]) throws -> TerminalSpec`: worktree shell → `shell -l` in `env.path` (`execName "-zsh"` handled by the app: `arguments` start with `-l`, the tab passes `execName`), worktree agent → `kunj agent <branch>` in the repo root, container shell → `kunj ct shell <branch>`, container agent → `kunj ct agent <branch>`, action → `kunj <action…>` with `closeOnExitZero` true and title `action.prefix(2).joined(" ")`; `.missing` → `worktreeMissing`, container not running → `containerStopped(branch)`; kunj runs through `/usr/bin/env` with the CLI's command parts.
+- `TerminalTab: LocalProcessTerminalView`: `let id: String /* "<envId>#<kind>#<n>" */`, `let kind`, `var title`, `var exited: Int32?`, `var onExit`, `var onTitle`, `var hidden: Bool` (when true `dataReceived` appends to a buffer flushed by a 250 ms timer, capped at 4 MB keeping the newest bytes; when set false the buffer is flushed and `setNeedsDisplay`); font JetBrains Mono 12.5, line spacing for 1.6, colours from the theme's `term*` (`nativeBackgroundColor`, `nativeForegroundColor`, `installColors` with ANSI 8 = `termMuted`, 4 and 12 = `termAccent`, 2 = `green`, 3 = `amber`, 1 = `red`), 16 px inset. Starts with `startProcess(executable:args:environment:execName:currentDirectory:)` from a `TerminalSpec`.
+- `TabRegistry` (`@MainActor`): `tabs(for envId) -> [TerminalTab]`, `active(for envId)`, `open(spec, env, kind) -> TerminalTab`, `close(tab)`, `closeAll()` (terminate every process; called from `applicationShouldTerminate`), `onChange`.
+- `TabBarView`: pills from the registry for the current environment (dot in `green` for a running agent tab, `amber` when the environment is waiting), right side `tmux <session> · <uptime>` when an agent tab exists (session from `env.agentSession`, uptime from the tab's start), a split button (disabled, v2) and `+` (opens a shell). `TerminalColumn` holds every tab view, shows the active one and sets `hidden` on the others.
+- Header `Shell`/`Agent` and ⌘T/⌘⇧A open tabs; `Agent` with an existing agent tab activates it. A `TerminalSpecError` shows as an `NSAlert`-free inline message in the column ("The worktree directory is missing" / "Start the container first").
 
 - [ ] **Step 1: Write the failing spec tests**
 
-```ts
-test.each([...])('terminalSpec for %s', …)   // worktree shell → $SHELL -l in path; worktree agent → kunj agent <branch>; container shell → kunj ct shell <branch> cwd repo root; container agent → kunj ct agent; missing worktree → refused; stopped container shell → refused; action ['ct','start','x'] → kunj ct start x
-test('terminal env has TERM, COLORTERM and the login PATH', …)
+```swift
+func testWorktreeShell() { … executable == "/bin/zsh", arguments == ["-l"], cwd == "/w/feat", environment["TERM"] == "xterm-256color" }
+func testWorktreeAgent() { … executable == "/usr/bin/env", arguments == ["kunj", "agent", "feature/x"], cwd == repo root }
+func testContainerShellAndAgent() { … ["kunj","ct","shell","feature/x"], ["kunj","ct","agent","feature/x"] }
+func testActionTab() { … ["kunj","ct","start","feature/x"], closeOnExitZero true, title "ct start" }
+func testMissingWorktreeRefused() { XCTAssertThrowsError(…) { XCTAssertEqual($0 as? TerminalSpecError, .worktreeMissing) } }
+func testStoppedContainerRefused() { … .containerStopped("feature/x") }
+func testEnvironmentIsCleaned() { … terminalEnv with NO_COLOR and CLAUDECODE set → absent in the spec; LANG present }
 ```
 
-- [ ] **Step 2: Run, implement `terminalSpec.ts`, run**
+- [ ] **Step 2: Run, implement, run**
 
-Run: `npm test -- terminalSpec`
-Expected: PASS.
+Run: `scripts/test.sh` → PASS.
 
-- [ ] **Step 3: Write the failing PtyManager test**
+- [ ] **Step 3: Build the tab bar, the column and the tabs; wire the actions and menus**
 
-```ts
-test('open streams data and reports the exit code', …)   // command 'sh', args ['-c', 'echo hi; exit 3'] → onData contains 'hi', onExit(3)
-test('closeAll kills every pty', …)                       // open 'sleep 30' twice, closeAll(), has() false for both, processes gone (check `ps -p <pid>` via the pty's pid)
+- [ ] **Step 4: Check it live**
+
+Run: `scripts/bundle.sh && open "build/Kunj Workspace.app"`. Open a shell in a worktree (`echo $TERM` prints `xterm-256color`, `claude` draws correctly); open Agent on `main`: `kunj agent` attaches to the tmux session started in Task 1 Step 5, both sides show the same pane; detach the CLI side (`Ctrl-b d`) and the app keeps it; quit the app: `pgrep -f "kunj agent"` is empty but `tmux ls` still lists the session. Switch environments and back: the shell's scrollback is intact. Run `yes | head -c 50000000` in a hidden tab while typing in a visible one: no visible lag.
+Then `--demo --screenshot /tmp/ws-tabs.png` and compare the tab bar with `warm.png`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add workspace-app aj-log.md && git commit -m "workspace-app: SwiftTerm terminals, agent tabs and the tab bar" && git push
 ```
 
-- [ ] **Step 4: Run, implement `pty.ts`, run**
+---
 
-Run: `npm test -- pty`
-Expected: PASS (node-pty rebuilt for Node by `install-app-deps` is fine for vitest; if the native module mismatches Electron vs Node, run vitest with `npx electron-rebuild -f -w node-pty` guidance in the README).
+### Task 8: Layout persistence and last activity
 
-- [ ] **Step 5: Wire IPC and the renderer**
+**Files:**
+- Create: `workspace-app/Sources/KunjWorkspaceCore/Layout/WorkspaceLayout.swift`
+- Modify: `TabRegistry.swift`, `MainWindowController.swift`, `SidebarView.swift`
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/WorkspaceLayoutTests.swift`
 
-Main: a `PtyManager` instance; handlers forward to `webContents.send`; `closeAll()` on `before-quit`. Renderer: `TabStrip`, `PaneArea`, `TerminalPane`; opening a tab asks main for `terminalSpec` via IPC `terminal:spec` (or main opens directly from `{ envId, kind }`: choose main-side `pty:openFor({ envId, kind, cols, rows })` so the renderer never sees commands); a refused spec shows the reason inline in the tab strip; on `pty:exit` the tab shows "exited (code)" and a close button.
+**Interfaces:**
+- `WorkspaceLayout.swift`: `public struct SavedTab: Codable, Equatable { kind: TabKind; title: String; path: String? }`; `public struct BranchLayout: Codable, Equatable { tabs: [SavedTab]; active: Int?; lastActivity: Date? }`; `public struct WorkspaceLayout: Codable, Equatable { public var branches: [String: BranchLayout] }` (encoded as the branch-keyed object of the spec); `public func layoutPath(repoName: String, home: String = NSHomeDirectory()) -> String` → `<home>/.kunj/<repoName>/workspace.json`; `public func loadLayout(path:) -> WorkspaceLayout` (`{}` for missing or corrupt); `public func saveLayout(_:path:) throws` (temp file + rename; parent directories created); `public final class LayoutStore { init(home:); func layout(repo: String) -> WorkspaceLayout; func update(repo: String, branch: String, _ f: (inout BranchLayout) -> Void)` (debounced 500 ms save) `; func flush()` }`.
+- The registry saves `shell`, `agent` and `editor` tabs (never `action`) and the active index on every change; selecting an environment for the first time in a session restores its tabs (agent tabs reattach, editor tabs reopen in Task 10, shells restart). `lastActivity` is bumped on a state-hash change in the store (`Environment` without `lastActivity` hashed) and when a tab of the environment receives input; the sidebar shows `relativeTime(lastActivity)`.
 
-Run: `npm run lint && npm run build`; `npm run dev`: open a shell in a worktree and a `kunj ct agent` in a running container; detach the CLI side (`Ctrl-b d` in a separate terminal) and see the app's tab keep the session; switch environments and back: scrollback intact.
+- [ ] **Step 1: Write the failing tests**
+
+```swift
+func testLoadMissingIsEmpty() { … }
+func testRoundTripSlashKey() throws { … branches["feature/x"] with two tabs and active 1 survives save + load }
+func testCorruptIsEmpty() throws { … "{ nope" → empty }
+func testSaveIsAtomic() throws { … no "*.tmp" left in the directory }
+func testLayoutPath() { XCTAssertEqual(layoutPath(repoName: "kunj", home: "/h"), "/h/.kunj/kunj/workspace.json") }
+```
+
+- [ ] **Step 2: Run, implement, run; wire restore and `lastActivity`**
+
+Run: `scripts/test.sh` → PASS; `scripts/bundle.sh && open …`: open two tabs, quit, relaunch, select the environment: both are back (the agent one attached to tmux); `cat ~/.kunj/kunj/workspace.json` shows them.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add workspace-app aj-log.md && git commit -m "workspace-app: persist open tabs and last activity per repo" && git push
+```
+
+---
+
+### Task 9: The Changes column with Monaco's diff editor
+
+**Files:**
+- Create: `workspace-app/Sources/KunjWorkspaceCore/Diff/DiffModel.swift`, `workspace-app/Sources/KunjWorkspaceCore/Diff/DiffService.swift`, `workspace-app/Sources/KunjWorkspaceCore/Diff/GitRunner.swift`, `workspace-app/Sources/KunjWorkspace/Editor/MonacoWebView.swift`, `workspace-app/Sources/KunjWorkspace/Views/ChangesColumn.swift`, `workspace-app/Sources/KunjWorkspace/Views/ChangedFileRowView.swift`, `workspace-app/Resources/web/index.html` (replaces the placeholder), `workspace-app/Resources/web/app.js`
+- Modify: `MainWindowController.swift`, `EnvironmentStore` (an `onRepoChanged(root)` hook so the column refreshes on `git` events of its repo)
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/DiffModelTests.swift`, `workspace-app/Tests/KunjWorkspaceCoreTests/DiffServiceTests.swift` (builds a temp git repository with `git init`, an `origin` remote pointing at a second temp repo, two commits, a modified, an added, a deleted and an untracked file)
+
+**Interfaces:**
+- `DiffModel.swift`: `public enum DiffScope: String, CaseIterable { case base, uncommitted, last; public var label: String /* "vs origin/<base>" filled by the column, "Uncommitted", "Last commit" */ }`; `public enum FileStatus: String { case added = "A", modified = "M", deleted = "D", renamed = "R" }`; `public struct ChangedFile: Equatable { path: String; oldPath: String?; status: FileStatus; added, deleted: Int /* nil → 0 for binary */ }`; `public struct DiffSummary: Equatable { files: [ChangedFile]; var added: Int; var deleted: Int }`; `public func parseNumstat(_ s: String) -> [(path: String, oldPath: String?, added: Int, deleted: Int)]` (`-` counts as 0; `old => new` and `{a => b}/c` rename forms); `public func parseNameStatus(_ s: String) -> [String: FileStatus]` (`R100\told\tnew` keyed by new path); `public func diffArgs(scope:, mergeBase: String?) -> (list: [[String]], contentRefs: (old: String?, new: String?))`: base → `["diff","--numstat","-M", mb]` + `["diff","--name-status","-M", mb]`, old ref `mb`, new nil (working tree); uncommitted → `HEAD`; last → `["diff","--numstat","-M","HEAD~1","HEAD"]`, old `HEAD~1`, new `HEAD`; `public func chooseBase(prBase: String?, originHead: String?, branches: [String]) -> String` (`origin/<prBase>`, else `originHead`, else `origin/main` if in `branches`, else `origin/master`).
+- `GitRunner.swift`: `public protocol CommandRunner { func run(_ argv: [String], cwd: String, env: [String: String], stdin: Data?) async throws -> (stdout: Data, exit: Int32) }`; `public struct ProcessRunner: CommandRunner`; `public struct GitContext { enum Target { case worktree(path: String), container(branch: String, repoRoot: String) } }`; `public func gitArgv(_ target: GitContext.Target, cli: KunjCLI, _ args: [String]) -> (argv: [String], cwd: String, env: [String: String])` (worktree: `["/usr/bin/git", "-C", path] + args`, env `GIT_OPTIONAL_LOCKS=0`; container: `cli.spawnSpec(["ct","exec",branch,"--","git"] + args, cwd: repoRoot)`).
+- `DiffService.swift`: `public final class DiffService { public init(cli: KunjCLI, runner: CommandRunner = ProcessRunner()); public func summary(env: Environment, scope: DiffScope) async throws -> (DiffSummary, baseLabel: String)` (base: `git merge-base <base> HEAD`, untracked via `ls-files --others --exclude-standard` added as `.added` with line counts from `wc -l`); `public func contents(env:, scope:, file: ChangedFile) async throws -> (original: String, modified: String)` (`git show <ref>:<path>`, empty for a missing side; the working file through `FileAccess` (Task 10's protocol, here a minimal `readWorkingFile` in the same file, moved in Task 10)) }`.
+- `index.html` + `app.js` (served over the `kunj://app/` scheme as in the spike): `?mode=diff` creates a read-only side-by-side `createDiffEditor` (`renderSideBySide: true`, `fontFamily` JetBrains Mono 11.5 px, line height 1.65, `minimap` off, `renderOverviewRuler` false), `?mode=editor` an editable `create` (Task 10); both define a Monaco theme from the tokens posted by Swift (`setTheme(tokens)`: `editor.background` = `bg`, `diffEditor.insertedLineBackground` = `addBg`, `diffEditor.removedLineBackground` = `red` at 18 %, `editorLineNumber.foreground` = `faintest`, foreground `text2`); functions `showDiff(original, modified, language, path)` and `clear()`; language from the extension map in `app.js`; Cmd+F stays Monaco's.
+- `MonacoWebView`: `final class MonacoWebView: NSView { init(mode: "diff" | "editor"); func whenReady(_:); func call(_ fn: String, _ args: [String: Any]) async -> Any?; var onMessage: (([String: Any]) -> Void)? }` with a shared `WKProcessPool` and the scheme handler from the spike.
+- `ChangesColumn`: header bar 40 px: `Changes` 13 px/600, `14 files` mono `muted`, `+199` `green` `−12` `red`, a popup button (`NSPopUpButton`, `raised2`, 26 px) with the three scopes; file list (`NSTableView`, rows 28 px, `ChangedFileRowView`: letter mono 10 px in `green`/`amber`/`red`, name 12.5 px, counts mono 11 px right); the first file selected on load; the diff `MonacoWebView` fills the rest. Refreshes on selection change and on `git` events of its repo (debounced 500 ms), keeping the selected path when it still exists. Empty state: `No changes` in `muted`.
+
+- [ ] **Step 1: Write the failing model tests**
+
+```swift
+func testParseNumstatWithRenameAndBinary() { … "3\t1\tsrc/a.ts\n-\t-\timg.png\n0\t0\t{old => new}/x.ts\n" }
+func testParseNameStatus() { … "A\tnew.ts\nR100\told.ts\tnew2.ts\nD\tgone.ts" }
+func testDiffArgsPerScope() { … }
+func testChooseBase() { … pr "develop" → "origin/develop"; nil + "origin/main" → "origin/main"; nothing + ["origin/master"] → "origin/master" }
+func testGitArgvWorktreeAndContainer() { … env["GIT_OPTIONAL_LOCKS"] == "0"; container argv starts with "/usr/bin/env", contains "ct", "exec", "--", "git" }
+```
+
+- [ ] **Step 2: Write the failing service test against a temp repository**
+
+```swift
+func testSummaryAndContentsInWorktree() async throws { … scope .base: files sorted by path contain the modified (M, +1 −1), added (A), deleted (D) and untracked (A) files; total counts; contents(modified) original == committed text, modified == working text; scope .last lists only the second commit's files }
+```
+
+- [ ] **Step 3: Run, implement, run**
+
+Run: `scripts/test.sh` → PASS (git is on the machine; skip the service test with `XCTSkip` when `/usr/bin/git` is missing).
+
+- [ ] **Step 4: Build the web page, the web view and the column**
+
+- [ ] **Step 5: Compare and check live**
+
+Run: `scripts/bundle.sh && "…/KunjWorkspace" --demo --screenshot /tmp/ws-changes.png` (the demo feeds the mockup's file list and a diff fixture) against `warm.png`; then `open …`: this repository's `main` with an uncommitted edit shows it under Uncommitted and vs origin/main; a container environment shows its diff through `kunj ct exec`; editing a file in the worktree updates the list within a few seconds (the `kunj events` status poll) and the app does not refresh in a loop (`kunj events --json` in a terminal stays quiet while the app is idle).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add workspace-app aj-log.md
-git commit -m "workspace-app: terminals and agent tabs over node-pty"
+git add workspace-app aj-log.md && git commit -m "workspace-app: Changes column with Monaco diff" && git push
 ```
 
 ---
 
-### Task 7: Layout state
+### Task 10: Editor tabs
 
 **Files:**
-- Create: `workspace-app/src/main/layout.ts`
-- Modify: `workspace-app/src/shared/ipc.ts`, `workspace-app/src/preload/index.ts`, `workspace-app/src/main/index.ts`, `workspace-app/src/renderer/state/tabs.ts`
-- Test: `workspace-app/src/main/layout.test.ts`
+- Create: `workspace-app/Sources/KunjWorkspaceCore/Files/FileAccess.swift`, `workspace-app/Sources/KunjWorkspace/Editor/EditorTab.swift`
+- Modify: `DiffService.swift` (use `FileAccess`), `Resources/web/app.js` (`?mode=editor`), `TabRegistry.swift` (editor tabs), `TabBarView.swift` (dirty dot, title = file name), `ChangesColumn.swift` (double-click and an `Edit` button in the diff header), `TerminalColumn.swift` (shows the editor web view for an editor tab), `AppDelegate.swift` (⌘S `File > Save`)
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/FileAccessTests.swift`
 
 **Interfaces:**
-- Produces: `Layout = Record<string /* branch */, { tabs: Array<{ id: string; kind: 'shell' | 'agent' | 'diff'; title: string }>; active: string | null }>`; `layoutPath(repoName: string, home = os.homedir()): string` = `~/.kunj/<repoName>/workspace.json`; `loadLayout(repoName): Promise<Layout>` (missing or corrupt file → `{}`); `saveLayout(repoName, layout): Promise<void>` (write to `workspace.json.tmp` then rename; create the directory); `action` tabs are never saved.
-- IPC: `layout:load(repoName)`, `layout:save(repoName, layout)`. Renderer saves (debounced 500 ms) whenever tabs change; on selecting an environment for the first time in a session it restores the saved tabs lazily (a saved shell/agent tab is re-opened only when it becomes the active tab, so launch stays cheap).
+- `FileAccess.swift`: `public struct FileAccess { public init(cli: KunjCLI); public func read(env: Environment, path: String) async throws -> String` (worktree: `path` must be relative, no `..` component → else `FileAccessError.badPath`; `String(contentsOf:)` UTF-8; container: `cli.run<FileReadJson>(["ct","file","read",branch,path], cwd: repoRoot).content`); `public func write(env:, path:, content: String) async throws` (worktree: atomic write; container: `cli.run<FileWriteJson>(["ct","file","write",branch,path], stdin:)`); `public func digest(_ s: String) -> String` (SHA-256 hex, `CryptoKit`) }`; `public enum FileAccessError: Error, Equatable { case badPath, notFound }`.
+- `app.js` editor mode: `openFile(id, content, language, path)`, `showFile(id)`, `closeFile(id)`, `getContent(id) -> string`, posts `{ type: "dirty", id, dirty }` on model change and `{ type: "save", id }` on Cmd+S inside Monaco.
+- `EditorTab`: `final class EditorTab { let id; let env; let path; var dirty: Bool; var openedDigest: String; func save() async throws` (re-reads the file first: when its digest ≠ `openedDigest` and ≠ the digest of the content being saved, an `NSAlert` "The file changed on disk" with Overwrite / Cancel) `}`; the registry closes a dirty editor tab only after an `NSAlert` Save / Don't Save / Cancel.
 
 - [ ] **Step 1: Write the failing tests**
 
+```swift
+func testReadWriteWorktree() async throws { … temp dir; write then read round-trips; "../x" → .badPath; "/etc/passwd" → .badPath }
+func testContainerGoesThroughKunjCtFile() async throws { … fake-kunj fixture ct_file_read_feature-x_src-a.ts.json → content; write sends stdin (fixture echoes `{"success":true,"path":…}`) }
+func testDigestIsStable() { XCTAssertEqual(digest("a"), digest("a")); XCTAssertNotEqual(digest("a"), digest("b")) }
+```
+
+- [ ] **Step 2: Run, implement, run; build the editor mode, the tab and the wiring**
+
+Run: `scripts/test.sh` → PASS; `scripts/bundle.sh && open …`: double-click a changed file → an editor tab titled with the file name; type → dot on the tab; ⌘S → the Changes list's counts update; edit the same file in another editor and ⌘S in the app → the conflict alert; close a dirty tab → the save prompt. Same for a file in a running container.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add workspace-app aj-log.md && git commit -m "workspace-app: editor tabs in Monaco with save and conflict check" && git push
+```
+
+---
+
+### Task 11: Actions, New session, search, shortcuts, settings and themes
+
+**Files:**
+- Create: `workspace-app/Sources/KunjWorkspaceCore/Actions/ActionSpec.swift`, `workspace-app/Sources/KunjWorkspace/Actions/ActionRunner.swift`, `workspace-app/Sources/KunjWorkspace/Sheets/NewSessionSheet.swift`, `workspace-app/Sources/KunjWorkspace/Settings/SettingsWindow.swift`
+- Modify: `HeaderView.swift` (overflow menu, enabled states), `SidebarView.swift` (search filtering, `+ New session`), `AppDelegate.swift` (menus: `Kunj Workspace > Settings… ⌘,`, `Environment > Shell ⌘T / Agent ⌘⇧A / Open in VS Code ⌘O / Create PR ⌘⇧P / New Session ⌘N / Switch 1–9 ⌘1–9`, `View > Theme`), `Theme.swift` (apply a theme change to every view and terminal live)
+- Test: `workspace-app/Tests/KunjWorkspaceCoreTests/ActionSpecTests.swift`
+
+**Interfaces:**
+- `ActionSpec.swift`: `public enum EnvAction: Equatable { case ctStart, ctStop, ctRemove(force: Bool), ctRebuild, ctOpen, worktreeOpen, worktreeRemove(force: Bool), createPR, prune, copyPath, revealInFinder, openPort(Int) }`; `public enum ActionPlan: Equatable { case terminal(args: [String], title: String); case run(args: [String]); case external(url: String); case local(String) /* copyPath, reveal */; case disabled(reason: String) }`; `public func actionPlan(_ action: EnvAction, env: Environment, worktreeOfSameBranch: Environment?) -> ActionPlan`: `ctStart` → `.terminal(["ct","start",branch], "ct start")`, `ctStop` → `.run(["ct","stop",branch])`, `ctRemove` → `.terminal(["ct","remove",branch] + (force ? ["--force"] : []))`, `ctRebuild` → `.terminal(["ct","start",branch,"--rebuild"])`, `ctOpen` → `.run(["ct","open",branch])`, `worktreeOpen` → `.run(["worktree","open",path])`, `worktreeRemove` → `.terminal(["worktree","remove",path] + force)`, `createPR` → `.terminal(["pr"], "pr")` run in the worktree's path (the plan carries `cwd` override: add `cwd: String?` to `.terminal`), for a container with `worktreeOfSameBranch` nil → `.disabled("Create PRs from a worktree of this branch")`, `prune` → `.terminal(["ct","prune"])`, `openPort(p)` → `.external("http://localhost:\(p)")`, `copyPath`/`revealInFinder` → `.local(path or containerName)`; `public struct NewSessionRequest: Equatable { repo: RepoRef; branch: String; base: String?; kind: EnvironmentKind; startAgent: Bool }`; `public func newSessionPlan(_ r: NewSessionRequest) -> ActionPlan` → worktree: `["worktree","add",branch,"-c"] + (base ? ["--base", base] : [])`, container: `["ct","start",branch,"-c"]` (base through `--base` when `ct start` has it, else omitted) as `.terminal`.
+- `ActionRunner`: executes a plan: `.terminal` opens an action tab in the environment (for New session: a temporary "new" environment row is not created; the tab opens in the repo's main worktree environment and the sidebar selects the new environment when it appears; with `startAgent` an agent tab is opened then), `.run` runs `cli.run<SuccessJson>` and shows an `NSAlert` on error, `.external` `NSWorkspace.shared.open`, destructive actions (`ctRemove`, `worktreeRemove`) confirm first (`NSAlert`, with a "Force" checkbox mapping to `force`).
+- `NewSessionSheet`: repo popup (from the store), branch text field, base text field (placeholder "repo default"), kind radio (Worktree / Container; Container disabled when the repo's backend is unavailable), "Start an agent" checkbox, Create / Cancel; Create validates the branch name (`git check-ref-format --branch` rules: non-empty, no spaces, `..`, `~`, `^`, `:`, `?`, `*`, `[`, leading `-`).
+- Search: typing in the sidebar field filters rows by substring of branch or repo name (case-insensitive); Esc clears; ⌘K focuses it. ⌘1–9 select the nth visible row.
+- `SettingsWindow` (⌘,): "kunj command" text field (UserDefaults `kunjCommand`, default `kunj`; change re-runs discovery) and a Theme popup (`auto`, `warm`, `light`, `graphite`); `ThemeManager.choice` applies at once: views re-read colours, terminals get `installColors` + background, Monaco `setTheme`.
+
+- [ ] **Step 1: Write the failing table test**
+
+```swift
+func testActionPlans() { … one assertion per EnvAction case, plus ctRemove force → "--force", createPR for a container without a worktree → .disabled, createPR for a worktree → cwd == path }
+func testNewSessionPlans() { … worktree with base; container without base }
+```
+
+- [ ] **Step 2: Run, implement, run; build the runner, the sheet, the menus, search, shortcuts, settings and live theming**
+
+Run: `scripts/test.sh` → PASS; `scripts/bundle.sh && open …`: Shell/Agent/Open in VS Code/Create PR/… all act; New session creates a worktree `tmp/ws-test` and selects it; the overflow's Remove worktree confirms and removes it; `ct start` on a stopped container streams in an action tab that closes on success; ⌘K then typing filters; ⌘2 selects the second row; Settings → Light re-themes the window live and `--screenshot` with `-theme light`/`graphite` (a `--theme` flag for the screenshot path) matches `light.png` and `graphite.png`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add workspace-app aj-log.md && git commit -m "workspace-app: actions, new session, search, shortcuts, settings and themes" && git push
+```
+
+---
+
+### Task 12: Distribution, `kunj install workspace` and docs
+
+**Files:**
+- Modify: `.github/workflows/release.yml` (job `workspace-app` on `macos-15`: `brew install` nothing; `npm ci` in `web/`, `scripts/bundle.sh` with `VERSION`, `ditto -c -k --keepParent "build/Kunj Workspace.app" "Kunj-workspace-$VERSION.zip"`, attach; release notes paragraph), `src/lib/apps.ts` (`CompanionApp` gains `'workspace'`: `{ label: 'Kunj Workspace app', asset: /^Kunj-workspace-.*\.zip$/ }`; `installMacApp(zipPath, { app: 'Kunj.app' | 'Kunj Workspace.app' })` generalised, `installedMacApp(app)`), `src/commands/install.ts` (`workspace` target, in `all` on darwin, help text), `src/commands/setup.ts` if it offers apps, `README.md` (a Workspace app section), `docs-site/src/content/docs/` (a `workspace-app.mdx` page: what it is, install, the layout, shortcuts, themes, how agents persist), `docs/specs/workspace-ide.md` (status table → Shipped with commits), `docs/specs/README.md` (tracker), `CLAUDE.md` (a Workspace app paragraph next to the macOS app one), `workspace-app/README.md`
+- Test: `src/lib/__tests__/apps.test.ts` (extend: `pickAsset` for `workspace`; `installMacApp` app name)
+
+- [ ] **Step 1: Write the failing `apps` tests, run, implement, run**
+
 ```ts
-test('load returns {} for a missing file', …)
-test('save then load round-trips a branch with a slash', …)   // key 'feature/x'
-test('save skips action tabs and is atomic', …)                 // no .tmp left behind
-test('corrupt json loads as {}', …)
+test('pickAsset finds the workspace zip of the matching release', …);
+test('installMacApp installs to the app name given', …);   // temp HOME/Applications, a zip with "Kunj Workspace.app/Contents/Info.plist"
 ```
 
-- [ ] **Step 2: Run, implement, run; wire IPC and the renderer**
+Run: `npm test -- apps && npm run lint && npm run build`
+Expected: PASS; `node dist/index.js install --help` lists `workspace`.
 
-Run: `npm test -- layout` → PASS; `npm run lint && npm run build`; `npm run dev`: open two tabs, quit, relaunch, select the environment: both tabs are back (agent tab reattaches to tmux).
+- [ ] **Step 2: Release job and docs**
 
-- [ ] **Step 3: Commit**
+`npm run gen` in `docs-site` after the `install` option change; `cd docs-site && npm run build` passes.
+
+- [ ] **Step 3: Final checks**
+
+Run: `cd workspace-app && scripts/test.sh && scripts/bundle.sh --install` then use the installed app for the whole loop once: select, shell, agent (attached to the CLI's tmux session), Changes, edit + save, Create PR disabled/enabled as expected, quit without orphans (`pgrep -f "kunj events|kunj ct shell"` empty).
+
+- [ ] **Step 4: Commit**
 
 ```bash
-git add workspace-app aj-log.md
-git commit -m "workspace-app: persist open tabs per repo"
-```
-
----
-
-### Task 8: Diff viewer
-
-**Files:**
-- Create: `workspace-app/src/main/diff.ts`, `workspace-app/src/main/files.ts`, `workspace-app/src/renderer/components/DiffPane.tsx`
-- Modify: `workspace-app/src/shared/ipc.ts`, `workspace-app/src/preload/index.ts`, `workspace-app/src/main/index.ts`, `workspace-app/src/renderer/components/TabStrip.tsx` (`+ Diff`), `workspace-app/package.json` (`monaco-editor`, `@monaco-editor/react`, `parse-diff`)
-- Test: `workspace-app/src/main/diff.test.ts`, `workspace-app/src/main/files.test.ts`, fixture `test/fixtures/sample.diff`
-
-**Interfaces:**
-- Consumes: `KunjCli.run`/`spawnSpec`, `Environment`, `FileReadJson` from `kunj`.
-- Produces:
-  - `files.ts`: `readFile(cli, env, relPath): Promise<string>` — worktree: `fs.readFile(path.join(env.path, relPath))` after rejecting `..`/absolute paths; container: `cli.run<FileReadJson>(['ct', 'file', 'read', env.branch, relPath], { cwd: env.repo.root })`.
-  - `diff.ts`: `DiffMode = 'base' | 'uncommitted' | 'last'`; `gitArgs(mode: DiffMode, baseSha: string | null): string[]` (`base` → `['diff', baseSha]`, `uncommitted` → `['diff', 'HEAD']`, `last` → `['diff', 'HEAD~1', 'HEAD']`); `gitInvocation(cli, env, args): { command; args; cwd }` — worktree: `git -C <path> <args>`; container: `kunj ct exec <branch> -- git <args>` with `cwd: env.repo.root`; `baseRef(env): string` = `origin/<pullRequest.baseBranch>` when known else `origin/HEAD`; `mergeBase(cli, env): Promise<string | null>` runs `git merge-base <baseRef> HEAD` through `gitInvocation` (null on failure); `getDiff(cli, env, mode): Promise<{ files: DiffFile[]; raw: string }>` where `DiffFile { path: string; oldPath: string | null; additions: number; deletions: number; status: 'added' | 'deleted' | 'modified' | 'renamed' }` from `parse-diff`; `fileContents(cli, env, mode, file): Promise<{ original: string; modified: string }>` — original from `git show <sha>:<oldPath>` (sha = merge base / `HEAD` / `HEAD~1`; empty for added), modified from `readFile` (or `git show HEAD:<path>` for `last`; empty for deleted).
-- IPC: `diff:list({ envId, mode })`, `diff:file({ envId, mode, path })`.
-- Renderer: `DiffPane` = mode dropdown (default `base`), file list with `+n −m`, Monaco `DiffEditor` (read-only, `renderSideBySide` true, language from the extension) for the selected file; a "Refresh" button and automatic refresh on `environments:changed` for this environment.
-
-- [ ] **Step 1: Write the failing tests**
-
-```ts
-test.each([...])('gitArgs %s', …)
-test('gitInvocation uses git -C for worktrees and kunj ct exec for containers', …)
-test('baseRef prefers the PR base', …)
-test('getDiff parses the fixture into files with counts and status', …)   // fixture has an added, a modified and a renamed file
-test('readFile refuses paths outside the worktree', …)
-test('readFile in a container goes through kunj ct file read', …)         // fake-kunj fixture
-```
-
-- [ ] **Step 2: Run, implement, run; wire IPC and the pane**
-
-Run: `npm test -- diff files` → PASS; `npm run lint && npm run build`; `npm run dev`: a `+ Diff` tab on a branch with changes shows the files and a side-by-side diff; switching to "uncommitted" changes the list.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add workspace-app aj-log.md
-git commit -m "workspace-app: diff viewer against the base branch"
-```
-
----
-
-### Task 9: Actions
-
-**Files:**
-- Create: `workspace-app/src/main/actions.ts`
-- Modify: `workspace-app/src/shared/ipc.ts`, `workspace-app/src/preload/index.ts`, `workspace-app/src/main/index.ts`, `workspace-app/src/renderer/components/EnvironmentHeader.tsx`, `workspace-app/src/renderer/components/EnvironmentList.tsx` (repo header "+ Worktree" / "+ Container")
-- Test: `workspace-app/src/main/actions.test.ts`
-
-**Interfaces:**
-- Consumes: `KunjCli.run`, `PtyManager` + `terminalSpec` action tabs (Task 6), `EnvironmentStore.refreshRepo` (Task 4), Electron `shell.openExternal`, `dialog.showMessageBox`.
-- Produces: `actionSpec(env, action: Action): { kind: 'pty'; args: string[]; title: string } | { kind: 'run'; args: string[] } | { kind: 'external'; url: string }` where `Action = 'ct-start' | 'ct-stop' | 'ct-remove' | 'ct-open' | 'wt-open' | 'wt-remove' | 'open-pr' | 'open-port'` and the table is: `ct-start` → pty `kunj ct start <branch>`; `ct-stop` → run `kunj ct stop <branch>`; `ct-remove` → pty `kunj ct remove <branch>` (after a confirm dialog; the pty shows kunj's unpushed-work refusal, a second button offers `--force`); `ct-open` → run `kunj ct open <branch>`; `wt-open` → run `kunj worktree open <branch>`; `wt-remove` → run `kunj worktree remove <branch>` after confirm; `open-pr` → external `pullRequest.url`; `open-port` → external `http://localhost:<host>`. Repo-level: `wt-add(branch)` → run `kunj worktree add -c <branch>`; `ct-create(branch)` → pty `kunj ct start -c <branch>`. After a `run` completes or a pty action exits, `refreshRepo(env.repo.root)`.
-- IPC: `action:run({ envId, action, args? })` → `{ ok: true } | { error: { code, message } }`.
-
-- [ ] **Step 1: Write the failing table test** for `actionSpec` (one row per action, plus "ct-remove with force adds --force").
-
-- [ ] **Step 2: Run, implement, run; wire the header buttons and repo-level inputs**
-
-Run: `npm test -- actions` → PASS; `npm run lint && npm run build`; `npm run dev`: start a stopped container from the header (progress in an action tab, list updates on exit), open it in VS Code, open its PR.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add workspace-app aj-log.md
-git commit -m "workspace-app: container and worktree actions through kunj"
-```
-
----
-
-### Task 10: Packaging, release job and `kunj install workspace`
-
-**Files:**
-- Create: `workspace-app/electron-builder.yml`, `workspace-app/build/icon.icns` (reuse the macOS app's icon source if there is one, else a plain generated icon)
-- Modify: `workspace-app/package.json` (`package` script, `build` field), `.github/workflows/release.yml` (new `workspace-app` job), `src/lib/apps.ts`, `src/commands/install.ts`, `src/lib/__tests__/apps.test.ts`, `CLAUDE.md`, `docs-site` (install page), `README.md` of `workspace-app/`
-- Test: `src/lib/__tests__/apps.test.ts`
-
-**Interfaces:**
-- Produces: DMG `Kunj-workspace-<version>.dmg` (arm64, `identity: null` for ad-hoc signing, `asarUnpack: ['**/node_modules/node-pty/**']`, `appId: ai.kunj.workspace`, product name `Kunj Workspace`); release job `workspace-app` (`runs-on: macos-15`, `needs: release`, same `if` as `macos-app`, `npm ci && npm run build && npm run package` in `workspace-app/` with `VERSION` from the release, attaches the DMG with `softprops/action-gh-release@v1`).
-- CLI: `CompanionApp` gains `'workspace'` (`label: 'Workspace app (Kunj Workspace.app)'`, `asset: /^Kunj-workspace-.*\.dmg$/`); `installWorkspaceApp(dmgPath: string, options: { launch?: boolean }): Promise<string>` — `hdiutil attach -nobrowse -readonly -mountpoint <tmp>`, `ditto` the `.app` to `macAppDestination()`'s directory as `Kunj Workspace.app`, `hdiutil detach`, `xattr -dr com.apple.quarantine`, optional `open`; `kunj install workspace`, and `all` includes it on darwin; help text updated.
-
-- [ ] **Step 1: Write the failing CLI tests**
-
-In `src/lib/__tests__/apps.test.ts`: `pickAsset(releases, 'workspace', '1.2.3')` finds `Kunj-workspace-1.2.3.dmg` and prefers the matching release; `COMPANION_APPS.workspace.asset` rejects `Kunj-macos-1.2.3.zip`.
-
-- [ ] **Step 2: Run, implement `apps.ts`/`install.ts`, run**
-
-Run: `npm test -- src/lib/__tests__/apps.test.ts` → PASS; `npm run lint`.
-
-- [ ] **Step 3: Package locally**
-
-Run: `cd workspace-app && VERSION=0.0.0-local npm run package`
-Expected: `dist/Kunj-workspace-0.0.0-local.dmg`; mount it, drag the app to `/Applications`, launch: the window opens, kunj is found through the login PATH, a container shell works (node-pty loaded from the unpacked asar).
-
-- [ ] **Step 4: Release job and docs**
-
-Add the job to `.github/workflows/release.yml` mirroring `macos-app`; document `kunj install workspace` on the docs-site install page and in `CLAUDE.md` (Key Commands line for `install`, a "Workspace app" paragraph: package layout, CLI-only rule, IPC services, where layout state lives, how to build and package). `cd docs-site && npm run gen`.
-
-- [ ] **Step 5: Full tests and commit**
-
-Run: `npm test && npm run lint && (cd workspace-app && npm test && npm run lint)`
-
-```bash
-git add workspace-app .github/workflows/release.yml src/lib/apps.ts src/commands/install.ts src/lib/__tests__/apps.test.ts CLAUDE.md docs-site aj-log.md
-git commit -m "workspace-app: DMG packaging, release job and kunj install workspace"
+git add -A && git commit -m "workspace-app: release job, kunj install workspace and docs" && git push
 ```

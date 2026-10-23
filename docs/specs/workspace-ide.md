@@ -153,32 +153,113 @@ that is anything else is an `ErrorJson`. Each later line says what to refresh, n
 
 It ends on SIGINT/SIGTERM or when stdin closes, so it dies with its parent.
 
-### App design (proposed)
+### Architecture
 
-| Part | Choice |
-| --- | --- |
-| Shell | AppKit (Swift, SwiftPM, no Xcode project), macOS only, like `macos-app/` |
-| Terminal view | SwiftTerm (`LocalProcessTerminalView`), one per tab; hidden tabs have their output parsed off the main thread or throttled (the spike's one weakness) |
-| PTY source | SwiftTerm's local process: `$SHELL -l` in a worktree, `kunj agent <branch>`, `kunj ct shell\|agent <branch>`; the app never knows container or session names |
-| Agent persistence | tmux owned by kunj; nothing in the app, so quitting the app or using the CLI loses nothing |
-| Editor | Monaco in one shared WKWebView: the diff editor first, single files later; no language servers in v1; a standard Edit menu routes Cmd+F/C/V into it |
-| Files | `fs` for worktrees, `kunj ct file` for containers |
+Decided 2026-10-23, before the app was started. One process, no daemon: the app owns AppKit views, a
+handful of child processes and one WebKit content process.
 
-*Drawing: AppKit views (EnvironmentList, EnvironmentHeader, TabStrip, TerminalPane, DiffPane in the
-WKWebView) ↔ Swift models (KunjCli, Environments, Events, Files, Diff, Layout) → kunj CLI → git,
-docker exec → tmux → claude.* The JSON contract is decoded with Swift `Codable` types mirroring
-`src/lib/json-types.ts`.
+```
+Kunj Workspace.app
+├─ kunj repos | worktree list | ct list --json   short-lived, one per refresh, cwd = repo root
+├─ kunj events --json                            one long-lived child; stdin held open, restarted with backoff
+├─ PTYs (SwiftTerm LocalProcess)                 $SHELL -l · kunj agent <b> · kunj ct shell|agent <b> · kunj <long action>
+├─ git (read-only, GIT_OPTIONAL_LOCKS=0)         diff content in a worktree; kunj ct exec <b> -- git … in a container
+└─ WKWebView ×2 (one process pool)               Monaco: the Changes diff, and the editor tabs
+```
 
-**Distribution:** `workspace-app/` next to `vscode-extension/` and `macos-app/`; a `workspace-app` job in
-the release workflow attaching `Kunj-workspace-<version>.dmg`, ad-hoc signed and not notarized like the
-macOS app, so `kunj install workspace` strips the quarantine attribute as `installMacApp()` does; Monaco is
-bundled as static files inside the app. SwiftTerm needs a one-line `Package.swift` patch to build
-without Xcode (see the spike report).
+**Package** `workspace-app/` (SwiftPM, no Xcode project, macOS 14+, like `macos-app/`):
 
-**v1:** environment list with status, terminals, agent tabs reattaching to CLI sessions, the diff viewer,
-container start/stop/remove and worktree add/remove, hand-off to VS Code, ports as links. **v2:** Monaco
-editing with a file tree, webview previews, the "agent waiting for input" signal, Linux, tearing an
-environment into its own window.
+| Target | Holds | Depends on |
+| --- | --- | --- |
+| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout`, `DesignTokens` (generated), `RelativeTime` | Foundation only |
+| `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `TerminalTab` (SwiftTerm), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
+| `KunjWorkspaceCoreTests` | `swift test`, with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) | Core |
+
+SwiftTerm is vendored at an exact tag by `scripts/prepare-swiftterm.sh` (the spike's one-line
+`Shaders.metal` patch, so it builds with the Command Line Tools). Monaco's `min/vs` build is copied
+into `Resources/web/vs` by `web/copy-monaco.js`; Inter and JetBrains Mono (OFL) are fetched at pinned
+versions into `Resources/fonts` by `scripts/fetch-fonts.sh` and registered through
+`ATSApplicationFontsPath`. `scripts/gen-tokens.js` turns `docs/workspace-app/design/tokens.json` into
+`Sources/KunjWorkspaceCore/Design/DesignTokens.swift` (committed; a test fails when they drift).
+`scripts/bundle.sh` builds `build/Kunj Workspace.app` (ad-hoc signed; `--install` copies it to
+/Applications) and `scripts/test.sh` runs `swift test` with the same SDK fallback as `macos-app/`.
+
+**Data flow.** `EnvironmentStore` holds `[RepoEnvironments]` and is the only source for the views. A
+refresh runs `kunj repos --json` (hidden and missing repos skipped), then per repo `worktree list --json`
+and `ct list --json` in parallel (a failing `ct list` marks that repo's backend unavailable; the worktrees
+still show), and merges them into `Environment` values (`id = "<repo>|<kind>|<branch>"`; a worktree and a
+container on the same branch are two rows). `EventStream` reads `kunj events --json` line by line on a
+background thread; the store maps `git`/`container`/`agent` events to a refresh of that repo and
+`repos`/`backend`/`sessions`/`forwards` to a full refresh, coalesced per repo (300 ms), and notifies the
+views on the main thread. The app never asks git or Docker for state. The status verb and dot are pure
+functions of an `Environment` (`Environment.statusVerb`, `Environment.dot`), in this order: missing
+worktree, stopped container, agent waiting, agent running, PR merged, PR open, dirty (`N changed files`),
+ahead (`↑N unpushed`), `Clean`. The relative time is the app's own `lastActivity` per environment
+(bumped when its state hash changes or a tab of it is used; persisted in the layout file).
+
+**Agent state.** Running comes from tmux (`agent.running`); *waiting for input* comes from Claude Code
+hooks that kunj installs: `kunj agent` and `kunj ct agent` append `--settings '<json>'` to a command
+whose first word is `claude` (setting `agent.hooks`, default true) with `UserPromptSubmit` and
+`PreToolUse` → `running`, `Stop` and `Notification` (`permission_prompt|idle_prompt|elicitation_dialog`)
+→ `waiting`, `SessionEnd` → remove, each a `printf` into the file named by `KUNJ_AGENT_STATE` (host:
+`~/.kunj/<repo>/agent-state/<session>`; container: `/tmp/kunj-agent-state`). `worktree list --json`
+reports it as `agent.state` (`running | waiting | null`), `ct list --json` reads it in `STATUS_SCRIPT`,
+and `kunj events` watches the host directory and includes `state` in the container status poll
+(`EventJson.agent` gains `state`). No tmux hooks, no polling of panes.
+
+**Terminals.** `TerminalTab` is a `LocalProcessTerminalView` per tab, created from a `TerminalSpec`
+(`shell`: `$SHELL -l` in the worktree, or `kunj ct shell <b>`; `agent`: `kunj agent <b>` or
+`kunj ct agent <b>`; `action`: `kunj <args…>` with `exec` semantics, the tab closing itself on exit 0).
+Every tab's view stays in the window, hidden when not shown, so switching environments never touches a
+process; a hidden tab batches its output into 250 ms feeds so a flood in a background environment
+does not draw. The environment of every PTY: `TERM=xterm-256color`, `COLORTERM=truecolor`, `LANG`
+(user's or `en_US.UTF-8`), PATH from the login shell (resolved once, off the main thread, 5 s cap),
+the Claude Code and terminal-program markers removed. The theme's `term*` tokens are the terminal
+colours (`termMuted` as bright black, `termAccent` as blue).
+
+**Changes column.** `DiffService` lists `ChangedFile`s (`status A/M/D/R`, `added`, `deleted`) for the
+scope: `base` (default: `git diff --numstat -M <merge-base(origin/<base>, HEAD)>` plus untracked files),
+`uncommitted` (`HEAD`), `last` (`HEAD~1 HEAD`). `<base>` is the PR's base branch, else
+`refs/remotes/origin/HEAD`, else `main`/`master`. Contents are `git show <ref>:<path>` and the working
+file (fs in a worktree, `kunj ct file read` in a container). Monaco's diff editor renders the selected
+file read-only; the Monaco theme is built from the tokens (`bg`, `addBg`, `faintest` line numbers).
+
+**Editor tabs.** Double-clicking a changed file (or "Edit" in the diff header) opens it as a tab in the
+left column, in the second WKWebView (`?mode=editor`, one Monaco model per open file). ⌘S saves through
+`FileAccess` (`fs` for a worktree, `kunj ct file write` for a container); the tab shows a dot while
+dirty; a save over a file that changed since it was opened asks before overwriting. Closing a dirty tab
+asks. No language servers.
+
+**Layout file** `~/.kunj/<reponame>/workspace.json`: `{ "<branch>": { "tabs": [{ "kind": "shell|agent|editor",
+"title", "path"? }], "active", "lastActivity" } }`, written atomically, debounced 500 ms; action tabs
+are never saved. On selecting an environment for the first time in a session its tabs are restored
+(agent tabs reattach to tmux; editor tabs reopen the file).
+
+**Actions** (`ActionRunner`): Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O (`worktree open` / `ct open`),
+Create PR ⌘⇧P (`kunj pr` in an action tab, in the worktree; for a container environment the host
+checkout of that branch is used when it exists, else the button is disabled with a tooltip), New
+session ⌘N (a sheet: repo, branch, base, worktree or container, start an agent; runs `worktree add -c`
+or `ct start -c` in an action tab), the overflow menu (container start/stop/remove/rebuild, worktree
+remove, copy path, reveal in Finder, `ct prune`), ports as links (`open http://localhost:<host>`),
+⌘K search filtering the sidebar, ⌘1–9 selecting the nth row, ⌘⇧] / ⌘⇧[ and ⌘W for tabs. Destructive
+actions confirm with an `NSAlert`. Settings (⌘,): the kunj command (default `kunj`) and the theme
+(`auto` = light ↔ warm by system appearance, `warm`, `light`, `graphite`).
+
+**Window.** Transparent title bar with the traffic lights inside the sidebar's 52 px top (as in the
+mockup), `NSVisualEffectView` (`.sidebar`) under the sidebar tinted with `side`, everything else opaque
+in `bg`; all sizes from `tokens.json` (`layout`), radii 5/6 px, 1 px hairlines in `border`, one filled
+button. `--demo` renders the mockup's data from fixtures and `--screenshot <png>` writes the window
+(the spike's snapshot code), so the look can be compared against `warm.png` without a person.
+
+**Distribution:** a `workspace-app` job in the release workflow attaching `Kunj-workspace-<version>.zip`
+(ad-hoc signed, not notarized, like the macOS app); `kunj install workspace` finds it by name and
+installs it as `installMacApp()` does. `MIN_KUNJ_VERSION` is the first release with the CLI contract;
+`1.0.0` (an `npm link`ed dev build) is accepted and shown as `dev`.
+
+**v1:** environment list with status, terminals, agent tabs reattaching to CLI sessions, the agent
+waiting state, the Changes column, editor tabs, container start/stop/remove and worktree add/remove,
+hand-off to VS Code, Create PR, ports as links, three themes. **v2:** webview preview tabs, split
+panes, a file tree, Linux, tearing an environment into its own window.
 
 ### Runtime
 
@@ -207,7 +288,13 @@ All 2026-10-23.
 - **The UI is the design package** (`docs/workspace-app/design/`, 2026-10-23): two columns under the
   header, terminals left and the Changes column always on the right, sidebar rows titled by task with a
   status verb, three themes from `tokens.json`. The package's technical remarks are ignored.
-- **Ports in v1 as links;** webview previews in v2.
+- **Ports in v1 as links;** webview previews and split panes in v2 (2026-10-23: the user kept them out of
+  this build; the agent waiting state and editor tabs are in).
+- **Session titles are branch names** (2026-10-23); the design's task titles need metadata the CLI does
+  not report, left for later.
+- **Agent waiting state through Claude Code hooks** that `kunj agent`/`kunj ct agent` pass with
+  `--settings` (see Architecture), not tmux hooks.
+- **Fonts bundled:** Inter and JetBrains Mono, fetched at pinned versions by the build.
 - **App state is UI layout only,** in `~/.kunj/<reponame>/workspace.json`.
 - **Long actions run in a terminal tab;** no NDJSON progress under `--json` for v1.
 - **tmux is optional for worktree agents.** With tmux, `kunj agent` and the app use a host tmux session,
@@ -223,8 +310,6 @@ All 2026-10-23.
 
 - [ ] `kunj ct agent` does not set `window-size latest` on its session yet (`kunj agent` does), so the app
   and a CLI terminal attached to a container agent are sized to the smaller one.
-- [ ] "Agent waiting for input" in a background environment: tmux silence/activity hooks or Claude Code
-  hooks writing a marker (v2).
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).
 

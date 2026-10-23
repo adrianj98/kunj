@@ -17,7 +17,7 @@ page only says where each thing stands.
 | [branch-containers.md](branch-containers.md) | Phase 1: isolation, names and labels, image, start/resume/remove, network helper and firewall, credentials, forwarding, hooks, `list --json` | Shipped |
 | [blueprints.md](blueprints.md) | `.kunj/blueprint.json`, presets, `init`, snapshots built by `start`, host-made bundles | Shipped |
 | [container-phase-2.md](container-phase-2.md) | Sidecar services, `ct open`, `forward --auto`, `ct prune`, Docker-in-Docker, host MCP bridge | Shipped |
-| [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | CLI contract shipped; app proposed (native) |
+| [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | CLI contract shipped; app in progress (native) |
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
 
 ## Done
@@ -45,14 +45,15 @@ page only says where each thing stands.
 
 ## In progress
 
-Nothing in progress.
+| Work | Spec | Notes |
+| --- | --- | --- |
+| Workspace app v1 (native) | [workspace-ide.md](workspace-ide.md#architecture) | Started 2026-10-23 from the design package (`docs/workspace-app/`); plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`, 12 tasks |
 
 ## To do
 
 | Work | Spec | Notes |
 | --- | --- | --- |
 | Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Design approved 2026-10-23; plan `docs/superpowers/plans/2026-10-23-secret-manager.md` waits for your review |
-| Workspace app v1 | [workspace-ide.md](workspace-ide.md) | Runtime decided: native (AppKit + SwiftTerm, Monaco in one WKWebView); the Electron plan needs rewriting in Swift |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
 | Extra repos cloned next to the workspace | [container-system.md](container-system.md#roadmap) | — |
