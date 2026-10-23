@@ -171,6 +171,15 @@ describe('image', () => {
     expect(NETHELPER_IMAGE('1.0.0')).toBe(`kunj-nethelper:1.0.0-${directoryHash(path.join(sandboxAssetsDir(), 'nethelper'))}`);
   });
 
+  posixOnly('ships a syntactically valid default zshrc', () => {
+    const rc = path.join(sandboxAssetsDir(), 'sandbox', 'zshrc');
+    expect(fs.existsSync(rc)).toBe(true);
+    const r = spawnSync('zsh', ['-n', rc], { encoding: 'utf8' });
+    if (r.error) return; // zsh is not installed on this host
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+  });
+
   it('resolveHelperImage builds the network helper from its assets', () => {
     const helper = resolveHelperImage('2.0.0');
     expect(helper.tag).toMatch(/^kunj-nethelper:2\.0\.0-[0-9a-f]{12}$/);

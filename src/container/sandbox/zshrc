@@ -1,0 +1,33 @@
+# Default interactive zsh config for kunj sandboxes, installed as /etc/zsh/zshrc.
+# It lives here, not in ~/.zshrc, because the home directory is a volume the image cannot seed.
+# A user's own ~/.zshrc (container.files) is sourced after this file and wins.
+
+# Debian's first-run wizard would block the first `kunj ct shell`
+zsh-newuser-install() { :; }
+
+# Presets record their tool environment (JAVA_HOME, COREPACK_HOME, ...) here
+# (N): no error when no preset has written a file yet
+for f in /etc/profile.d/*.sh(N); do [ -r "$f" ] && . "$f"; done
+
+HISTFILE=$HOME/.zsh_history
+HISTSIZE=50000
+SAVEHIST=50000
+setopt share_history hist_ignore_dups hist_ignore_space autocd
+
+# -u: the home volume's ownership varies, so skip compinit's insecure-directory prompt
+autoload -Uz compinit && compinit -u
+zstyle ':completion:*' menu select
+
+# KUNJ_BRANCH is set by kunj on the container; the arrow turns red after a failed command
+setopt prompt_subst
+PROMPT='%F{cyan}kunj%f ▸ %F{green}${KUNJ_BRANCH:-?}%f %F{blue}%~%f %(?.%F{green}.%F{red})❯%f '
+RPROMPT='%F{240}sandbox%f'
+
+alias ls='ls --color=auto'
+alias ll='ls -la'
+alias gs='git status -sb'
+alias gl='git log --oneline -20'
+bindkey -e
+
+# Shells open in the home directory; the code is in /workspace
+[ -d /workspace ] && [ "$PWD" = "$HOME" ] && cd /workspace

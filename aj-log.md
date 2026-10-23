@@ -2,6 +2,10 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Sandbox: default zsh config and KUNJ_* env (Task 11)
+
+- Added `src/container/sandbox/zshrc` (installed as `/etc/zsh/zshrc`: history, compinit, prompt with branch, aliases, no first-run wizard, sources `/etc/profile.d/*.sh`) and `KUNJ_CONTAINER/KUNJ_BRANCH/KUNJ_REPO` in the main container env (after `containerEnv`, so a branch cannot spoof them). Why: the home is a volume, so defaults must live in the image; shells should show which branch they are in.
+
 ## 2026-10-23 — Merged branch containers + blueprints to main
 
 - Fast-forwarded `main` to `feature/blueprints` (2ee7853): phase 1 of `kunj container` (PR #15) plus

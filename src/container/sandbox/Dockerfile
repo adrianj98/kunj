@@ -24,7 +24,10 @@ RUN apt-get update \
 
 COPY git-credential-kunj /usr/local/bin/git-credential-kunj
 
+COPY zshrc /etc/zsh/zshrc
+
 RUN chmod 0755 /usr/local/bin/git-credential-kunj \
+ && chmod 0644 /etc/zsh/zshrc \
  && useradd -m -u 1000 -s /bin/zsh dev \
  && mkdir -p /workspace \
  && chown dev:dev /workspace

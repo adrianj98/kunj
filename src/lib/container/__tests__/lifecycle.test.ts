@@ -177,7 +177,7 @@ describe('startContainer', () => {
       { name: names.workspaceVolume, path: '/workspace' },
       { name: names.homeVolume, path: '/home/dev' },
     ]);
-    expect(main.env).toEqual({ GH_TOKEN: 'tok', ANTHROPIC_API_KEY: 'k', KUNJ_CREDENTIAL_HOST: 'github.com' });
+    expect(main.env).toEqual({ GH_TOKEN: 'tok', ANTHROPIC_API_KEY: 'k', KUNJ_CREDENTIAL_HOST: 'github.com', KUNJ_CONTAINER: '1', KUNJ_BRANCH: BRANCH, KUNJ_REPO: REPO.name });
     expect(main.labels[LABEL.role]).toBe('main');
     expect(JSON.parse(main.labels[LABEL.options])).toEqual({ firewall: 'default', allowHost: false, publish: [], helperEnv: helper.env, user: 'dev', imageKind: 'sandbox' });
 
@@ -647,7 +647,7 @@ describe('startContainer', () => {
     fs.writeFileSync(path.join(tmp, '.devcontainer', 'devcontainer.json'), JSON.stringify({
       image: 'node:22',
       remoteUser: 'node',
-      containerEnv: { FOO: 'bar', KUNJ_CREDENTIAL_HOST: 'evil.example', GH_TOKEN: 'stolen' },
+      containerEnv: { FOO: 'bar', KUNJ_CREDENTIAL_HOST: 'evil.example', GH_TOKEN: 'stolen', KUNJ_BRANCH: 'evil', KUNJ_REPO: 'evil', KUNJ_CONTAINER: '0' },
       forwardPorts: [5173],
       postCreateCommand: 'npm ci',
       postStartCommand: 'npm run dev',
@@ -668,7 +668,7 @@ describe('startContainer', () => {
     expect(result.image).toBe('node:22');
     expect(main.user).toBe('node');
     expect(main.volumes[1]).toEqual({ name: names.homeVolume, path: '/home/node' });
-    expect(main.env).toMatchObject({ FOO: 'bar', KUNJ_CREDENTIAL_HOST: 'github.com', GH_TOKEN: 'tok' });
+    expect(main.env).toMatchObject({ FOO: 'bar', KUNJ_CREDENTIAL_HOST: 'github.com', GH_TOKEN: 'tok', KUNJ_BRANCH: BRANCH, KUNJ_REPO: REPO.name, KUNJ_CONTAINER: '1' });
     expect(result.publish.map(p => p.container)).toEqual([5173]);
     const cmds = execCmds(b);
     expect(cmds).toContain('sh -lc npm ci');
@@ -1229,6 +1229,7 @@ describe('blueprint start', () => {
     expect(main.name).toBe(snapNames.container);
     expect(main.labels[LABEL.branch]).toBe('main@snapshot');
     expect(seedScriptOf(b)).toContain("git switch 'main'");
+    expect(main.env).toMatchObject({ KUNJ_BRANCH: 'main', KUNJ_REPO: REPO.name });
   });
 });
 
