@@ -18,7 +18,7 @@ themselves up, and repos that run `docker compose` themselves can. Each feature 
 | 3 | Auto port forwarding (`forward --auto`) | Dev servers just appear on localhost | Shipped (5710902, b88466c) |
 | 4 | Prune (`kunj ct prune`) | Containers, volumes and snapshots pile up (1–2 GB each) | Shipped (893dc79, 4f7aa10) |
 | 5 | Docker-in-Docker | Repos whose tests run `docker compose`; weakens isolation, so opt-in and last | Shipped (d40b44c, c88430b) |
-| 6 | Host MCP bridge (a browser on the Mac for the agent) | Let the agent check the dev server it started | Built, in security review (branch `worktree-agent-ad3a524ce9e8fc25b`) |
+| 6 | Host MCP bridge (a browser on the Mac for the agent) | Let the agent check the dev server it started | Shipped (c4ac53d, cf544d8, 92b14ef, d235d85) |
 | — | Cross-feature fixes: forwards through the helper, compose deps, orphan grace | Review of the whole phase | Shipped (a32bc90) |
 | — | Containers in the VS Code extension and the macOS app | Consumers of the JSON added here | Not started |
 
@@ -182,29 +182,52 @@ names, ports and volumes are fine). The costs are an image cache per branch and 
 - `list` marks the mode (`dind`). When the working tree has a compose file, DinD is off and no services
   are declared, `start` suggests services.
 
-### 6. Host MCP bridge (not started)
+### 6. Host MCP bridge
 
-Proposed: the agent in the container can use MCP servers that run on the Mac, starting with a browser
-server so it can open and drive Chrome on the user's screen.
+Shipped (c4ac53d, cf544d8, 92b14ef, d235d85; module `src/lib/container/mcpbridge.ts`). The agent in the
+container can use a browser MCP server that runs on the Mac, so it can open and drive Chrome to check the
+dev server it started. Off unless `container.mcp` has an entry. It went through three security review
+rounds; the first found a sandbox escape (host file read and write through the browser tools), so the
+filter is deny by default.
 
-- **How:** the container cannot reach the Mac (the firewall blocks the host), so the connection goes the
-  other way over `docker exec`, like forwarding: kunj keeps an exec open that listens on
-  `/run/kunj-mcp/<name>.sock` in the container; Claude Code in the container is configured with an MCP
-  server whose command connects to that socket (`socat - UNIX-CONNECT:…`); per connection kunj starts
-  the real stdio server on the Mac and pipes both ways. No port opens on the Mac and it works with a
-  remote Docker host. The plan picks the concrete mechanism; whether the listening exec runs in the
-  helper or the branch container must follow the forwarding rule above.
-- **Configuration:** `container.mcp: { <name>: { command, args?, env?, allowOrigins? } }`, host config
-  only, never the blueprint; suggested entry `chrome` → `npx -y chrome-devtools-mcp@latest --isolated`.
-  kunj writes the container's Claude Code MCP config at start; `kunj ct agent` keeps the bridge running
-  for the session.
-- **Localhost URLs:** the browser runs on the Mac, so `localhost:3000` is the Mac's port; the bridge's
-  instructions give the container→host port map from the forwards registry.
-- **Safety:** off unless `container.mcp` has entries; an isolated, empty browser profile; `allowOrigins`
-  (default `http://localhost`, `http://127.0.0.1`) enforced by the server's own restriction where it has
-  one, else by rejecting other origins in `navigate_page`/`new_page` calls in the host-side pipe;
-  `list` shows the bridged servers. The Claude in Chrome extension is tied to the local Claude Code and
-  the real profile, so it is not bridged.
+- **Transport:** the container cannot reach the Mac, so kunj holds a `docker exec` running
+  `socat UNIX-LISTEN:/run/kunj-mcp/<name>.sock,mode=600 STDIO` as the sandbox user (one session per
+  server at a time, restarted when either side ends). Root is used only to create `/run/kunj-mcp` and
+  chown it to the user (mode 700). Claude Code in the container gets
+  `mcpServers.<name> = { command: 'socat', args: ['-', 'UNIX-CONNECT:/run/kunj-mcp/<name>.sock'] }`
+  merged into the user's `~/.claude.json` (other servers kept). The host spawns the real stdio server
+  only after the first complete JSON line, with only `PATH`, `HOME` and the configured `env`.
+- **Configuration:** `container.mcp: { chrome: { command?, args?, env?, allowOrigins? } }`, host config
+  only (never the blueprint or the repository); only the browser entry is honoured in v1, other keys warn.
+  The default server is pinned: `npx -y chrome-devtools-mcp@1.12.0` with a fresh temporary
+  `--userDataDir` per session whose preferences refuse downloads (and point the download folder inside it),
+  plus `--categoryPerformance=false --categoryMemory=false --fileNavigations=false
+  --no-usage-statistics`; the directory is deleted on every exit path. Custom `args` drop these and warn.
+- **Lifetime:** `kunj ct agent` starts a detached bridge (registry `~/.kunj/container-bridges.json`, shared
+  `pidRegistry` with the forwarder) bound to one run of the container (`State.StartedAt`); it exits when
+  the container stops or restarts. `kunj ct mcp [branch]` runs it in the foreground. Snapshot builds never
+  bridge. `list --json` gains `bridges: [{ name, pid }]`.
+- **Filter, container to host:** only tools on a pinned allowlist (`BROWSER_TOOLS`), each with an argument
+  allowlist (`BROWSER_TOOL_ARGS`); unknown arguments and any path-like key (`filePath`, `sourcePath`, …,
+  checked recursively, failing closed past 32 levels) are refused; `upload_file` and `new_page`'s
+  `isolatedContext` are refused. Batches, malformed lines, ids that are not a short string or an integer,
+  and duplicate in-flight ids are refused or dropped; refusals quote at most 100 characters of container
+  text. `capabilities.roots` is stripped from `initialize`, and the bridge answers the server's
+  `roots/list` itself with `[]`.
+- **Filter, host to container:** every result carrying a `tools` array is rewritten to the allowlist with
+  path-like schema properties removed.
+- **Origins:** `navigate_page`/`new_page` URLs must match `allowOrigins`; the default allows only the host
+  ports currently forwarded for that container (`localhost` or `127.0.0.1`, http or https). This limits
+  explicit navigation only: a click or `evaluate_script` can still go anywhere, so it is not a network
+  boundary. The port map is appended to the server's `initialize` instructions.
+- **Limits:** 4 MB per container line, 16 MB per server line, 1 MB per refusal reply, backpressure both
+  ways and an 8 MB cap on output buffered to the container; any error ends the session, never the
+  process.
+
+What holds: no file path from the agent reaches the server, and the default browser refuses downloads.
+What does not: the agent drives a real browser on the Mac's network, so it can reach any service the Mac
+can, through page scripts and links. With a custom command or args, downloads land where that browser
+saves them.
 
 ### Settings and commands added
 
@@ -216,6 +239,7 @@ server so it can open and drive Chrome on the user's screen.
 | `container.pruneAfterDays` | `0` (off) | Prune also removes stopped containers created longer ago |
 | `container.dockerInDocker` | `off` | `off`, `sysbox` or `privileged` |
 | `container.allowPrivileged` | `false` | Required for `privileged`; still refused on Docker Desktop |
+| `container.mcp` | `{}` | Host MCP servers bridged into containers; only `chrome` in v1 |
 
 ```text
 kunj ct open [branch] [--new-window]
@@ -223,9 +247,10 @@ kunj ct forward [branch] --auto [--detach]
 kunj ct forward [branch] <service>:<port>
 kunj ct logs [branch] [service] [--follow]
 kunj ct prune [--all] [--dry-run] [--force] [--yes]
+kunj ct mcp [branch]
 ```
 
-`list --json` gained, per container, `services`, `dind` and forward entries in `ports`, and at the top
+`list --json` gained, per container, `services`, `dind`, `bridges` and forward entries in `ports`, and at the top
 level `orphans`; all additive.
 
 ### Security impact
@@ -237,7 +262,7 @@ level `orphans`; all additive.
 | Auto forwarding | Any port the agent opens is reachable on the Mac's localhost | `127.0.0.1` only; ignore list; `forward.auto: false`; exec only in kunj's own helper |
 | Prune | Data loss | Remove guard at plan and removal; dry run without a TTY or with `--json`; volumes only with `--force` |
 | Docker-in-Docker | `privileged` is root on the Docker host's VM | Two opt-ins, refused on Docker Desktop, re-checked on resume, `sysbox` preferred |
-| MCP bridge | A browser on the Mac, outside the sandbox | Off by default; isolated profile; localhost-only origins |
+| MCP bridge | The agent drives a browser on the Mac, outside the sandbox and on the Mac network | Off by default; pinned server; tool and argument allowlists, no path arguments; throwaway profile that refuses downloads; listener as the sandbox user; origins limited to forwarded ports (explicit navigation only); size bounds |
 
 ## Decisions
 
@@ -255,12 +280,15 @@ All 2026-10-23.
 - **Prune of stale branches:** only branches gone from origin that the clone saw there, only with a
   clean guard; `--force` skips only the guard; consent through the prompt or `--yes` (4f7aa10).
 - **Docker-in-Docker built in this phase**, fifth, `sysbox` and `privileged`, kunj sandbox image only.
-- **MCP bridge:** Chrome DevTools MCP with `--isolated` by default; `localhost` origins only, widened per
-  server; browser only for now, other stdio servers later through the same bridge.
+- **MCP bridge:** Chrome DevTools MCP, browser only for now. After review: deny by default (tool and
+  argument allowlists), server pinned to 1.12.0, a throwaway profile instead of `--isolated`, default
+  origins = the container's forwarded ports, malformed lines dropped, batches refused.
 
 ## Open questions and roadmap
 
-- Host MCP bridge: implement (plan to pick the socket mechanism).
+- MCP bridge: bump the pinned chrome-devtools-mcp only after re-reading its tool schemas; consider
+  `--allowedUrlPattern` (Chrome 149+) as a real origin boundary; verify the download block in a visible
+  browser.
 - Containers in the VS Code extension and the macOS app (start, agent in a terminal, open, forward,
   remove), reading `kunj ct list --json`.
 - Service egress filtering, if a service image turns out to need watching.

@@ -3,6 +3,14 @@
 Changes made with Claude, and why.
 
 
+
+## 2026-10-23 — MCP bridge landed; specs updated
+
+- Landed the host MCP bridge on main (c4ac53d, cf544d8, 92b14ef, d235d85) after three security review
+  rounds. Rewrote section 6 of `docs/specs/container-phase-2.md` to describe what shipped (transport,
+  configuration, lifetime, filters both ways, origins, limits, what holds and what does not), added
+  `container.mcp` and `kunj ct mcp` to its tables, and marked phase 2 done in `container-system.md` and the
+  tracker. Why: the old section described the pre-review design.
 ## 2026-10-23 — `kunj agent` verified against a real tmux
 
 - Ran the manual checks from the CLI contract's final fixes report with tmux 3.8: `KUNJ_*` are this
