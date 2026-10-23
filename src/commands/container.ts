@@ -608,6 +608,15 @@ export class ContainerCommand extends BaseCommand {
     return resolveBlueprint({ cwd: process.cwd(), repoKunjDir: getKunjDir(), defaultBranch, override: options.blueprint });
   }
 
+  // The usual reason nothing resolves: the file was written but not pushed to the default branch
+  private async unpushedBlueprintHint(defaultBranch: string | undefined): Promise<void> {
+    const root = await getGitRoot().catch(() => null);
+    if (!root || !fs.existsSync(path.join(root, BLUEPRINT_PATH))) return;
+    this.warn(
+      `found ${BLUEPRINT_PATH} in the working tree but not on origin/${defaultBranch || '<default>'}; commit and push it, or pass --blueprint`
+    );
+  }
+
   private snapshotInput(ctx: Context, branch: string, blueprint: ResolvedBlueprint, warn: (m: string) => void) {
     return {
       branch,
@@ -642,8 +651,9 @@ export class ContainerCommand extends BaseCommand {
     }
     const file = options.global ? path.join(getKunjDir(), 'blueprint.json') : path.join(root, BLUEPRINT_PATH);
     const interactive = !options.yes && !this.jsonMode && !!process.stdin.isTTY;
+    const exists = fs.existsSync(file);
 
-    if (fs.existsSync(file) && !options.yes) {
+    if (exists && !options.yes) {
       if (!interactive) throw new ContainerError(`${file} already exists; pass --yes to overwrite it`);
       const inquirer = (await import('inquirer')).default;
       const { overwrite } = await inquirer.prompt([
@@ -652,6 +662,16 @@ export class ContainerCommand extends BaseCommand {
       if (!overwrite) {
         console.log(chalk.gray('Left unchanged'));
         return;
+      }
+    }
+
+    // Notes are written by hand and never inferred, so an overwrite keeps them
+    let notes: string | undefined;
+    if (exists) {
+      try {
+        notes = parseBlueprint(fs.readFileSync(file, 'utf8'), file).notes;
+      } catch {
+        // an unreadable or invalid file has nothing worth keeping
       }
     }
 
@@ -691,6 +711,7 @@ export class ContainerCommand extends BaseCommand {
       setup,
       maintain,
       ...(inferred.lockfiles.length ? { lockfiles: inferred.lockfiles } : {}),
+      ...(notes !== undefined ? { notes } : {}),
     };
     const text = JSON.stringify(doc, null, 2) + '\n';
     try {
@@ -724,7 +745,10 @@ export class ContainerCommand extends BaseCommand {
     if (!branch) throw new ContainerError('cannot detect the default branch; pass --base');
     // The blueprint a start would use, so the snapshot's hash matches the starts that look for it
     const resolved = await this.resolveBlueprint(options, defaultBranch || branch);
-    if (!resolved) throw new ContainerError('No blueprint; run kunj ct blueprint init');
+    if (!resolved) {
+      await this.unpushedBlueprintHint(defaultBranch || branch);
+      throw new ContainerError('No blueprint; run kunj ct blueprint init');
+    }
 
     this.progress(chalk.blue(`Snapshotting the blueprint (${resolved.path}) from ${branch}...`));
     const result = await snapshotBlueprint(ctx.backend, {
@@ -748,6 +772,7 @@ export class ContainerCommand extends BaseCommand {
     const defaultBranch = (await detectDefaultBranch(ctx.repo.root)) || undefined;
     const resolved = await this.resolveBlueprint(options, defaultBranch);
     if (!resolved) {
+      await this.unpushedBlueprintHint(defaultBranch);
       if (this.jsonMode) {
         this.outputJSON({ source: null });
         return;

@@ -6,10 +6,8 @@ import {
   ResolvedBlueprint,
   SEED_DIR,
   SNAPSHOT_REPO,
-  blueprintHash,
   blueprintLabels,
-  blueprintRef,
-  lockfileIds,
+  computeBlueprintHash,
   snapshotTag,
 } from './blueprint';
 import { StartOptions, StartResult, baseImageTag, removeContainer, startContainer } from './lifecycle';
@@ -99,7 +97,6 @@ export interface SnapshotPlan {
  * use it too, so every command computes the hash the same way. */
 export async function planSnapshot(opts: Omit<SnapshotOptions, 'rebuild' | 'log'>): Promise<SnapshotPlan> {
   const bp = opts.blueprint.blueprint;
-  const ref = blueprintRef(opts.blueprint, opts.branch);
   const presets = await resolvePresets(orderTools(bp.tools), { repoRoot: opts.repo.root, globalKunjDir: getGlobalKunjDir() });
 
   // No secrets, keep files, copied files, ports or agent: the image must not hold anything private
@@ -132,12 +129,7 @@ export async function planSnapshot(opts: Omit<SnapshotOptions, 'rebuild' | 'log'
 
   // Same base image and lockfile ref as a start, so the two hashes agree
   const base = await baseImageTag(startOptions);
-  const hash = blueprintHash({
-    text: opts.blueprint.text,
-    lockfiles: await lockfileIds(bp.lockfiles, ref, opts.cwd),
-    baseImage: base,
-    presetHashes: presets.map(p => p.hash),
-  });
+  const hash = await computeBlueprintHash({ resolved: opts.blueprint, defaultBranch: opts.branch, cwd: opts.cwd, baseImage: base, presets });
   return { startOptions, base, hash, tag: snapshotTag(opts.repo.name, hash) };
 }
 

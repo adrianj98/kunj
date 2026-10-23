@@ -11,6 +11,7 @@ import { SEED_MARKER } from '../seed';
 import { describeGuard } from '../env';
 import { ResolvedBlueprint, blueprintHash, parseBlueprint, snapshotTag } from '../blueprint';
 import { Preset } from '../presets';
+import { planSnapshot } from '../snapshot';
 import { KunjConfig } from '../../../types';
 
 let keepDir = '';
@@ -1030,6 +1031,36 @@ describe('blueprint start', () => {
     expect(result.blueprint?.hash).toBe(
       blueprintHash({ text: r.text, lockfiles: [{ path: 'yarn.lock', id: blob }], baseImage: SANDBOX_IMAGE(VERSION), presetHashes: ['p1'] })
     );
+  });
+
+  it('records the same hash planSnapshot computes for the same inputs', async () => {
+    const b = backend();
+    const repoDir = path.join(tmp, 'repo');
+    fs.mkdirSync(repoDir);
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoDir, env: GIT_ENV });
+    fs.writeFileSync(path.join(repoDir, 'yarn.lock'), 'lock');
+    execFileSync('git', ['add', 'yarn.lock'], { cwd: repoDir, env: GIT_ENV });
+    execFileSync('git', ['commit', '-qm', 'lock'], { cwd: repoDir, env: GIT_ENV });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repoDir, env: GIT_ENV });
+    const r = blueprint({ lockfiles: ['yarn.lock'] });
+    // Real presets on both sides: the start resolves them itself, as planSnapshot does
+    const opts = bpOptions({ blueprint: r, presets: undefined, cwd: repoDir, defaultBranch: async () => 'main' });
+    await startContainer(b, opts);
+    const main = runSpecs(b).find(s => s.name === names.container)!;
+    const recorded = JSON.parse(main.labels[LABEL.options]).blueprintHash;
+
+    const plan = await planSnapshot({
+      branch: 'main',
+      blueprint: r,
+      config: opts.config,
+      repo: REPO,
+      kunjVersion: VERSION,
+      cwd: repoDir,
+      jsonMode: false,
+      warn: () => {},
+    });
+    expect(recorded).toMatch(/^[0-9a-f]{12}$/);
+    expect(recorded).toBe(plan.hash);
   });
 
   it('setup runs as the sandbox user', async () => {

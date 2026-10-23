@@ -437,6 +437,33 @@ describe('ContainerCommand', () => {
       expect(fs.readFileSync(file, 'utf8')).toBe('{"setup":["make"]}\n');
     });
 
+    it('blueprint init keeps the notes of the file it overwrites', async () => {
+      const file = path.join(mockRoot, '.kunj', 'blueprint.json');
+      fs.mkdirSync(path.dirname(file));
+      fs.writeFileSync(file, '{ "setup": ["make"], "notes": "ask Ada about the db" }\n');
+      await new ContainerCommand().execute('blueprint', 'init', [], { yes: true });
+      const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+      expect(written.setup).toEqual(['npm ci', 'npm run build']);
+      expect(written.notes).toBe('ask Ada about the db');
+    });
+
+    it('status and snapshot point at an unpushed .kunj/blueprint.json', async () => {
+      const hint = 'found .kunj/blueprint.json in the working tree but not on origin/main; commit and push it, or pass --blueprint';
+      const warned = () => logSpy.mock.calls.map(c => c.join(' ')).filter(l => l.includes('found .kunj'));
+      (resolveBlueprint as jest.Mock).mockResolvedValue(null);
+      await new ContainerCommand().execute('blueprint', 'status', [], {});
+      expect(warned()).toEqual([]);
+
+      fs.mkdirSync(path.join(mockRoot, '.kunj'));
+      fs.writeFileSync(path.join(mockRoot, '.kunj', 'blueprint.json'), '{}');
+      await new ContainerCommand().execute('blueprint', 'status', [], {});
+      await new ContainerCommand().execute('blueprint', 'snapshot', [], {});
+      expect(warned()).toHaveLength(2);
+      for (const line of warned()) expect(line).toContain(hint);
+      expect(errors).toEqual(['✗ No blueprint; run kunj ct blueprint init', '✗ No blueprint; run kunj ct blueprint init', '✗ No blueprint; run kunj ct blueprint init']);
+      expect(snapshot.snapshotBlueprint).not.toHaveBeenCalled();
+    });
+
     it('blueprint init --global writes to the kunj dir', async () => {
       await new ContainerCommand().execute('blueprint', 'init', [], { yes: true, global: true });
       expect(fs.existsSync(path.join(mockKunjDir, 'blueprint.json'))).toBe(true);

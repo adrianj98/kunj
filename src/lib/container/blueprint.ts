@@ -168,6 +168,24 @@ export function blueprintHash(input: {
   return createHash('sha1').update(body).digest('hex').slice(0, 12);
 }
 
+/** The one hash a start looks up and a snapshot is tagged with: the blueprint text, its lockfiles at
+ * blueprintRef(), the base image and the presets. Start, snapshot, status and list all call this. */
+export async function computeBlueprintHash(input: {
+  resolved: Pick<ResolvedBlueprint, 'blueprint' | 'text' | 'ref'>;
+  defaultBranch?: string;
+  cwd: string;
+  baseImage: string;
+  presets: Array<{ hash: string }>;
+}): Promise<string> {
+  const ref = blueprintRef(input.resolved, input.defaultBranch);
+  return blueprintHash({
+    text: input.resolved.text,
+    lockfiles: await lockfileIds(input.resolved.blueprint.lockfiles, ref, input.cwd),
+    baseImage: input.baseImage,
+    presetHashes: input.presets.map(p => p.hash),
+  });
+}
+
 export const SNAPSHOT_REPO = (repoName: string): string => `kunj-blueprint-${imageRepoName(repoName)}`;
 
 export function snapshotTag(repoName: string, hash: string): string {

@@ -10,7 +10,7 @@ import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutErro
 import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch } from './names';
 import { ImageSource, credentialHelperSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
 import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devcontainer';
-import { Blueprint, ResolvedBlueprint, SEED_DIR, blueprintHash, blueprintRef, lockfileIds, resolveBlueprint } from './blueprint';
+import { Blueprint, ResolvedBlueprint, SEED_DIR, computeBlueprintHash, resolveBlueprint } from './blueprint';
 import { Preset, orderTools, resolvePresets } from './presets';
 import { FoundSnapshot, findSnapshot, maintain, provisionNew } from './provision';
 import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
@@ -245,11 +245,12 @@ async function resolveSource(
   const presets = options.presets ?? (await step('setup', () =>
     resolvePresets(orderTools(bp.tools), { repoRoot: options.repo.root, globalKunjDir: getGlobalKunjDir() })));
   // The base image is part of the hash, so a snapshot is only exact for the image it was built on
-  const hash = blueprintHash({
-    text: resolved.text,
-    lockfiles: await lockfileIds(bp.lockfiles, blueprintRef(resolved, await options.defaultBranch?.()), options.cwd),
+  const hash = await computeBlueprintHash({
+    resolved,
+    defaultBranch: await options.defaultBranch?.(),
+    cwd: options.cwd,
     baseImage: base.tag,
-    presetHashes: presets.map(p => p.hash),
+    presets,
   });
   // --image is a one-off choice of image, so it is never swapped for a snapshot
   const lookup = !options.noSnapshot && !options.imageOverride;
