@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A CLI tool for working with git branches",
   "main": "dist/index.js",
+  "types": "./dist/lib/json-types.d.ts",
   "bin": {
     "kunj": "./dist/index.js"
   },

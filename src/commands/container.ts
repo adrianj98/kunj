@@ -52,6 +52,7 @@ import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint
 import { inferBlueprint } from '../lib/container/infer';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
 import { KunjConfig } from '../types';
+import type { ContainerJson, ContainerListJson } from '../lib/json-types';
 
 interface ContainerOptions {
   json?: boolean;
@@ -823,7 +824,7 @@ export class ContainerCommand extends BaseCommand {
     const currentHash = blueprintMains.some(c => c.labels[LABEL.repo] === ctx.repo.id) ? await this.currentHash(ctx) : null;
 
     const forwards = readForwards().filter(r => r.port > 0);
-    const containers = mains.map((c, i) => {
+    const containers: ContainerJson[] = mains.map((c, i) => {
       const s = statuses[i];
       const recorded = this.recordedOptions(c);
       const stale = currentHash === null || c.labels[LABEL.repo] !== ctx.repo.id ? null : recorded.blueprintHash !== currentHash;
@@ -853,7 +854,7 @@ export class ContainerCommand extends BaseCommand {
         repo: ctx.repo.name,
         backend: { kind: 'docker', context: ctx.dockerContext || 'default' },
         containers,
-      });
+      } satisfies ContainerListJson);
       return;
     }
 

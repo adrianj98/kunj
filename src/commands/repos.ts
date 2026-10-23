@@ -8,6 +8,7 @@
 // The macOS menu bar app reads `kunj repos --json` to know what to show.
 
 import chalk from 'chalk';
+import type { ReposJson } from '../lib/json-types';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { getGitCommonDir } from '../lib/worktree';
@@ -70,7 +71,7 @@ export class ReposCommand extends BaseCommand {
   private list(options: ReposOptions): void {
     const repos = listRepos({ includeHidden: options.all });
     if (this.jsonMode) {
-      this.outputJSON({ repos });
+      this.outputJSON({ repos } satisfies ReposJson);
       return;
     }
     if (repos.length === 0) {
