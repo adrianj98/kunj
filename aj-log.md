@@ -855,3 +855,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - docs/specs/workspace-ide.md: tmux-optional and events status poll marked shipped. Why: the fix wave landed both.
 - docs/specs/container-system.md: secret manager design (encrypted vault in ~/.kunj, explicit targets, env or file delivery, .env import) and a roadmap to-do. Why: the user asked for a secret manager in the containers spec.
 - docs/specs/README.md is now the project tracker (done with commits, in progress, to do, waiting on you); CLAUDE.md says to keep it current. Why: the user asked to keep track of what is done in one place.
+- scripts/check-tmux-agent.sh: the tmux behaviour kunj agent relies on (-e on a running server, -A reattach runs set-option, window-size latest, nesting refusal and TMUX removal), run in a Debian container; passes on tmux 3.3a and 3.5a. Why: to cover the tmux versions Linux users get, besides the macOS 3.8 check.
