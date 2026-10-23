@@ -299,10 +299,13 @@ Every request from the container is checked before it reaches the server:
   its profile and temp files live in a directory that is deleted when the session ends;
 - `navigate_page` and `new_page` may open only the host ports [forwarded](#automatic-forwarding) for the
   container, unless `allowOrigins` says otherwise;
-- a request id must be a short string or a safe integer; a line that is not a JSON-RPC message is
-  dropped; a line over 4 MB, or more than 8 MB of replies the container does not read, ends the session.
+- a request id must be a short string or a safe integer, and not one already in flight; a batch
+  (a JSON array) gets a single error; a line that is not a JSON-RPC message is dropped; a line over
+  4 MB from the container (16 MB from the server), or more than 8 MB of replies the container does
+  not read, ends the session, and so does any error while handling a line.
 
-The server's own `roots/list` request is answered by the bridge with no roots.
+The server's own `roots/list` request is answered by the bridge with no roots, and the container's
+`roots` capability is removed from its `initialize`.
 
 A refused request gets a JSON-RPC error. The initialize result tells the agent which host port each
 forwarded container port is on.

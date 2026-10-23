@@ -7,6 +7,7 @@ import { ExecIO } from '../backend';
 import {
   BROWSER_TOOLS,
   BROWSER_TOOL_ARGS,
+  BATCH_REFUSAL,
   BridgeRecord,
   CHROME_DEVTOOLS_MCP,
   MAX_LINE_BYTES,
@@ -95,11 +96,11 @@ describe('makeRequestFilter', () => {
   };
 
   it('passes allowed tools, an allowed navigate, and evaluate_script without file arguments', () => {
-    expect(filter(call(1, 'navigate_page', { url: 'http://localhost:3000/' }))).toEqual({ pass: true });
-    expect(filter(call(2, 'navigate_page', { type: 'back' }))).toEqual({ pass: true });
-    expect(filter(call(3, 'take_screenshot', { fullPage: true }))).toEqual({ pass: true });
-    expect(filter(call(4, 'evaluate_script', { function: '() => document.title' }))).toEqual({ pass: true });
-    expect(filter(call(5, 'click', { uid: '1_2' }))).toEqual({ pass: true });
+    expect(filter(call(1, 'navigate_page', { url: 'http://localhost:3000/' }))).toMatchObject({ pass: true });
+    expect(filter(call(2, 'navigate_page', { type: 'back' }))).toMatchObject({ pass: true });
+    expect(filter(call(3, 'take_screenshot', { fullPage: true }))).toMatchObject({ pass: true });
+    expect(filter(call(4, 'evaluate_script', { function: '() => document.title' }))).toMatchObject({ pass: true });
+    expect(filter(call(5, 'click', { uid: '1_2' }))).toMatchObject({ pass: true });
   });
 
   it('answers a navigate to another origin with a JSON-RPC error carrying the request id', () => {
@@ -129,7 +130,9 @@ describe('makeRequestFilter', () => {
   it('refuses an argument a tool does not take, however harmless its name', () => {
     expect(refused(call(1, 'take_screenshot', { fullPage: true, output: '/tmp/x' })).error.message).toContain('output');
     expect(refused(call(2, 'evaluate_script', { function: '() => 1', saveTo: 'x' })).error.message).toContain('saveTo');
-    expect(filter(call(3, 'click', { uid: '1', pageId: 2 }))).toEqual({ pass: true });
+    expect(filter(call(3, 'click', { uid: '1', pageId: 2 }))).toMatchObject({ pass: true });
+    // an off-the-record context may not inherit the profile's download block
+    expect(refused(call(5, 'new_page', { url: 'http://localhost/', isolatedContext: 'x' })).error.message).toContain('isolatedContext');
     expect(refused(call(4, 'click', 'not an object' as unknown as Record<string, unknown>)).id).toBe(4);
   });
 
@@ -162,18 +165,31 @@ describe('makeRequestFilter', () => {
 
   it('refuses methods that are not allowed, passes notifications and responses', () => {
     expect(refused(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: 'file:///etc/passwd' } })).id).toBe(1);
-    expect(filter(JSON.stringify({ jsonrpc: '2.0', id: 6, method: 'tools/list' }))).toEqual({ pass: true });
-    expect(filter(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }))).toEqual({ pass: true });
-    expect(filter(JSON.stringify({ jsonrpc: '2.0', id: 0, result: { roots: [] } }))).toEqual({ pass: true });
+    expect(filter(JSON.stringify({ jsonrpc: '2.0', id: 6, method: 'tools/list' }))).toMatchObject({ pass: true });
+    expect(filter(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }))).toMatchObject({ pass: true });
+    expect(filter(JSON.stringify({ jsonrpc: '2.0', id: 0, result: { roots: [] } }))).toMatchObject({ pass: true });
   });
 
   it('drops lines that are not JSON-RPC messages (fail closed), with no reply', () => {
-    for (const line of ['', 'not json', '{"half":', '42', 'null', '"str"', '[]']) expect(filter(line)).toEqual({ pass: false, malformed: true });
+    for (const line of ['', 'not json', '{"half":', '42', 'null', '"str"']) expect(filter(line)).toEqual({ pass: false, malformed: true });
   });
 
-  it('refuses a whole batch that holds a refused call', () => {
-    const r = refused(`[${call(1, 'navigate_page', { url: 'https://evil.com' })},${call(2, 'list_pages', {})}]`);
-    expect(r.map((m: { id: number }) => m.id)).toEqual([1, 2]);
+  it('refuses every batch with one fixed error, however big', () => {
+    expect(refused(`[${call(2, 'list_pages', {})}]`)).toEqual({ jsonrpc: '2.0', id: null, error: { code: -32602, message: BATCH_REFUSAL } });
+    const big = `[${Array.from({ length: 20000 }, (_, i) => call(i, 'x'.repeat(50), { url: 'u'.repeat(50) })).join(',')}]`;
+    expect(big.length).toBeGreaterThan(1_000_000);
+    const r = filter(big) as { reply: string };
+    expect(r.reply.length).toBeLessThan(200);
+    expect(refused('[]').id).toBeNull();
+  });
+
+  it('quotes at most 100 characters of what the container sent', () => {
+    const method = 'm'.repeat(100_000);
+    const reply = refused(JSON.stringify({ jsonrpc: '2.0', id: 1, method }));
+    expect(reply.error.message.length).toBeLessThan(200);
+    expect(reply.error.message).toContain('…');
+    expect(refused(call(2, 'navigate_page', { url: `https://evil.example/${'a'.repeat(10_000)}` })).error.message.length).toBeLessThan(400);
+    expect(refused(call(3, 't'.repeat(5000), {})).error.message.length).toBeLessThan(200);
   });
 });
 
@@ -397,18 +413,23 @@ const ECHO_SERVER = `
 const rl = require('readline').createInterface({ input: process.stdin });
 const send = m => process.stdout.write(JSON.stringify(m) + '\\n');
 let initId;
+let capsSeen;
 rl.on('line', line => {
   const m = JSON.parse(line);
   if (m.method === 'notifications/exit') process.exit(0);
   // the answer to its own roots/list, sent when initialize arrived
   if (m.id === 'roots-1' && m.method === undefined) {
-    return send({ jsonrpc: '2.0', id: initId, result: { protocolVersion: '2025-06-18', instructions: 'from the server', roots: m.result.roots } });
+    return send({ jsonrpc: '2.0', id: initId, result: { protocolVersion: '2025-06-18', instructions: 'from the server', roots: m.result.roots, capsSeen } });
   }
   if (m.id === undefined) return;
   if (m.params && m.params.noreply) return;
   if (m.params && m.params.fail) return send({ jsonrpc: '2.0', id: m.id, error: { code: -1, message: 'failed' } });
+  if (m.params && m.params.arguments && m.params.arguments.uid === 'huge') {
+    return process.stdout.write('{"x":"' + 'a'.repeat(17 * 1024 * 1024) + '"}\\n');
+  }
   if (m.method === 'initialize') {
     initId = m.id;
+    capsSeen = m.params && m.params.capabilities;
     return send({ jsonrpc: '2.0', id: 'roots-1', method: 'roots/list' });
   }
   const result = m.method === 'tools/list' ? { tools: [{ name: 'take_screenshot', inputSchema: { type: 'object', properties: { filePath: {}, fullPage: {} } } }, { name: 'upload_file', inputSchema: {} }] }
@@ -672,31 +693,98 @@ describe('runBridge', () => {
     expect(fs.existsSync(dirDuring)).toBe(false);
   });
 
-  it('forgets a watched request on an error reply, and keeps at most 1024', async () => {
+  it('filters every tool list by shape, ends a request on any reply, refuses duplicate ids in flight, keeps at most 1024', async () => {
     const b = new FakeBackend();
     const controller = new AbortController();
     const replies: any[] = [];
     scriptedListener(b, [
       async c => {
-        // tools/list that fails, then another reply under the same id: not rewritten
+        // tools/list that fails: the id is free again
         c.send({ jsonrpc: '2.0', id: 7, method: 'tools/list', params: { fail: true } });
         replies.push(await c.next());
+        // a reply to another method that carries a tool list is filtered all the same
         c.send({ jsonrpc: '2.0', id: 7, method: 'prompts/list' });
         replies.push(await c.next());
-        // 1030 that are never answered: the first ones are evicted, the last ones still watched
+        // 1030 never answered: 2029 is still in flight, so a second request under it is refused
         for (let i = 0; i < 1030; i++) c.send({ jsonrpc: '2.0', id: 1000 + i, method: 'tools/list', params: { noreply: true } });
-        c.send({ jsonrpc: '2.0', id: 1000, method: 'prompts/list' });
+        c.send({ jsonrpc: '2.0', id: 2029, method: 'tools/list' });
         replies.push(await c.next());
-        c.send({ jsonrpc: '2.0', id: 2029, method: 'prompts/list' });
+        // ...and 1000 was evicted, so it may be used again; its reply is filtered by shape
+        c.send({ jsonrpc: '2.0', id: 1000, method: 'tools/list' });
         replies.push(await c.next());
         controller.abort();
       },
     ]);
     await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn: recordingSpawn().spawn });
     expect(replies[0]).toMatchObject({ id: 7, error: { message: 'failed' } });
-    expect(replies[1].result.tools).toEqual([{ name: 'upload_file' }]);
-    expect(replies[2].result.tools).toEqual([{ name: 'upload_file' }]);
-    expect(replies[3].result.tools).toEqual([]);
+    expect(replies[1]).toMatchObject({ id: 7, result: { tools: [] } });
+    expect(replies[2]).toMatchObject({ id: 2029, error: { code: -32600 } });
+    expect(replies[3].id).toBe(1000);
+    expect(replies[3].result.tools.map((t: { name: string }) => t.name)).toEqual(['take_screenshot']);
+  });
+
+  it('strips the container\'s roots capability and drops its replies to requests the bridge answered', async () => {
+    const b = new FakeBackend();
+    const controller = new AbortController();
+    const replies: any[] = [];
+    scriptedListener(b, [
+      async c => {
+        c.send({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { capabilities: { roots: { listChanged: true }, sampling: {} } } });
+        replies.push(await c.next());
+        // a spoofed answer to the server's roots/list: the server would answer it with another initialize result
+        c.send({ jsonrpc: '2.0', id: 'roots-1', result: { roots: [{ uri: 'file:///Users' }] } });
+        c.send({ jsonrpc: '2.0', id: 1, method: 'ping' });
+        replies.push(await c.next());
+        controller.abort();
+      },
+    ]);
+    await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn: recordingSpawn().spawn });
+    expect(replies[0].result.roots).toEqual([]);
+    expect(replies[0].result.capsSeen).toEqual({ sampling: {} });
+    expect(replies[1]).toMatchObject({ id: 1, result: { echo: 'ping' } });
+  });
+
+  it('ends the session, not the process, when handling a line throws, and removes the profile', async () => {
+    const b = new FakeBackend();
+    const controller = new AbortController();
+    const logs: string[] = [];
+    let exitListenersDuring = 0;
+    const exitListenersBefore = process.listenerCount('exit');
+    scriptedListener(b, [
+      async c => {
+        c.send({ jsonrpc: '2.0', id: 1, method: 'ping' });
+        await c.next();
+        exitListenersDuring = process.listenerCount('exit');
+        c.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'navigate_page', arguments: { url: 'http://localhost:3000/' } } });
+        await c.stdinEnded;
+        controller.abort();
+      },
+    ]);
+    const forwardedPorts = () => {
+      throw new Error('boom');
+    };
+    const { allowOrigins: _ignored, ...noOrigins } = CFG;
+    await runBridge(b, 'cid', 'chrome', { ...noOrigins, args: [...CFG.args, '--'], throwawayProfile: true }, {
+      user: 'sandbox', signal: controller.signal, spawn: recordingSpawn().spawn, forwardedPorts, log: m => logs.push(m),
+    });
+    expect(logs.join('\n')).toMatch(/could not handle a request: boom; session ended/);
+    expect(exitListenersDuring).toBe(exitListenersBefore + 1);
+    expect(process.listenerCount('exit')).toBe(exitListenersBefore);
+  });
+
+  it('ends the session on a server line over 16 MB', async () => {
+    const b = new FakeBackend();
+    const controller = new AbortController();
+    const logs: string[] = [];
+    scriptedListener(b, [
+      async c => {
+        c.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'click', arguments: { uid: 'huge' } } });
+        await c.stdinEnded;
+        controller.abort();
+      },
+    ]);
+    await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn: recordingSpawn().spawn, log: m => logs.push(m) });
+    expect(logs.join('\n')).toMatch(/a line from the server is longer than 16777216 bytes; session ended/);
   });
 
   it('stops reading a container that does not read its replies, and ends the session past the cap', async () => {

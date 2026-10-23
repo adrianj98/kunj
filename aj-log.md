@@ -11,6 +11,25 @@ Changes made with Claude, and why.
   latest`. Moved the item to Done in `docs/specs/README.md`. Why: user installed tmux and asked for it.
 ## 2026-10-23 — Containers: host MCP bridge (phase 2, Task 6)
 
+Fix round 3 (second re-review), on top of round 2:
+
+- Batches are refused outright with one error (id null, fixed message). Before, each element's error
+  repeated the first reason, which quoted the container's method/tool/URL: a 124 KB line gave a 100 MB
+  reply and a 1 MB line crashed the host process (`RangeError: Invalid string length`), leaving the
+  temp profile behind. Refusals now quote at most 100 characters of container text, a refusal over 1 MB
+  ends the session instead of being written, and the handling of each line (both directions) is in a
+  try/catch that ends the session, never the process.
+- Every server reply whose result has a `tools` array is filtered (by shape, not by id), and a
+  request whose id is already in flight is refused, so neither eviction from the 1024 cap nor a
+  duplicate id can carry an unfiltered list. Requests leave the in-flight map on any reply.
+- Roots: the container's `capabilities.roots` is stripped from `initialize`, and its replies to server
+  requests the bridge answered itself (roots/list) are dropped.
+- Server lines over 16 MB end the session. The temp profile is removed on every way out: the session's
+  end and, synchronously, the process 'exit'; `kunj ct mcp` also stops on SIGHUP.
+- `new_page` no longer takes `isolatedContext`: an off-the-record browser context may not inherit the
+  profile's download block (not verified either way, so refused; the directory pref would still keep a
+  file in the temp dir).
+
 Fix round 2 (security re-review), on top of round 1:
 
 - Backpressure on everything sent to the container, not only the server's output. While a write to the

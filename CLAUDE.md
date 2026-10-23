@@ -290,9 +290,11 @@ message; the default one is pinned (`CHROME_DEVTOOLS_MCP`) and gets a per-sessio
 TMPDIR in a temp dir whose prefs refuse downloads, deleted afterwards. The agent drives a browser on
 the Mac's network, so the filter is deny by default: `BROWSER_TOOL_ARGS` (tools and, per tool, their
 arguments, checked against the pinned version), `isPathKey` at any depth (too deep is refused), ids
-short strings or safe integers, `tools/list` rewritten to match, the server's `roots/list` answered
-empty by the bridge, malformed lines dropped, lines capped at 4 MB, reading paused while either side
-does not drain (8 MB waiting for the container ends the session), navigation only to the forwarded host
+short strings or safe integers and unique in flight, batches refused with one error, container text
+quoted at most 100 characters, every tool list in a reply filtered by shape, the server's `roots/list`
+answered empty by the bridge (container roots stripped, its replies to those dropped), malformed lines
+dropped, lines capped at 4 MB (16 MB from the server), reading paused while either side does not drain
+(8 MB waiting for the container ends the session), a thrown error ends the session, never the process, navigation only to the forwarded host
 ports unless `allowOrigins` (explicit navigation only, not a network boundary). Never add a tool or an
 argument that takes a host path; bump the pin only after re-reading the new version's tools. `kunj ct agent` (and start) merge `mcpServers.<name>` into the user's
 `~/.claude.json`; agent spawns a detached `kunj ct mcp`, registered in `~/.kunj/container-bridges.json`

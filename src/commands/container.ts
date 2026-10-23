@@ -876,6 +876,8 @@ export class ContainerCommand extends BaseCommand {
     const stop = () => controller.abort();
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
+    // A closed terminal too: the bridge stops and its temp profile is removed
+    process.on('SIGHUP', stop);
     // The container's forwarded and published ports, read at every check: what the browser may open
     // by default, and what the agent is told when it connects
     const ports = () => [
@@ -900,6 +902,7 @@ export class ContainerCommand extends BaseCommand {
     } finally {
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
+      process.off('SIGHUP', stop);
       updateBridges(others);
     }
     process.exit(process.exitCode ?? 0);

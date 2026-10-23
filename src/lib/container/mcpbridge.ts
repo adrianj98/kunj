@@ -67,7 +67,8 @@ export const BROWSER_TOOL_ARGS: Readonly<Record<string, readonly string[]>> = {
   // pages and navigation
   list_pages: [],
   select_page: ['bringToFront'],
-  new_page: ['url', 'background', 'isolatedContext', 'timeout'],
+  // not isolatedContext: an off-the-record context may not inherit the profile's download block
+  new_page: ['url', 'background', 'timeout'],
   navigate_page: ['type', 'url', 'ignoreCache', 'handleBeforeUnload', 'initScript', 'timeout'],
   close_page: [],
   wait_for: ['text', 'visible', 'timeout'],
@@ -116,6 +117,12 @@ const NAVIGATING_TOOLS = ['navigate_page', 'new_page'];
 export const MAX_LINE_BYTES = 4 * 1024 * 1024;
 /** Output to the container that it is not reading; past this the session ends. */
 export const MAX_BUFFERED_TO_CONTAINER = 8 * 1024 * 1024;
+/** A longer line from the host server ends the session (screenshots come inline, so it is generous). */
+export const MAX_SERVER_LINE_BYTES = 16 * 1024 * 1024;
+/** A refusal the bridge writes itself is never longer than this; one that would be ends the session. */
+export const MAX_REPLY_BYTES = 1024 * 1024;
+/** Container-supplied text quoted in a refusal is cut to this many characters. */
+const MAX_QUOTED = 100;
 /** Requests whose replies are rewritten are remembered by id, at most this many (oldest dropped). */
 const MAX_WATCHED = 1024;
 const MAX_ID_LENGTH = 256;
@@ -304,6 +311,11 @@ export function validId(id: unknown): boolean {
   return (typeof id === 'string' && id.length <= MAX_ID_LENGTH) || (typeof id === 'number' && Number.isSafeInteger(id));
 }
 
+/** Container-supplied text as quoted in a refusal: at most 100 characters. */
+export function clip(text: string): string {
+  return text.length > MAX_QUOTED ? `${text.slice(0, MAX_QUOTED)}…` : text;
+}
+
 function refusal(msg: unknown, policy: RequestPolicy): string | undefined {
   if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) return 'kunj: not a JSON-RPC message';
   const m = msg as { id?: unknown; method?: unknown; params?: { name?: unknown; arguments?: unknown } };
@@ -313,24 +325,24 @@ function refusal(msg: unknown, policy: RequestPolicy): string | undefined {
   // The bridge answers the server's roots/list itself: the container's roots are not the host's
   if (m.method === 'notifications/roots/list_changed') return 'kunj: roots are not forwarded';
   if (m.method.startsWith('notifications/')) return undefined;
-  if (!ALLOWED_METHODS.includes(m.method)) return `kunj: ${m.method} is not allowed through the bridge`;
+  if (!ALLOWED_METHODS.includes(m.method)) return `kunj: ${clip(m.method)} is not allowed through the bridge`;
   if (m.method !== 'tools/call') return undefined;
 
   const name = m.params?.name;
   if (typeof name !== 'string' || !BROWSER_TOOLS.includes(name)) {
-    return `kunj: the tool ${typeof name === 'string' ? name : '(none)'} is not available through the bridge`;
+    return `kunj: the tool ${typeof name === 'string' ? clip(name) : '(none)'} is not available through the bridge`;
   }
   const args = m.params?.arguments;
   if (args !== undefined && (typeof args !== 'object' || args === null || Array.isArray(args))) return 'kunj: arguments must be an object';
   const unknownArg = Object.keys(args ?? {}).find(k => !toolArgAllowed(name, k));
-  if (unknownArg) return `kunj: ${name} does not take ${unknownArg} through the bridge`;
+  if (unknownArg) return `kunj: ${name} does not take ${clip(unknownArg)} through the bridge`;
   const key = findPathKey(args);
-  if (key) return `kunj: the argument ${key} is not allowed through the bridge: the browser runs on the host, and host files are out of reach`;
+  if (key) return `kunj: the argument ${clip(key)} is not allowed through the bridge: the browser runs on the host, and host files are out of reach`;
   if (NAVIGATING_TOOLS.includes(name) && typeof args === 'object' && args !== null && 'url' in args) {
     const url = (args as { url: unknown }).url;
     if (typeof url !== 'string') return 'kunj: url must be a string';
     if (!policy.allowOrigin(url)) {
-      return `kunj: ${url} is not allowed (${policy.describeOrigins()}); forward the port with kunj ct forward, or set container.mcp.${BROWSER_SERVER}.allowOrigins on the host`;
+      return `kunj: ${clip(url)} is not allowed (${policy.describeOrigins()}); forward the port with kunj ct forward, or set container.mcp.${BROWSER_SERVER}.allowOrigins on the host`;
     }
   }
   return undefined;
@@ -340,11 +352,14 @@ function errorReply(id: unknown, message: string): object {
   return { jsonrpc: '2.0', id: validId(id) ? id : null, error: { code: -32602, message } };
 }
 
-export type Verdict = { pass: true } | { pass: false; malformed?: true; reply?: string };
+export type Verdict = { pass: true; msg: any } | { pass: false; malformed?: true; reply?: string };
+
+export const BATCH_REFUSAL = 'kunj: JSON-RPC batches are not accepted through the bridge';
 
 /**
  * The filter for the container→host direction of the JSON-RPC stream, one line at a time: a request
- * that is refused is answered with a JSON-RPC error carrying its id and not passed on; a line that is
+ * that is refused is answered with a JSON-RPC error carrying its id and not passed on (a batch with one
+ * error, id null, whatever it holds); a line that is
  * not a JSON-RPC message is dropped (fail closed). A batch with anything refused is refused whole.
  */
 export function makeRequestFilter(policy: RequestPolicy): (line: string) => Verdict {
@@ -355,17 +370,11 @@ export function makeRequestFilter(policy: RequestPolicy): (line: string) => Verd
     } catch {
       return { pass: false, malformed: true };
     }
-    if (Array.isArray(msg)) {
-      if (msg.length === 0) return { pass: false, malformed: true };
-      const reasons = msg.map(m => refusal(m, policy));
-      const first = reasons.find(r => r !== undefined);
-      if (first === undefined) return { pass: true };
-      const replies = msg.filter(m => m && typeof m === 'object' && 'id' in m && 'method' in m).map(m => errorReply(m.id, first));
-      return replies.length ? { pass: false, reply: JSON.stringify(replies) } : { pass: false };
-    }
+    // MCP's stdio transport has no batches: one fixed error, never one per element
+    if (Array.isArray(msg)) return { pass: false, reply: JSON.stringify(errorReply(null, BATCH_REFUSAL)) };
     if (typeof msg !== 'object' || msg === null) return { pass: false, malformed: true };
     const reason = refusal(msg, policy);
-    if (reason === undefined) return { pass: true };
+    if (reason === undefined) return { pass: true, msg };
     const m = msg as { id?: unknown; method?: unknown };
     // A notification (no id) and a response (no method) get no reply
     return m.id === undefined || m.method === undefined ? { pass: false } : { pass: false, reply: JSON.stringify(errorReply(m.id, reason)) };
@@ -401,6 +410,11 @@ function allowedSchema(tool: string, schema: unknown): unknown {
       : s.properties;
   const required = Array.isArray(s.required) ? s.required.filter(k => typeof k === 'string' && toolArgAllowed(tool, k)) : s.required;
   return stripPathProperties({ ...s, ...(properties !== undefined ? { properties } : {}), ...(required !== undefined ? { required } : {}) });
+}
+
+/** Whether a reply's result is a tool list (filtered whatever request it answers). */
+function hasToolList(result: unknown): boolean {
+  return typeof result === 'object' && result !== null && Array.isArray((result as { tools?: unknown }).tools);
 }
 
 /** A tools/list result with only BROWSER_TOOLS, each schema cut down to the arguments the bridge lets through. */
@@ -726,6 +740,19 @@ export function makeThrowawayProfile(): { dir: string; profile: string; download
   return { dir, profile, downloads, tmp };
 }
 
+/** A bounded insertion-ordered set of id keys: past `max` the oldest is dropped. */
+function boundedKeys(max: number) {
+  const keys = new Set<string>();
+  return {
+    has: (k: string) => keys.has(k),
+    delete: (k: string) => keys.delete(k),
+    add(k: string) {
+      if (keys.size >= max) keys.delete(keys.values().next().value as string);
+      keys.add(k);
+    },
+  };
+}
+
 /** One listener and, once a client sends a message that may pass, one server process. True when a client connected. */
 async function session(ctx: SessionContext): Promise<boolean> {
   const { backend, containerId, name, user, cfg, filter, opts, log } = ctx;
@@ -742,13 +769,30 @@ async function session(ctx: SessionContext): Promise<boolean> {
 
   let server: childProcess.ChildProcess | undefined;
   let serverExited: Promise<void> = Promise.resolve();
-  let profileDir: string | undefined;
   let connected = false;
   let execDone = false;
   let ended = false;
-  // Requests whose replies are rewritten: initialize (the port hint) and tools/list (the allowlist)
-  const watched = new Map<string, 'initialize' | 'tools/list'>();
   const idKey = (id: unknown) => JSON.stringify(id);
+  // The container's requests in flight, by id: a second request under the same id is refused, so it
+  // can never be taken for the first one's reply. Values: initialize gets the port hint.
+  const inFlight = new Map<string, string>();
+  // Requests of the server's that the bridge answered itself: the container's replies to them are dropped
+  const answered = boundedKeys(MAX_WATCHED);
+
+  // The throwaway profile goes on every way out: the session's end, and the process exiting
+  let profileDir: string | undefined;
+  const removeProfile = () => {
+    if (!profileDir) return;
+    const dir = profileDir;
+    profileDir = undefined;
+    process.off('exit', removeProfile);
+    try {
+      // Chrome may still be writing as it exits
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (err) {
+      log(`MCP ${name}: could not remove ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   const stopListener = () => {
     if (!execDone) backend.exec(containerId, stopCommand(name), { user }).catch(() => undefined);
@@ -759,6 +803,7 @@ async function session(ctx: SessionContext): Promise<boolean> {
     log(`MCP ${name}: ${why}; session ended`);
     fromContainer.pause();
     server?.stdout?.pause();
+    if (!toContainer.writableEnded) toContainer.end();
     stopListener();
   };
 
@@ -788,6 +833,11 @@ async function session(ctx: SessionContext): Promise<boolean> {
       }
     }
   };
+  // A reply the bridge makes up itself: bounded, whatever the request held
+  const reply = (text: string) => {
+    if (Buffer.byteLength(text) > MAX_REPLY_BYTES) return endSession(`a refusal would be over ${MAX_REPLY_BYTES} bytes`);
+    toClient(text);
+  };
 
   const toServer = (line: string) => {
     const stdin = server?.stdin;
@@ -797,37 +847,54 @@ async function session(ctx: SessionContext): Promise<boolean> {
     }
   };
 
-  // host → container: the server's replies, tools/list cut down to the allowlist, the port map added;
-  // its roots/list is answered here (the container's roots mean nothing on the host)
-  const fromServer = lineSplitter(line => {
+  // host → container: every tool list cut down to the allowlist, the port map added to initialize; the
+  // server's roots/list is answered here (the container's roots mean nothing on the host)
+  const onServerLine = (line: string) => {
     let msg: any;
     try {
       msg = JSON.parse(line);
     } catch {
       return toClient(line); // not JSON: passed on as it is (the host server is trusted)
     }
-    if (msg && msg.method === 'roots/list' && msg.id !== undefined) {
+    if (msg && typeof msg === 'object' && msg.method === 'roots/list' && msg.id !== undefined) {
+      answered.add(idKey(msg.id));
       return toServer(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { roots: [] } }));
     }
-    const kind = msg && msg.method === undefined && msg.id !== undefined ? watched.get(idKey(msg.id)) : undefined;
-    if (kind) {
-      // Any reply ends the watch, an error as well as a result
-      watched.delete(idKey(msg.id));
-      if (msg.result && typeof msg.result === 'object') {
-        if (kind === 'tools/list') {
-          msg.result = filterToolsList(msg.result);
-        } else {
-          const extra = opts.instructions?.();
-          if (extra) {
-            const own = typeof msg.result.instructions === 'string' && msg.result.instructions ? `${msg.result.instructions}\n\n` : '';
-            msg.result.instructions = own + extra;
-          }
-        }
-        line = JSON.stringify(msg);
+    if (msg && typeof msg === 'object' && msg.method === undefined && msg.id !== undefined) {
+      const key = idKey(msg.id);
+      const method = inFlight.get(key);
+      // Any reply ends the request, an error as well as a result
+      inFlight.delete(key);
+      let changed = false;
+      if (hasToolList(msg.result)) {
+        // by shape, not by id: no reply can carry the unfiltered list
+        msg.result = filterToolsList(msg.result);
+        changed = true;
       }
+      if (method === 'initialize' && msg.result && typeof msg.result === 'object') {
+        const extra = opts.instructions?.();
+        if (extra) {
+          const own = typeof msg.result.instructions === 'string' && msg.result.instructions ? `${msg.result.instructions}\n\n` : '';
+          msg.result.instructions = own + extra;
+          changed = true;
+        }
+      }
+      if (changed) line = JSON.stringify(msg);
     }
     toClient(line);
-  });
+  };
+  const fromServer = lineSplitter(
+    line => {
+      if (ended) return;
+      try {
+        onServerLine(line);
+      } catch (err) {
+        endSession(`could not pass on a reply: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    MAX_SERVER_LINE_BYTES,
+    () => endSession(`a line from the server is longer than ${MAX_SERVER_LINE_BYTES} bytes`),
+  );
 
   const startServer = () => {
     log(`MCP ${name}: client connected; starting ${cfg.command}`);
@@ -836,6 +903,7 @@ async function session(ctx: SessionContext): Promise<boolean> {
     if (cfg.throwawayProfile) {
       const p = makeThrowawayProfile();
       profileDir = p.dir;
+      process.on('exit', removeProfile);
       args = [...args, `--userDataDir=${p.profile}`];
       env = { ...env, TMPDIR: p.tmp };
     }
@@ -859,38 +927,50 @@ async function session(ctx: SessionContext): Promise<boolean> {
   };
 
   // container → host: through the request filter; the server starts on the first message that passes
+  const onClientLine = (line: string) => {
+    const verdict = filter(line);
+    if (!verdict.pass) {
+      if (verdict.malformed) {
+        if (!ctx.warnedMalformed) log(`MCP ${name}: dropped a line from the container that is not a JSON-RPC message`);
+        ctx.warnedMalformed = true;
+      } else {
+        log(`MCP ${name}: refused a request`);
+      }
+      if (verdict.reply) reply(verdict.reply);
+      return;
+    }
+    const msg = verdict.msg;
+    if (msg.method === undefined) {
+      // A reply to a request of the server's; never to one the bridge answered itself
+      if (answered.has(idKey(msg.id))) return;
+    } else if (msg.id !== undefined) {
+      const key = idKey(msg.id);
+      if (inFlight.has(key)) {
+        return reply(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32600, message: 'kunj: a request with this id is already in flight' } }));
+      }
+      // Bounded: a client that never gets (or never waits for) its replies cannot grow it
+      if (inFlight.size >= MAX_WATCHED) inFlight.delete(inFlight.keys().next().value as string);
+      inFlight.set(key, msg.method);
+    }
+    if (msg.method === 'initialize' && msg.params && typeof msg.params === 'object' && msg.params.capabilities && typeof msg.params.capabilities === 'object' && 'roots' in msg.params.capabilities) {
+      // The container's roots are paths in the container; the server must not ask for them
+      const { roots: _roots, ...capabilities } = msg.params.capabilities;
+      line = JSON.stringify({ ...msg, params: { ...msg.params, capabilities } });
+    }
+    if (!server) startServer();
+    toServer(line);
+  };
   const fromClient = lineSplitter(
     line => {
       if (ended) return;
-      const verdict = filter(line);
-      if (!verdict.pass) {
-        if (verdict.malformed) {
-          if (!ctx.warnedMalformed) log(`MCP ${name}: dropped a line from the container that is not a JSON-RPC message`);
-          ctx.warnedMalformed = true;
-        } else {
-          log(`MCP ${name}: refused a request`);
-        }
-        if (verdict.reply) toClient(verdict.reply);
-        return;
-      }
       try {
-        const msg = JSON.parse(line);
-        if (msg && (msg.method === 'initialize' || msg.method === 'tools/list') && msg.id !== undefined) {
-          // Bounded: a client that never gets (or never waits for) its replies cannot grow it
-          if (watched.size >= MAX_WATCHED) watched.delete(watched.keys().next().value as string);
-          watched.set(idKey(msg.id), msg.method);
-        }
-      } catch {
-        // passed the filter, so it is JSON
+        onClientLine(line);
+      } catch (err) {
+        endSession(`could not handle a request: ${err instanceof Error ? err.message : String(err)}`);
       }
-      if (!server) startServer();
-      toServer(line);
     },
     MAX_LINE_BYTES,
-    () => {
-      if (!toContainer.writableEnded) toContainer.end();
-      endSession(`a line from the container is longer than ${MAX_LINE_BYTES} bytes`);
-    },
+    () => endSession(`a line from the container is longer than ${MAX_LINE_BYTES} bytes`),
   );
   fromContainer.on('data', (chunk: Buffer) => {
     connected = true;
@@ -909,24 +989,18 @@ async function session(ctx: SessionContext): Promise<boolean> {
     execDone = true;
   }
 
-  if (!toContainer.writableEnded) toContainer.end();
-  const s = server as childProcess.ChildProcess | undefined;
-  if (s) {
-    if (s.exitCode === null && s.signalCode === null) {
+  try {
+    if (!toContainer.writableEnded) toContainer.end();
+    const s = server as childProcess.ChildProcess | undefined;
+    if (s && s.exitCode === null && s.signalCode === null) {
       s.stdin?.end();
       s.kill('SIGTERM');
       const killer = setTimeout(() => s.kill('SIGKILL'), SERVER_STOP_MS);
       await serverExited;
       clearTimeout(killer);
     }
-  }
-  if (profileDir) {
-    try {
-      // Chrome may still be writing as it exits
-      fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    } catch (err) {
-      log(`MCP ${name}: could not remove ${profileDir}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  } finally {
+    removeProfile();
   }
   if (connected) log(`MCP ${name}: session ended`);
   return connected;
