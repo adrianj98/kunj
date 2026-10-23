@@ -9,6 +9,49 @@ Changes made with Claude, and why.
   branch's with another tmux server running, a second `kunj agent` reattaches to the same pane instead of
   starting a second agent, starting from inside a tmux pane works, and the session has `window-size
   latest`. Moved the item to Done in `docs/specs/README.md`. Why: user installed tmux and asked for it.
+## 2026-10-23 — Containers: host MCP bridge (phase 2, Task 6)
+
+- New setting `container.mcp` (host config only, never the blueprint; default `{}` = off). v1 bridges only
+  `chrome`: `{}` runs `npx -y chrome-devtools-mcp@latest --isolated`; each entry takes `command`, `args`,
+  `env`, `allowOrigins` (default `http://localhost`, `http://127.0.0.1`). Other names warn and are
+  skipped. Why: phase 2 spec section 6, so the agent can open the dev server it started in a real
+  browser, with the browser-only, isolated-profile, localhost-only decisions.
+- New `src/lib/container/mcpbridge.ts`. The container cannot reach the host, so the host connects in: a
+  root `docker exec -i <ctr> socat UNIX-LISTEN:/run/kunj-mcp/<name>.sock,unlink-early,mode=600,user=<user>
+  STDIO` (no `fork`, so one session at a time per server, as ruled). The server is spawned on the host
+  on the session's first byte, with only `cfg.env` + PATH/HOME (never the forwarded container env); when
+  either side ends both stop and a new listener waits. `/run/kunj-mcp` is created as root, owned by the
+  user, mode 700; the listener writes a pid file so an abort (or a bridge that died) can kill it, since
+  a pending `docker exec` cannot be cancelled from the host. Name and user are validated as plain words
+  because they go into a socat address.
+- Origin filter (container→host): `tools/call` of `navigate_page`/`new_page` with a `url` outside
+  `allowOrigins` gets a JSON-RPC error (-32602) with the request id and never reaches the server;
+  matching is scheme + hostname (any port) through `URL`, so `localhost.evil.com` and `localhost@evil.com`
+  are refused; a non-string url is refused; a batch with a blocked call is refused whole; lines that are
+  not JSON pass unchanged. Documented as best effort (a page can still link elsewhere).
+- Port hint: the bridge appends the container→host forward map (from `~/.kunj/container-forwards.json`)
+  to the `instructions` of the server's initialize result. Cheap: one id tracked per session.
+- Container config: `installMcpConfig()` merges `mcpServers.<name> = { command: 'socat', args: ['-',
+  'UNIX-CONNECT:/run/kunj-mcp/<name>.sock'] }` into the user's `~/.claude.json` as that user (read, merge
+  on the host, write to a temp file and rename; unchanged files are not rewritten; invalid JSON is left
+  alone with a warning). Called by `startContainer` after the seed and files (new and resumed), and by
+  `kunj ct agent` before the agent starts (a container started before the setting). The snapshot build
+  clears `container.mcp`.
+- `kunj ct agent` starts a detached `kunj ct mcp <branch>` (same model as the auto forwarder:
+  `spawnDetached`, registered at once in `~/.kunj/container-bridges.json`, dead pids pruned on read)
+  unless one runs; new `kunj ct mcp [branch]` runs the bridge in the foreground and refuses a second
+  bridge for the container. The bridge exits when the container is seen not running twice in a row.
+  A listener that ends without a client (socat failing) is logged with socat's stderr and retried with
+  a doubling delay up to 30 s, so a broken setup does not spin `docker exec` every half second.
+- `kunj ct list` shows `[mcp chrome]`; `--json` gains `bridges: [{ name, pid }]` per container (additive).
+- FakeBackend gains `execHandler` for streaming execs. Tests: origin filter, config merge (keeps servers,
+  idempotent), registry, bridge end to end with a node echo server (round trip, refusal, restart after
+  client disconnect and after server exit, two-strike stop, port hint, env), agent only when configured,
+  lifecycle write after the seed; Docker: echo server on the host reached with `socat - UNIX-CONNECT`
+  from inside, socket mode 600, navigate to example.com refused, listener gone after abort.
+- Docs: README, docs-site commands (`mcp`, agent), configuration ("A browser for the agent"), security
+  (table row and "can" list), regenerated reference JSON; CLAUDE.md module list and a bridge paragraph.
+
 ## 2026-10-23 — Specs tracker: phase 2 progress brought up to date
 
 - `docs/specs/README.md`: added the cross-feature fixes (a32bc90) to Done, the missing `forward --auto`

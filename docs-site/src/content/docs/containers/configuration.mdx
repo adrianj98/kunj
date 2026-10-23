@@ -135,6 +135,45 @@ kunj config --set container.forward.auto=false
 kunj config --set container.forward.ignore=[9229,5555]
 ```
 
+## A browser for the agent
+
+`container.mcp` bridges MCP servers that run on your machine into the container, so the agent can,
+for example, open the dev server it just started in a real browser and check it. For now the only
+server is `chrome`, a browser. It is off until you set it, and only in your kunj config (global or
+`~/.kunj/<repo>/config.json`), never in the blueprint or anything read from the repository:
+
+```json
+{
+  "container": {
+    "mcp": { "chrome": {} }
+  }
+}
+```
+
+`{}` runs [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) as
+`npx -y chrome-devtools-mcp@latest --isolated`: its own Chrome window with an empty, throwaway
+profile, so no cookies and none of your logged-in sessions. Each server takes:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `command` | `npx` | The server's stdio command on your machine |
+| `args` | `["-y", "chrome-devtools-mcp@latest", "--isolated"]` | Its arguments (`[]` with your own `command`) |
+| `env` | `{}` | Its environment, next to `PATH` and `HOME`; nothing else from your shell or the container is passed |
+| `allowOrigins` | `["http://localhost", "http://127.0.0.1"]` | The scheme and host (any port) `navigate_page` and `new_page` may open |
+
+[`kunj ct agent`](../commands/#agent) adds an `mcpServers.chrome` entry to the container user's
+`~/.claude.json` (so does `kunj ct start`) and runs the bridge in the background while the container
+runs; [`kunj ct mcp`](../commands/#mcp) runs it in the foreground. The browser is on your machine, so
+`localhost` in it means your machine: open the host port a container port is
+[forwarded](#ports) to. The bridge tells the agent that mapping when it connects.
+
+<Aside type="caution">
+The browser runs outside the sandbox. `allowOrigins` checks only the URLs the agent asks to open; a
+page it opens can still link or redirect elsewhere. Keep the list short, and keep `--isolated`.
+</Aside>
+
+One Claude Code session at a time can use each bridged server.
+
 ## Resources and Docker context
 
 `container.cpus` and `container.memory` are passed to `docker run` as `--cpus` and `--memory`.

@@ -1482,6 +1482,21 @@
     "sensitive": false
   },
   {
+    "key": "container.mcp",
+    "type": "string",
+    "category": "container",
+    "default": {},
+    "description": "MCP servers on this machine bridged into the container for its Claude Code; only \"chrome\" (a browser) for now",
+    "detailedDescription": "An object of name: { command?, args?, env?, allowOrigins? }; edit the config file by hand (host config only, never the blueprint). Off while empty. {\"chrome\": {}} runs npx -y chrome-devtools-mcp@latest --isolated (an empty, isolated browser profile) on this machine when `kunj ct agent` starts, and adds a matching entry to the container user's ~/.claude.json. The server gets only PATH, HOME and its env. allowOrigins (default http://localhost and http://127.0.0.1, any port) limits the URLs navigate_page and new_page may open. One session at a time per server.",
+    "options": null,
+    "examples": [
+      "{\"chrome\": {}}",
+      "{\"chrome\": {\"allowOrigins\": [\"http://localhost\", \"https://staging.example.com\"]}}"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "agent.command",
     "type": "string",
     "category": "agent",

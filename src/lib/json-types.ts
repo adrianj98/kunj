@@ -74,6 +74,8 @@ export interface ContainerJson {
   workspace: { head: string | null; ahead: number | null; dirty: boolean | null };
   status: ContainerStatus['status'] | 'skipped';
   services: ServiceState[];
+  /** Host MCP servers bridged into the container (kunj ct mcp, started by kunj ct agent) */
+  bridges: Array<{ name: string; pid: number }>;
 }
 
 export interface ContainerListJson {

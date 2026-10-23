@@ -160,6 +160,7 @@ kunj ct open feature/x                 # VS Code attached to the container (--ne
 kunj ct exec feature/x -- npm test     # run one command
 kunj ct forward feature/x 3000         # localhost:3000 -> container port 3000
 kunj ct forward feature/x --auto       # forward every port the container starts listening on
+kunj ct mcp feature/x                  # bridge container.mcp (a browser on this machine) in the foreground
 kunj ct logs feature/x postgres        # a sidecar service's output (--follow to keep streaming)
 git fetch origin && git switch feature/x   # the agent's pushes arrive via origin
 kunj ct list                           # containers of this repository (-a for all)
@@ -203,6 +204,7 @@ Settings (`kunj config`):
 | `container.pruneAfterDays` | `0` (off) | `kunj ct prune` also removes stopped containers created longer ago |
 | `container.dockerInDocker` | `off` | Docker inside the container: `off`, `sysbox` or `privileged` (see [Docker inside](#docker-inside-the-container)) |
 | `container.allowPrivileged` | `false` | Allow `privileged`; still refused on Docker Desktop |
+| `container.mcp` | none (off) | Host MCP servers bridged into the container; only `chrome` for now (see below) |
 
 Network: by default the internet is open but the Docker host, the LAN and private ranges are
 blocked, except origin itself on its own port (so a self-hosted origin on the LAN still works). Set `container.network.allow` to restrict egress to a list of domains (plus GitHub, npm
@@ -226,6 +228,19 @@ one of those unless one is already running for the container or `container.forwa
 `~/.kunj/container-forwards.json`, and `kunj ct list --json` shows their ports as `kind: "forward"`
 entries with the forwarder's `pid`. Ports are reached through the container's network helper, never
 by running anything in the branch container, and a forwarder ends when the container stops or restarts.
+
+Browser: with `container.mcp` set to `{"chrome": {}}` (host config only, never the blueprint),
+`kunj ct agent` lets the agent drive a browser on your machine. It adds
+`mcpServers.chrome = { command: "socat", args: ["-", "UNIX-CONNECT:/run/kunj-mcp/chrome.sock"] }` to
+the container user's `~/.claude.json` and starts a background `kunj ct mcp`, which keeps a
+`docker exec … socat UNIX-LISTEN` open on that socket and, when Claude Code connects, runs
+`npx -y chrome-devtools-mcp@latest --isolated` (an empty, throwaway profile) here and pipes the two
+together. Each server takes `command`, `args`, `env` (it gets only those plus `PATH` and `HOME`) and
+`allowOrigins` (default `http://localhost` and `http://127.0.0.1`, any port): `navigate_page` and
+`new_page` calls to other origins are answered with an error and never reach the browser. One session
+at a time per server; the initialize result tells the agent which host port each forwarded container
+port is on. Running bridges are recorded in `~/.kunj/container-bridges.json` and shown by
+`kunj ct list` (`--json`: `bridges: [{ name, pid }]`).
 
 Hooks: `pre-container-create`, `post-container-create`, `pre-container-delete` and
 `post-container-delete` receive `branch`, `container` and `image` (see [Hooks](#hooks)). The create

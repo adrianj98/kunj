@@ -154,5 +154,20 @@ export function registerContainerSettings(): void {
       examples: ['{"postgres": {"image": "postgres:16-alpine", "env": {"POSTGRES_PASSWORD": "dev"}, "healthcheck": "pg_isready -U postgres", "volumes": {"data": "/var/lib/postgresql/data"}}}'],
       validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
     },
+    {
+      key: 'container.mcp',
+      description: 'MCP servers on this machine bridged into the container for its Claude Code; only "chrome" (a browser) for now',
+      type: 'string',
+      defaultValue: {},
+      category: 'container',
+      detailedDescription:
+        'An object of name: { command?, args?, env?, allowOrigins? }; edit the config file by hand (host config only, never the ' +
+        'blueprint). Off while empty. {"chrome": {}} runs npx -y chrome-devtools-mcp@latest --isolated (an empty, isolated ' +
+        "browser profile) on this machine when `kunj ct agent` starts, and adds a matching entry to the container user's " +
+        '~/.claude.json. The server gets only PATH, HOME and its env. allowOrigins (default http://localhost and ' +
+        'http://127.0.0.1, any port) limits the URLs navigate_page and new_page may open. One session at a time per server.',
+      examples: ['{"chrome": {}}', '{"chrome": {"allowOrigins": ["http://localhost", "https://staging.example.com"]}}'],
+      validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
+    },
   ]);
 }

@@ -8,6 +8,7 @@
 //   kunj container open [branch] [--new-window]         attach the editor (worktree.editorCommand)
 //   kunj container forward [branch] <port>|<host>:<port>|<service>:<port>...
 //   kunj container forward [branch] --auto [--detach]  forward every port the container listens on
+//   kunj container mcp [branch]                        bridge container.mcp's host servers in the foreground
 //   kunj container logs [branch] [service] [--follow]
 //   kunj container list [--all] [--no-status]
 //   kunj container stop [branch]
@@ -37,6 +38,7 @@ import { ContainerStatus, describeGuard, emptyStatus } from '../lib/container/en
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
 import { Forwarder, TUNNEL_PROBE, forwardPort, parseForwardSpec, parseTunnelProbe } from '../lib/container/forward';
 import { ForwardRecord, HELPER_NO_SOCAT, autoForwardIgnore, forwarderFor, readForwards, recordIsFor, runAutoForward, spawnDetached, updateForwards } from '../lib/container/autoforward';
+import { BridgeRecord, bridgeFor, installMcpConfig, mcpServers, portHint, readBridges, runBridge, updateBridges } from '../lib/container/mcpbridge';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerError } from '../lib/container/errors';
 import { readWorkspaceFile, validateWorkspacePath, writeWorkspaceFile } from '../lib/container/files';
@@ -93,7 +95,7 @@ interface Context {
   dockerContext?: string;
 }
 
-const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file'];
+const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'mcp', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file'];
 const FILE_ACTIONS = ['read', 'write'];
 const BLUEPRINT_ACTIONS = ['init', 'snapshot', 'status', 'remove'];
 const WORKSPACE = '/workspace';
@@ -151,6 +153,7 @@ export class ContainerCommand extends BaseCommand {
         '  forward [branch] <port>|<host>:<port>...  forward localhost ports into the container',
         '  forward [branch] <service>:<port>    forward a sidecar service\'s port (e.g. postgres:5432)',
         '  forward [branch] --auto [--detach]   forward each port the container listens on, as it appears',
+        '  mcp [branch]                         bridge the host MCP servers of container.mcp (foreground)',
         '  logs [branch] [service] [--follow]   output of the container, or of one of its services',
         '  list                                 containers of this repository (the default)',
         '  stop [branch]                        stop, keeping the workspace',
@@ -176,7 +179,9 @@ export class ContainerCommand extends BaseCommand {
         'and is reached by its name (postgres:5432). They are stopped and removed with the container.',
         '',
         'agent also starts a background forward --auto for the container (container.forward.auto: false',
-        'turns that off). Forwards only ever listen on 127.0.0.1.',
+        'turns that off). Forwards only ever listen on 127.0.0.1. With container.mcp set (host config,',
+        'e.g. {"chrome": {}}), agent also bridges a browser MCP server on this machine into the',
+        "container's Claude Code; navigation is limited to allowOrigins (default localhost).",
         '',
         '[branch] defaults to the current branch. `ct` is short for `container`.',
       ].join('\n'),
@@ -256,6 +261,8 @@ export class ContainerCommand extends BaseCommand {
         const specs = isForwardSpec(target) ? [target, ...rest] : rest;
         return this.forward(isForwardSpec(target) ? undefined : target, specs, options);
       }
+      case 'mcp':
+        return this.mcp(target, options);
       case 'logs':
         return this.logs(target, rest[0], options);
       case 'stop':
@@ -544,6 +551,7 @@ export class ContainerCommand extends BaseCommand {
         this.warn(`Could not start the port forwarder: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    await this.ensureBridge(ctx, branch, main);
     const user = this.userOf(main) || undefined;
     const command = agentCommandLine(ctx.config.container?.agentCommand, args);
     const probe = await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user });
@@ -819,6 +827,80 @@ export class ContainerCommand extends BaseCommand {
   }
 
   // ---------------------------------------------------------------------
+  // mcp
+  // ---------------------------------------------------------------------
+
+  // The container's Claude Code config first (so the agent sees the entry), then a detached
+  // `ct mcp` unless one already runs, registered at once like the forwarder. Nothing without container.mcp.
+  private async ensureBridge(ctx: Context, branch: string, main: ContainerInfo): Promise<void> {
+    const servers = mcpServers(ctx.config.container?.mcp, this.warn);
+    if (servers.length === 0) return;
+    try {
+      await installMcpConfig(ctx.backend, main.id, this.userOf(main), servers.map(s => s.name));
+    } catch (err) {
+      this.warn(`Could not add the MCP servers to the container's Claude Code config: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (bridgeFor(main.name)) return;
+    try {
+      const pid = spawnDetached(['ct', 'mcp', branch, ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : [])]);
+      updateBridges(rs => [...rs.filter(r => r.pid !== pid), ...servers.map(s => ({ pid, container: main.name, name: s.name }))]);
+    } catch (err) {
+      this.warn(`Could not start the MCP bridge: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private async mcp(target: string | undefined, options: ContainerOptions): Promise<void> {
+    const ctx = await this.context(options);
+    const branch = await this.resolveBranch(ctx, target);
+    const main = await this.requireRunning(ctx, branch);
+    const servers = mcpServers(ctx.config.container?.mcp, this.warn);
+    if (servers.length === 0) {
+      throw new ContainerError('container.mcp has no server to bridge; set it in the host config, e.g. {"chrome": {}}');
+    }
+    const pid = process.pid;
+    const other = bridgeFor(main.name, undefined, pid);
+    if (other) throw new ContainerError(`An MCP bridge for ${branch} is already running (pid ${other})`);
+
+    const user = this.userOf(main);
+    try {
+      await installMcpConfig(ctx.backend, main.id, user, servers.map(s => s.name));
+    } catch (err) {
+      this.warn(`Could not add the MCP servers to the container's Claude Code config: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const others = (rs: BridgeRecord[]) => rs.filter(r => r.pid !== pid);
+    updateBridges(rs => [...others(rs), ...servers.map(s => ({ pid, container: main.name, name: s.name }))]);
+    this.progress(chalk.gray(`Bridging ${servers.map(s => s.name).join(', ')} into ${branch} (one session at a time); press Ctrl-C to stop`));
+
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+    // The container's forwarded ports, read when a session starts, so the agent opens the host's URLs
+    const instructions = () =>
+      portHint(readForwards().filter(r => r.container === main.name && r.port > 0).map(r => ({ port: r.port, hostPort: r.hostPort })));
+    try {
+      await Promise.all(
+        servers.map(s =>
+          runBridge(ctx.backend, main.id, s.name, s.cfg, {
+            user,
+            signal: controller.signal,
+            instructions,
+            log: m => this.progress(chalk.gray(m)),
+          }).catch(err => {
+            this.warn(`MCP ${s.name}: ${err instanceof Error ? err.message : String(err)}`);
+            process.exitCode = 1;
+          })
+        )
+      );
+    } finally {
+      process.off('SIGINT', stop);
+      process.off('SIGTERM', stop);
+      updateBridges(others);
+    }
+    process.exit(process.exitCode ?? 0);
+  }
+
+  // ---------------------------------------------------------------------
   // logs
   // ---------------------------------------------------------------------
 
@@ -868,6 +950,7 @@ export class ContainerCommand extends BaseCommand {
     const [volumes, networks] = await leftovers;
     const orphans = findOrphans(all, volumes, networks);
     const forwards = readForwards().filter(r => r.port > 0);
+    const bridges = readBridges();
     const containers: ContainerJson[] = mains.map((c, i) => {
       const s = statuses[i];
       const recorded = this.recordedOptions(c);
@@ -891,6 +974,7 @@ export class ContainerCommand extends BaseCommand {
         workspace: { head: s.head ? s.head.slice(0, 7) : null, ahead: s.ahead, dirty: s.dirty },
         status: s.status,
         services: describeServices(servicesOf(all, c.name, { repoId: c.labels[LABEL.repo] ?? '', branch: c.labels[LABEL.branch] ?? '' })),
+        bridges: bridges.filter(b => b.container === c.name).map(b => ({ name: b.name, pid: b.pid })),
       };
     });
 
@@ -918,6 +1002,7 @@ export class ContainerCommand extends BaseCommand {
       if (c.workspace.ahead) line += chalk.cyan(`  +${c.workspace.ahead} ahead`);
       if (c.workspace.dirty) line += chalk.yellow('  dirty');
       if (c.status === 'timeout' || c.status === 'error') line += chalk.red(`  status ${c.status}`);
+      if (c.bridges.length) line += chalk.cyan(`  [mcp ${c.bridges.map(b => b.name).join(' ')}]`);
       if (c.ports.length) line += '  ' + c.ports.map(p => `${p.host}→${p.container}`).join(' ');
       if (c.services.length) {
         line += '  ' + c.services.map(svc => (svc.state === 'running' ? chalk.cyan(svc.name) : chalk.yellow(`${svc.name} ${svc.state}`))).join(' ');

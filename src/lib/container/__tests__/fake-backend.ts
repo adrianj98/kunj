@@ -48,6 +48,8 @@ export class FakeBackend implements ContainerBackend {
   stdinData: Array<string | undefined> = [];
   /** Per exec call with a stdin stream, in call order: whether that stream has ended. */
   stdinEnded: boolean[] = [];
+  /** Runs an exec itself when it returns a promise (streaming tests); undefined falls through to the programmed results. */
+  execHandler?: (id: string, cmd: string[], io: ExecIO) => Promise<ExecResult> | undefined;
   private nextId = 1;
   private nextImageId = 1;
 
@@ -160,6 +162,8 @@ export class FakeBackend implements ContainerBackend {
 
   async exec(id: string, cmd: string[], io: ExecIO = {}): Promise<ExecResult> {
     this.record('exec', [id, cmd, io]);
+    const handled = this.execHandler?.(id, cmd, io);
+    if (handled) return handled;
     const key = cmd.join(' ');
     const stdin = typeof io.stdin === 'object' ? io.stdin : undefined;
     let input: string | undefined;

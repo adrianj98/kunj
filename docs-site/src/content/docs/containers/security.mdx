@@ -20,6 +20,7 @@ is easy to over-read.
 | **Your machine's services and your LAN.** The Docker host (`host.docker.internal`), private address ranges and link-local addresses are blocked, whatever the network mode. | **Data leaving through allowed sites.** An allowlist limits *where* the agent connects, not *what* it sends: GitHub, npm and the model's API are enough to carry a token out. |
 | **Docker itself.** The Docker socket is never mounted, so the agent cannot start containers or reach the daemon. | **The image build.** Building an image (the sandbox image, or a devcontainer's Dockerfile) runs outside the firewall, with full network access. |
 | **The firewall.** The agent's container has no capability to change network rules, so it cannot switch the firewall off. | |
+| **Your browser profile.** The browser bridge (`container.mcp`) is off by default; when on, its browser starts with an isolated, empty profile and may open only `allowOrigins` (localhost by default). | **A bridged browser.** It runs on your machine, outside the sandbox and the firewall: `localhost` there is your machine, and a page it is allowed to open can still link or redirect elsewhere. |
 
 The practical advice follows from the right-hand column: forward as little as you can, prefer a
 token scoped to the one repository, and protect your default branch.
@@ -196,7 +197,11 @@ that small.
 - read every environment variable and file you forwarded into the container;
 - start servers you can reach with `kunj ct forward` or published ports. While `kunj ct agent` runs, any
   server it starts on port 1024 or above is forwarded to `127.0.0.1` on your machine (never the LAN)
-  automatically; `container.forward.ignore` and `container.forward.auto: false` limit or stop that.
+  automatically; `container.forward.ignore` and `container.forward.auto: false` limit or stop that;
+- with [`container.mcp`](../configuration/#a-browser-for-the-agent) set, drive a browser on your machine
+  through the MCP bridge, opening only the `allowOrigins` URLs (localhost by default) in an isolated
+  profile. The bridge is a socket in the container that kunj connects to from your side, so the
+  container still cannot reach your machine itself.
 
 **It cannot:**
 

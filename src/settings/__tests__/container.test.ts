@@ -20,6 +20,7 @@ describe('container settings', () => {
       pruneAfterDays: 0,
       dockerInDocker: 'off',
       allowPrivileged: false,
+      mcp: {},
     });
     expect(settingsRegistry.get('container.dockerInDocker')?.validate?.('sysbox')).toBe(true);
     expect(settingsRegistry.get('container.dockerInDocker')?.validate?.('privileged')).toBe(true);
@@ -27,6 +28,8 @@ describe('container settings', () => {
     expect(settingsRegistry.get('container.pruneAfterDays')?.validate?.(30)).toBe(true);
     expect(settingsRegistry.get('container.pruneAfterDays')?.validate?.(-1)).toBe(false);
     expect(settingsRegistry.get('container.services')?.validate?.({ pg: { image: 'p' } })).toBe(true);
+    expect(settingsRegistry.get('container.mcp')?.validate?.({ chrome: {} })).toBe(true);
+    expect(settingsRegistry.get('container.mcp')?.validate?.(['chrome'])).toBe(false);
     expect(settingsRegistry.get('container.services')?.validate?.('pg')).toBe(false);
     expect(settingsRegistry.get('hooks.pre-container-create')).toBeDefined();
   });

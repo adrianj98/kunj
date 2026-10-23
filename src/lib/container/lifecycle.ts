@@ -36,6 +36,7 @@ import { getGlobalKunjDir, getKunjDir } from '../config';
 import { ConfigVariables, expandVariables } from '../config-vars';
 import { KunjConfig } from '../../types';
 import { StartError, StartErrorCode } from './errors';
+import { installMcpConfig, mcpServers } from './mcpbridge';
 import { DIND_DATA, DIND_DOMAINS, DindMode, checkDind, checkRecordedDind, composeHint, dindHostInfo, dindMode, dindSource, startDockerd } from './dind';
 
 export { forwardedEnv, firewallEnv } from './env';
@@ -662,6 +663,18 @@ async function postCommands(
   }
 }
 
+// The container user's Claude Code gets an entry per bridged host MCP server (container.mcp), after
+// READY and the seed; `kunj ct agent` writes it again for a container started before it was set.
+async function mcpConfig(backend: ContainerBackend, id: string, user: string, options: StartOptions): Promise<void> {
+  const servers = mcpServers(options.config.container?.mcp, options.warn);
+  if (servers.length === 0) return;
+  try {
+    await installMcpConfig(backend, id, user, servers.map(s => s.name));
+  } catch (err) {
+    options.warn(`Could not add the MCP servers to the container's Claude Code config: ${message(err)}`);
+  }
+}
+
 // Only called after READY. Labels cannot change after `docker run`, so this is reported, not
 // recorded: later commands pass no -u for a recorded '', which docker resolves to the same user.
 async function effectiveUser(backend: ContainerBackend, id: string, user: string): Promise<string> {
@@ -904,6 +917,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
 
     // 9. Files
     const files = await step('docker', () => copyFiles(backend, id, user, home, options, vars));
+    await mcpConfig(backend, id, user, options);
 
     // 10. Blueprint: presets and setup once (a snapshot already holds them), maintain every later start
     let blueprint: StartResult['blueprint'];
@@ -1038,6 +1052,7 @@ async function resume(
     if (result.seeded) {
       Object.assign(result, await step('docker', () => copyFiles(backend, main.id, user, home, options, variables(options))));
     }
+    await mcpConfig(backend, main.id, user, options);
     // An existing container is never set up again, but maintain absorbs lockfile drift every start.
     // A broken blueprint must not keep the container from starting, so it is only a warning here.
     let resolved: ResolvedBlueprint | null = null;

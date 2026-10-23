@@ -572,6 +572,42 @@ describe('startContainer', () => {
     expect((post?.[2] as ExecIO).user).toBe('node');
   });
 
+  describe('MCP bridge config', () => {
+    const READ_CLAUDE = 'sh -c f="$HOME/.claude.json"; [ -e "$f" ] || exit 3; cat "$f"';
+    const mcpConfig = { container: { mcp: { chrome: {} } } } as unknown as KunjConfig;
+
+    it('adds the container.mcp servers to ~/.claude.json after the seed, as the user', async () => {
+      const b = backend();
+      b.execResults.set(READ_CLAUDE, { exitCode: 3, stdout: '' });
+      await startContainer(b, options({ config: mcpConfig }));
+      const cmds = execCmds(b);
+      const seedAt = cmds.findIndex(c => c.startsWith('sh -c set -e'));
+      const readAt = cmds.indexOf(READ_CLAUDE);
+      expect(readAt).toBeGreaterThan(seedAt);
+      const write = b.callsOf('exec')[readAt + 1];
+      expect((write[2] as ExecIO).user).toBe('dev');
+      expect(JSON.parse(b.stdinData[readAt + 1]!).mcpServers.chrome).toEqual({ command: 'socat', args: ['-', 'UNIX-CONNECT:/run/kunj-mcp/chrome.sock'] });
+    });
+
+    it('touches no ~/.claude.json without container.mcp', async () => {
+      const b = backend();
+      await startContainer(b, options());
+      expect(execCmds(b)).not.toContain(READ_CLAUDE);
+    });
+
+    it('also on a resume, and a failure is only a warning', async () => {
+      const b = backend();
+      b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+      b.execResults.set(READ_CLAUDE, { exitCode: 1, stdout: '' });
+      b.existing = [info({ state: 'exited' })];
+      const warnings: string[] = [];
+      const result = await startContainer(b, options({ config: mcpConfig, warn: m => warnings.push(m) }));
+      expect(result.created).toBe(false);
+      expect(execCmds(b)).toContain(READ_CLAUDE);
+      expect(warnings.join('\n')).toMatch(/Claude Code config/);
+    });
+  });
+
   it('reports a collision before any push prompt', async () => {
     const b = backend();
     b.existing = [info({ labels: { other: 'x' } })];

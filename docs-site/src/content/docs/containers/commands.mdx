@@ -88,6 +88,10 @@ stops when you leave.
 so a dev server the agent starts is reachable on your machine. It is not started when one is already
 running for that container, or when `container.forward.auto` is `false`.
 
+With [`container.mcp`](../configuration/#a-browser-for-the-agent) set, `agent` also adds the bridged
+servers to the container's Claude Code config and starts a background [`kunj ct mcp`](#mcp), so the
+agent can drive a browser on your machine. Nothing happens without that setting.
+
 ## attach
 
 Reattaches to the agent's `tmux` session:
@@ -266,6 +270,32 @@ There are two ways to reach a server in the container:
 Published ports are bound to `127.0.0.1` on your machine, never to the LAN. If the port is taken,
 kunj picks the next free one; `kunj ct start` and `kunj ct list` print the mapping.
 
+## mcp
+
+Bridges the MCP servers of [`container.mcp`](../configuration/#a-browser-for-the-agent) (for now only
+the `chrome` browser server) into the container, in the foreground, for debugging. `kunj ct agent`
+starts the same bridge in the background.
+
+```bash
+kunj ct mcp feature/search
+```
+
+The container cannot reach your machine, so the connection goes the other way: kunj keeps a
+`docker exec` open into the container that listens on `/run/kunj-mcp/chrome.sock` (owned by the
+container user, mode 600), and the container's `~/.claude.json` gets an `mcpServers.chrome` entry that
+connects to it with `socat`. When Claude Code connects, kunj starts the server's command on your
+machine (by default `npx -y chrome-devtools-mcp@latest --isolated`) and pipes the two together. The
+server gets only `PATH`, `HOME` and the `env` you configure, never the container's forwarded variables.
+
+One session at a time per server: when Claude Code disconnects or the server exits, both ends are
+stopped and the bridge waits for the next session. A `navigate_page` or `new_page` call to a URL
+outside the server's `allowOrigins` (default `http://localhost` and `http://127.0.0.1`, any port) is
+answered with an error and never reaches the browser. The initialize result tells the agent which host
+port each [forwarded](#automatic-forwarding) container port is on.
+
+Running bridges are recorded in `~/.kunj/container-bridges.json`. `kunj ct mcp` refuses to start a
+second bridge for the same container; a background one exits when the container stops, or `kill` its pid.
+
 ## list
 
 Lists the containers of the current repository. It is also what `kunj ct` does with no action.
@@ -289,7 +319,8 @@ container was started from a snapshot that no longer matches the blueprint, and
 `[firewall helper down]` means the network helper is not running (start the container again to bring
 it back). `[dind sysbox]` or `[dind privileged]` marks a container with
 [Docker inside](../configuration/#docker-inside-the-container); `--json` has `dind` (`"off"`,
-`"sysbox"` or `"privileged"`) on every container.
+`"sysbox"` or `"privileged"`) on every container. `[mcp chrome]` marks a container with a running
+[MCP bridge](#mcp); `--json` has `bridges` (`[{ "name": "chrome", "pid": 48213 }]`) on every container.
 
 | Flag | Use it to |
 |---|---|

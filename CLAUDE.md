@@ -210,11 +210,11 @@ worktree. `AgentError` prints without a stack trace (listed in BaseCommand). Rep
 own clone, mainly to run an agent with permissions skipped. Origin is the only channel in and out;
 nothing from the host is bind-mounted. Specs: docs/specs/ (one file per topic; overview in
 docs/specs/container-system.md, phase 1 in docs/specs/branch-containers.md). Phase 2
-(docs/specs/container-phase-2.md) adds sidecar services, `open` and
-`forward --auto`, `prune` and Docker-in-Docker (`container.dockerInDocker`). Phase 3 is the workspace IDE
+(docs/specs/container-phase-2.md) adds sidecar services, `open`,
+`forward --auto`, `prune`, Docker-in-Docker (`container.dockerInDocker`) and the host MCP bridge. Phase 3 is the workspace IDE
 (docs/specs/workspace-ide.md): its CLI contract has shipped, the app has not.
 
-**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor,prune,dind,errors,files}.ts`.
+**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor,prune,dind,errors,files,mcpbridge}.ts`.
 `prune.ts` (`planPrune`/`applyPrune`) removes containers of branches gone from origin (missing from one
 `git ls-remote --heads origin` and present as `refs/remotes/origin/<b>` in the clone; unreachable origin
 removes none) only when the remove guard is clean, checked at plan and again at removal, or `--force`;
@@ -280,6 +280,13 @@ unquoted context even within `"..."`; backtick spans get one more level of escap
 form passes the value literally. The container
 hooks are `pre/post-container-create` and `pre/post-container-delete` with `branch`, `container`,
 `image`; the create hooks are skipped when `start` resumes an existing container.
+
+**MCP bridge:** `mcpbridge.ts` bridges host stdio MCP servers (`container.mcp`, host config only;
+v1 only `chrome`) into the container: a root `docker exec -i … socat UNIX-LISTEN:/run/kunj-mcp/<name>.sock
+STDIO` (mode 600, owned by the user, no `fork`: one session at a time) ↔ the server spawned on the
+host per session with only `cfg.env` + PATH/HOME, through an origin filter on `navigate_page`/`new_page`.
+`kunj ct agent` (and start) merge `mcpServers.<name>` into the user's `~/.claude.json`; agent spawns a
+detached `kunj ct mcp`, registered in `~/.kunj/container-bridges.json`.
 
 **Services:** `services.ts` parses and validates services (blueprint `services`, `container.services`, the
 devcontainer's compose file read through `backend.composeConfig()`, i.e. `docker compose config

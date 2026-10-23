@@ -157,7 +157,7 @@ export async function planSnapshot(opts: Omit<SnapshotOptions, 'rebuild' | 'log'
   // No secrets, keep files, copied files, ports or agent: the image must not hold anything private
   const config: KunjConfig = {
     ...opts.config,
-    container: { ...opts.config.container, env: [], keepFiles: false, files: [], publish: [], agentCommand: '' },
+    container: { ...opts.config.container, env: [], keepFiles: false, files: [], publish: [], agentCommand: '', mcp: {} },
   };
   const startOptions: StartOptions = {
     branch: opts.branch,

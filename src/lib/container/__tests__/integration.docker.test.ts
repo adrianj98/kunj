@@ -17,6 +17,7 @@ import { LABEL, containerNames, repoIdFromUrl } from '../names';
 import { StartError, StartOptions, containerStatus, removeContainer, startContainer } from '../lifecycle';
 import { forwardPort } from '../forward';
 import { AutoForwardChange, runAutoForward } from '../autoforward';
+import { DEFAULT_ALLOW_ORIGINS, installMcpConfig, runBridge } from '../mcpbridge';
 import { resolveHelperImage } from '../image';
 import { getVersion } from '../../version';
 import { parseBlueprint, resolveBlueprint, snapshotTag, SEED_DIR } from '../blueprint';
@@ -330,6 +331,55 @@ const BRANCH_ALLOW = 'it-allow';
       controller.abort();
       await run;
     }
+  });
+
+  it('MCP bridge: a client in the container reaches a stdio server on the host, navigation limited to localhost', async () => {
+    // The fake MCP server on the host: answers every request with the method it was asked
+    const script = path.join(tmp, 'echo-mcp.js');
+    fs.writeFileSync(
+      script,
+      "require('readline').createInterface({ input: process.stdin }).on('line', l => { const m = JSON.parse(l); " +
+        "process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { echo: m.method } }) + '\\n'); });\n"
+    );
+    await installMcpConfig(backend, idA, USER, ['chrome']);
+    const claude = await inside(idA, 'cat "$HOME/.claude.json"');
+    expect(JSON.parse(claude.stdout).mcpServers.chrome).toEqual({ command: 'socat', args: ['-', 'UNIX-CONNECT:/run/kunj-mcp/chrome.sock'] });
+
+    const controller = new AbortController();
+    const run = runBridge(backend, idA, 'chrome', { command: process.execPath, args: [script], allowOrigins: DEFAULT_ALLOW_ORIGINS }, {
+      user: USER,
+      signal: controller.signal,
+      restartDelayMs: 100,
+    });
+    // One session per connection: send a line, keep stdin open a moment for the reply
+    const ask = async (msg: object): Promise<any> => {
+      let reply = '';
+      await waitFor(async () => {
+        const line = JSON.stringify(msg).replace(/'/g, "'\\''");
+        const r = await inside(idA, `(printf '%s\\n' '${line}'; sleep 1) | socat - UNIX-CONNECT:/run/kunj-mcp/chrome.sock`);
+        reply = r.stdout.trim();
+        return reply !== '';
+      }, 'a reply over the MCP socket', 20000);
+      return JSON.parse(reply);
+    };
+    try {
+      await waitFor(async () => (await inside(idA, 'test -S /run/kunj-mcp/chrome.sock')).exitCode === 0, 'the MCP socket');
+      const mode = await backend.exec(idA, ['stat', '-c', '%a %U', '/run/kunj-mcp/chrome.sock'], { user: 'root' });
+      expect(mode.stdout.trim()).toBe(`600 ${USER}`);
+
+      expect(await ask({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).toEqual({ jsonrpc: '2.0', id: 1, result: { echo: 'tools/list' } });
+      const refused = await ask({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'navigate_page', arguments: { url: 'https://example.com/' } } });
+      expect(refused).toMatchObject({ id: 2, error: { code: -32602 } });
+      const allowed = await ask({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'navigate_page', arguments: { url: 'http://localhost:3000/' } } });
+      expect(allowed).toEqual({ jsonrpc: '2.0', id: 3, result: { echo: 'tools/call' } });
+    } finally {
+      controller.abort();
+      await run;
+    }
+    // The listener is gone with its pid file
+    // ([N] keeps grep from matching its own command line)
+    const listenerGone = 'test ! -e /run/kunj-mcp/chrome.pid && ! grep -lqa "UNIX-LISTE[N]" /proc/[0-9]*/cmdline 2>/dev/null';
+    await waitFor(async () => (await backend.exec(idA, ['sh', '-c', listenerGone], { user: 'root' })).exitCode === 0, 'the listener to stop', 5000);
   });
 
   it('remove refuses with a second unpushed branch, then removes with force and leaves nothing labelled', async () => {

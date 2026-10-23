@@ -89,6 +89,20 @@ jest.mock('../../lib/container/autoforward', () => ({
   runAutoForward: jest.fn(async () => {}),
 }));
 
+// The bridge registry lives in the home directory too: in memory here; no real bridge runs
+const mockBridges: Array<{ pid: number; container: string; name: string }> = [];
+jest.mock('../../lib/container/mcpbridge', () => ({
+  ...jest.requireActual('../../lib/container/mcpbridge'),
+  readBridges: jest.fn(() => mockBridges.slice()),
+  updateBridges: jest.fn((change: (rs: typeof mockBridges) => typeof mockBridges) => {
+    mockBridges.splice(0, mockBridges.length, ...change(mockBridges.slice()));
+    return mockBridges.slice();
+  }),
+  bridgeFor: jest.fn((container: string, _file?: string, except?: number) => mockBridges.find(r => r.container === container && r.pid !== except)?.pid),
+  installMcpConfig: jest.fn(async () => {}),
+  runBridge: jest.fn(async () => {}),
+}));
+
 // The editor config is written under the home directory: a temp dir in the open tests
 let mockHome: string | undefined;
 jest.mock('os', () => {
@@ -133,6 +147,7 @@ import { detectDefaultBranch } from '../../lib/base-branch';
 import { loadResolvedConfig } from '../../lib/config';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri } from '../../lib/container/editor';
 import * as autoforward from '../../lib/container/autoforward';
+import * as mcpbridge from '../../lib/container/mcpbridge';
 import * as prune from '../../lib/container/prune';
 import * as config from '../../lib/config';
 import { runActionHook } from '../../lib/hooks';
@@ -188,6 +203,7 @@ beforeEach(() => {
   backend.volumeLabels.clear();
   backend.networks.clear();
   mockForwards.length = 0;
+  mockBridges.length = 0;
   stdout = [];
   writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
     stdout.push(String(chunk));
@@ -239,7 +255,7 @@ describe('ContainerCommand', () => {
   it('rejects unknown actions', async () => {
     await new ContainerCommand().execute('frobnicate', {});
     expect(errors).toEqual([
-      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, logs, list, stop, remove, prune, blueprint, file",
+      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, mcp, logs, list, stop, remove, prune, blueprint, file",
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -445,6 +461,94 @@ describe('ContainerCommand', () => {
     });
   });
 
+  describe('MCP bridge', () => {
+    const NAME = containerNames('app', REPO_ID, 'feat').container;
+    const spawnDetached = autoforward.spawnDetached as jest.Mock;
+    const runBridge = mcpbridge.runBridge as jest.Mock;
+    const installMcpConfig = mcpbridge.installMcpConfig as jest.Mock;
+    const withMcp = (mcp: unknown) =>
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { forward: { auto: false }, mcp } });
+
+    it('agent starts no bridge and writes no MCP config without container.mcp', async () => {
+      backend.existing = [mainContainer('feat')];
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { forward: { auto: false } } });
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(spawnDetached).not.toHaveBeenCalled();
+      expect(installMcpConfig).not.toHaveBeenCalled();
+      expect(mockBridges).toEqual([]);
+    });
+
+    it('agent writes the config, then starts a detached bridge and registers it', async () => {
+      backend.existing = [mainContainer('feat')];
+      withMcp({ chrome: {} });
+      await new ContainerCommand().execute('agent', 'feat', [], { context: 'colima' });
+      expect(installMcpConfig).toHaveBeenCalledWith(backend, 'cid-1', 'dev', ['chrome']);
+      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'mcp', 'feat', '--context', 'colima']);
+      expect(mockBridges).toEqual([{ pid: 4242, container: NAME, name: 'chrome' }]);
+      // the agent itself still runs
+      expect(backend.callsOf('exec').map(c => (c[1] as string[])[0])).toEqual(['sh', 'tmux']);
+    });
+
+    it('agent starts none when a bridge already runs for the container', async () => {
+      backend.existing = [mainContainer('feat')];
+      mockBridges.push({ pid: 777, container: NAME, name: 'chrome' });
+      withMcp({ chrome: {} });
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(spawnDetached).not.toHaveBeenCalled();
+    });
+
+    it('agent warns about servers other than the browser and starts none for them', async () => {
+      backend.existing = [mainContainer('feat')];
+      withMcp({ github: { command: 'gh-mcp' } });
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(spawnDetached).not.toHaveBeenCalled();
+      expect(errSpy.mock.calls.map(c => String(c[0])).join('') + logSpy.mock.calls.map(c => String(c[0])).join('')).toMatch(/container\.mcp\.github/);
+    });
+
+    it('mcp runs the bridge in the foreground, registered while it runs', async () => {
+      backend.existing = [mainContainer('feat')];
+      withMcp({ chrome: { command: 'node', args: ['srv.js'] } });
+      let during: unknown[] = [];
+      runBridge.mockImplementationOnce(async () => {
+        during = mockBridges.slice();
+      });
+      const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      try {
+        await new ContainerCommand().execute('mcp', 'feat', [], {});
+      } finally {
+        exit.mockRestore();
+      }
+      const [b, id, name, cfg, opts] = runBridge.mock.calls[0];
+      expect([b, id, name]).toEqual([backend, 'cid-1', 'chrome']);
+      expect(cfg).toMatchObject({ command: 'node', args: ['srv.js'] });
+      expect(opts.user).toBe('dev');
+      expect(installMcpConfig).toHaveBeenCalledWith(backend, 'cid-1', 'dev', ['chrome']);
+      expect(during).toEqual([{ pid: process.pid, container: NAME, name: 'chrome' }]);
+      expect(mockBridges).toEqual([]);
+    });
+
+    it('mcp refuses without container.mcp, and while another bridge runs', async () => {
+      backend.existing = [mainContainer('feat')];
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: {} });
+      await new ContainerCommand().execute('mcp', 'feat', [], {});
+      expect(errors[0]).toMatch(/container\.mcp/);
+
+      mockBridges.push({ pid: 777, container: NAME, name: 'chrome' });
+      withMcp({ chrome: {} });
+      await new ContainerCommand().execute('mcp', 'feat', [], {});
+      expect(errors[1]).toMatch(/already.*777/);
+      expect(runBridge).not.toHaveBeenCalled();
+    });
+
+    it('list JSON shows the bridges of each container', async () => {
+      backend.existing = [mainContainer('feat')];
+      (lifecycle.containerStatus as jest.Mock).mockResolvedValue({ agentRunning: false, head: null, ahead: 0, dirty: false, status: 'ok' });
+      mockBridges.push({ pid: 4242, container: NAME, name: 'chrome' }, { pid: 5, container: 'kunj-other', name: 'chrome' });
+      await new ContainerCommand().execute('list', { json: true });
+      expect(JSON.parse(stdout.join('')).containers[0].bridges).toEqual([{ name: 'chrome', pid: 4242 }]);
+    });
+  });
+
   it('list marks the Docker-in-Docker mode in JSON and text', async () => {
     const main = mainContainer('feat');
     main.labels['kunj.options'] = JSON.stringify({ firewall: 'default', user: 'dev', dind: 'sysbox' });
@@ -495,6 +599,7 @@ describe('ContainerCommand', () => {
           workspace: { head: 'a1b2c3d', ahead: 2, dirty: true },
           status: 'ok',
           services: [],
+          bridges: [],
         },
       ],
       orphans: [],

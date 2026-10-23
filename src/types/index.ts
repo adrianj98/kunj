@@ -75,6 +75,8 @@ export interface KunjConfig {
     // Docker inside the branch container (src/lib/container/dind.ts); privileged needs allowPrivileged
     dockerInDocker?: 'off' | 'sysbox' | 'privileged';
     allowPrivileged?: boolean;
+    // Host MCP servers bridged into the container; v1: only "chrome" (src/lib/container/mcpbridge.ts)
+    mcp?: Record<string, unknown>;
   };
   // Commands run by kunj hooks, keyed by hook name (see src/lib/hook-defs.ts)
   hooks?: Partial<Record<HookName, string | string[]>>;
