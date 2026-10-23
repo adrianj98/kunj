@@ -1,7 +1,8 @@
 # Workspace IDE (phase 3)
 
 *Researched, reviewed and decided 2026-10-23. Checked against `main` on 2026-10-23. The CLI contract is
-shipped; the app is a proposal and its runtime is open pending a native-shell spike.*
+shipped; the app is a proposal. Its runtime is native (AppKit + SwiftTerm, Monaco in one WKWebView),
+chosen after the native-shell spike.*
 
 ## Goal and status
 
@@ -25,8 +26,8 @@ no state beyond UI layout.
 | `kunj ct file read\|write [branch] <path>` | Shipped (47fcefe, 5721f17) |
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
-| The app (`workspace-app/`) | Not started; plan written for Electron, on hold |
-| Runtime choice | Open: Electron decided, then a native-shell spike started the same day |
+| The app (`workspace-app/`) | Not started; the Electron plan is being rewritten for the native runtime |
+| Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (decided after the spike, 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Not started (in the app plan) |
 
 ## Design
@@ -121,22 +122,25 @@ It ends on SIGINT/SIGTERM or when stdin closes, so it dies with its parent.
 
 ### App design (proposed)
 
-| Part | Choice (written for Electron) |
+| Part | Choice |
 | --- | --- |
-| Terminal view | xterm.js with the WebGL addon (canvas fallback) and the fit addon |
-| PTY source | node-pty in the main process: `$SHELL -l` in a worktree, `kunj agent <branch>`, `kunj ct shell\|agent <branch>`; the app never knows container or session names |
+| Shell | AppKit (Swift, SwiftPM, no Xcode project), macOS only, like `macos-app/` |
+| Terminal view | SwiftTerm (`LocalProcessTerminalView`), one per tab; hidden tabs have their output parsed off the main thread or throttled (the spike's one weakness) |
+| PTY source | SwiftTerm's local process: `$SHELL -l` in a worktree, `kunj agent <branch>`, `kunj ct shell\|agent <branch>`; the app never knows container or session names |
 | Agent persistence | tmux owned by kunj; nothing in the app, so quitting the app or using the CLI loses nothing |
-| Editor | Monaco: the diff editor first, single files later; no language servers in v1 |
+| Editor | Monaco in one shared WKWebView: the diff editor first, single files later; no language servers in v1; a standard Edit menu routes Cmd+F/C/V into it |
 | Files | `fs` for worktrees, `kunj ct file` for containers |
 
-*Drawing: renderer (React, sandboxed, context isolation: EnvironmentList, EnvironmentHeader, TabStrip,
-TerminalPane, DiffPane) ↔ typed IPC ↔ main process (KunjCli, Environments, Events, PtyManager, Files,
-Diff, Layout) → kunj CLI → git, docker exec → tmux → claude.* Only the main process spawns processes.
+*Drawing: AppKit views (EnvironmentList, EnvironmentHeader, TabStrip, TerminalPane, DiffPane in the
+WKWebView) ↔ Swift models (KunjCli, Environments, Events, Files, Diff, Layout) → kunj CLI → git,
+docker exec → tmux → claude.* The JSON contract is decoded with Swift `Codable` types mirroring
+`src/lib/json-types.ts`.
 
 **Distribution:** `workspace-app/` next to `vscode-extension/` and `macos-app/`; a `workspace-app` job in
 the release workflow attaching `Kunj-workspace-<version>.dmg`, ad-hoc signed and not notarized like the
-macOS app, so `kunj install workspace` strips the quarantine attribute as `installMacApp()` does;
-node-pty rebuilt for Electron on a macOS arm64 runner.
+macOS app, so `kunj install workspace` strips the quarantine attribute as `installMacApp()` does; Monaco is
+bundled as static files inside the app. SwiftTerm needs a one-line `Package.swift` patch to build
+without Xcode (see the spike report).
 
 **v1:** environment list with status, terminals, agent tabs reattaching to CLI sessions, the diff viewer,
 container start/stop/remove and worktree add/remove, hand-off to VS Code, ports as links. **v2:** Monaco
@@ -161,19 +165,23 @@ standards in the space are the Dev Container spec (kunj reads `devcontainer.json
 devcontainer CLI, which bind-mounts the workspace and has no firewall), LSP and the Debug Adapter
 Protocol; language features in a container, if ever wanted, are LSP over `kunj ct exec`.
 
-**Native-shell spike** (`spikes/native-ide/`, started 2026-10-23, results pending): AppKit with SwiftTerm
-terminals and Monaco in a single WKWebView, to see whether a native shell gives Electron's terminal
-fidelity at a fraction of the footprint. No `REPORT.md` yet, so the runtime decision is open until it
-reports.
+**Native-shell spike** (`spikes/native-ide/REPORT.md`, 1c2aaa3, 1730cd1, 0e41a24, closed): AppKit with
+SwiftTerm terminals and Monaco in one WKWebView. Five live Claude Code sessions cost 6% CPU and about
+75 MB; `claude`, `vim`, `top` and truecolor drew correctly through resizes; big output was faster than
+Terminal.app on `seq` and `cat`, slower on a `yes` flood; Monaco's diff showed in under 1 s (its web
+process 340–420 MB, Monaco's cost in any runtime); menu shortcuts, real key presses and live resize
+worked. Weakness: every tab parses output on the main thread, hidden or not, so five flooding tabs pin
+it at 95% and typing in them lags 0.5–1.2 s (xterm.js has the same design).
 
 ## Decisions
 
 All 2026-10-23.
 
-- **Runtime: Electron** in `workspace-app/`, macOS only in v1 (terminal stack proven at VS Code scale,
-  one language, a blank window for an environment-first layout, a cost that does not grow per
-  environment). **Reopened the same day:** a native-shell spike (AppKit + SwiftTerm + Monaco in one
-  WKWebView) runs before any app code; the decision waits for its report. Tauri 2 stays a fallback.
+- **Runtime: native** in `workspace-app/`, macOS only in v1: AppKit + SwiftTerm terminals, Monaco in
+  one WKWebView. Electron was chosen first, then reopened for the native-shell spike; after its report
+  the user chose native (smallest footprint, no bundled Chromium, terminals as fast as Terminal.app).
+  Parsing hidden tabs' output off the main thread, or throttling it, is an early task. Electron stays
+  the fallback.
 - **The CLI is the only contract;** the app imports JSON types only.
 - **Worktree agents through `kunj agent`**, sessions named by kunj; the app never names a tmux session.
 - **Container files through `kunj ct file`;** the app never runs `docker`.
@@ -194,7 +202,6 @@ All 2026-10-23.
 
 ## Open questions
 
-- [ ] The runtime: Electron or the native shell, once the spike reports.
 - [ ] `kunj ct agent` does not set `window-size latest` on its session yet (`kunj agent` does), so the app
   and a CLI terminal attached to a container agent are sized to the smaller one.
 - [ ] "Agent waiting for input" in a background environment: tmux silence/activity hooks or Claude Code
@@ -206,7 +213,7 @@ All 2026-10-23.
 
 - `docs/superpowers/plans/2026-10-23-workspace-cli-contract.md`: the CLI contract above. Done.
 - `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`: the app (environment list, terminals, agent
-  attach, diff viewer). Written for Electron; **on hold** until the spike decides the runtime.
+  attach, diff viewer). Written for Electron; being rewritten in Swift for the native runtime.
 
 ## Code map
 
@@ -218,7 +225,7 @@ All 2026-10-23.
 | `src/lib/container/files.ts`, `src/commands/container.ts` | `kunj ct file` |
 | `src/lib/events.ts`, `src/commands/events.ts` | `kunj events` |
 | `src/lib/command.ts` | The opt-in `jsonCode` error rule |
-| `spikes/native-ide/` | The native-shell spike (not committed) |
+| `spikes/native-ide/` | The native-shell spike and `REPORT.md` |
 
 ## Sources
 

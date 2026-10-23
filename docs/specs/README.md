@@ -17,7 +17,7 @@ page only says where each thing stands.
 | [branch-containers.md](branch-containers.md) | Phase 1: isolation, names and labels, image, start/resume/remove, network helper and firewall, credentials, forwarding, hooks, `list --json` | Shipped |
 | [blueprints.md](blueprints.md) | `.kunj/blueprint.json`, presets, `init`, snapshots built by `start`, host-made bundles | Shipped |
 | [container-phase-2.md](container-phase-2.md) | Sidecar services, `ct open`, `forward --auto`, `ct prune`, Docker-in-Docker, host MCP bridge | Shipped |
-| [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | CLI contract shipped; app proposed |
+| [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | CLI contract shipped; app proposed (native) |
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
 
 ## Done
@@ -53,7 +53,7 @@ Nothing in progress.
 | --- | --- | --- |
 | `kunj events` must exit when stopped while Docker hangs | [workspace-ide.md](workspace-ide.md) | The `docker info` / `docker ps` child is never killed after abort; kill it through a signal in `spawnDocker`, or exit once `watchEvents` resolves. Needed before the app. |
 | Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Designed 2026-10-23; needs an implementation plan |
-| Workspace app v1 | [workspace-ide.md](workspace-ide.md) | Plan written for Electron, on hold until the spike decides the runtime |
+| Workspace app v1 | [workspace-ide.md](workspace-ide.md) | Runtime decided: native (AppKit + SwiftTerm, Monaco in one WKWebView); the Electron plan needs rewriting in Swift |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
 | Extra repos cloned next to the workspace | [container-system.md](container-system.md#roadmap) | — |
@@ -70,7 +70,6 @@ Nothing in progress.
 | Verify Docker-in-Docker `sysbox` mode on a real daemon | Docker Desktop has no `sysbox-runc`; needs a Linux host or a VM with sysbox. `privileged` was only smoke-tested outside kunj |
 | Delete a stray test file: `~/Library/Application Support/Code/User/globalStorage/ms-vscode-remote.remote-containers/imageConfigs/kunj-sandbox%3a1.3.0.json` | Left by an early `kunj ct open` test run before it was made hermetic; the agent was not allowed to delete it |
 | Delete the duplicate outline-only doc <https://claude.ai/artifact/VE9Ltof3P1N62yWZyyExDW> | Created by mistake; it is in a different claude.ai organization than the agent session, so delete it from claude.ai yourself |
-| Decide the workspace app runtime (Electron or native) | The spike finished: read `spikes/native-ide/REPORT.md` (verdict at the end). Real key presses and live resize passed your manual check (1730cd1); the container, iTerm2 and Metal checks were dropped as not needed and the spike is closed (0e41a24) |
 
 The Claude Docs where the discussions started are no longer kept in step: container system
 <https://claude.ai/artifact/TmtL5VdNYr55VaddMSVEwk>, branch containers
