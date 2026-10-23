@@ -11,6 +11,10 @@ Changes made with Claude, and why.
 - Compared Electron, Tauri 2, Eclipse Theia, an embedded VS Code server and native SwiftUI; recommends
   Electron in `workspace-app/` importing kunj's library, xterm.js + node-pty, Monaco diff editor, tmux for
   agent persistence, VS Code as the hand-off. Not approved yet; no plan.
+- Decision (user): the app drives the installed `kunj` CLI through `--json` instead of importing `src/lib`,
+  so the GUI, the VS Code extension and the macOS app share one contract and cannot drift from the CLI.
+  VS Code's remote protocol is not used: it is internal to Microsoft's VS Code, and VS Code attaches to
+  kunj containers on its own over `docker exec`, so kunj maintains no second protocol.
 
 ## 2026-10-23 — Containers: sidecar services (phase 2, Task 1)
 
