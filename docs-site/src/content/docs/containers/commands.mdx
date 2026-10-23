@@ -95,16 +95,33 @@ kunj ct open feature/search
 kunj ct open feature/search --new-window
 ```
 
-The editor is `worktree.editorCommand` (default `code`). VS Code, Cursor, VSCodium and Windsurf
-open `/workspace` in the container through the Dev Containers extension, which must be installed. kunj
-writes the extension's attached-container configuration for the container's image first, so the
-window opens as the container's user in `/workspace`. Any other editor cannot attach; kunj prints
-the `docker exec` command to use instead.
+The editor is `worktree.editorCommand` (default `code`). VS Code and Cursor open `/workspace` in the
+container through the Dev Containers extension, which must be installed. kunj writes the extension's
+attached-container configuration for the container's image first, so the window opens as the
+container's user in `/workspace`. Editors that cannot attach get the `docker exec` command to run
+instead.
+
+<Aside type="caution" title="Credentials">
+While the window is attached, the Dev Containers extension copies your `~/.gitconfig` into the
+container, installs a git credential helper that answers from your host's credentials, and forwards
+your SSH agent and gpg-agent. The agent in the container can use all of them, for any host, not only
+origin. Turn the git ones off in the editor's settings:
+
+```json
+"dev.containers.copyGitConfig": false,
+"dev.containers.gitCredentialHelperConfigLocation": "none"
+```
+
+SSH and GPG agent forwarding have no setting: the extension forwards them whenever the editor runs
+with `SSH_AUTH_SOCK` set or a gpg-agent running. kunj prints this warning on every `open`.
+</Aside>
 
 With `container.network.allow` set, the editor's server inside the container needs the VS Code
 update and marketplace domains; kunj warns about it and you add them to the allowlist.
 
-`--json` prints `{ success, branch, name, editor, uri }`.
+`--json` prints `{ success, branch, name, editor, uri, warning }`, `warning` being the credentials
+warning above. For an editor that cannot attach it prints `{ success, branch, name, editor, uri: null,
+exec }`, with the `docker exec` command in `exec`.
 
 ## shell
 

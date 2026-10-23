@@ -12,6 +12,16 @@ const EXTENSION_ID = 'ms-vscode-remote.remote-containers';
 // Editors that run the Dev Containers extension, by their user-data directory name
 const EDITOR_DIRS = ['Code', 'Cursor'];
 
+// The Dev Containers extension (checked in 0.470.0) copies the host's ~/.gitconfig, installs a git
+// credential helper that answers from the host's credentials, and forwards the host's SSH agent and
+// gpg-agent while a window is attached. The first two have settings; SSH and GPG forwarding have
+// none (they follow SSH_AUTH_SOCK and the host's gpg-agent). kunj cannot change that, so it says so.
+export const EDITOR_CREDENTIALS_WARNING =
+  "While the editor is attached, the Dev Containers extension may forward your host's git credentials, " +
+  'SSH agent and GPG agent into the container, where the agent can use them. Turn off the git ones with ' +
+  '"dev.containers.copyGitConfig": false and "dev.containers.gitCredentialHelperConfigLocation": "none"; ' +
+  'SSH and GPG agent forwarding have no setting (start the editor without SSH_AUTH_SOCK and gpg-agent to avoid them)';
+
 export interface ImageConfig {
   remoteUser?: string;
   workspaceFolder: string;

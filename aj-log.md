@@ -19,6 +19,15 @@ Changes made with Claude, and why.
   about the marketplace/update domains. `--json`: `{ success, branch, name, editor, uri }`. Why: phase 2
   spec section 2.
 - README, docs-site containers pages and the generated command reference updated.
+- Fix round 1 (review): `open` prints `EDITOR_CREDENTIALS_WARNING` (JSON: `warning`), because an attached
+  Dev Containers window copies the host gitconfig, installs a host-backed git credential helper and forwards
+  the SSH and GPG agents into the sandbox. It names `dev.containers.copyGitConfig: false` and
+  `dev.containers.gitCredentialHelperConfigLocation: "none"`; the 0.470.0 bundle has no setting for SSH/GPG
+  forwarding, so the warning says so. Why: that channel breaks "origin is the only channel in and out".
+  `open` now only resumes (start's --rebuild/--create/--image/--publish are not passed on); the printed
+  `docker exec` line uses the same shell as `kunj ct shell`; docs narrowed to VS Code and Cursor (the only
+  editors whose config dirs are written and that run the extension), the other-editor JSON shape is
+  documented; CLAUDE.md says `open` exists and how it works.
 
 ## 2026-10-23 — Workspace IDE: research and design spec
 

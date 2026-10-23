@@ -31,7 +31,7 @@ import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
 import { ContainerStatus, describeGuard, emptyStatus } from '../lib/container/env';
-import { attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
+import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
 import { Forwarder, TUNNEL_PROBE, forwardPort, parseForwardSpec, parseTunnelProbe } from '../lib/container/forward';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerNames, LABEL, containerNames, repoIdFromUrl } from '../lib/container/names';
@@ -534,7 +534,10 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireMain(ctx, branch);
-    if (main.state !== 'running') await this.startOrResume(ctx, branch, options);
+    // Only resumed: start's --rebuild, --create, --image and --publish never apply to open
+    if (main.state !== 'running') {
+      await this.startOrResume(ctx, branch, { hooks: options.hooks, context: options.context, json: options.json });
+    }
 
     const editor = (ctx.config.worktree?.editorCommand ?? 'code').trim();
     if (!editor) throw new ContainerError('worktree.editorCommand is empty; set it to the editor to open');
@@ -554,7 +557,7 @@ export class ContainerCommand extends BaseCommand {
         ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : []),
         'exec', '-it',
         ...(user ? ['-u', user] : []),
-        '-w', WORKSPACE, main.name, 'sh', '-l',
+        '-w', WORKSPACE, main.name, 'sh', '-lc', shellQuote(SHELL),
       ].join(' ');
       if (this.jsonMode) {
         this.outputJSON({ success: true, branch, name: main.name, editor, uri: null, exec: execLine });
@@ -574,9 +577,10 @@ export class ContainerCommand extends BaseCommand {
     if (!opened) throw new ContainerError(`Could not run ${editor}`);
 
     if (this.jsonMode) {
-      this.outputJSON({ success: true, branch, name: main.name, editor, uri });
+      this.outputJSON({ success: true, branch, name: main.name, editor, uri, warning: EDITOR_CREDENTIALS_WARNING });
       return;
     }
+    this.warn(EDITOR_CREDENTIALS_WARNING);
     console.log(chalk.green(`✓ Opened ${main.name} in ${editor}`));
   }
 

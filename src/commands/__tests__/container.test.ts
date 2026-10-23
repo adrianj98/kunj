@@ -106,7 +106,7 @@ import { inferBlueprint } from '../../lib/container/infer';
 import { parseBlueprint, resolveBlueprint } from '../../lib/container/blueprint';
 import { detectDefaultBranch } from '../../lib/base-branch';
 import { loadResolvedConfig } from '../../lib/config';
-import { attachedContainerUri } from '../../lib/container/editor';
+import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri } from '../../lib/container/editor';
 
 const REPO_ID = repoIdFromUrl('https://github.com/acme/app.git');
 
@@ -876,8 +876,18 @@ describe('ContainerCommand', () => {
       expect(mockSpawned).toEqual([['code', '-r', '--folder-uri', uri]]);
       const file = path.join(configDir(), 'kunj-sandbox%3a1.3.0.json');
       expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ remoteUser: 'dev', workspaceFolder: '/workspace' });
-      expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feat', name: main.name, editor: 'code', uri });
+      expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feat', name: main.name, editor: 'code', uri, warning: EDITOR_CREDENTIALS_WARNING });
       expect(lifecycle.startContainer).not.toHaveBeenCalled();
+    });
+
+    it('warns that the editor may forward host credentials, naming the settings that turn them off', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('open', 'feat', {});
+      const printed = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(printed).toContain(EDITOR_CREDENTIALS_WARNING);
+      expect(EDITOR_CREDENTIALS_WARNING).toMatch(/git credentials, SSH agent and GPG agent/);
+      expect(EDITOR_CREDENTIALS_WARNING).toContain('"dev.containers.copyGitConfig": false');
+      expect(EDITOR_CREDENTIALS_WARNING).toContain('"dev.containers.gitCredentialHelperConfigLocation": "none"');
     });
 
     it('opens a new window with --new-window and uses the configured editor', async () => {
@@ -890,7 +900,7 @@ describe('ContainerCommand', () => {
     it('starts a stopped container first, through the start routine', async () => {
       const main = mainContainer('feat', { state: 'exited' });
       backend.existing = [main];
-      (lifecycle.startContainer as jest.Mock).mockResolvedValue({
+      (lifecycle.startContainer as jest.Mock).mockResolvedValueOnce({
         names: containerNames('app', REPO_ID, 'feat'),
         containerId: 'cid-1',
         image: 'kunj-sandbox:1.3.0',
@@ -902,8 +912,9 @@ describe('ContainerCommand', () => {
         publish: [],
         firewall: 'default',
       });
-      await new ContainerCommand().execute('open', 'feat', { json: true });
-      expect((lifecycle.startContainer as jest.Mock).mock.calls[0][1]).toMatchObject({ branch: 'feat', create: false });
+      await new ContainerCommand().execute('open', 'feat', { json: true, rebuild: true, create: true, image: 'other:1', publish: '3000' });
+      // only resumed: start's options never reach it
+      expect((lifecycle.startContainer as jest.Mock).mock.calls[0][1]).toMatchObject({ branch: 'feat', create: false, rebuild: false, imageOverride: undefined, publish: [] });
       expect(mockSpawned).toHaveLength(1);
       expect(JSON.parse(stdout.join(''))).toMatchObject({ success: true, branch: 'feat' });
     });
@@ -915,7 +926,8 @@ describe('ContainerCommand', () => {
       await new ContainerCommand().execute('open', 'feat', {});
       expect(mockSpawned).toEqual([]);
       const printed = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
-      expect(printed).toContain(`docker exec -it -u dev -w /workspace ${main.name} sh -l`);
+      expect(printed).toContain(`docker exec -it -u dev -w /workspace ${main.name} sh -lc 'exec $(command -v zsh || command -v bash || echo sh) -l'`);
+      expect(printed).not.toContain('Dev Containers extension');
       expect(fs.existsSync(configDir())).toBe(false);
     });
 

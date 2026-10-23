@@ -169,8 +169,10 @@ kunj ct remove feature/x               # refuses while work is unpushed (-f to o
 The branch defaults to the current one. `start` takes `--base <ref>`, `--image <img>`,
 `--publish <ports>`, `--rebuild`, `--no-snapshot` (see [Blueprints](#blueprints)) and `--keep-on-error`; `remove` takes `--force` and
 `--keep-volumes`; `open` starts a stopped container and opens `worktree.editorCommand` attached to it
-(VS Code-like editors, through the Dev Containers extension; other editors get the `docker exec`
-command to run); `--context <name>` picks a Docker context; `--json` works on every action. The
+(VS Code and Cursor, through the Dev Containers extension; other editors get the `docker exec`
+command to run; while attached, the extension forwards your host's git credentials, SSH agent and
+gpg-agent into the container unless `dev.containers.copyGitConfig` is `false` and
+`dev.containers.gitCredentialHelperConfigLocation` is `"none"`; SSH/GPG forwarding has no setting); `--context <name>` picks a Docker context; `--json` works on every action. The
 image comes from the repository's `.devcontainer/devcontainer.json` (an image or a Dockerfile) if
 there is one, else `kunj-sandbox`.
 

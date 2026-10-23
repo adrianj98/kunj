@@ -175,13 +175,13 @@ The VS Code extension in `vscode-extension/` is a separate npm package (own `pac
 `kunj container` (alias `ct`, src/commands/container.ts) runs a branch in a Docker container with its
 own clone, mainly to run an agent with permissions skipped. Origin is the only channel in and out;
 nothing from the host is bind-mounted. Design: docs/superpowers/specs/2026-10-21-branch-containers-design.md.
-Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sidecar services; no `open`,
+Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sidecar services and `open`; no
 `prune`, Docker-in-Docker or `--auto` yet. Phase 3, after phase 2, is the workspace IDE
 (docs/superpowers/specs/2026-10-23-workspace-ide-design.md): an Electron app in `workspace-app/` that lists
 environments (worktrees and containers) and drives everything through `kunj … --json`, never by importing
 `src/lib`, so the CLI stays the one contract for it, the VS Code extension and the macOS app.
 
-**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,services}.ts`.
+**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,services,editor}.ts`.
 The images' build contexts live in `src/container/{sandbox,nethelper}/` and are copied to
 `dist/container` by `scripts/copy-container-assets.js` as part of the build. Their tags are
 `kunj-sandbox:<version>-<hash>` / `kunj-nethelper:<version>-<hash>`, the hash covering the build
@@ -233,6 +233,13 @@ the network and before the branch container (health check polled up to 120 s, th
 they are in its rollback list; `resume` starts stopped ones, `stopContainer` stops them and
 `removeContainer` deletes them and the volumes in their label. Never give a service host env, a
 bind mount, a capability or `--privileged`: its image is chosen by the branch.
+
+**Editor:** `kunj ct open` resumes a stopped container through `startOrResume()` (never rebuilds), writes the
+Dev Containers extension's per-image config (`imageConfigs/<image>.json`, `:`/`/`/`%` escaped as lowercase
+`%xx`, with `remoteUser` and `workspaceFolder`) and launches `worktree.editorCommand` via `buildOpenCommand`
+with `--folder-uri vscode-remote://attached-container+<hex of {"containerName":"/<name>"}>/workspace`. An
+attached window forwards host git credentials and the SSH/GPG agents into the container, so `open` always
+prints `EDITOR_CREDENTIALS_WARNING` (editor.ts); kunj does not change the extension's behaviour.
 
 **Blueprints:** `.kunj/blueprint.json` (`tools`, `setup`, `maintain`, `lockfiles`, `notes`) says how a
 new container is set up. Design: docs/superpowers/specs/2026-10-22-blueprints-design.md. Modules:
