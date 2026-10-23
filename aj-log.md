@@ -31,6 +31,16 @@ Changes made with Claude, and why.
   in JSON and an `orphans:` line in text.
 - Docs: README, docs-site containers commands (`prune`, list orphans) and configuration pages, regenerated
   reference JSON, CLAUDE.md Branch Containers paragraph.
+- Fix round 1 (review): only `--yes` or the confirmation is consent. `--force` skips the guard and nothing
+  else, and `--json` or a missing TTY without `--yes` means a dry run. The guard runs again in `applyPrune`
+  before the pre hook, so commits made after the plan (or while the prompt waits, or during `--all`) keep the
+  container, which is reported in `failed`. Volumes without a main container are listed as kept ("volume
+  without a container; use --force to remove") because they can hold unpushed work that no guard sees.
+  "Gone" now means missing from ls-remote *and* present as `refs/remotes/origin/<branch>` in the clone: the
+  guard script gained an `@@remotes` section (`RemoveGuard.originBranches`), so a `start -c` branch that was
+  never pushed is not gone, and a container that cannot be inspected is not gone either. An empty ls-remote
+  answer counts as unreachable. `mergePlans`/`removalCount` moved to prune.ts. Why: the reviewer's
+  data-loss findings on the removal path.
 
 ## 2026-10-23 — Containers: `kunj ct forward --auto` (phase 2, Task 3)
 

@@ -1,11 +1,12 @@
 // `kunj ct prune`: what kunj left behind in Docker for one repository, and its removal.
 //
 // Removes branch containers whose branch is gone from origin (or that have been stopped longer than
-// container.pruneAfterDays) when their remove guard is clean; orphans (helpers, services, volumes
-// and networks labelled for a branch that has no main container); snapshot images of another
-// blueprint hash; and kunj-sandbox / kunj-nethelper tags of other versions. Every rule fails safe:
-// origin unreachable -> no branch is gone, hash unknown -> every snapshot is kept, an image in use
-// or a guard that cannot run -> kept.
+// container.pruneAfterDays) when their remove guard is clean; orphans (helpers, services and
+// networks labelled for a branch that has no main container; such volumes only with --force);
+// snapshot images of another blueprint hash; and kunj-sandbox / kunj-nethelper tags of other
+// versions. Every rule fails safe: origin unreachable -> no branch is gone, a branch the clone never
+// saw on origin -> not gone, hash unknown -> every snapshot is kept, an image in use or a guard that
+// cannot run -> kept. The guard runs again at removal time.
 
 import { execFile } from 'child_process';
 import { ContainerBackend, ContainerInfo, LabelledObject } from './backend';
@@ -24,6 +25,8 @@ export interface PrunePlan {
     reason: 'branch-gone' | 'age';
     /** The container's image, for the container-delete hooks */
     image: string;
+    /** The recorded user the guard runs as */
+    user: string;
     guard?: RemoveGuard;
     /** Why it stays despite the reason: the guard's problems, or why the guard could not run */
     kept?: string;
@@ -40,7 +43,11 @@ export interface PrunePlan {
 export interface PruneOrphan {
   kind: 'container' | 'volume' | 'network';
   name: string;
+  /** Why it stays: a volume can hold unpushed work and has no guard, so it goes only with --force */
+  kept?: string;
 }
+
+export const KEPT_VOLUME = 'volume without a container; use --force to remove';
 
 export interface PruneContext {
   repoId: string;
@@ -51,9 +58,9 @@ export interface PruneContext {
   now?: Date;
   /** Stopped containers created longer ago than this are removed; unset or 0 = off */
   pruneAfterDays?: number;
-  /** Skip the remove guard */
+  /** Skip the remove guard, and remove volumes without a container */
   force: boolean;
-  /** Branch names on origin; null when origin cannot be reached. Default: one git ls-remote in cwd. */
+  /** Branch names on origin; null (or none) when origin cannot be reached. Default: one git ls-remote in cwd. */
   remoteBranches?: () => Promise<string[] | null>;
   /** The blueprint hash a snapshot would have now; null (or no function) keeps every snapshot. */
   currentBlueprintHash?: () => Promise<string | null>;
@@ -66,6 +73,8 @@ export interface PruneContext {
 export interface ApplyContext {
   repoId: string;
   kunjVersion: string;
+  /** false: removeContainer runs the guard again, so work done since the plan is never lost */
+  force: boolean;
   /** Runs pre-/post-container-delete; a throwing pre hook skips that container */
   hook?: (name: 'pre-container-delete' | 'post-container-delete', values: { branch: string; container: string; image: string }) => Promise<void>;
   forwardsFile?: string;
@@ -151,31 +160,43 @@ export async function planPrune(backend: ContainerBackend, ctx: PruneContext): P
   const containers = everything.filter(c => c.labels[LABEL.repo] === ctx.repoId);
   const mains = containers.filter(isMainContainer);
 
-  // 1. Branch containers: branch gone from origin, or stopped for too long
-  const remote = await (ctx.remoteBranches ?? (() => lsRemoteHeads(ctx.cwd)))();
-  if (remote === null) plan.warnings.push('origin is unreachable, so no container is removed because its branch is gone');
-  const onOrigin = new Set(remote ?? []);
+  // 1. Branch containers: branch gone from origin, or stopped for too long. An empty answer is
+  // treated as unreachable: a repository always has a branch, so it means something went wrong.
+  const answer = await (ctx.remoteBranches ?? (() => lsRemoteHeads(ctx.cwd)))();
+  const remote = answer && answer.length ? new Set(answer) : null;
+  if (!remote) plan.warnings.push('origin is unreachable, so no container is removed because its branch is gone');
   const now = (ctx.now ?? new Date()).getTime();
   const days = ctx.pruneAfterDays ?? 0;
   for (const c of mains) {
     const branch = c.labels[LABEL.branch] ?? '';
     // A snapshot build's temporary container (`<branch>:snapshot`) is not a branch
     if (branch.endsWith(':snapshot')) continue;
-    let reason: PrunePlan['containers'][number]['reason'] | null = null;
-    if (remote !== null && !onOrigin.has(branch)) reason = 'branch-gone';
-    else if (days > 0 && c.state !== 'running' && now - createdTime(c.createdAt) > days * DAY_MS) reason = 'age';
-    if (!reason) continue;
+    const missing = !!remote && !remote.has(branch);
+    const old = days > 0 && c.state !== 'running' && now - createdTime(c.createdAt) > days * DAY_MS;
+    if (!missing && !old) continue;
 
     const names = namesOfContainer(c.name);
-    const entry: PrunePlan['containers'][number] = { branch, names, reason, image: c.image };
-    if (!ctx.force) {
+    const user = recordedUser(c);
+    // Missing from origin is not enough: a branch made with `start -c` and never pushed was never
+    // there. The guard's exec says whether the clone has origin's ref for it, so it runs even with --force.
+    let guard: RemoveGuard | undefined;
+    let guardError: string | undefined;
+    if (missing || !ctx.force) {
       try {
-        entry.guard = await inspectForRemove(backend, names, { user: recordedUser(c), kunjVersion: ctx.kunjVersion });
-        const problems = describeGuard(entry.guard);
-        if (problems.length) entry.kept = problems.join('; ');
+        guard = await inspectForRemove(backend, names, { user, kunjVersion: ctx.kunjVersion });
       } catch (err) {
-        entry.kept = message(err);
+        guardError = message(err);
       }
+    }
+    const gone = missing && !!guard?.originBranches?.includes(branch);
+    if (missing && !guard) plan.warnings.push(`${c.name} could not be inspected, so it is not treated as gone: ${guardError}`);
+    if (!gone && !old) continue;
+
+    const entry: PrunePlan['containers'][number] = { branch, names, reason: gone ? 'branch-gone' : 'age', image: c.image, user };
+    if (guard) entry.guard = guard;
+    if (!ctx.force) {
+      const problems = guard ? describeGuard(guard) : [guardError ?? 'the container could not be inspected'];
+      if (problems.length) entry.kept = problems.join('; ');
     }
     plan.containers.push(entry);
   }
@@ -185,7 +206,8 @@ export async function planPrune(backend: ContainerBackend, ctx: PruneContext): P
     backend.listVolumes({ [LABEL.repo]: ctx.repoId }),
     backend.listNetworks({ [LABEL.repo]: ctx.repoId }),
   ]);
-  plan.orphans = findOrphans(containers, volumes, networks);
+  plan.orphans = findOrphans(containers, volumes, networks).map(o =>
+    o.kind === 'volume' && !ctx.force ? { ...o, kept: KEPT_VOLUME } : o);
 
   // 3. Images nobody uses: snapshots of another hash, kunj images of another version
   const inUse = new Set(everything.map(c => c.image));
@@ -230,10 +252,15 @@ export async function applyPrune(
   for (const c of plan.containers.filter(c => !c.kept)) {
     const values = { branch: c.branch, container: c.names.container, image: c.image };
     await attempt(c.names.container, async () => {
+      // Checked again: the agent may have committed since the plan (or while the prompt waited).
+      // Before the pre hook, as `remove` does, so the hook only runs for a container that goes.
+      if (!ctx.force) {
+        const problems = describeGuard(await inspectForRemove(backend, c.names, { user: c.user, kunjVersion: ctx.kunjVersion }));
+        if (problems.length) throw new Error(`kept, it now holds work origin does not have: ${problems.join('; ')}`);
+      }
       await ctx.hook?.('pre-container-delete', values);
-      // The guard was checked when planning (or --force)
       await removeContainer(backend, c.names, {
-        user: '',
+        user: c.user,
         kunjVersion: ctx.kunjVersion,
         force: true,
         keepVolumes: false,
@@ -244,7 +271,7 @@ export async function applyPrune(
   }
   // Containers before their volumes and networks, which are in use until they are gone
   for (const kind of ['container', 'volume', 'network'] as const) {
-    for (const o of plan.orphans.filter(o => o.kind === kind)) {
+    for (const o of plan.orphans.filter(o => o.kind === kind && !o.kept)) {
       const ids = kind === 'container' ? { containers: [o.name] } : kind === 'volume' ? { volumes: [o.name] } : { networks: [o.name] };
       await attempt(o.name, () => backend.remove(ids));
     }
@@ -259,4 +286,21 @@ export async function applyPrune(
     failed.push(`forward registry: ${message(err)}`);
   }
   return { removed, failed };
+}
+
+/** What applying the plan would remove (kept entries are not counted). */
+export function removalCount(plan: PrunePlan): number {
+  return plan.containers.filter(c => !c.kept).length + plan.orphans.filter(o => !o.kept).length + plan.images.length;
+}
+
+/** One plan of several repositories' (`prune --all`), for the JSON output. */
+export function mergePlans(plans: PrunePlan[]): PrunePlan {
+  if (plans.length === 1) return plans[0];
+  return {
+    containers: plans.flatMap(p => p.containers),
+    orphans: plans.flatMap(p => p.orphans),
+    images: plans.flatMap(p => p.images),
+    bytes: plans.reduce((sum, p) => sum + p.bytes, 0),
+    warnings: plans.flatMap(p => p.warnings),
+  };
 }

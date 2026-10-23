@@ -52,7 +52,7 @@ import { stripUserinfo } from '../lib/container/seed';
 import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
-import { PrunePlan, applyPrune, findOrphans, planPrune } from '../lib/container/prune';
+import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount } from '../lib/container/prune';
 import { KunjConfig } from '../types';
 
 interface ContainerOptions {
@@ -129,15 +129,15 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--no-hooks', description: "[start|remove|prune] Skip kunj hooks (see 'kunj hooks --help')" },
         { flags: '--no-status', description: '[list] Skip the per-container status exec (faster listing)' },
         { flags: '-a, --all', description: "[list] Show every repository's containers; [prune] prune every repository in ~/.kunj/repos.json" },
-        { flags: '-f, --force', description: '[remove|prune] Remove even when the container holds unpushed work (prune: also without asking)' },
-        { flags: '--dry-run', description: '[prune] Only list what would be removed (the default when stdout is not a terminal)' },
+        { flags: '-f, --force', description: '[remove|prune] Remove even when the container holds unpushed work (prune: and volumes without a container)' },
+        { flags: '--dry-run', description: '[prune] Only list what would be removed (the default without --yes when stdout is not a terminal, or with --json)' },
         { flags: '--keep-volumes', description: "[remove] Keep the workspace and home volumes (and the services' volumes)" },
         { flags: '--follow', description: '[logs] Keep streaming new output' },
         { flags: '-n, --new-window', description: '[open] Open in a new editor window' },
         { flags: '--auto', description: '[forward] Forward every port the container starts listening on (>= 1024, not in container.forward.ignore)' },
         { flags: '--detach', description: '[forward --auto] Run the forwarder in the background; it exits when the container stops' },
         { flags: '--global', description: '[blueprint init] Write the host copy (~/.kunj/<repo>/blueprint.json) instead of .kunj/blueprint.json' },
-        { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file; [prune] remove without asking (the guard still applies)' },
+        { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file; [prune] remove without asking, also from a script or with --json' },
         { flags: '--no-bundle', description: '[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)' },
         { flags: '--blueprint <path>', description: '[blueprint snapshot|status] Use this blueprint file instead of the resolved one' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
@@ -1135,8 +1135,9 @@ export class ContainerCommand extends BaseCommand {
 
   // Two passes: plan every repository, confirm once, then apply. Each repository is planned and
   // applied from its own directory, because the config, repo name and blueprint come from the cwd.
+  // Only --yes (or a confirmation) is consent: --force skips the guard and nothing else.
   private async prune(options: ContainerOptions): Promise<void> {
-    const dryRun = !!options.dryRun || (!process.stdout.isTTY && !options.yes && !options.force);
+    const dryRun = !!options.dryRun || (!options.yes && (this.jsonMode || !process.stdout.isTTY));
     const startDir = process.cwd();
     const roots: Array<string | null> = options.all ? listRepos().filter(r => r.exists).map(r => r.root) : [null];
     const runs: Array<{ root: string | null; ctx: Context; plan: PrunePlan }> = [];
@@ -1178,7 +1179,8 @@ export class ContainerCommand extends BaseCommand {
       let removed: string[] = [];
       let failed: string[] = [];
       let apply = !dryRun && count > 0;
-      if (apply && !this.jsonMode && !options.force && !options.yes) {
+      // Not a dry run and no --yes: a terminal and no --json, so there is someone to ask
+      if (apply && !options.yes) {
         const inquirer = (await import('inquirer')).default;
         const { ok } = await inquirer.prompt([{ type: 'confirm', name: 'ok', message: `Remove ${count} object${count === 1 ? '' : 's'}?`, default: false }]);
         apply = ok;
@@ -1192,6 +1194,7 @@ export class ContainerCommand extends BaseCommand {
           const result = await applyPrune(run.ctx.backend, run.plan, {
             repoId: run.ctx.repo.id,
             kunjVersion: getVersion(),
+            force: !!options.force,
             hook: async (name, values) => {
               await runActionHook(name, values, hookOptions);
             },
@@ -1225,13 +1228,16 @@ export class ContainerCommand extends BaseCommand {
     for (const { ctx, plan } of runs) {
       console.log(chalk.blue(`Prune ${ctx.repo.name}${dryRun ? ' (dry run)' : ''}:`));
       for (const w of plan.warnings) console.log(chalk.yellow(`  ⚠ ${w}`));
-      if (removalCount(plan) === 0 && !plan.containers.length) console.log(chalk.gray('  nothing to prune'));
+      if (removalCount(plan) === 0 && !plan.containers.length && !plan.orphans.length) console.log(chalk.gray('  nothing to prune'));
       for (const c of plan.containers) {
         const why = c.reason === 'branch-gone' ? `branch ${c.branch} is gone from origin` : `stopped, created over ${ctx.config.container?.pruneAfterDays} days ago`;
         if (c.kept) console.log(`  ${chalk.yellow('keep  ')} ${c.names.container}  ${chalk.gray(`${why}, but: ${c.kept}`)}`);
         else console.log(`  ${chalk.red('remove')} ${c.names.container}  ${chalk.gray(why)}`);
       }
-      for (const o of plan.orphans) console.log(`  ${chalk.red('remove')} ${o.kind} ${o.name}  ${chalk.gray('orphan: its branch container is gone')}`);
+      for (const o of plan.orphans) {
+        if (o.kept) console.log(`  ${chalk.yellow('keep  ')} ${o.kind} ${o.name}  ${chalk.gray(o.kept)}`);
+        else console.log(`  ${chalk.red('remove')} ${o.kind} ${o.name}  ${chalk.gray('orphan: its branch container is gone')}`);
+      }
       for (const tag of plan.images) console.log(`  ${chalk.red('remove')} image ${tag}`);
       if (plan.images.length) console.log(chalk.gray(`  images: ${megabytes(plan.bytes)} MB`));
     }
@@ -1288,21 +1294,6 @@ export class ContainerCommand extends BaseCommand {
 // container.agentCommand is shell text (it may quote its own arguments); extra args are data
 export function agentCommandLine(setting: string | undefined, args: string[]): string {
   return [(setting || CONTAINER_AGENT_COMMAND_DEFAULT).trim(), ...args.map(shellQuote)].join(' ');
-}
-
-function removalCount(plan: PrunePlan): number {
-  return plan.containers.filter(c => !c.kept).length + plan.orphans.length + plan.images.length;
-}
-
-function mergePlans(plans: PrunePlan[]): PrunePlan {
-  if (plans.length === 1) return plans[0];
-  return {
-    containers: plans.flatMap(p => p.containers),
-    orphans: plans.flatMap(p => p.orphans),
-    images: plans.flatMap(p => p.images),
-    bytes: plans.reduce((sum, p) => sum + p.bytes, 0),
-    warnings: plans.flatMap(p => p.warnings),
-  };
 }
 
 function megabytes(bytes: number): number {

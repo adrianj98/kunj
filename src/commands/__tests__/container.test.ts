@@ -1086,7 +1086,7 @@ describe('ContainerCommand', () => {
   describe('prune', () => {
     const NAMES = containerNames('app', REPO_ID, 'gone');
     const PLAN = {
-      containers: [{ branch: 'gone', names: NAMES, reason: 'branch-gone', image: 'kunj-sandbox:1', guard: { unpushedRefs: [], stashes: 0, dirty: false, originReachable: true } }],
+      containers: [{ branch: 'gone', names: NAMES, reason: 'branch-gone', image: 'kunj-sandbox:1', user: 'dev', guard: { unpushedRefs: [], stashes: 0, dirty: false, originReachable: true } }],
       orphans: [{ kind: 'volume', name: 'kunj-app-old-123456-ws' }],
       images: ['kunj-blueprint-app:old'],
       bytes: 5 * 1024 * 1024,
@@ -1129,7 +1129,7 @@ describe('ContainerCommand', () => {
       tty(true);
       await new ContainerCommand().execute('prune', {});
       expect(inquirer.prompt).toHaveBeenCalledTimes(1);
-      expect(prune.applyPrune).toHaveBeenCalledWith(backend, PLAN, expect.objectContaining({ repoId: REPO_ID }));
+      expect(prune.applyPrune).toHaveBeenCalledWith(backend, PLAN, expect.objectContaining({ repoId: REPO_ID, force: false }));
       const hook = (prune.applyPrune as jest.Mock).mock.calls[0][2].hook;
       await hook('pre-container-delete', { branch: 'gone', container: NAMES.container, image: 'kunj-sandbox:1' });
       expect(runActionHook).toHaveBeenCalledWith('pre-container-delete', { branch: 'gone', container: NAMES.container, image: 'kunj-sandbox:1' }, expect.objectContaining({ skip: false }));
@@ -1142,18 +1142,44 @@ describe('ContainerCommand', () => {
       expect(prune.applyPrune).not.toHaveBeenCalled();
     });
 
-    it('--force skips the confirmation and the guard; --yes applies without a TTY', async () => {
+    it('--force skips the guard but still asks on a TTY', async () => {
       tty(true);
       await new ContainerCommand().execute('prune', { force: true, hooks: false });
-      expect(inquirer.prompt).not.toHaveBeenCalled();
+      expect(inquirer.prompt).toHaveBeenCalledTimes(1);
       expect(prune.planPrune).toHaveBeenCalledWith(backend, expect.objectContaining({ force: true }));
-      expect(prune.applyPrune).toHaveBeenCalledTimes(1);
+      expect(prune.applyPrune).toHaveBeenCalledWith(backend, PLAN, expect.objectContaining({ force: true }));
+    });
 
+    it('--force alone is a dry run without a TTY, and with --json', async () => {
+      tty(false);
+      await new ContainerCommand().execute('prune', { force: true });
+      expect(prune.applyPrune).not.toHaveBeenCalled();
+
+      tty(true);
+      await new ContainerCommand().execute('prune', { force: true, json: true });
+      expect(prune.applyPrune).not.toHaveBeenCalled();
+      expect(inquirer.prompt).not.toHaveBeenCalled();
+      expect(JSON.parse(stdout.join(''))).toMatchObject({ dryRun: true, removed: [] });
+    });
+
+    it('--yes applies without asking, without a TTY and with --json, keeping the guard unless --force', async () => {
       tty(false);
       await new ContainerCommand().execute('prune', { yes: true, json: true });
+      expect(inquirer.prompt).not.toHaveBeenCalled();
       expect(prune.planPrune).toHaveBeenLastCalledWith(backend, expect.objectContaining({ force: false }));
-      expect(prune.applyPrune).toHaveBeenCalledTimes(2);
+      expect(prune.applyPrune).toHaveBeenLastCalledWith(backend, PLAN, expect.objectContaining({ force: false }));
       expect(JSON.parse(stdout.join(''))).toMatchObject({ success: true, dryRun: false, removed: ['kunj-app-gone-abc123'], failed: [] });
+
+      await new ContainerCommand().execute('prune', { yes: true, force: true });
+      expect(prune.applyPrune).toHaveBeenLastCalledWith(backend, PLAN, expect.objectContaining({ force: true }));
+      expect(inquirer.prompt).not.toHaveBeenCalled();
+    });
+
+    it('lists kept orphan volumes as kept', async () => {
+      tty(true);
+      (prune.planPrune as jest.Mock).mockResolvedValue({ ...PLAN, containers: [], images: [], orphans: [{ kind: 'volume', name: 'v-ws', kept: prune.KEPT_VOLUME }] });
+      await new ContainerCommand().execute('prune', { dryRun: true });
+      expect(logSpy.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/keep\s+volume v-ws\s+volume without a container; use --force/);
     });
 
     it('--all plans every recorded repository from its own directory, asking about kunj images once', async () => {

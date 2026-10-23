@@ -171,10 +171,11 @@ kunj ct prune                          # containers of branches gone from origin
 The branch defaults to the current one. `start` takes `--base <ref>`, `--image <img>`,
 `--publish <ports>`, `--rebuild`, `--no-snapshot` (see [Blueprints](#blueprints)) and `--keep-on-error`; `remove` takes `--force` and
 `--keep-volumes`; `prune` removes the containers of branches deleted on origin (only those without
-unpushed work, unless `--force`), helpers, services, volumes and networks left without their
-container, snapshot and `kunj-sandbox` images that are no longer current, and stopped containers
-older than `container.pruneAfterDays`; it asks first, takes `--dry-run` (the default when stdout is
-not a terminal; `--yes` applies there) and `--all` (every recorded repository); `open` starts a stopped container and opens `worktree.editorCommand` attached to it
+unpushed work, unless `--force`), helpers, services and networks left without their container
+(volumes only with `--force`), snapshot and `kunj-sandbox` images that are no longer current, and
+stopped containers older than `container.pruneAfterDays`; it asks first, takes `--dry-run` (the
+default without `--yes` when stdout is not a terminal or with `--json`) and `--all` (every recorded
+repository); `open` starts a stopped container and opens `worktree.editorCommand` attached to it
 (VS Code and Cursor, through the Dev Containers extension; other editors get the `docker exec`
 command to run; while attached, the extension forwards your host's git credentials, SSH agent and
 gpg-agent into the container unless `dev.containers.copyGitConfig` is `false` and

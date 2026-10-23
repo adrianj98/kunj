@@ -235,12 +235,12 @@
       },
       {
         "flags": "-f, --force",
-        "description": "[remove|prune] Remove even when the container holds unpushed work (prune: also without asking)",
+        "description": "[remove|prune] Remove even when the container holds unpushed work (prune: and volumes without a container)",
         "default": null
       },
       {
         "flags": "--dry-run",
-        "description": "[prune] Only list what would be removed (the default when stdout is not a terminal)",
+        "description": "[prune] Only list what would be removed (the default without --yes when stdout is not a terminal, or with --json)",
         "default": null
       },
       {
@@ -275,7 +275,7 @@
       },
       {
         "flags": "-y, --yes",
-        "description": "[blueprint init] Accept the inferred blueprint and overwrite an existing file; [prune] remove without asking (the guard still applies)",
+        "description": "[blueprint init] Accept the inferred blueprint and overwrite an existing file; [prune] remove without asking, also from a script or with --json",
         "default": null
       },
       {

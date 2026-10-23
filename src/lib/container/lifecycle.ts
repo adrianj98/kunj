@@ -1077,6 +1077,9 @@ const GUARD_SCRIPT = [
   `out=$(${G} stash list); rc=$?; printf '%s\n' "$out" | grep -c .; echo "@@stash-exit $rc"`,
   'echo @@status',
   `out=$(${G} status --porcelain=v2 --branch --untracked-files=no); rc=$?; [ -z "$out" ] || printf '%s\n' "$out"; echo "@@status-exit $rc"`,
+  // Which branches the clone has seen on origin: prune counts a branch as gone only if it was there
+  'echo @@remotes',
+  `out=$(${G} for-each-ref --format='%(refname)' refs/remotes/origin); rc=$?; [ -z "$out" ] || printf '%s\n' "$out"; echo "@@remotes-exit $rc"`,
 ].join('\n');
 
 const ORIGIN_TIMEOUT_MS = 15000;

@@ -333,12 +333,16 @@ kunj ct prune --all       # every repository kunj has recorded (kunj repos)
 It removes:
 
 - **containers of branches deleted on origin** (a merged pull request, say), with their helper,
-  services, network and volumes, as [`remove`](#remove) does. The same check for unpushed work runs
-  first: a container that holds commits, stashes or changes origin does not have is kept, and the plan
-  says why. kunj asks origin once (`git ls-remote --heads origin`); when origin cannot be reached, no
-  container is removed for this reason.
-- **orphans**: helpers, services, volumes and networks labelled for a branch whose container no
-  longer exists. This includes volumes kept by `remove --keep-volumes`.
+  services, network and volumes, as [`remove`](#remove) does. A branch counts as deleted only when
+  origin no longer has it *and* the clone in the container has seen it there, so a branch made with
+  `start -c` and never pushed is not touched. The same check for unpushed work runs first, and again
+  just before removal: a container that holds commits, stashes or changes origin does not have is
+  kept, and the plan says why. kunj asks origin once (`git ls-remote --heads origin`); when origin
+  cannot be reached, no container is removed for this reason.
+- **orphans**: helpers, services and networks labelled for a branch whose container no longer exists.
+  Volumes without a container (a workspace kept by `remove --keep-volumes`, or left by a `docker rm`)
+  can hold unpushed work that no check can see, so they are listed as kept and removed only with
+  `--force`.
 - **old snapshot images**: [blueprint snapshots](../blueprints/) whose hash is not the current one.
   When the current hash cannot be worked out, every snapshot is kept.
 - **old kunj images**: `kunj-sandbox` and `kunj-nethelper` tags of other kunj versions.
@@ -357,21 +361,26 @@ Prune shop:
 ? Remove 3 objects? (y/N)
 ```
 
-When stdout is not a terminal (a script, `| less`, the VS Code extension), prune only lists the plan
-unless you pass `--yes` or `--force`. Each container removed runs the `pre/post-container-delete`
-hooks.
+When stdout is not a terminal (a script, `| less`, the VS Code extension) or with `--json`, prune only
+lists the plan unless you pass `--yes`; `--force` alone never removes anything without asking. Each
+container removed runs the `pre/post-container-delete` hooks.
+
+Planning, even a dry run, inspects each candidate container: a stopped one is started behind its
+firewall for a moment and stopped again, as `remove` does. Only containers whose branch is missing
+from origin or that are older than `container.pruneAfterDays` are inspected; with `--force` the old
+ones are not.
 
 | Flag | Use it to |
 |---|---|
 | `--dry-run` | Show the plan and remove nothing. |
 | `-a, --all` | Prune every repository in `~/.kunj/repos.json` that is not hidden. |
-| `-y, --yes` | Remove without asking; the check for unpushed work still applies. |
-| `-f, --force` | Remove without asking and without the check for unpushed work. |
+| `-y, --yes` | Remove without asking, also from a script or with `--json`; the check for unpushed work still applies. |
+| `-f, --force` | Skip the check for unpushed work and remove volumes without a container. Still asks, unless `--yes`. |
 | `--no-hooks` | Skip the `pre/post-container-delete` hooks. |
 
 <Aside type="caution">
-`--force` removes containers of deleted branches even when they hold unpushed work. Run
-`kunj ct prune --dry-run` first.
+`--force` removes containers of deleted branches even when they hold unpushed work, and volumes
+whose container is gone. Run `kunj ct prune --dry-run --force` first to see what that would take.
 </Aside>
 
 ## blueprint

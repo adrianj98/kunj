@@ -96,15 +96,18 @@ export interface RemoveGuard {
   originReachable: boolean;
   /** Guard sections whose git command failed (or never reported), e.g. ['stash']; absent when none */
   unreadable?: string[];
+  /** Branches the clone has a refs/remotes/origin/ ref for (it saw them on origin); absent when not read */
+  originBranches?: string[];
 }
 
 /** Parse the sections printed by the remove guard script (see lifecycle.ts). */
 export function parseGuard(stdout: string): Omit<RemoveGuard, 'originReachable'> {
   const guard: Omit<RemoveGuard, 'originReachable'> = { unpushedRefs: [], stashes: 0, dirty: false };
   const exits: Record<string, number> = {};
+  const remotes: string[] = [];
   let section = '';
   for (const line of stdout.split('\n')) {
-    const exit = /^@@(stash|status)-exit (\d+)$/.exec(line.trim());
+    const exit = /^@@(stash|status|remotes)-exit (\d+)$/.exec(line.trim());
     if (exit) {
       exits[exit[1]] = parseInt(exit[2], 10);
       section = '';
@@ -124,8 +127,12 @@ export function parseGuard(stdout: string): Omit<RemoveGuard, 'originReachable'>
       guard.stashes = parseInt(line.trim(), 10) || 0;
     } else if (section === 'status' && !line.startsWith('#')) {
       guard.dirty = true;
+    } else if (section === 'remotes' && line.trim().startsWith('refs/remotes/origin/')) {
+      remotes.push(line.trim().slice('refs/remotes/origin/'.length));
     }
   }
+  // Not a guard problem: only prune asks, and an unread list means "cannot tell"
+  if (exits.remotes === 0) guard.originBranches = remotes.filter(b => b !== 'HEAD');
   // Fail closed: a git command that failed, or a section that never finished, is not clean
   const unreadable = ['stash', 'status'].filter(s => exits[s] !== 0);
   if (unreadable.length) {

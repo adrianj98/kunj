@@ -21,7 +21,7 @@ import { resolveHelperImage } from '../image';
 import { getVersion } from '../../version';
 import { parseBlueprint, resolveBlueprint, snapshotTag, SEED_DIR } from '../blueprint';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint } from '../snapshot';
-import { applyPrune, parseLsRemoteHeads, planPrune } from '../prune';
+import { KEPT_VOLUME, PruneContext, applyPrune, parseLsRemoteHeads, planPrune } from '../prune';
 import { KunjConfig } from '../../../types';
 
 let dockerUp = false;
@@ -755,7 +755,7 @@ const BRANCH_ALLOW = 'it-allow';
         // The main container goes behind kunj's back
         await backend.remove({ containers: [orphan.names.container] });
 
-        const plan = await planPrune(backend, {
+        const pruneCtx: PruneContext = {
           repoId,
           repoName: REPO_NAME,
           cwd: hostClone,
@@ -764,18 +764,27 @@ const BRANCH_ALLOW = 'it-allow';
           // The host cannot resolve host.docker.internal, origin's name inside the container
           remoteBranches: async () => parseLsRemoteHeads(git(['ls-remote', '--heads', bare], tmp)),
           kunjImages: false,
-        });
+        };
+        const applyCtx = { repoId, kunjVersion: VERSION, force: false, forwardsFile: path.join(tmp, 'forwards.json') };
+        const plan = await planPrune(backend, pruneCtx);
         expect(plan.orphans).toEqual(expect.arrayContaining([
           { kind: 'container', name: orphan.names.helper },
-          { kind: 'volume', name: orphan.names.workspaceVolume },
-          { kind: 'volume', name: orphan.names.homeVolume },
+          { kind: 'volume', name: orphan.names.workspaceVolume, kept: KEPT_VOLUME },
+          { kind: 'volume', name: orphan.names.homeVolume, kept: KEPT_VOLUME },
           { kind: 'network', name: orphan.names.network },
         ]));
         const kept = plan.containers.find(c => c.branch === WIP);
         expect(kept).toMatchObject({ reason: 'branch-gone', kept: expect.stringMatching(/unpushed commits/) });
 
-        const result = await applyPrune(backend, { ...plan, images: [] }, { repoId, kunjVersion: VERSION, forwardsFile: path.join(tmp, 'forwards.json') });
+        // Without --force the orphan volumes stay (they may hold work); the helper and network go
+        const result = await applyPrune(backend, { ...plan, images: [] }, applyCtx);
         expect(result.failed).toEqual([]);
+        expect(labelledFor(ORPH).sort()).toEqual([orphan.names.homeVolume, orphan.names.workspaceVolume].sort());
+        expect(docker(['ps', '-aq', '--filter', `name=^${wip.names.container}$`])).not.toBe('');
+
+        // With --force they go too (only the orphans are applied, so the WIP container stays)
+        const forced = await planPrune(backend, { ...pruneCtx, force: true });
+        await applyPrune(backend, { ...forced, containers: [], images: [] }, { ...applyCtx, force: true });
         expect(labelledFor(ORPH)).toEqual([]);
         expect(docker(['ps', '-aq', '--filter', `name=^${wip.names.container}$`])).not.toBe('');
       } finally {

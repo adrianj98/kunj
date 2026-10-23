@@ -180,9 +180,11 @@ Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sid
 docs/superpowers/specs/2026-10-23-workspace-ide-design.md.
 
 **Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor,prune}.ts`.
-`prune.ts` (`planPrune`/`applyPrune`) removes containers of branches gone from origin (one `git ls-remote
---heads origin`; unreachable origin removes none) only when the remove guard is clean or `--force`,
-orphans found by labels (helpers, services, volumes, networks of a repo/branch with no main container),
+`prune.ts` (`planPrune`/`applyPrune`) removes containers of branches gone from origin (missing from one
+`git ls-remote --heads origin` and present as `refs/remotes/origin/<b>` in the clone; unreachable origin
+removes none) only when the remove guard is clean, checked at plan and again at removal, or `--force`;
+orphans found by labels (helpers, services, networks of a repo/branch with no main container; volumes
+only with `--force`); only `--yes` or a confirmation applies (`--force` is not consent);
 snapshots of another hash (all kept when the hash is unknown), other versions' `kunj-sandbox`/`kunj-nethelper`
 tags and stopped containers older than `container.pruneAfterDays`; never an image a container uses.
 `autoforward.ts` polls `/proc/net/tcp{,6}` (not `ss`, which most images lack) and forwards new listeners (127.0.0.1 only); running forwarders are in

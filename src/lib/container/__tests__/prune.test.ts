@@ -5,13 +5,16 @@ import { FakeBackend } from './fake-backend';
 import { ContainerInfo, ExecIO, ImageInfo, Labels } from '../backend';
 import { LABEL, containerNames, labelsFor } from '../names';
 import { readForwards, writeForwards } from '../autoforward';
-import { PruneContext, applyPrune, findOrphans, namesOfContainer, parseLsRemoteHeads, planPrune } from '../prune';
+import { parseGuard } from '../env';
+import { KEPT_VOLUME, PruneContext, applyPrune, findOrphans, mergePlans, namesOfContainer, parseLsRemoteHeads, planPrune, removalCount } from '../prune';
 
 const REPO = { id: 'github.com/acme/app', name: 'app' };
 const VERSION = '1.2.3';
 const NOW = new Date('2026-10-23T12:00:00Z');
 const CLEAN = '@@refs\nrefs/heads/x 0\n@@stash\n0\n@@stash-exit 0\n@@status\n# branch.oid abc\n@@status-exit 0\n';
 const UNPUSHED = CLEAN.replace('@@stash', 'refs/heads/wip 2\n@@stash');
+/** The guard's last section: the branches the clone has seen on origin */
+const remotes = (...branches: string[]) => `@@remotes\n${branches.map(b => `refs/remotes/origin/${b}\n`).join('')}@@remotes-exit 0\n`;
 
 const n = (branch: string) => containerNames(REPO.name, REPO.id, branch);
 
@@ -36,14 +39,15 @@ function image(tag: string, size: number, labels: Labels = {}, id = `img-${tag}`
   return { tag, id, createdAt: '', labels, size };
 }
 
-/** The guard script prints `guard[id]` (CLEAN by default); ls-remote inside the container succeeds. */
+/** The guard script prints `guard[id]` (default: clean, and the clone has seen its branch on origin);
+ * ls-remote inside the container succeeds. */
 function backendWith(containers: ContainerInfo[], guard: Record<string, string> = {}): FakeBackend {
   const b = new FakeBackend();
   b.existing = containers;
   const real = b.exec.bind(b);
   b.exec = async (id: string, cmd: string[], io?: ExecIO) => {
     const r = await real(id, cmd, io);
-    if (cmd[0] === 'sh' && cmd[1] === '-c') return { exitCode: 0, stdout: guard[id] ?? CLEAN };
+    if (cmd[0] === 'sh' && cmd[1] === '-c') return { exitCode: 0, stdout: guard[id] ?? CLEAN + remotes(id.replace(/^id-/, '')) };
     return r;
   };
   return b;
@@ -77,6 +81,14 @@ describe('parseLsRemoteHeads', () => {
   });
 });
 
+describe('parseGuard', () => {
+  it("reads the clone's origin branches, and leaves them out when for-each-ref failed", () => {
+    expect(parseGuard(CLEAN + remotes('main', 'feature/x') + 'refs/remotes/origin/HEAD\n').originBranches).toEqual(['main', 'feature/x']);
+    expect(parseGuard(CLEAN + '@@remotes\n@@remotes-exit 128\n').originBranches).toBeUndefined();
+    expect(parseGuard(CLEAN).originBranches).toBeUndefined();
+  });
+});
+
 describe('namesOfContainer', () => {
   it('derives the helper, volumes and network from the container name', () => {
     expect(namesOfContainer(n('feature/x').container)).toEqual(n('feature/x'));
@@ -85,13 +97,16 @@ describe('namesOfContainer', () => {
 
 describe('planPrune', () => {
   it('removes a gone branch whose guard is clean and keeps one with unpushed work, with the reason', async () => {
-    const b = backendWith([main('gone'), main('wip'), main('alive')], { 'id-wip': UNPUSHED });
+    const b = backendWith([main('gone'), main('wip'), main('alive')], { 'id-wip': UNPUSHED + remotes('wip') });
     const plan = await planPrune(b, ctx());
     expect(plan.containers).toEqual([
-      { branch: 'gone', names: n('gone'), reason: 'branch-gone', image: 'kunj-sandbox:1.2.3-aaa', guard: { unpushedRefs: [], stashes: 0, dirty: false, originReachable: true } },
       {
-        branch: 'wip', names: n('wip'), reason: 'branch-gone', image: 'kunj-sandbox:1.2.3-aaa',
-        guard: { unpushedRefs: ['refs/heads/wip'], stashes: 0, dirty: false, originReachable: true },
+        branch: 'gone', names: n('gone'), reason: 'branch-gone', image: 'kunj-sandbox:1.2.3-aaa', user: 'dev',
+        guard: { unpushedRefs: [], stashes: 0, dirty: false, originReachable: true, originBranches: ['gone'] },
+      },
+      {
+        branch: 'wip', names: n('wip'), reason: 'branch-gone', image: 'kunj-sandbox:1.2.3-aaa', user: 'dev',
+        guard: { unpushedRefs: ['refs/heads/wip'], stashes: 0, dirty: false, originReachable: true, originBranches: ['wip'] },
         kept: 'unpushed commits on wip',
       },
     ]);
@@ -100,24 +115,43 @@ describe('planPrune', () => {
     expect((guardCall![2] as ExecIO).user).toBe('dev');
   });
 
-  it('keeps a container whose guard cannot run, with the error as the reason', async () => {
-    const b = backendWith([main('gone', { state: 'exited', labels: labelsFor(REPO.id, 'gone', { [LABEL.role]: 'main' }) })]);
-    const plan = await planPrune(b, ctx());
-    expect(plan.containers[0].kept).toMatch(/firewall settings/);
+  it('does not count a branch the clone never saw on origin as gone (start -c, never pushed)', async () => {
+    const b = backendWith([main('local-only')], { 'id-local-only': CLEAN + remotes('main') });
+    expect((await planPrune(b, ctx())).containers).toEqual([]);
+    expect((await planPrune(b, ctx({ force: true }))).containers).toEqual([]);
   });
 
-  it('--force skips the guard', async () => {
-    const b = backendWith([main('wip')], { 'id-wip': UNPUSHED });
-    const plan = await planPrune(b, ctx({ force: true }));
-    expect(plan.containers).toEqual([{ branch: 'wip', names: n('wip'), reason: 'branch-gone', image: 'kunj-sandbox:1.2.3-aaa' }]);
-    expect(b.callsOf('exec')).toEqual([]);
-  });
-
-  it('prunes nothing for the branch-gone reason when origin is unreachable, and says so', async () => {
-    const b = backendWith([main('gone')]);
-    const plan = await planPrune(b, ctx({ remoteBranches: async () => null }));
+  it('does not count a branch as gone when the container cannot be inspected, and says so', async () => {
+    const stopped = { state: 'exited' as const, labels: labelsFor(REPO.id, 'gone', { [LABEL.role]: 'main' }) };
+    const plan = await planPrune(backendWith([main('gone', stopped)]), ctx());
     expect(plan.containers).toEqual([]);
-    expect(plan.warnings).toEqual([expect.stringMatching(/origin.*unreachable/i)]);
+    expect(plan.warnings).toEqual([expect.stringMatching(/could not be inspected.*firewall settings/)]);
+  });
+
+  it('keeps an old container whose guard cannot run, with the error as the reason', async () => {
+    const stopped = { state: 'exited' as const, createdAt: '2026-01-01T00:00:00Z', labels: labelsFor(REPO.id, 'alive', { [LABEL.role]: 'main' }) };
+    const plan = await planPrune(backendWith([main('alive', stopped)]), ctx({ pruneAfterDays: 30 }));
+    expect(plan.containers.map(c => [c.reason, c.kept])).toEqual([['age', expect.stringMatching(/firewall settings/)]]);
+  });
+
+  it('--force ignores what the guard finds (it still runs, for the origin ref) and skips it for age', async () => {
+    const b = backendWith([main('wip')], { 'id-wip': UNPUSHED + remotes('wip') });
+    const plan = await planPrune(b, ctx({ force: true }));
+    expect(plan.containers).toEqual([expect.objectContaining({ branch: 'wip', reason: 'branch-gone' })]);
+    expect(plan.containers[0].kept).toBeUndefined();
+
+    const old = backendWith([main('alive', { state: 'exited', createdAt: '2026-01-01T00:00:00Z' })]);
+    expect((await planPrune(old, ctx({ force: true, pruneAfterDays: 30 }))).containers.map(c => c.reason)).toEqual(['age']);
+    expect(old.callsOf('exec')).toEqual([]);
+  });
+
+  it('prunes nothing for the branch-gone reason when origin is unreachable or answers nothing, and says so', async () => {
+    for (const answer of [null, []]) {
+      const b = backendWith([main('gone')]);
+      const plan = await planPrune(b, ctx({ remoteBranches: async () => answer }));
+      expect(plan.containers).toEqual([]);
+      expect(plan.warnings).toEqual([expect.stringMatching(/origin.*unreachable/i)]);
+    }
   });
 
   it('leaves a snapshot build container alone', async () => {
@@ -156,17 +190,25 @@ describe('planPrune', () => {
     b.networks.set(gone.network, labelsFor(REPO.id, 'rm-oob'));
     b.networks.set(n('alive').network, labelsFor(REPO.id, 'alive'));
 
+    // Volumes can hold unpushed work and have no guard: kept unless --force
     const plan = await planPrune(b, ctx());
     expect(plan.orphans).toEqual([
       { kind: 'container', name: gone.helper },
       { kind: 'container', name: `${gone.container}-svc-postgres` },
+      { kind: 'volume', name: gone.workspaceVolume, kept: KEPT_VOLUME },
+      { kind: 'volume', name: `${gone.container}-svc-postgres-data`, kept: KEPT_VOLUME },
+      { kind: 'volume', name: `${n('alive').container}-x`, kept: KEPT_VOLUME },
+      { kind: 'network', name: gone.network },
+    ]);
+    expect(removalCount(plan)).toBe(3);
+    expect(b.callsOf('listVolumes')).toEqual([[{ [LABEL.repo]: REPO.id }]]);
+    expect(b.callsOf('listNetworks')).toEqual([[{ [LABEL.repo]: REPO.id }]]);
+    const forced = await planPrune(b, ctx({ force: true }));
+    expect(forced.orphans.filter(o => o.kind === 'volume')).toEqual([
       { kind: 'volume', name: gone.workspaceVolume },
       { kind: 'volume', name: `${gone.container}-svc-postgres-data` },
       { kind: 'volume', name: `${n('alive').container}-x` },
-      { kind: 'network', name: gone.network },
     ]);
-    expect(b.callsOf('listVolumes')).toEqual([[{ [LABEL.repo]: REPO.id }]]);
-    expect(b.callsOf('listNetworks')).toEqual([[{ [LABEL.repo]: REPO.id }]]);
   });
 
   it('removes snapshots of other hashes (not one in use) and keeps every snapshot when the hash is unknown', async () => {
@@ -209,6 +251,21 @@ describe('planPrune', () => {
 });
 
 describe('findOrphans', () => {
+  it("keeps a stopped main container's helper, volumes and network out of the orphans", () => {
+    const names = n('alive');
+    const labels = labelsFor(REPO.id, 'alive');
+    expect(findOrphans(
+      [main('alive', { state: 'exited' }), { ...side('alive', names.helper, 'helper'), state: 'exited' }],
+      [{ name: names.workspaceVolume, labels }, { name: names.homeVolume, labels }],
+      [{ name: names.network, labels }],
+    )).toEqual([]);
+  });
+
+  it('mergePlans joins the repositories\' plans', () => {
+    const one = { containers: [], orphans: [{ kind: 'network' as const, name: 'a' }], images: ['x'], bytes: 1, warnings: ['w'] };
+    expect(mergePlans([one, one])).toEqual({ containers: [], orphans: [one.orphans[0], one.orphans[0]], images: ['x', 'x'], bytes: 2, warnings: ['w', 'w'] });
+  });
+
   it('ignores objects without kunj labels and treats unlabelled-role containers by name', () => {
     const legacyMain: ContainerInfo = { ...main('alive'), labels: labelsFor(REPO.id, 'alive') };
     expect(findOrphans([legacyMain], [{ name: 'v', labels: {} }, { name: n('alive').homeVolume, labels: labelsFor(REPO.id, 'alive') }], [])).toEqual([]);
@@ -217,7 +274,7 @@ describe('findOrphans', () => {
 
 describe('applyPrune', () => {
   it('removes kept-free containers with their hooks, then orphans, images and stale forwards', async () => {
-    const b = backendWith([main('gone'), main('wip'), main('alive')], { 'id-wip': UNPUSHED });
+    const b = backendWith([main('gone'), main('wip'), main('alive')], { 'id-wip': UNPUSHED + remotes('wip') });
     const gone = n('rm-oob');
     b.existing.push(side('rm-oob', gone.helper, 'helper'));
     b.volumes.add(gone.workspaceVolume);
@@ -241,6 +298,7 @@ describe('applyPrune', () => {
     const result = await applyPrune(b, plan, {
       repoId: REPO.id,
       kunjVersion: VERSION,
+      force: false,
       forwardsFile: file,
       hook: async (name, values) => {
         hooks.push([name, values]);
@@ -248,7 +306,8 @@ describe('applyPrune', () => {
     });
 
     expect(result.failed).toEqual([]);
-    expect(result.removed).toEqual([n('gone').container, gone.helper, gone.workspaceVolume, gone.network, 'kunj-sandbox:0.1.0']);
+    // The orphan workspace volume is kept (no --force)
+    expect(result.removed).toEqual([n('gone').container, gone.helper, gone.network, 'kunj-sandbox:0.1.0']);
     expect(hooks).toEqual([
       ['pre-container-delete', { branch: 'gone', container: n('gone').container, image: 'kunj-sandbox:1.2.3-aaa' }],
       ['post-container-delete', { branch: 'gone', container: n('gone').container, image: 'kunj-sandbox:1.2.3-aaa' }],
@@ -256,7 +315,6 @@ describe('applyPrune', () => {
     expect(b.callsOf('remove')).toEqual([
       [{ containers: [n('gone').helper, n('gone').container], volumes: [n('gone').workspaceVolume, n('gone').homeVolume], networks: [n('gone').network] }],
       [{ containers: [gone.helper] }],
-      [{ volumes: [gone.workspaceVolume] }],
       [{ networks: [gone.network] }],
     ]);
     expect(b.callsOf('removeImage')).toEqual([['kunj-sandbox:0.1.0']]);
@@ -275,6 +333,7 @@ describe('applyPrune', () => {
     const result = await applyPrune(b, plan, {
       repoId: REPO.id,
       kunjVersion: VERSION,
+      force: false,
       forwardsFile: path.join(tmp, 'f.json'),
       hook: async (name, values) => {
         if (name === 'pre-container-delete' && values.branch === 'gone') throw new Error('hook said no');
@@ -282,5 +341,40 @@ describe('applyPrune', () => {
     });
     expect(result.removed).toEqual([n('gone2').container]);
     expect(result.failed).toEqual([`${n('gone').container}: hook said no`, 'kunj-sandbox:0.1.0: conflict']);
+  });
+
+  it('checks the guard again: work done after the plan keeps the container, reported as failed, without hooks', async () => {
+    const guard: Record<string, string> = {};
+    const b = backendWith([main('gone')], guard);
+    const plan = await planPrune(b, ctx());
+    expect(plan.containers[0].kept).toBeUndefined();
+    // The agent commits while the prompt waits
+    guard['id-gone'] = CLEAN.replace('@@stash', 'refs/heads/gone 1\n@@stash') + remotes('gone');
+    const hooks: string[] = [];
+    const result = await applyPrune(b, plan, {
+      repoId: REPO.id,
+      kunjVersion: VERSION,
+      force: false,
+      forwardsFile: path.join(tmp, 'f.json'),
+      hook: async name => {
+        hooks.push(name);
+      },
+    });
+    expect(result.removed).toEqual([]);
+    expect(result.failed).toEqual([`${n('gone').container}: kept, it now holds work origin does not have: unpushed commits on gone`]);
+    expect(hooks).toEqual([]);
+    expect(b.callsOf('remove')).toEqual([]);
+  });
+
+  it('with --force removes orphan volumes and does not check the guard again', async () => {
+    const b = backendWith([main('gone')]);
+    const gone = n('rm-oob');
+    b.volumes.add(gone.workspaceVolume);
+    b.volumeLabels.set(gone.workspaceVolume, labelsFor(REPO.id, 'rm-oob'));
+    const plan = await planPrune(b, ctx({ force: true }));
+    const execsBefore = b.callsOf('exec').length;
+    const result = await applyPrune(b, plan, { repoId: REPO.id, kunjVersion: VERSION, force: true, forwardsFile: path.join(tmp, 'f.json') });
+    expect(result.removed).toEqual([n('gone').container, gone.workspaceVolume]);
+    expect(b.callsOf('exec').length).toBe(execsBefore);
   });
 });
