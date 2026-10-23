@@ -89,11 +89,9 @@ export class AgentCommand extends BaseCommand {
     if (!process.stdin.isTTY) throw new AgentError('no-tty', 'kunj agent needs a terminal to attach to');
     const config = await loadResolvedConfig(process.cwd());
     const command = opts.command || config.agent?.command || 'claude';
-    process.exitCode = await runTmux(agentArgv(session, wt.path, command), wt.path, {
-      ...process.env,
-      KUNJ_BRANCH: wt.branch,
-      KUNJ_REPO: repo.name,
-      KUNJ_WORKTREE: wt.path,
-    });
+    const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path };
+    // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
+    const { TMUX: _tmux, ...env } = process.env;
+    process.exitCode = await runTmux(agentArgv(session, wt.path, command, vars), wt.path, { ...env, ...vars });
   }
 }

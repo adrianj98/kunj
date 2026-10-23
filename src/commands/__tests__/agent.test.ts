@@ -72,17 +72,31 @@ test('status without a branch uses the current branch and reports null without t
 test('start runs tmux in the worktree with agent.command', async () => {
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('start', 'feature-a', {});
-  expect(runTmux).toHaveBeenCalledWith(
-    agentArgv(session, '/wt/feature-a', 'claude'),
-    '/wt/feature-a',
-    expect.objectContaining({ KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a' }),
-  );
+  const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a' };
+  expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', 'claude', vars), '/wt/feature-a', expect.objectContaining(vars));
+  // tmux takes a new session's environment from its server, not this client: the values go in argv
+  expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(expect.arrayContaining(['-e', 'KUNJ_BRANCH=feature-a', '-e', 'KUNJ_WORKTREE=/wt/feature-a']));
+});
+
+test('start works inside a tmux pane: TMUX is not passed on', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  const before = process.env.TMUX;
+  process.env.TMUX = '/private/tmp/tmux-501/default,123,0';
+  try {
+    await new AgentCommand().execute('start', 'feature-a', {});
+  } finally {
+    if (before === undefined) delete process.env.TMUX;
+    else process.env.TMUX = before;
+  }
+  expect((runTmux as jest.Mock).mock.calls[0][2]).not.toHaveProperty('TMUX');
 });
 
 test('a bare branch name starts, and --command overrides the setting', async () => {
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('feature-a', { command: 'aider' });
-  expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(agentArgv(session, '/wt/feature-a', 'aider'));
+  expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(
+    agentArgv(session, '/wt/feature-a', 'aider', { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a' }),
+  );
 });
 
 test('start without tmux fails with tmux-missing', async () => {

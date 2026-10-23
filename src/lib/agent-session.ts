@@ -29,14 +29,15 @@ export function agentSessionName(repoName: string, repoId: string, branch: strin
   return containerNames(repoName, repoId, branch).container.replace(/[.:]/g, '-');
 }
 
-// null: tmux is not installed. []: tmux is installed but has no server (or no sessions).
+// []: tmux has no server (or no sessions). null: tmux is not installed, or it failed some other way,
+// so a transient failure is never read as "no agents".
 export async function listTmuxSessions(): Promise<string[] | null> {
   try {
     const { stdout } = await execFileAsync('tmux', ['list-sessions', '-F', '#{session_name}']);
     return stdout.split('\n').map(s => s.trim()).filter(Boolean);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    return [];
+    const stderr = String((error as { stderr?: unknown }).stderr ?? '');
+    return /no server running|error connecting to/.test(stderr) ? [] : null;
   }
 }
 
@@ -46,8 +47,11 @@ export function agentRunning(sessions: string[] | null, name: string): boolean |
 
 // -u: UTF-8 even without a locale. window-size latest: the size follows the client that attached last.
 // tmux runs a single command argument through the shell, so the setting keeps its quoting.
-export function agentArgv(name: string, cwd: string, command: string): string[] {
-  return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, command, ';', 'set-option', '-t', name, 'window-size', 'latest'];
+// -e (tmux 3.2+): a new session's environment comes from the tmux server, not this client, so the
+// variables must be given here or a running server hands it an earlier agent's values.
+export function agentArgv(name: string, cwd: string, command: string, env: Record<string, string>): string[] {
+  const vars = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+  return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, ...vars, command, ';', 'set-option', '-t', name, 'window-size', 'latest'];
 }
 
 // Run argv attached to the terminal; resolves with the exit code
