@@ -107,6 +107,14 @@ jobs:
             xattr -dr com.apple.quarantine /Applications/Kunj.app
             ```
 
+            ### Workspace app
+            Download `Kunj-workspace-${{ steps.extract_version.outputs.version }}.zip` from the assets below (it is added a
+            few minutes after the release), or run `kunj install workspace`. Unzip it and move `Kunj Workspace.app` to
+            /Applications. It needs macOS 14 and the kunj CLI above. It is not signed or notarized either:
+            ```bash
+            xattr -dr com.apple.quarantine "/Applications/Kunj Workspace.app"
+            ```
+
             See the changelog below for details.
 
       - name: Report NPM publish failure
@@ -142,3 +150,38 @@ jobs:
         with:
           tag_name: v${{ needs.release.outputs.version }}
           files: macos-app/Kunj-macos-${{ needs.release.outputs.version }}.zip
+
+  # Like macos-app: added to the release after it exists, so a failing build
+  # never holds up the npm package or the release
+  workspace-app:
+    name: Build Workspace app
+    needs: release
+    if: ${{ !cancelled() && needs.release.outputs.released == 'success' }}
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install the web bundle's dependencies
+        working-directory: workspace-app/web
+        run: npm ci
+
+      - name: Build Kunj Workspace.app (unsigned)
+        working-directory: workspace-app
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          scripts/bundle.sh
+          ditto -c -k --keepParent "build/Kunj Workspace.app" "Kunj-workspace-$VERSION.zip"
+
+      - name: Attach to the GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.release.outputs.version }}
+          files: workspace-app/Kunj-workspace-${{ needs.release.outputs.version }}.zip

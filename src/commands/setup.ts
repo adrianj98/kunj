@@ -138,7 +138,7 @@ export class SetupCommand extends BaseCommand {
   private async offerCompanionApps(): Promise<void> {
     const installer = new InstallCommand();
     console.log(chalk.blue('\n\n🧩 Companion apps (Optional)'));
-    console.log(chalk.gray('See your worktrees, which ones are open and their pull requests in VS Code or the macOS menu bar\n'));
+    console.log(chalk.gray('See your worktrees, which ones are open and their pull requests in VS Code, the macOS menu bar or the Workspace app\n'));
     const apps = await installer.ask();
     for (const app of apps) {
       try {

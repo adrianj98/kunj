@@ -1,9 +1,9 @@
-// Install command - the VS Code extension and the macOS menu bar app,
-// downloaded from the GitHub release (src/lib/apps.ts).
+// Install command - the VS Code extension, the macOS menu bar app and the
+// Workspace app, downloaded from the GitHub release (src/lib/apps.ts).
 //
-//   kunj install                 ask which apps to install
-//   kunj install vscode|macos    install one
-//   kunj install all             install everything available on this OS
+//   kunj install                            ask which apps to install
+//   kunj install vscode|macos|workspace     install one
+//   kunj install all                        install everything available on this OS
 
 import chalk from 'chalk';
 import inquirer from 'inquirer';
@@ -11,6 +11,7 @@ import { BaseCommand } from '../lib/command';
 import {
   COMPANION_APPS,
   CompanionApp,
+  MAC_APPS,
   RELEASES_REPO,
   downloadAsset,
   findReleaseAsset,
@@ -36,14 +37,14 @@ function cliVersion(): string | undefined {
 }
 
 function availableApps(): CompanionApp[] {
-  return process.platform === 'darwin' ? ['vscode', 'macos'] : ['vscode'];
+  return process.platform === 'darwin' ? ['vscode', 'macos', 'workspace'] : ['vscode'];
 }
 
 export class InstallCommand extends BaseCommand {
   constructor() {
     super({
       name: 'install',
-      description: 'Install the VS Code extension and the macOS menu bar app',
+      description: 'Install the VS Code extension, the macOS menu bar app and the Workspace app',
       arguments: '[app]',
       options: [
         { flags: '--release <version>', description: 'Install from this release (default: the CLI version, else the newest)' },
@@ -53,12 +54,13 @@ export class InstallCommand extends BaseCommand {
       helpText: () =>
         [
           'Apps:',
-          '  vscode   Kunj Worktrees extension for VS Code (and VS Code-like editors via --editor)',
-          '  macos    Kunj menu bar app, installed to /Applications (or ~/Applications)',
-          '  all      Both, where available',
+          '  vscode     Kunj Worktrees extension for VS Code (and VS Code-like editors via --editor)',
+          '  macos      Kunj menu bar app, installed to /Applications (or ~/Applications)',
+          '  workspace  Kunj Workspace app: worktrees, containers, terminals and agents in one window (macOS)',
+          '  all        All of them, where available',
           '',
-          `Both are downloaded from https://github.com/${RELEASES_REPO}/releases. The macOS app is not`,
-          'notarized; the download quarantine is cleared so it opens without a warning.',
+          `They are downloaded from https://github.com/${RELEASES_REPO}/releases. The macOS apps are not`,
+          'notarized; the download quarantine is cleared so they open without a warning.',
         ].join('\n'),
     });
   }
@@ -75,10 +77,10 @@ export class InstallCommand extends BaseCommand {
       apps = options.yes ? availableApps() : await this.ask(options);
     } else if (app === 'all') {
       apps = availableApps();
-    } else if (app === 'vscode' || app === 'macos') {
+    } else if (app === 'vscode' || app === 'macos' || app === 'workspace') {
       apps = [app];
     } else {
-      throw new Error(`Unknown app '${app}'. Expected vscode, macos or all`);
+      throw new Error(`Unknown app '${app}'. Expected vscode, macos, workspace or all`);
     }
 
     if (apps.length === 0) {
@@ -115,7 +117,7 @@ export class InstallCommand extends BaseCommand {
         const installed = await isVscodeExtensionInstalled(options.editor);
         note = installed === null ? chalk.gray(' (editor CLI not found)') : installed ? chalk.gray(' (installed - update)') : '';
       } else {
-        const installed = installedMacApp();
+        const installed = installedMacApp(MAC_APPS[name].app);
         note = installed ? chalk.gray(` (installed in ${installed} - update)`) : '';
       }
       choices.push({ name: COMPANION_APPS[name].label + note, value: name, checked: !note.includes('installed') });
@@ -135,7 +137,9 @@ export class InstallCommand extends BaseCommand {
       throw new Error(
         app === 'macos'
           ? 'no release has the macOS app yet. Build it from source: cd macos-app && scripts/bundle.sh --install'
-          : 'no release has the VS Code extension. Build it from source: cd vscode-extension && npm run install-local'
+          : app === 'workspace'
+            ? 'no release has the Workspace app yet. Build it from source: cd workspace-app && scripts/bundle.sh --install'
+            : 'no release has the VS Code extension. Build it from source: cd vscode-extension && npm run install-local'
       );
     }
     if (version && asset.tag.replace(/^v/, '') !== version.replace(/^v/, '')) {
@@ -151,8 +155,14 @@ export class InstallCommand extends BaseCommand {
       return { release: asset.tag };
     }
 
-    const dest = await installMacApp(file);
-    this.log(chalk.green(`✓ Installed ${dest} ${asset.tag} and launched it. Look for the branch icon in the menu bar.`));
+    const dest = await installMacApp(file, { app: MAC_APPS[app].app });
+    this.log(
+      chalk.green(
+        app === 'workspace'
+          ? `✓ Installed ${dest} ${asset.tag} and launched it.`
+          : `✓ Installed ${dest} ${asset.tag} and launched it. Look for the branch icon in the menu bar.`
+      )
+    );
     return { release: asset.tag, path: dest };
   }
 }
