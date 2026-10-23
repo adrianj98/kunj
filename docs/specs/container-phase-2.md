@@ -16,7 +16,7 @@ Phase 2 makes a branch container usable for real projects: their databases run n
 | Editor attach | Shipped (93b7ed3, f635113) |
 | Auto port forwarding | Shipped (5710902, b88466c) |
 | Prune | Shipped (893dc79, 4f7aa10) |
-| Docker-in-Docker | Not started |
+| Docker-in-Docker | Shipped (d40b44c, c88430b) |
 | Host MCP bridge | Not started |
 
 | # | Feature | Why it matters | Size |
