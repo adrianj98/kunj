@@ -64,6 +64,29 @@ jest.mock('../../lib/container/forward', () => ({
   forwardPort: jest.fn(async (_b: unknown, _id: string, spec: { container: number }) => ({ hostPort: spec.container + 10000, close: async () => {} })),
 }));
 
+// The editor config is written under the home directory: a temp dir in the open tests
+let mockHome: string | undefined;
+jest.mock('os', () => {
+  const actual = jest.requireActual('os');
+  return { ...actual, homedir: () => mockHome ?? actual.homedir() };
+});
+
+// The editor launch (openWorktree in worktree.ts): records the argv, emits 'spawn'
+const mockSpawned: string[][] = [];
+jest.mock('child_process', () => {
+  const actual = jest.requireActual('child_process');
+  const { EventEmitter } = jest.requireActual('events');
+  return {
+    ...actual,
+    spawn: jest.fn((cmd: string, args: string[]) => {
+      mockSpawned.push([cmd, ...args]);
+      const child = Object.assign(new EventEmitter(), { unref: () => {} });
+      setImmediate(() => child.emit('spawn'));
+      return child;
+    }),
+  };
+});
+
 jest.mock('../../lib/hooks', () => {
   const actual = jest.requireActual('../../lib/hooks');
   return {
@@ -82,6 +105,8 @@ import * as snapshot from '../../lib/container/snapshot';
 import { inferBlueprint } from '../../lib/container/infer';
 import { parseBlueprint, resolveBlueprint } from '../../lib/container/blueprint';
 import { detectDefaultBranch } from '../../lib/base-branch';
+import { loadResolvedConfig } from '../../lib/config';
+import { attachedContainerUri } from '../../lib/container/editor';
 
 const REPO_ID = repoIdFromUrl('https://github.com/acme/app.git');
 
@@ -180,7 +205,7 @@ describe('ContainerCommand', () => {
   it('rejects unknown actions', async () => {
     await new ContainerCommand().execute('frobnicate', {});
     expect(errors).toEqual([
-      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, forward, logs, list, stop, remove, blueprint",
+      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, logs, list, stop, remove, blueprint",
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -823,6 +848,90 @@ describe('ContainerCommand', () => {
       (resolveBlueprint as jest.Mock).mockRejectedValueOnce(new Error('bad blueprint'));
       await new ContainerCommand().execute('list', { json: true, status: false });
       expect(JSON.parse(stdout.join('')).containers[0].blueprint).toEqual({ hash: 'h', stale: null });
+    });
+  });
+
+  describe('open', () => {
+    let home: string;
+    const vscodeDir = () => path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'ms-vscode-remote.remote-containers', 'imageConfigs');
+    const linuxDir = () => path.join(home, '.config', 'Code', 'User', 'globalStorage', 'ms-vscode-remote.remote-containers', 'imageConfigs');
+    const configDir = () => (process.platform === 'darwin' ? vscodeDir() : linuxDir());
+
+    beforeEach(() => {
+      mockSpawned.length = 0;
+      home = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-open-'));
+      mockHome = home;
+    });
+    afterEach(() => {
+      mockHome = undefined;
+      fs.rmSync(home, { recursive: true, force: true });
+    });
+
+    it('writes the image config and launches the editor on the attached-container uri', async () => {
+      const main = mainContainer('feat');
+      backend.existing = [main];
+      await new ContainerCommand().execute('open', 'feat', { json: true });
+
+      const uri = attachedContainerUri(main.name);
+      expect(mockSpawned).toEqual([['code', '-r', '--folder-uri', uri]]);
+      const file = path.join(configDir(), 'kunj-sandbox%3a1.3.0.json');
+      expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ remoteUser: 'dev', workspaceFolder: '/workspace' });
+      expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feat', name: main.name, editor: 'code', uri });
+      expect(lifecycle.startContainer).not.toHaveBeenCalled();
+    });
+
+    it('opens a new window with --new-window and uses the configured editor', async () => {
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: {}, worktree: { editorCommand: 'cursor' } });
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('open', 'feat', { newWindow: true });
+      expect(mockSpawned[0].slice(0, 3)).toEqual(['cursor', '-n', '--folder-uri']);
+    });
+
+    it('starts a stopped container first, through the start routine', async () => {
+      const main = mainContainer('feat', { state: 'exited' });
+      backend.existing = [main];
+      (lifecycle.startContainer as jest.Mock).mockResolvedValue({
+        names: containerNames('app', REPO_ID, 'feat'),
+        containerId: 'cid-1',
+        image: 'kunj-sandbox:1.3.0',
+        user: 'dev',
+        created: false,
+        seeded: false,
+        keptFiles: [],
+        copiedFiles: [],
+        publish: [],
+        firewall: 'default',
+      });
+      await new ContainerCommand().execute('open', 'feat', { json: true });
+      expect((lifecycle.startContainer as jest.Mock).mock.calls[0][1]).toMatchObject({ branch: 'feat', create: false });
+      expect(mockSpawned).toHaveLength(1);
+      expect(JSON.parse(stdout.join(''))).toMatchObject({ success: true, branch: 'feat' });
+    });
+
+    it('prints the docker exec command for an editor that cannot attach', async () => {
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: {}, worktree: { editorCommand: 'subl' } });
+      const main = mainContainer('feat');
+      backend.existing = [main];
+      await new ContainerCommand().execute('open', 'feat', {});
+      expect(mockSpawned).toEqual([]);
+      const printed = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(printed).toContain(`docker exec -it -u dev -w /workspace ${main.name} sh -l`);
+      expect(fs.existsSync(configDir())).toBe(false);
+    });
+
+    it('warns in allowlist mode that the editor server needs its domains', async () => {
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { network: { allow: ['registry.npmjs.org'] } } });
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('open', 'feat', {});
+      const printed = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(printed).toMatch(/allowlist.*marketplace/i);
+      expect(mockSpawned).toHaveLength(1);
+    });
+
+    it('refuses a branch without a container', async () => {
+      await new ContainerCommand().execute('open', 'feat', {});
+      expect(errors).toEqual(['✗ No container for feat; run kunj ct start feat']);
+      expect(mockSpawned).toEqual([]);
     });
   });
 });

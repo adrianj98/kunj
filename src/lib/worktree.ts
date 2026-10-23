@@ -765,14 +765,20 @@ export function unregisterSession(options: UnregisterSessionOptions): number {
 // Editors that share VS Code's window flags (-r reuse, -n new window)
 const VSCODE_LIKE = new Set(['code', 'code-insiders', 'codium', 'vscodium', 'cursor', 'windsurf']);
 
+/** True for editors that take VS Code's flags (and run its Dev Containers extension). */
+export function isVSCodeLike(command: string): boolean {
+  const bin = command.trim().split(/\s+/)[0];
+  return !!bin && VSCODE_LIKE.has(path.basename(bin));
+}
+
 export interface OpenOptions {
   newWindow?: boolean;
   existing?: boolean; // worktree already existed; let the editor focus an open window
 }
 
-// Build the argv used to open a worktree in the configured editor.
-// Returns null when the editor command is empty (opening is disabled).
-export function buildOpenCommand(command: string, targetPath: string, options: OpenOptions = {}): string[] | null {
+// Build the argv used to open a worktree (or, given several arguments, e.g. `--folder-uri <uri>`,
+// anything else) in the configured editor. Returns null when the editor command is empty (opening is disabled).
+export function buildOpenCommand(command: string, target: string | string[], options: OpenOptions = {}): string[] | null {
   const trimmed = command.trim();
   if (!trimmed) {
     return null;
@@ -788,14 +794,14 @@ export function buildOpenCommand(command: string, targetPath: string, options: O
       args.push('-r');
     }
   }
-  args.push(targetPath);
+  args.push(...(Array.isArray(target) ? target : [target]));
   return [parts[0], ...args];
 }
 
 // Open a worktree in the configured editor. Returns false if nothing was opened.
 // The child is detached so the editor outlives the CLI process.
-export async function openWorktree(command: string, targetPath: string, options: OpenOptions = {}): Promise<boolean> {
-  const argv = buildOpenCommand(command, targetPath, options);
+export async function openWorktree(command: string, target: string | string[], options: OpenOptions = {}): Promise<boolean> {
+  const argv = buildOpenCommand(command, target, options);
   if (!argv) {
     return false;
   }

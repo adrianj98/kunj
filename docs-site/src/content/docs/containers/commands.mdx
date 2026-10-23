@@ -85,6 +85,27 @@ kunj ct attach feature/search
 
 It fails with `No agent session` when the agent is not running; start it with `kunj ct agent`.
 
+## open
+
+Opens the container in your editor, attached over Docker. A stopped container is started first, the
+same way `kunj ct start` resumes it.
+
+```bash
+kunj ct open feature/search
+kunj ct open feature/search --new-window
+```
+
+The editor is `worktree.editorCommand` (default `code`). VS Code, Cursor, VSCodium and Windsurf
+open `/workspace` in the container through the Dev Containers extension, which must be installed. kunj
+writes the extension's attached-container configuration for the container's image first, so the
+window opens as the container's user in `/workspace`. Any other editor cannot attach; kunj prints
+the `docker exec` command to use instead.
+
+With `container.network.allow` set, the editor's server inside the container needs the VS Code
+update and marketplace domains; kunj warns about it and you add them to the allowlist.
+
+`--json` prints `{ success, branch, name, editor, uri }`.
+
 ## shell
 
 Opens an interactive login shell in `/workspace`, as the container's user. It uses zsh when the

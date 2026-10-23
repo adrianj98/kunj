@@ -156,6 +156,7 @@ kunj ct start -c feature/x             # new branch from origin/<base>, cloned i
 kunj ct agent feature/x                # Claude in tmux; detach with Ctrl-b d
 kunj ct attach feature/x               # come back to it later
 kunj ct shell feature/x                # login shell in /workspace
+kunj ct open feature/x                 # VS Code attached to the container (--new-window)
 kunj ct exec feature/x -- npm test     # run one command
 kunj ct forward feature/x 3000         # localhost:3000 -> container port 3000
 kunj ct logs feature/x postgres        # a sidecar service's output (--follow to keep streaming)
@@ -167,7 +168,9 @@ kunj ct remove feature/x               # refuses while work is unpushed (-f to o
 
 The branch defaults to the current one. `start` takes `--base <ref>`, `--image <img>`,
 `--publish <ports>`, `--rebuild`, `--no-snapshot` (see [Blueprints](#blueprints)) and `--keep-on-error`; `remove` takes `--force` and
-`--keep-volumes`; `--context <name>` picks a Docker context; `--json` works on every action. The
+`--keep-volumes`; `open` starts a stopped container and opens `worktree.editorCommand` attached to it
+(VS Code-like editors, through the Dev Containers extension; other editors get the `docker exec`
+command to run); `--context <name>` picks a Docker context; `--json` works on every action. The
 image comes from the repository's `.devcontainer/devcontainer.json` (an image or a Dockerfile) if
 there is one, else `kunj-sandbox`.
 

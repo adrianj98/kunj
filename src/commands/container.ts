@@ -5,6 +5,7 @@
 //   kunj container exec [branch] -- <cmd...>            run a command
 //   kunj container agent [branch] [-- <args>]           the agent in a tmux session
 //   kunj container attach [branch]                      reattach to that session
+//   kunj container open [branch] [--new-window]         attach the editor (worktree.editorCommand)
 //   kunj container forward [branch] <port>|<host>:<port>|<service>:<port>...
 //   kunj container logs [branch] [service] [--follow]
 //   kunj container list [--all] [--no-status]
@@ -17,6 +18,7 @@
 
 import chalk from 'chalk';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { getKunjDir, getOriginUrl, getRepoCommonDir, getRepoCommonRoot, getRepoName, loadResolvedConfig } from '../lib/config';
@@ -29,6 +31,7 @@ import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
 import { ContainerStatus, describeGuard, emptyStatus } from '../lib/container/env';
+import { attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
 import { Forwarder, TUNNEL_PROBE, forwardPort, parseForwardSpec, parseTunnelProbe } from '../lib/container/forward';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerNames, LABEL, containerNames, repoIdFromUrl } from '../lib/container/names';
@@ -68,6 +71,7 @@ interface ContainerOptions {
   blueprint?: string;
   bundle?: boolean;
   follow?: boolean;
+  newWindow?: boolean;
 }
 
 interface Context {
@@ -85,7 +89,7 @@ class ContainerError extends Error {
   }
 }
 
-const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'forward', 'logs', 'list', 'stop', 'remove', 'blueprint'];
+const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'logs', 'list', 'stop', 'remove', 'blueprint'];
 const BLUEPRINT_ACTIONS = ['init', 'snapshot', 'status', 'remove'];
 const WORKSPACE = '/workspace';
 const STATUS_TIMEOUT_MS = 2000;
@@ -121,6 +125,7 @@ export class ContainerCommand extends BaseCommand {
         { flags: '-f, --force', description: '[remove] Remove even when the container holds unpushed work' },
         { flags: '--keep-volumes', description: "[remove] Keep the workspace and home volumes (and the services' volumes)" },
         { flags: '--follow', description: '[logs] Keep streaming new output' },
+        { flags: '-n, --new-window', description: '[open] Open in a new editor window' },
         { flags: '--global', description: '[blueprint init] Write the host copy (~/.kunj/<repo>/blueprint.json) instead of .kunj/blueprint.json' },
         { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file' },
         { flags: '--no-bundle', description: '[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)' },
@@ -134,6 +139,7 @@ export class ContainerCommand extends BaseCommand {
         '  exec [branch] -- <cmd...>            run a command in the container',
         '  agent [branch] [-- <args>]           start or reattach the agent\'s tmux session',
         '  attach [branch]                      reattach to the agent\'s tmux session',
+        '  open [branch] [--new-window]         attach the editor (worktree.editorCommand), starting it if stopped',
         '  forward [branch] <port>|<host>:<port>...  forward localhost ports into the container',
         '  forward [branch] <service>:<port>    forward a sidecar service\'s port (e.g. postgres:5432)',
         '  logs [branch] [service] [--follow]   output of the container, or of one of its services',
@@ -225,6 +231,8 @@ export class ContainerCommand extends BaseCommand {
       }
       case 'attach':
         return this.attach(target, options);
+      case 'open':
+        return this.open(target, options);
       case 'forward': {
         // `forward 3000` names a port, not a branch
         const specs = isForwardSpec(target) ? [target, ...rest] : rest;
@@ -345,6 +353,31 @@ export class ContainerCommand extends BaseCommand {
   private async start(target: string | undefined, options: ContainerOptions): Promise<void> {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
+    const result = await this.startOrResume(ctx, branch, options);
+
+    if (this.jsonMode) {
+      this.outputJSON({ ...result, branch });
+      return;
+    }
+
+    console.log(chalk.green(`✓ Container ${result.names.container} ${result.created ? 'created' : 'resumed'}`));
+    console.log(`  image     ${result.image}`);
+    console.log(`  branch    ${branch}`);
+    if (result.user) console.log(`  user      ${result.user}`);
+    console.log(`  firewall  ${result.firewall}`);
+    const bp = blueprintSummary(result.blueprint);
+    if (bp) console.log(`  blueprint ${bp}`);
+    for (const file of result.keptFiles) console.log(`  kept      ${file}`);
+    for (const file of result.copiedFiles) console.log(`  copied    ${file}`);
+    for (const port of result.publish) console.log(`  port      localhost:${port.host} → :${port.container}`);
+    if (result.services?.length) console.log(`  services  ${result.services.join(', ')} (reach them by name from the container)`);
+    console.log('');
+    console.log(`Next: kunj ct agent ${branch}`);
+    console.log(`      kunj ct shell ${branch}`);
+  }
+
+  /** Creates or resumes the branch's container, with the create hooks and the snapshot; `start` and `open` share it. */
+  private async startOrResume(ctx: Context, branch: string, options: ContainerOptions): Promise<StartResult> {
     const names = this.names(ctx, branch);
     const { config } = ctx;
     const publish = parsePublish(options.publish);
@@ -408,26 +441,7 @@ export class ContainerCommand extends BaseCommand {
     if (result.created) {
       await runActionHook('post-container-create', { branch, container: names.container, image: result.image }, hookOptions);
     }
-
-    if (this.jsonMode) {
-      this.outputJSON({ ...result, branch });
-      return;
-    }
-
-    console.log(chalk.green(`✓ Container ${result.names.container} ${result.created ? 'created' : 'resumed'}`));
-    console.log(`  image     ${result.image}`);
-    console.log(`  branch    ${branch}`);
-    if (result.user) console.log(`  user      ${result.user}`);
-    console.log(`  firewall  ${result.firewall}`);
-    const bp = blueprintSummary(result.blueprint);
-    if (bp) console.log(`  blueprint ${bp}`);
-    for (const file of result.keptFiles) console.log(`  kept      ${file}`);
-    for (const file of result.copiedFiles) console.log(`  copied    ${file}`);
-    for (const port of result.publish) console.log(`  port      localhost:${port.host} → :${port.container}`);
-    if (result.services?.length) console.log(`  services  ${result.services.join(', ')} (reach them by name from the container)`);
-    console.log('');
-    console.log(`Next: kunj ct agent ${branch}`);
-    console.log(`      kunj ct shell ${branch}`);
+    return result;
   }
 
   /** Builds a missing or stale snapshot before a start; true when the start's hints are covered. */
@@ -510,6 +524,76 @@ export class ContainerCommand extends BaseCommand {
     const main = await this.requireRunning(ctx, branch);
     const r = await ctx.backend.exec(main.id, ['tmux', '-u', 'attach', '-t', 'agent'], this.interactive(main, true));
     if (r.exitCode !== 0) throw new ContainerError(`No agent session; run kunj ct agent ${branch}`);
+  }
+
+  // ---------------------------------------------------------------------
+  // open
+  // ---------------------------------------------------------------------
+
+  private async open(target: string | undefined, options: ContainerOptions): Promise<void> {
+    const ctx = await this.context(options);
+    const branch = await this.resolveBranch(ctx, target);
+    const main = await this.requireMain(ctx, branch);
+    if (main.state !== 'running') await this.startOrResume(ctx, branch, options);
+
+    const editor = (ctx.config.worktree?.editorCommand ?? 'code').trim();
+    if (!editor) throw new ContainerError('worktree.editorCommand is empty; set it to the editor to open');
+    const user = this.userOf(main);
+    if (ctx.config.container?.network?.allow?.length) {
+      this.warn(
+        'Firewall allowlist mode: the editor installs its server and extensions from the VS Code update and ' +
+          'marketplace domains; add them to container.network.allow if the editor cannot connect'
+      );
+    }
+
+    // Lazy: worktree.ts is not needed by the other actions
+    const { isVSCodeLike, openWorktree } = await import('../lib/worktree');
+    if (!isVSCodeLike(editor)) {
+      const execLine = [
+        'docker',
+        ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : []),
+        'exec', '-it',
+        ...(user ? ['-u', user] : []),
+        '-w', WORKSPACE, main.name, 'sh', '-l',
+      ].join(' ');
+      if (this.jsonMode) {
+        this.outputJSON({ success: true, branch, name: main.name, editor, uri: null, exec: execLine });
+        return;
+      }
+      console.log(`${editor} cannot attach to a container; open a shell in it with:`);
+      console.log(`  ${execLine}`);
+      return;
+    }
+
+    if (ctx.dockerContext) {
+      this.warn(`The editor finds the container through its own Docker context, not --context ${ctx.dockerContext}`);
+    }
+    this.writeEditorImageConfig(editor, main.image, user);
+    const uri = attachedContainerUri(main.name, WORKSPACE);
+    const opened = await openWorktree(editor, ['--folder-uri', uri], { newWindow: !!options.newWindow });
+    if (!opened) throw new ContainerError(`Could not run ${editor}`);
+
+    if (this.jsonMode) {
+      this.outputJSON({ success: true, branch, name: main.name, editor, uri });
+      return;
+    }
+    console.log(chalk.green(`✓ Opened ${main.name} in ${editor}`));
+  }
+
+  // The Dev Containers extension takes the user and folder of an attached container from its image's
+  // config. Written for each editor that is installed (its User dir exists), and always for this one.
+  private writeEditorImageConfig(editor: string, image: string, user: string): void {
+    const dirs = imageConfigPaths(os.homedir(), process.platform);
+    const mine = path.basename(editor.split(/\s+/)[0]) === 'cursor' ? 1 : 0;
+    dirs.forEach((dir, i) => {
+      const userDir = path.dirname(path.dirname(path.dirname(dir)));
+      if (i !== mine && !fs.existsSync(userDir)) return;
+      try {
+        writeImageConfig(dir, image, { ...(user ? { remoteUser: user } : {}), workspaceFolder: WORKSPACE });
+      } catch (err) {
+        this.warn(`Could not write the editor's container config in ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
   }
 
   private interactive(main: ContainerInfo, tty: boolean) {

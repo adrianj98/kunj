@@ -149,7 +149,6 @@ start ──► running ──► stop ──► stopped ──► start (resume
 Branch containers can run [services](../services/) (databases, queues) next to them. These are not
 supported yet:
 
-- **`kunj ct open`**: attaching VS Code or Cursor to a container.
 - **`kunj ct prune`**: removing containers whose branches are merged.
 - **Docker inside the container** (Docker-in-Docker). The host's Docker socket is never mounted.
 - **`kunj ct forward --auto`**: forwarding ports as servers start. Forward ports by hand with

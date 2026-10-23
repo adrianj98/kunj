@@ -2,6 +2,24 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Containers: `kunj ct open` (phase 2, Task 2)
+
+- New `src/lib/container/editor.ts`: the attached-container URI (`vscode-remote://attached-container+<hex>/workspace`,
+  hex of `{"containerName":"/<name>"}`), the VS Code and Cursor `imageConfigs` directories (macOS, Linux,
+  Windows) and `writeImageConfig()`, which merges `remoteUser` and `workspaceFolder` into the per-image file and
+  leaves a file with comments alone. Why: the Dev Containers extension takes the user and folder of an attached
+  container from that file, so the window opens as the sandbox user in `/workspace`.
+- File name escaping copied from the extension (checked in 0.470.0): only `:`, `/` and `%` become
+  `%<lowercase hex>` (`kunj-sandbox%3a1.2.3-abc.json`); it is not `encodeURIComponent`, whose `%3A` the
+  extension would not decode on a case-sensitive file system.
+- `kunj ct open [branch] [--new-window]`: resumes a stopped container through the same routine as `start`
+  (extracted as `startOrResume()`), writes the image config, then launches `worktree.editorCommand` with
+  `--folder-uri` via `openWorktree()`/`buildOpenCommand()` (which now take several arguments, and
+  `isVSCodeLike()` is exported). Other editors get the `docker exec` command printed; allowlist mode warns
+  about the marketplace/update domains. `--json`: `{ success, branch, name, editor, uri }`. Why: phase 2
+  spec section 2.
+- README, docs-site containers pages and the generated command reference updated.
+
 ## 2026-10-23 — Workspace IDE: research and design spec
 
 - Added `docs/superpowers/specs/2026-10-23-workspace-ide-design.md`, mirroring the Claude Doc "Kunj Workspace
