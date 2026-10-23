@@ -12,12 +12,17 @@
         "default": null
       },
       {
+        "flags": "--no-tmux",
+        "description": "Run the agent directly in this terminal, without a tmux session",
+        "default": null
+      },
+      {
         "flags": "--json",
         "description": "Output result as JSON",
         "default": null
       }
     ],
-    "helpText": "Actions:\n  start [branch]    run the agent in the worktree's tmux session, or reattach to it (default)\n  status [branch]   whether the session exists\n  stop [branch]     kill the session\n\n[branch] defaults to the current branch; `kunj agent my-branch` starts. Needs tmux."
+    "helpText": "Actions:\n  start [branch]    run the agent in the worktree's tmux session, or reattach to it (default)\n  status [branch]   whether the session exists\n  stop [branch]     kill the session\n\n[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with\n--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes."
   },
   {
     "name": "branch-desc",
@@ -444,7 +449,7 @@
         "default": null
       }
     ],
-    "helpText": "Prints a hello line, then one line per change: git (refs, HEAD, index), sessions, forwards,\nrepos (files in ~/.kunj), container (Docker events), agent (tmux sessions), backend.\nWith --json each line is one JSON object. Stops on Ctrl-C or when stdin closes."
+    "helpText": "Prints a hello line, then one line per change: git (refs, HEAD, index), sessions, forwards,\nrepos (files in ~/.kunj), container (Docker events, and action \"status\" from a 10 s poll),\nagent (tmux sessions), backend. A 10 s poll also reports worktree changes (git status).\nWith --json each line is one JSON object. Stops on Ctrl-C or when stdin closes."
   },
   {
     "name": "flow",

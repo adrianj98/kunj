@@ -186,7 +186,13 @@ always prints the object shape. `kunj events --json` is the NDJSON change stream
 container file access.
 
 **Worktree agents:** `kunj agent` (src/commands/agent.ts, src/lib/agent-session.ts) runs `agent.command`
-(default `claude`) in a host tmux session for a worktree. One tmux server serves the host, so the
+(default `claude`) in a host tmux session for a worktree. The `KUNJ_*` variables go in argv
+(`new-session -e`, tmux 3.2+), because tmux builds a new session's environment from its server, and
+`TMUX` is dropped so it works from inside a pane. Without tmux (or with `--no-tmux`) `start` runs the
+command directly (`$SHELL -lc`, a one-line hint on stderr when tmux is missing, exit code passed
+through), like `kunj ct agent` in an image without tmux; `status` still reports `running: null` and
+`stop` fails with `tmux-missing`. `readTmuxSessions()` tells `'missing'` (ENOENT) from `'failed'`;
+only "no server running"/"error connecting to" count as no sessions. One tmux server serves the host, so the
 session name is `agentSessionName()`: the container name from `containerNames()` with `.` and `:`
 replaced by `-`. `listWorktreesDetailed()` makes one `tmux list-sessions` call per listing (in the
 same `Promise.all` as the git calls, only with status) and sets `WorktreeInfo.agent`
@@ -237,7 +243,7 @@ context's files (`assetHash()` in image.ts), so editing a Dockerfile or `firewal
 `ContainerBackend` interface (backend.ts) so a remote backend can be added later; unit tests use
 `FakeBackend`.
 
-**Files:** `ct file read|write [branch] <path>` (src/lib/container/files.ts) validates paths against `/workspace` and runs as the sandbox user; its errors carry a `ContainerError` code (`bad-path`, `not-found`, `write-failed`) printed as the `--json` error code.
+**Files:** `ct file read|write [branch] <path>` (src/lib/container/files.ts) validates paths against `/workspace` and runs as the sandbox user; its errors carry a `ContainerError` code (`bad-path`, `not-found`, `write-failed`) printed as the `--json` error code. It is for text: `read` decodes UTF-8, and symlinks inside /workspace are followed (the sandbox boundary is the container, not the path check).
 
 **Naming and state:** containers, volumes and networks are `kunj-<repo>-<b>-<h>`, where `<h>` is a
 short hash of the exact branch name, because `branchToDirName` collapses `feature/x` and
@@ -357,11 +363,21 @@ then `git` (`fs.watch` of each repo's git common dir top level, plus `refs/` and
 recursively, started when they appear; never the whole common dir recursively, because worktrees
 live in `.git/kunj/worktrees` with their node_modules; filtered by `gitPathMatters()`),
 `sessions`/`forwards`/`repos` (the registry files in `~/.kunj`), `agent` (a poll of `kunj-` tmux
-sessions, 5 s) and `container` (`ContainerBackend.events()`, filtered on `kunj.repo`; exec/attach/copy
-actions are dropped because `kunj ct list` execs and would trigger its own refresh). Changes are
+sessions, 5 s; a failed listing is skipped, not read as every agent ending) and `container`
+(`ContainerBackend.events()`, filtered on `kunj.repo`; exec/attach/copy actions are dropped because
+`kunj ct list` execs and would trigger its own refresh). The watches cannot see a file edited in a
+worktree or work inside a container, so a status poll (`statusPollMs`, 10 s) runs one
+`git worktree list --porcelain` per repo and one `git status --porcelain=v2 --branch` per worktree
+(both `GIT_OPTIONAL_LOCKS=0`), emitting a `git` event when a worktree's hash changes, and, while the
+backend is available, one `backend.list` per repo and one exec of `STATUS_SCRIPT` (env.ts, shared with
+`kunj ct list`) per running main container, emitting `container` with `action: 'status'` when
+`{ agentRunning, head, ahead, dirty }` changes. The first poll only primes; ticks never overlap; a
+failing worktree or container is skipped; Docker calls are raced against the abort signal. `hello` is
+printed from `onReady`, after the watches, the repo ids and the first tmux and git polls. Changes are
 debounced per key (250 ms, the first change starts the timer). An unreachable backend gives one
 `backend unavailable`, then `info()` is retried every 10 s until `available`. Container events map to
-a repo through `repoIdentity().id`, the same id as the `kunj.repo` label. It stops on SIGINT/SIGTERM
+a repo through an id computed once per repo at startup from `git remote get-url origin` (insteadOf,
+includes; userinfo stripped), as the `kunj.repo` label has it (`repoId` is the test seam). It stops on SIGINT/SIGTERM
 or when stdin ends, so a child dies with its parent. On the fast path; a missing directory is skipped.
 `index` is a trigger, so `getWorktreeStatus()` runs `git status` with `GIT_OPTIONAL_LOCKS=0`: otherwise
 git rewrites a stale index on every listing, which is another `git` event and another refresh.

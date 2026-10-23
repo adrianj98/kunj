@@ -16,7 +16,10 @@ kunj events --json                 # every known, visible repository
 kunj events --json --repo ~/src/shop --repo ~/src/api
 ```
 
-The first line is always `hello`. With `--json` every line is one JSON object (NDJSON):
+The first line is `hello`, printed once every source is watching, so a change made after it is
+reported. If the first line is anything else, it is an error object (`{"error":{"code","message"}}`,
+for example `not-a-repo` for a bad `--repo`) and the command has stopped. With `--json` every line is
+one JSON object (NDJSON):
 
 ```json
 {"type":"hello","version":"1.4.0","repos":2,"at":"2026-10-23T19:19:05.671Z"}
@@ -29,11 +32,11 @@ The first line is always `hello`. With `--json` every line is one JSON object (N
 | `type` | When | Fields |
 | --- | --- | --- |
 | `hello` | Once, at start | `version`, `repos` (how many are watched) |
-| `git` | A branch, HEAD, the index or a worktree changed in the repository's git directory | `repo` |
+| `git` | A branch, HEAD, the index or a worktree changed in the repository's git directory, or a worktree's `git status` changed (a file edited, staged or committed) | `repo` |
 | `sessions` | An editor opened or closed a worktree (`~/.kunj/worktree-sessions.json`) | |
 | `forwards` | A container port forward started or stopped (`~/.kunj/container-forwards.json`) | |
 | `repos` | The repository list changed (`~/.kunj/repos.json`) | |
-| `container` | Docker reported an event for a kunj container (start, die, destroy, …) | `repo` (null when it is not a watched repository), `branch`, `container`, `action` |
+| `container` | Docker reported an event for a kunj container (start, die, destroy, …), or, with `action` `status`, its agent, HEAD, commits ahead or uncommitted changes changed | `repo` (null when it is not a watched repository), `branch`, `container`, `action` |
 | `agent` | A `kunj-…` tmux session appeared or ended | `session`, `running` |
 | `backend` | Docker became unreachable, or reachable again | `status` (`available` or `unavailable`), `message` |
 
@@ -44,6 +47,22 @@ Changes are debounced: a burst of writes in one repository (a commit, a rebase) 
 event. Docker's exec, attach and copy events are left out, because `kunj ct list` execs into each
 container and would otherwise trigger its own refresh. When Docker is not running, `backend`
 `unavailable` is printed once and kunj retries every 10 seconds; the other events keep coming.
+
+## What is watched, what is polled
+
+Files are watched: each repository's git directory (refs, HEAD, the index) and the registry files in
+`~/.kunj`. Docker's own event stream covers containers starting and stopping. Watching cannot see a
+file edited in a worktree, or the work an agent does inside a container, so every 10 seconds kunj
+also polls:
+
+- each repository's worktrees: one `git worktree list` per repository and one `git status` per
+  worktree (run so that they never rewrite the index). A change gives a `git` event.
+- each running container of a watched repository: the same status check as `kunj ct list`, one
+  `docker exec` per container. A change in its agent, HEAD, commits ahead or uncommitted changes
+  gives a `container` event with `action` `status`.
+
+The first poll only records the state. tmux sessions are polled every 5 seconds; when tmux fails
+for a moment, that poll is skipped rather than reported as every agent ending.
 
 ## Stopping
 

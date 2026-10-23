@@ -185,6 +185,9 @@ echo 'new content' | kunj ct file write feature/search src/app.ts
 `{ "path", "content" }` and `write` prints `{ "success": true, "path" }`; failures print
 `{ "error": { "code", "message" } }` with the code `bad-path`, `not-found` or `write-failed`.
 
+`file` is for text: `read` decodes the file as UTF-8. Symlinks inside `/workspace` are followed,
+even when they point outside it; the sandbox boundary is the container, not the path check.
+
 ## forward
 
 Forwards ports on your machine into the container, for as long as the command runs:
