@@ -215,6 +215,28 @@ bundlePath?: string;   // when set: `git clone --no-checkout <bundle> /workspace
 
 ---
 
+### Task 10: `start` builds the snapshot itself
+
+**Files:**
+- Modify: `src/commands/container.ts` (`start`: ensure-snapshot step before `startContainer`), `src/lib/container/snapshot.ts` (`ensureSnapshot()`), `src/lib/container/blueprint.ts` (`resolveBlueprint` gains `repoRoot?` checked first)
+- Test: `src/commands/__tests__/container.test.ts`, `src/lib/container/__tests__/{blueprint,snapshot}.test.ts`, `integration.docker.test.ts`
+
+**Interfaces (Produces):**
+```ts
+// snapshot.ts
+export async function ensureSnapshot(backend, opts: SnapshotOptions & { stale: 'rebuild' | 'keep' }): Promise<{ result: SnapshotResult | null; built: boolean; failed?: string }>;
+// planSnapshot → if exists && !stale → {built:false}; if missing or (stale && opts.stale==='rebuild') → snapshotBlueprint (progress line); a thrown error is caught → {result:null, built:false, failed: message}
+// blueprint.ts
+resolveBlueprint({ cwd, repoRoot?, repoKunjDir, defaultBranch?, override? }) // order: override → <repoRoot>/.kunj/blueprint.json ('worktree') → origin/<default> ('repo') → host ('host')
+```
+- `start` (command): unless `--no-snapshot`, after resolving the blueprint: `ensureSnapshot(..., { stale: 'rebuild' })`; on `failed` → `warn('Blueprint snapshot could not be built (<reason>); running tools and setup in the container instead')` and continue; then `startContainer` as today (which now finds the fresh snapshot). The lifecycle's own stale hint is suppressed when the command already rebuilt. `ResolvedBlueprint.source` gains `'worktree'`; `status` prints it.
+- `kunj ct blueprint snapshot` keeps working (`--rebuild` forces).
+
+- [ ] Step 1: Tests — command: `start builds the snapshot when none exists then starts from it` (snapshot mock called before startContainer, with the same blueprint/base), `start rebuilds a stale snapshot`, `start falls back with a warning when the snapshot build fails`, `--no-snapshot skips the build`; blueprint: `worktree file wins over origin and host`; Docker: `start with a blueprint and no snapshot builds one and starts from it` (fresh repo id: assert the snapshot image exists after a plain `startContainer`-via-command flow — call the same `ensureSnapshot` + `startContainer` sequence the command uses).
+- [ ] Steps 2–5; update README/CLAUDE.md wording (the flow is `init` → `start`; `snapshot` is optional). Commit `kunj ct start builds the blueprint snapshot itself`.
+
+---
+
 ## Self-review notes
 
 - Spec coverage: file/resolution/hash → T2; presets + inference → T3/T4; snapshot → T6; start/seed/maintain/stale/`--no-snapshot` → T5; commands/JSON → T7; backend → T1; tests/docs/worked example → T8. Open question (devcontainer `postCreateCommand` during snapshot) is answered by T5's ordering: `startContainer` already runs it on a new container, so the snapshot includes it.

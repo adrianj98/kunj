@@ -104,6 +104,23 @@ Kept under `kunj ct` so it shares the command's context, backend and `--json` co
 
 Previous snapshots of the repo with another hash are deleted after a successful commit (one snapshot per repo).
 
+### start builds the snapshot itself
+
+The user never has to run `kunj ct blueprint snapshot`. `kunj ct start` resolves the blueprint and,
+when no snapshot exists for the current hash (none yet, or stale), builds it first — the same
+temporary-sandbox snapshot as the command — and then starts the branch from it. The first start of a
+repo therefore takes as long as its `setup`; every later branch starts in seconds. Progress lines say
+what is happening (`Building blueprint snapshot (first use)…` / `Blueprint changed; rebuilding the
+snapshot…`). `--no-snapshot` skips both the build and the lookup (tools + setup run inside the
+container instead). When the snapshot build fails — most commonly an origin that cannot be cloned
+without credentials until Task 9 lands — `start` warns and falls back to running tools + setup in
+the container, so a start never fails only because a snapshot could not be made. `kunj ct blueprint
+snapshot` remains for forcing a rebuild (`--rebuild`) or building ahead of time.
+
+**Resolution** also looks at the host checkout first: `<repoRoot>/.kunj/blueprint.json` in the
+working tree kunj runs from (user-controlled, so safe), then `origin/<default>`, then the host copy
+in `~/.kunj/{repo}/`. A blueprint that has only just been written therefore works before it is pushed.
+
 ### start with a snapshot
 
 In `resolveImage`, after `setting` and before `devcontainer`: when a blueprint resolves and `kunj-blueprint-<repo>:<hash>` exists, `kind: 'blueprint'`, `tag` = that image, `user` = the base image's user (recorded in the label `kunj.blueprint.user`). When the hash differs from every existing snapshot of the repo (`backend.listImages({ 'kunj.repo': id })`, prefix match on the repository name), the newest snapshot is still used and `start` prints one hint: `Blueprint snapshot is stale (lockfiles or blueprint changed); run kunj ct blueprint snapshot`. `--no-snapshot` or no blueprint → today's resolution; when a blueprint exists but no snapshot, `setup` runs after the clone and `start` prints a hint to snapshot.
