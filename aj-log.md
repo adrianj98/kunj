@@ -4,6 +4,12 @@ Changes made with Claude, and why.
 
 
 
+
+## 2026-10-23 — Phase 2 follow-ups landed; tracker updated
+
+- Landed the three follow-up batches after review (8c88318, 1cb0c9b; 0637441, f47a9e0; 8f8f23c, 19151f4,
+  a335d6a) and moved them to Done in `docs/specs/README.md`, leaving two small items under To do. Why: user
+  asked for the phase 2 follow-ups to be done.
 ## 2026-10-23 — Containers: phase 2 follow-ups (helper refresh, services on resume, compose escapes)
 
 - Resume replaces a running network helper whose image is not the current `kunj-nethelper:<ver>-<hash>`
