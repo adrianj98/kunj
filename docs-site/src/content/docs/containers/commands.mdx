@@ -206,8 +206,10 @@ Forwarding the ports feature/search listens on; press Ctrl-C to stop
 - localhost:3001 → 3000 (closed)
 ```
 
-Every 2 seconds kunj lists the container's TCP listeners (`ss -ltnH`, one `docker exec`). Each new
-one on port 1024 or above, bound to `localhost` or all addresses, is forwarded to the same port on
+Every 2 seconds kunj lists the container's TCP listeners (one `docker exec` of
+`cat /proc/net/tcp /proc/net/tcp6`, so any Linux image works). Each new one on port 1024 or above,
+bound to all addresses or to `127.0.0.1`, is forwarded (a server listening only on IPv6 `::1` is
+not, because the tunnel connects to `127.0.0.1`) to the same port on
 `127.0.0.1` when it is free, else to the next free port; when the listener goes away the forward is
 dropped. Ports in `container.forward.ignore` are skipped. With `--json` each change is one line,
 `{"event":"add","port":3000,"hostPort":3001}` (`"remove"` when it is dropped), and

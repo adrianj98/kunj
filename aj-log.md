@@ -26,6 +26,16 @@ Changes made with Claude, and why.
 - New settings `container.forward.auto` and `container.forward.ignore` (a list, or the single number
   `config --set` stores). README, docs-site containers pages (commands, configuration, overview,
   security), the generated reference JSON and CLAUDE.md updated.
+- Fix round 1 (review): the listener source is now `cat /proc/net/tcp /proc/net/tcp6`
+  (`parseProcNetTcp()`, replacing `parseSsListen()`), because `ss` (iproute2) is missing from most
+  devcontainer images (e.g. `node:20`) and the forwarder then polled forever and forwarded nothing,
+  silently. The output counts when it has the header, so a kernel without IPv6 (cat exits 1) still
+  works; when it cannot be read `onError` warns once each time reading starts failing. Ports bound
+  only on `::1` are no longer forwarded (the tunnel connects to 127.0.0.1, so they could never work).
+  The forwarder now exits only after two state checks in a row see the container not running, so one
+  failed `docker inspect` no longer ends it. `spawnDetached` runs the package's `dist/index.js` when
+  `argv[1]` is a `.ts` file (ts-node). Each registry write rewrites the forwarder's own entries from
+  memory (marker + live ports), repairing an update lost to a concurrent writer.
 
 ## 2026-10-23 — Containers: `kunj ct open` (phase 2, Task 2)
 

@@ -206,7 +206,8 @@ place.
 Ports: `kunj ct forward <branch> 3000` or `8080:3000` forwards a local port into the container
 over `docker exec`, so nothing is published. `--publish` and `container.publish` use Docker's own
 port publishing instead. `kunj ct forward <branch> --auto` watches the container's listeners
-(`ss -ltnH` every 2 s) and forwards each new one on port 1024 or above to the same port on
+(`/proc/net/tcp` every 2 s, so the image needs no extra tools) and forwards each new one on port 1024
+or above that listens on all addresses or on 127.0.0.1 to the same port on
 127.0.0.1, or the next free one, dropping it when the listener goes away; ports in
 `container.forward.ignore` are skipped. It prints one line per change (`--json`: one
 `{ "event": "add"|"remove", "port", "hostPort" }` object per line). `--detach` runs it in the

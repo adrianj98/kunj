@@ -180,7 +180,7 @@ Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sid
 docs/superpowers/specs/2026-10-23-workspace-ide-design.md.
 
 **Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor}.ts`.
-`autoforward.ts` polls `ss -ltnH` and forwards new listeners (127.0.0.1 only); running forwarders are in
+`autoforward.ts` polls `/proc/net/tcp{,6}` (not `ss`, which most images lack) and forwards new listeners (127.0.0.1 only); running forwarders are in
 `~/.kunj/container-forwards.json` (dead pids pruned on read, atomic writes), and `agent` spawns a detached
 one unless `container.forward.auto` is `false` or one is registered for the container.
 The images' build contexts live in `src/container/{sandbox,nethelper}/` and are copied to

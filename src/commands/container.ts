@@ -730,9 +730,10 @@ export class ContainerCommand extends BaseCommand {
     }
 
     const pid = process.pid;
-    const mine = (rs: ForwardRecord[]) => rs.filter(r => r.pid !== pid);
+    const others = (rs: ForwardRecord[]) => rs.filter(r => r.pid !== pid);
+    const live = new Map<number, number>(); // container port -> host port
     const ignore = ignoredPorts(ctx.config.container?.forward?.ignore);
-    updateForwards(rs => [...mine(rs), forwarderRecord(pid, main.name, 0, 0)]);
+    updateForwards(rs => [...others(rs), forwarderRecord(pid, main.name, 0, 0)]);
     if (!this.jsonMode) console.log(chalk.gray(`Forwarding the ports ${branch} listens on; press Ctrl-C to stop`));
 
     const controller = new AbortController();
@@ -746,12 +747,16 @@ export class ContainerCommand extends BaseCommand {
         signal: controller.signal,
         onError: this.warn,
         onChange: change => {
+          if (change.event === 'add') live.set(change.port, change.hostPort);
+          else live.delete(change.port);
           try {
-            updateForwards(rs =>
-              change.event === 'add'
-                ? [...rs, forwarderRecord(pid, main.name, change.port, change.hostPort)]
-                : rs.filter(r => !(r.pid === pid && r.port === change.port))
-            );
+            // All of this forwarder's entries from memory, so each write also repairs an update
+            // another forwarder's concurrent write may have lost
+            updateForwards(rs => [
+              ...others(rs),
+              forwarderRecord(pid, main.name, 0, 0),
+              ...[...live].map(([port, hostPort]) => forwarderRecord(pid, main.name, port, hostPort)),
+            ]);
           } catch (err) {
             // the forward itself works; only `list` will not show it
             this.warn(`Could not record the forward: ${err instanceof Error ? err.message : String(err)}`);
@@ -768,7 +773,7 @@ export class ContainerCommand extends BaseCommand {
     } finally {
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
-      updateForwards(mine);
+      updateForwards(others);
     }
     process.exit(0);
   }

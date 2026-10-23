@@ -1,5 +1,5 @@
-// `kunj container forward --auto`: polls the container's TCP listeners (`ss -ltnH`, one exec every
-// 2 s) and forwards each new one to 127.0.0.1 on the host with forwardPort, dropping it when the
+// `kunj container forward --auto`: polls the container's TCP listeners (/proc/net/tcp and tcp6,
+// which every Linux container has, unlike `ss`; one exec every 2 s) and forwards each new one to 127.0.0.1 on the host with forwardPort, dropping it when the
 // listener goes away. Running forwarders are recorded in ~/.kunj/container-forwards.json so that
 // `kunj ct list` can show them and `kunj ct agent` does not start a second one.
 import { spawn } from 'child_process';
@@ -11,23 +11,43 @@ import { Forwarder, forwardPort } from './forward';
 
 const POLL_MS = 2000;
 const STATE_POLL_MS = 5000;
+const PROC_NET_TCP = ['cat', '/proc/net/tcp', '/proc/net/tcp6'];
 const LOWEST_PORT = 1024;
 
+const LISTEN = '0A';
+const DOCKER_DNS = '127.0.0.11';
+
+/** A /proc/net/tcp address: hex 32-bit words, each in host (little-endian) byte order. */
+function procAddress(hex: string): string | null {
+  if (!/^[0-9A-Fa-f]+$/.test(hex) || (hex.length !== 8 && hex.length !== 32)) return null;
+  const bytes: number[] = [];
+  for (let w = 0; w < hex.length; w += 8) {
+    for (let b = 6; b >= 0; b -= 2) bytes.push(parseInt(hex.slice(w + b, w + b + 2), 16));
+  }
+  if (bytes.length === 4) return bytes.join('.');
+  // IPv4-mapped (::ffff:a.b.c.d) is reported as the IPv4 address
+  if (bytes.slice(0, 10).every(b => b === 0) && bytes[10] === 0xff && bytes[11] === 0xff) return bytes.slice(12).join('.');
+  if (bytes.every(b => b === 0)) return '::';
+  if (bytes.slice(0, 15).every(b => b === 0) && bytes[15] === 1) return '::1';
+  return 'other-v6';
+}
+
 /**
- * Ports with a listener the tunnel can reach, i.e. bound to a wildcard or loopback address (the
- * tunnel connects to 127.0.0.1). 127.0.0.11 is Docker's embedded DNS, never an application.
+ * Ports listening where the tunnel reaches them: it connects to 127.0.0.1, so a wildcard (0.0.0.0,
+ * ::) or IPv4 loopback listener. A port bound only on ::1 is left out, and so is 127.0.0.11, Docker's
+ * embedded DNS. `output` is /proc/net/tcp and /proc/net/tcp6 concatenated.
  */
-export function parseSsListen(output: string): number[] {
+export function parseProcNetTcp(output: string): number[] {
   const ports = new Set<number>();
   for (const line of output.split('\n')) {
-    const local = line.trim().split(/\s+/)[3];
-    const m = local && /^(.*):(\d+)$/.exec(local);
-    if (!m) continue;
-    const address = m[1].replace(/^\[(.*)\]$/, '$1').replace(/%.*$/, '').replace(/^::ffff:/, '');
-    const port = Number(m[2]);
-    const wildcard = address === '*' || address === '0.0.0.0' || address === '::';
-    const loopback = (/^127\./.test(address) && address !== '127.0.0.11') || address === '::1';
-    if ((wildcard || loopback) && port >= 1 && port <= 65535) ports.add(port);
+    const fields = line.trim().split(/\s+/);
+    if (!/^\d+:$/.test(fields[0] ?? '') || fields[3] !== LISTEN) continue;
+    const m = /^([0-9A-Fa-f]+):([0-9A-Fa-f]{4})$/.exec(fields[1] ?? '');
+    const address = m && procAddress(m[1]);
+    if (!m || !address) continue;
+    const port = parseInt(m[2], 16);
+    const reachable = address === '0.0.0.0' || address === '::' || (/^127\./.test(address) && address !== DOCKER_DNS);
+    if (reachable && port >= 1) ports.add(port);
   }
   return [...ports].sort((a, b) => a - b);
 }
@@ -123,9 +143,14 @@ export function forwarderFor(container: string, file: string = forwardsFile()): 
   return readForwards(file).find(r => r.container === container)?.pid;
 }
 
-/** Runs this CLI again in the background (`kunj <args>`), detached from our terminal; returns its pid. */
+/**
+ * Runs this CLI again in the background (`kunj <args>`), detached from our terminal; returns its pid.
+ * argv[1] is the CLI entry (dist/index.js, or the npm bin link to it). Under ts-node it is a .ts file
+ * that plain node cannot run, so the package's built dist/index.js is used instead.
+ */
 export function spawnDetached(args: string[]): number {
-  const child = spawn(process.execPath, [process.argv[1], ...args], { detached: true, stdio: 'ignore', cwd: process.cwd() });
+  const entry = /\.ts$/.test(process.argv[1] ?? '') ? path.resolve(__dirname, '../../../dist/index.js') : process.argv[1];
+  const child = spawn(process.execPath, [entry, ...args], { detached: true, stdio: 'ignore', cwd: process.cwd() });
   child.unref();
   if (!child.pid) throw new Error('Could not start the background forwarder');
   return child.pid;
@@ -155,8 +180,9 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Forwards the container's listeners until `signal` aborts or the container stops running, then
- * closes every forward. A failed poll keeps the current forwards.
+ * Forwards the container's listeners until `signal` aborts or the container is seen not running on
+ * two state checks in a row (one failed `docker inspect` is not enough), then closes every forward.
+ * A failed poll keeps the current forwards; `onError` is told once each time reading starts failing.
  */
 export async function runAutoForward(
   backend: ContainerBackend,
@@ -180,21 +206,29 @@ export async function runAutoForward(
   const failed = new Set<number>();
   const hasSocat = (await backend.exec(containerId, ['sh', '-c', 'command -v socat'], { user })).exitCode === 0;
   let lastStateCheck = Date.now();
+  let notRunning = 0;
+  let unreadable = false;
 
   try {
     while (!signal.aborted) {
       if (Date.now() - lastStateCheck >= stateIntervalMs) {
         lastStateCheck = Date.now();
-        if ((await backend.containerState(containerId)) !== 'running') return;
+        notRunning = (await backend.containerState(containerId)) === 'running' ? 0 : notRunning + 1;
+        if (notRunning >= 2) return;
       }
 
       let listening: number[] | undefined;
       try {
-        const r = await backend.exec(containerId, ['ss', '-ltnH'], { user });
-        if (r.exitCode === 0) listening = parseSsListen(r.stdout);
+        // cat exits 1 when the kernel has no IPv6 (no tcp6) but still prints tcp: the header decides
+        const r = await backend.exec(containerId, PROC_NET_TCP, { user });
+        if (r.stdout.includes('local_address')) listening = parseProcNetTcp(r.stdout);
       } catch {
-        // the container is going away; the state check ends the loop
+        // the container may be going away; the state check ends the loop
       }
+      if (!listening && !unreadable && !signal.aborted) {
+        opts.onError?.("Cannot read the container's listening ports (/proc/net/tcp); nothing new is forwarded until it can be read");
+      }
+      unreadable = !listening;
 
       if (listening && !signal.aborted) {
         for (const port of failed) if (!listening.includes(port)) failed.delete(port);
