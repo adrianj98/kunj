@@ -318,6 +318,14 @@ describe('docker backend', () => {
       expect(argvOf(1)).toEqual(['volume', 'rm', 'v']);
     });
 
+    it('remove ignores the "exit status" line Docker 29 adds after the daemon errors', async () => {
+      results.push({
+        code: 1,
+        stderr: 'Error response from daemon: network a not found\nError response from daemon: network b not found\nexit status 1\n',
+      });
+      await expect(new LocalDockerBackend().remove({ networks: ['a', 'b'] })).resolves.toBeUndefined();
+    });
+
     it('remove throws on other failures', async () => {
       results.push({ code: 1, stderr: 'Error response from daemon: network n has active endpoints\n' });
       await expect(new LocalDockerBackend().remove({ networks: ['n'] })).rejects.toThrow('docker network rm failed: Error response from daemon: network n has active endpoints');

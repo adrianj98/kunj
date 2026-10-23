@@ -18,6 +18,8 @@ import { StartError, StartOptions, containerStatus, removeContainer, startContai
 import { forwardPort } from '../forward';
 import { resolveHelperImage } from '../image';
 import { getVersion } from '../../version';
+import { parseBlueprint, resolveBlueprint, snapshotTag, SEED_DIR } from '../blueprint';
+import { planSnapshot, removeSnapshots, snapshotBlueprint } from '../snapshot';
 import { KunjConfig } from '../../../types';
 
 let dockerUp = false;
@@ -131,6 +133,8 @@ function startOptions(branch: string, cfg: KunjConfig): StartOptions {
     keepOnError: false,
     confirmPush: async () => false,
     warn: msg => process.stderr.write(`warn: ${msg}\n`),
+    // Never the host copy in ~/.kunj/<repo>/blueprint.json; the blueprint tests resolve their own
+    blueprint: null,
   };
 }
 
@@ -191,6 +195,12 @@ const BRANCH_ALLOW = 'it-allow';
     if (left.containers.length) attempt('removing containers', () => docker(['rm', '-f', ...left.containers]));
     if (left.volumes.length) attempt('removing volumes', () => docker(['volume', 'rm', '-f', ...left.volumes]));
     if (left.networks.length) attempt('removing networks', () => docker(['network', 'rm', ...left.networks]));
+    if (repoId) {
+      attempt('removing snapshot images', () => {
+        const images = docker(['images', '-q', '--filter', `label=${LABEL.repo}=${repoId}`]).split('\n').filter(Boolean);
+        if (images.length) docker(['rmi', '-f', ...new Set(images)]);
+      });
+    }
     attempt('stopping git daemon', () => daemon?.kill());
     if (tmp) attempt('removing the temp dir', () => fs.rmSync(tmp, { recursive: true, force: true }));
   });
@@ -338,5 +348,180 @@ const BRANCH_ALLOW = 'it-allow';
       });
     }
     expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
+  });
+
+  describe('blueprints', () => {
+    const BLUEPRINT = {
+      tools: { apt: ['jq'] },
+      setup: ['touch installed', 'echo built > built.txt'],
+      maintain: ['touch maintained'],
+      lockfiles: ['package-lock.json'],
+    };
+    const ctx = { user: USER, kunjVersion: VERSION, force: true, keepVolumes: false };
+    let work = '';
+    let tag = '';
+    let hash = '';
+
+    /** Commit `files` on origin's main (and `branches`), then bring the host clone's origin/* up to date. */
+    function pushToMain(files: Record<string, string>, msg: string, branches: string[] = []): void {
+      git(['pull', '-q', 'origin', 'main'], work);
+      for (const [name, content] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(work, name)), { recursive: true });
+        fs.writeFileSync(path.join(work, name), content);
+      }
+      git(['add', '.'], work);
+      git(['commit', '-qm', msg], work);
+      git(['push', '-q', 'origin', 'HEAD:main', ...branches.map(b => `HEAD:${b}`)], work);
+      // The host clone's origin URL is the container's; fetch from the bare repository directly
+      git(['fetch', '-q', bare, '+refs/heads/*:refs/remotes/origin/*'], hostClone);
+    }
+
+    async function resolved() {
+      const r = await resolveBlueprint({ cwd: hostClone, repoKunjDir: path.join(tmp, 'no-kunj-dir'), defaultBranch: 'main' });
+      if (!r) throw new Error('no blueprint on origin/main');
+      return r;
+    }
+
+    function snapshotOptions(blueprint: Awaited<ReturnType<typeof resolved>>) {
+      return {
+        branch: 'main',
+        blueprint,
+        config: config({ allowHost: true }),
+        repo: { root: hostClone, name: REPO_NAME, id: repoId, originUrl },
+        kunjVersion: VERSION,
+        cwd: hostClone,
+        jsonMode: false,
+        rebuild: false,
+        warn: (m: string) => process.stderr.write(`warn: ${m}\n`),
+        log: () => {},
+      };
+    }
+
+    // The branches are pushed beforehand rather than created by the start (create: true), which
+    // asks origin with ls-remote from the host, and the host cannot resolve host.docker.internal
+    /** startOptions for a new container that resolves the blueprint from origin/main. */
+    function bpStart(branch: string, extra: Partial<StartOptions> = {}): StartOptions {
+      return {
+        ...startOptions(branch, config({ allowHost: true })),
+        blueprint: undefined,
+        defaultBranch: async () => 'main',
+        ...extra,
+      };
+    }
+
+    /** Records every exec's argv, to tell a clone from a seed copy. */
+    class RecordingBackend extends LocalDockerBackend {
+      execs: string[][] = [];
+      override exec(...args: Parameters<LocalDockerBackend['exec']>) {
+        this.execs.push(args[1]);
+        return super.exec(...args);
+      }
+    }
+
+    beforeAll(() => {
+      work = path.join(tmp, 'bp-work');
+      git(['clone', '-q', bare, work], tmp);
+      pushToMain(
+        { '.kunj/blueprint.json': JSON.stringify(BLUEPRINT, null, 2) + '\n', 'package-lock.json': '{"v":1}\n' },
+        'blueprint',
+        ['it-bp-new', 'it-bp-fresh']
+      );
+    });
+
+    it('blueprint snapshot builds an image with jq and the seed', async () => {
+      const result = await snapshotBlueprint(backend, snapshotOptions(await resolved()));
+      expect(result.reused).toBe(false);
+      ({ tag, hash } = result);
+      expect(tag).toBe(snapshotTag(REPO_NAME, hash));
+      expect(result.ref).toBe(git(['rev-parse', 'main'], bare));
+
+      const labels = JSON.parse(docker(['image', 'inspect', '--format', '{{json .Config.Labels}}', tag]));
+      expect(labels[LABEL.repo]).toBe(repoId);
+      expect(labels[LABEL.blueprintHash]).toBe(hash);
+      expect(labels[LABEL.blueprintRef]).toBe(result.ref);
+      expect(labels[LABEL.blueprintBase]).toBe(result.base);
+      expect(labels[LABEL.blueprintUser]).toBe(USER);
+
+      const check = [
+        'command -v jq',
+        `test -f ${SEED_DIR}/installed`,
+        `test -f ${SEED_DIR}/built.txt`,
+        `! test -f ${SEED_DIR}/.kunj-seeded`,
+      ].join(' && ');
+      expect(() => docker(['run', '--rm', '--entrypoint', 'sh', tag, '-c', check])).not.toThrow();
+
+      // apt writes no /etc/kunj/env, and nothing secret is baked into the image
+      const env: string[] = JSON.parse(docker(['image', 'inspect', '--format', '{{json .Config.Env}}', tag])) ?? [];
+      expect(env.filter(e => /GH_TOKEN|GITHUB_TOKEN|GITLAB_TOKEN|ANTHROPIC/.test(e))).toEqual([]);
+      // The temporary container is gone
+      expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
+    });
+
+    it('start from the snapshot copies the seed and runs maintain', async () => {
+      const rec = new RecordingBackend();
+      const started = await startContainer(rec, bpStart('it-bp-new'));
+      try {
+        expect(started.blueprint).toMatchObject({ snapshot: tag, hash, stale: false, setupRan: false, maintainRan: true });
+        expect(started.image).toBe(tag);
+        const r = await inside(
+          started.containerId,
+          'test -f installed && test -f maintained && git rev-parse --abbrev-ref HEAD && git remote get-url origin'
+        );
+        expect(r.exitCode).toBe(0);
+        expect(r.stdout.trim().split('\n')).toEqual(['it-bp-new', originUrl]);
+        expect(rec.execs.filter(argv => argv.join(' ').includes('git clone'))).toEqual([]);
+      } finally {
+        await removeContainer(backend, started.names, ctx);
+      }
+      expect(labelledFor('it-bp-new')).toEqual([]);
+    });
+
+    it('stale snapshot prints the hint and is still used', async () => {
+      pushToMain({ 'package-lock.json': '{"v":2}\n' }, 'lockfile change', ['it-bp-stale']);
+      const warnings: string[] = [];
+      const started = await startContainer(backend, bpStart('it-bp-stale', { warn: m => warnings.push(m) }));
+      try {
+        expect(warnings.some(w => /snapshot is stale/.test(w))).toBe(true);
+        expect(started.blueprint).toMatchObject({ snapshot: tag, stale: true, setupRan: false });
+        expect(started.blueprint?.hash).not.toBe(hash);
+        // The branch is origin's, not the snapshot's commit
+        const lock = await inside(started.containerId, 'cat package-lock.json && test -f installed');
+        expect(lock.exitCode).toBe(0);
+        expect(lock.stdout.trim()).toBe('{"v":2}');
+      } finally {
+        await removeContainer(backend, started.names, ctx);
+      }
+    });
+
+    it('--no-snapshot clones and runs setup', async () => {
+      const started = await startContainer(backend, bpStart('it-bp-fresh', { noSnapshot: true }));
+      try {
+        expect(started.blueprint).toMatchObject({ snapshot: null, setupRan: true, maintainRan: true });
+        expect(started.image).not.toBe(tag);
+        const r = await inside(started.containerId, 'test -f installed && test -f maintained && command -v jq');
+        expect(r.exitCode).toBe(0);
+      } finally {
+        await removeContainer(backend, started.names, ctx);
+      }
+    });
+
+    it('snapshot failure leaves nothing', async () => {
+      const text = JSON.stringify({ ...BLUEPRINT, tools: {}, setup: ['exit 1'] });
+      const failing = { blueprint: parseBlueprint(text, 'failing.json'), source: 'file' as const, path: 'failing.json', text };
+      const plan = await planSnapshot(snapshotOptions(failing));
+      await expect(snapshotBlueprint(backend, snapshotOptions(failing))).rejects.toThrow(/setup command failed/);
+      expect(await backend.imageExists(plan.tag)).toBe(false);
+      expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
+      // The good snapshot is untouched
+      expect(await backend.imageExists(tag)).toBe(true);
+    });
+
+    it('removeSnapshots removes the images', async () => {
+      const removed = await removeSnapshots(backend, REPO_NAME, repoId);
+      expect(removed).toEqual([tag]);
+      expect(await backend.imageExists(tag)).toBe(false);
+      expect(await backend.listImages({ [LABEL.repo]: repoId })).toEqual([]);
+      expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
+    });
   });
 });

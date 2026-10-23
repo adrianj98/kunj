@@ -380,7 +380,8 @@ export class LocalDockerBackend implements ContainerBackend {
       const args = [...cmd, ...names];
       const out = await this.spawnDocker(args);
       if (out.code === 0) continue;
-      const lines = out.stderr.trim().split('\n').filter(Boolean);
+      // Docker 29's CLI adds an `exit status 1` line after the daemon's errors
+      const lines = out.stderr.trim().split('\n').filter(l => l && !/^exit status \d+$/.test(l.trim()));
       const allGone = lines.length > 0 && lines.every(l => /no such|not found/i.test(l));
       if (!allGone) throw new Error(`docker ${subcommand(args)} failed: ${firstLine(out)}`);
     }
