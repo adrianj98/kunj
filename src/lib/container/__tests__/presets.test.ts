@@ -151,7 +151,7 @@ describe('presets', () => {
   posixOnly('sh -n passes for every builtin script', () => {
     const scripts = fs.readdirSync(builtinPresetsDir()).filter(f => f.endsWith('.sh'));
     expect(scripts.sort()).toEqual(
-      ['_lib.sh', 'apt.sh', 'bun.sh', 'go.sh', 'java.sh', 'node.sh', 'playwright.sh', 'pnpm.sh', 'python.sh', 'rust.sh', 'yarn.sh']
+      ['_lib.sh', 'apt.sh', 'bun.sh', 'go.sh', 'java.sh', 'node.sh', 'playwright.sh', 'pnpm.sh', 'python.sh', 'rust.sh', 'supabase.sh', 'yarn.sh']
     );
     for (const f of scripts) {
       const r = spawnSync('sh', ['-n', path.join(builtinPresetsDir(), f)], { encoding: 'utf8' });

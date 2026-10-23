@@ -130,6 +130,11 @@ export function inferBlueprint(repoRoot: string, imageNodeMajor = 22): Inferred 
       tools.playwright = true;
       reasons.push('playwright in package.json → playwright: true');
     }
+    // A supabase/ directory means the project uses the Supabase CLI (migrations, gen types)
+    if (fs.existsSync(path.join(repoRoot, 'supabase', 'config.toml'))) {
+      tools.supabase = 'latest';
+      reasons.push('supabase/config.toml → supabase: latest');
+    }
   }
   if (nvm) {
     tools.node = 'nvmrc';

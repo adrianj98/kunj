@@ -17,7 +17,7 @@ export interface Preset {
 }
 
 /** apt first, then runtimes, then the package managers and tools that need a runtime. */
-export const PRESET_ORDER = ['apt', 'node', 'python', 'go', 'rust', 'java', 'yarn', 'pnpm', 'bun', 'playwright'];
+export const PRESET_ORDER = ['apt', 'node', 'python', 'go', 'rust', 'java', 'yarn', 'pnpm', 'bun', 'playwright', 'supabase'];
 
 /** Where scripts, _lib.sh, env files and results go inside the container while presets run. */
 export const PRESET_DIR = '/tmp/kunj-presets';

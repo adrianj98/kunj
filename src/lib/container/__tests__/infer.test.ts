@@ -8,6 +8,7 @@ function repo(files: Record<string, string | object>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-infer-'));
   dirs.push(dir);
   for (const [name, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
     fs.writeFileSync(path.join(dir, name), typeof body === 'string' ? body : JSON.stringify(body));
   }
   return dir;
@@ -190,6 +191,16 @@ describe('inferBlueprint', () => {
     }));
     expect(i.tools).toEqual({ pnpm: 'corepack', playwright: true });
     hasReason(i, 'playwright');
+  });
+
+  it('supabase cli from supabase/config.toml', () => {
+    const i = inferBlueprint(repo({
+      'package.json': { packageManager: 'pnpm@9.1.0' },
+      'pnpm-lock.yaml': '',
+      'supabase/config.toml': 'project_id = "x"\n',
+    }));
+    expect(i.tools).toEqual({ pnpm: 'corepack', supabase: 'latest' });
+    hasReason(i, 'supabase');
   });
 
   it('suggests a Makefile setup target without choosing it', () => {

@@ -4,6 +4,9 @@ Changes made with Claude, and why.
 
 ## 2026-10-22 — Branch containers: final review fix wave
 
+- Added a `supabase` preset (CLI from GitHub releases into /usr/local/bin; smoke-tested: 2.121.0) and
+  inference from `supabase/config.toml`. Why: driveday_planner's blueprint lacked it.
+
 - Blueprints task 5 fix round 2: a snapshot seed wipes and recopies `/workspace` only when there is no `.git` or its own `.kunj-copying` sentinel is left from a copy cut short, and resets the branch to origin's only while `.kunj-fresh` marks an untouched copy. Why: the seed marker is an ignored file `git clean -x` removes, so deciding by it could wipe a user's checkout.
 - Blueprints task 5 review fixes: presets and setup run in every new container without a snapshot, also on a kept workspace volume; a seed moves its branch to origin's (`switch -C`) and a partial copy is redone; lockfiles for the hash are read at `blueprintRef()` (blueprint ref, else origin/<default>, else HEAD) so the hash does not depend on the worktree; the no-snapshot hint names only what will run; resume reports no `stale`. Why: review found starts that skipped setup forever, stale checkouts and a cwd-dependent hash.
 - Blueprints task 5: start uses the repo's blueprint snapshot (`kind: 'blueprint'`, seed copied from `/opt/kunj/seed`, origin reset; newest snapshot with one stale hint), else runs presets as root and `setup` as the user on a new container; `maintain` every start (warns); `--no-snapshot`/`namesFor`/`presets` start options, `imageKind`/`blueprintHash` in `kunj.options`; blueprint steps in `src/lib/container/provision.ts`. Why: new branch containers start with dependencies installed.
