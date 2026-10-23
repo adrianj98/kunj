@@ -20,7 +20,7 @@ is easy to over-read.
 | **Your machine's services and your LAN.** The Docker host (`host.docker.internal`), private address ranges and link-local addresses are blocked, whatever the network mode. | **Data leaving through allowed sites.** An allowlist limits *where* the agent connects, not *what* it sends: GitHub, npm and the model's API are enough to carry a token out. |
 | **Docker itself.** The Docker socket is never mounted, so the agent cannot start containers or reach the daemon. | **The image build.** Building an image (the sandbox image, or a devcontainer's Dockerfile) runs outside the firewall, with full network access. |
 | **The firewall.** The agent's container has no capability to change network rules, so it cannot switch the firewall off. | |
-| **Your browser profile.** The browser bridge (`container.mcp`) is off by default; when on, its browser starts with an isolated, empty profile and may open only `allowOrigins` (localhost by default). | **A bridged browser.** It runs on your machine, outside the sandbox and the firewall: `localhost` there is your machine, and a page it is allowed to open can still link or redirect elsewhere. |
+| **Your files, from the bridged browser.** The browser bridge (`container.mcp`) is off by default. When on, only a fixed list of browser tools passes it and no tool may get a file path, so the agent cannot read or write files on your machine through it; its profile is empty and throwaway. | **Your Mac's network, through the bridged browser.** The agent drives a browser on your Mac, outside the sandbox and the firewall: it can reach whatever your Mac reaches, your LAN included. `allowOrigins` (by default the container's forwarded ports) limits explicit navigation only; a click, a redirect or a script can still go anywhere. |
 
 The practical advice follows from the right-hand column: forward as little as you can, prefer a
 token scoped to the one repository, and protect your default branch.
@@ -199,15 +199,17 @@ that small.
   server it starts on port 1024 or above is forwarded to `127.0.0.1` on your machine (never the LAN)
   automatically; `container.forward.ignore` and `container.forward.auto: false` limit or stop that;
 - with [`container.mcp`](../configuration/#a-browser-for-the-agent) set, drive a browser on your machine
-  through the MCP bridge, opening only the `allowOrigins` URLs (localhost by default) in an isolated
-  profile. The bridge is a socket in the container that kunj connects to from your side, so the
-  container still cannot reach your machine itself.
+  through the MCP bridge: an empty profile, a fixed list of tools and no file arguments, explicit
+  navigation only to the container's forwarded ports (or `allowOrigins`). The page itself can still go
+  anywhere your Mac can reach. The bridge is a socket in the container that kunj connects to from your
+  side, so the container still cannot reach your machine itself.
 
 **It cannot:**
 
 - read or write any file on your machine, including your repository and its `.git`;
 - reach your other branches' containers, the Docker host, your LAN or private networks
-  (unless `allowHost`);
+  (unless `allowHost`) from the container; a bridged browser (`container.mcp`) is the exception,
+  since it runs on your Mac;
 - use the Docker daemon (the host's is never mounted; with Docker-in-Docker it has its own);
 - change or switch off the firewall (with Docker-in-Docker it can: see above);
 - become root in the default image (with Docker-in-Docker on it can: root in the container through

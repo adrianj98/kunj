@@ -508,6 +508,10 @@ describe('ContainerCommand', () => {
     it('mcp runs the bridge in the foreground, registered while it runs', async () => {
       backend.existing = [mainContainer('feat')];
       withMcp({ chrome: { command: 'node', args: ['srv.js'] } });
+      mockForwards.push(
+        { pid: 4242, container: NAME, port: 5173, hostPort: 5174, kind: 'forward' },
+        { pid: 4242, container: 'kunj-other', port: 8080, hostPort: 8080, kind: 'forward' },
+      );
       let during: unknown[] = [];
       runBridge.mockImplementationOnce(async () => {
         during = mockBridges.slice();
@@ -522,6 +526,9 @@ describe('ContainerCommand', () => {
       expect([b, id, name]).toEqual([backend, 'cid-1', 'chrome']);
       expect(cfg).toMatchObject({ command: 'node', args: ['srv.js'] });
       expect(opts.user).toBe('dev');
+      // the default allowed origins: this container's forwarded and published host ports
+      expect(opts.forwardedPorts()).toEqual([5174, 13000]);
+      expect(opts.instructions()).toContain('container port 5173 is http://localhost:5174');
       expect(installMcpConfig).toHaveBeenCalledWith(backend, 'cid-1', 'dev', ['chrome']);
       expect(during).toEqual([{ pid: process.pid, container: NAME, name: 'chrome' }]);
       expect(mockBridges).toEqual([]);

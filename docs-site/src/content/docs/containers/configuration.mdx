@@ -139,8 +139,12 @@ kunj config --set container.forward.ignore=[9229,5555]
 
 `container.mcp` bridges MCP servers that run on your machine into the container, so the agent can,
 for example, open the dev server it just started in a real browser and check it. For now the only
-server is `chrome`, a browser. It is off until you set it, and only in your kunj config (global or
-`~/.kunj/<repo>/config.json`), never in the blueprint or anything read from the repository:
+server is `chrome`, a browser.
+
+Know what you turn on: the agent then drives a browser **on your Mac, on your Mac's network**,
+outside the sandbox and its firewall. That is why it is off by default, and why it is only in your
+kunj config (global or `~/.kunj/<repo>/config.json`), never in the blueprint or anything read from the
+repository:
 
 ```json
 {
@@ -151,26 +155,42 @@ server is `chrome`, a browser. It is off until you set it, and only in your kunj
 ```
 
 `{}` runs [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) as
-`npx -y chrome-devtools-mcp@latest --isolated`: its own Chrome window with an empty, throwaway
-profile, so no cookies and none of your logged-in sessions. Each server takes:
+`npx -y chrome-devtools-mcp@latest --isolated --categoryPerformance=false --categoryMemory=false
+--fileNavigations=false`: its own Chrome window with an empty, throwaway profile (no cookies, none of
+your logged-in sessions), without the tools that write trace and heap snapshot files, and refusing
+`file:` URLs. Each server takes:
 
 | Key | Default | Meaning |
 |---|---|---|
 | `command` | `npx` | The server's stdio command on your machine |
-| `args` | `["-y", "chrome-devtools-mcp@latest", "--isolated"]` | Its arguments (`[]` with your own `command`) |
+| `args` | the Chrome DevTools MCP arguments above | Its arguments (`[]` with your own `command`) |
 | `env` | `{}` | Its environment, next to `PATH` and `HOME`; nothing else from your shell or the container is passed |
-| `allowOrigins` | `["http://localhost", "http://127.0.0.1"]` | The scheme and host (any port) `navigate_page` and `new_page` may open |
+| `allowOrigins` | (the forwarded ports) | Origins `navigate_page` and `new_page` may open, instead of the default |
+
+What keeps the agent in check:
+
+- **No files.** Only a fixed list of browser tools passes the bridge (pages and navigation, input,
+  snapshots and screenshots, console and network reads, `evaluate_script`, emulation), and no tool may
+  get an argument that names a file. `upload_file`, heap snapshots, performance traces and Lighthouse
+  are not available. The agent cannot read or write files on your machine through the browser.
+- **Explicit navigation only to your forwarded ports.** By default `navigate_page` and `new_page` may
+  open `http(s)://localhost` or `127.0.0.1` only on the host ports [forwarded](#ports) (or published)
+  for this container, checked at the moment of the call. `allowOrigins` replaces that list:
+  `"http://localhost:3000"` allows that port, `"https://staging.example.com"` that site. An entry
+  without a port, such as `"http://localhost"`, allows **every** port, which reaches every service on
+  your Mac: avoid it.
+
+<Aside type="caution">
+`allowOrigins` limits the URLs the agent asks to open, nothing more. It is not a network boundary: a
+link the agent clicks, a redirect, or `evaluate_script` can still take the page anywhere your Mac can
+reach, including your LAN. A `navigate_page` without a URL (back, forward, reload) is not checked.
+</Aside>
 
 [`kunj ct agent`](../commands/#agent) adds an `mcpServers.chrome` entry to the container user's
 `~/.claude.json` (so does `kunj ct start`) and runs the bridge in the background while the container
 runs; [`kunj ct mcp`](../commands/#mcp) runs it in the foreground. The browser is on your machine, so
-`localhost` in it means your machine: open the host port a container port is
-[forwarded](#ports) to. The bridge tells the agent that mapping when it connects.
-
-<Aside type="caution">
-The browser runs outside the sandbox. `allowOrigins` checks only the URLs the agent asks to open; a
-page it opens can still link or redirect elsewhere. Keep the list short, and keep `--isolated`.
-</Aside>
+`localhost` in it means your machine: open the host port a container port is forwarded to. The bridge
+tells the agent that mapping when it connects.
 
 One Claude Code session at a time can use each bridged server.
 

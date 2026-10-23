@@ -875,16 +875,20 @@ export class ContainerCommand extends BaseCommand {
     const stop = () => controller.abort();
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
-    // The container's forwarded ports, read when a session starts, so the agent opens the host's URLs
-    const instructions = () =>
-      portHint(readForwards().filter(r => r.container === main.name && r.port > 0).map(r => ({ port: r.port, hostPort: r.hostPort })));
+    // The container's forwarded and published ports, read at every check: what the browser may open
+    // by default, and what the agent is told when it connects
+    const ports = () => [
+      ...readForwards().filter(r => r.port > 0 && recordIsFor(r, main)).map(r => ({ port: r.port, hostPort: r.hostPort })),
+      ...main.ports.map(p => ({ port: p.container, hostPort: p.host })),
+    ];
     try {
       await Promise.all(
         servers.map(s =>
           runBridge(ctx.backend, main.id, s.name, s.cfg, {
             user,
             signal: controller.signal,
-            instructions,
+            forwardedPorts: () => ports().map(p => p.hostPort),
+            instructions: () => portHint(ports()),
             log: m => this.progress(chalk.gray(m)),
           }).catch(err => {
             this.warn(`MCP ${s.name}: ${err instanceof Error ? err.message : String(err)}`);

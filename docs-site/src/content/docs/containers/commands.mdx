@@ -281,20 +281,33 @@ kunj ct mcp feature/search
 ```
 
 The container cannot reach your machine, so the connection goes the other way: kunj keeps a
-`docker exec` open into the container that listens on `/run/kunj-mcp/chrome.sock` (owned by the
-container user, mode 600), and the container's `~/.claude.json` gets an `mcpServers.chrome` entry that
-connects to it with `socat`. When Claude Code connects, kunj starts the server's command on your
-machine (by default `npx -y chrome-devtools-mcp@latest --isolated`) and pipes the two together. The
-server gets only `PATH`, `HOME` and the `env` you configure, never the container's forwarded variables.
+`docker exec` open into the container, as the container user, that listens on
+`/run/kunj-mcp/chrome.sock` (mode 600; only creating the directory runs as root), and the container's
+`~/.claude.json` gets an `mcpServers.chrome` entry that connects to it with `socat`. When Claude Code
+connects, kunj starts the server's command on your machine (by default Chrome DevTools MCP with an
+isolated profile) and pipes the two together. The server gets only `PATH`, `HOME` and the `env` you
+configure, never the container's forwarded variables.
+
+Every request from the container is checked before it reaches the server:
+
+- only a fixed list of browser tools may be called (pages and navigation, clicks and typing, page
+  snapshots and screenshots, console and network reads, `evaluate_script`, emulation); everything
+  else, `upload_file` first of all, is refused, and `tools/list` only shows the allowed ones;
+- no tool may get an argument that names a file (`filePath`, `sourcePath`, `outputDirPath`, ...), so the
+  agent cannot read or write files on your machine;
+- `navigate_page` and `new_page` may open only the host ports [forwarded](#automatic-forwarding) for the
+  container, unless `allowOrigins` says otherwise;
+- a line that is not a JSON-RPC message is dropped, and a line over 4 MB ends the session.
+
+A refused request gets a JSON-RPC error. The initialize result tells the agent which host port each
+forwarded container port is on.
 
 One session at a time per server: when Claude Code disconnects or the server exits, both ends are
-stopped and the bridge waits for the next session. A `navigate_page` or `new_page` call to a URL
-outside the server's `allowOrigins` (default `http://localhost` and `http://127.0.0.1`, any port) is
-answered with an error and never reaches the browser. The initialize result tells the agent which host
-port each [forwarded](#automatic-forwarding) container port is on.
+stopped and the bridge waits for the next session. The bridge belongs to one run of the container: it
+exits when the container stops or is restarted.
 
 Running bridges are recorded in `~/.kunj/container-bridges.json`. `kunj ct mcp` refuses to start a
-second bridge for the same container; a background one exits when the container stops, or `kill` its pid.
+second bridge for the same container; a background one exits on its own, or `kill` its pid.
 
 ## list
 

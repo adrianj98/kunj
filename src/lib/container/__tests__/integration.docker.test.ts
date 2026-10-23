@@ -17,7 +17,7 @@ import { LABEL, containerNames, repoIdFromUrl } from '../names';
 import { StartError, StartOptions, containerStatus, removeContainer, startContainer } from '../lifecycle';
 import { forwardPort } from '../forward';
 import { AutoForwardChange, runAutoForward } from '../autoforward';
-import { DEFAULT_ALLOW_ORIGINS, installMcpConfig, runBridge } from '../mcpbridge';
+import { installMcpConfig, runBridge } from '../mcpbridge';
 import { resolveHelperImage } from '../image';
 import { getVersion } from '../../version';
 import { parseBlueprint, resolveBlueprint, snapshotTag, SEED_DIR } from '../blueprint';
@@ -333,7 +333,7 @@ const BRANCH_ALLOW = 'it-allow';
     }
   });
 
-  it('MCP bridge: a client in the container reaches a stdio server on the host, navigation limited to localhost', async () => {
+  it('MCP bridge: a client in the container reaches a stdio server on the host, navigation limited to forwarded ports, no host files, listener as the user', async () => {
     // The fake MCP server on the host: answers every request with the method it was asked
     const script = path.join(tmp, 'echo-mcp.js');
     fs.writeFileSync(
@@ -346,7 +346,9 @@ const BRANCH_ALLOW = 'it-allow';
     expect(JSON.parse(claude.stdout).mcpServers.chrome).toEqual({ command: 'socat', args: ['-', 'UNIX-CONNECT:/run/kunj-mcp/chrome.sock'] });
 
     const controller = new AbortController();
-    const run = runBridge(backend, idA, 'chrome', { command: process.execPath, args: [script], allowOrigins: DEFAULT_ALLOW_ORIGINS }, {
+    const run = runBridge(backend, idA, 'chrome', { command: process.execPath, args: [script] }, {
+      // the default origins: only the container's forwarded host ports
+      forwardedPorts: () => [3000],
       user: USER,
       signal: controller.signal,
       restartDelayMs: 100,
@@ -366,12 +368,21 @@ const BRANCH_ALLOW = 'it-allow';
       await waitFor(async () => (await inside(idA, 'test -S /run/kunj-mcp/chrome.sock')).exitCode === 0, 'the MCP socket');
       const mode = await backend.exec(idA, ['stat', '-c', '%a %U', '/run/kunj-mcp/chrome.sock'], { user: 'root' });
       expect(mode.stdout.trim()).toBe(`600 ${USER}`);
+      // Root only made the directory: the pid file is the user's, and so is the listener
+      const owner = await backend.exec(idA, ['sh', '-c', 'stat -c "%a %U" /run/kunj-mcp && stat -c %U /run/kunj-mcp/chrome.pid && stat -c %U /proc/$(cat /run/kunj-mcp/chrome.pid)'], { user: 'root' });
+      expect(owner.stdout.trim().split('\n')).toEqual([`700 ${USER}`, USER, USER]);
 
       expect(await ask({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).toEqual({ jsonrpc: '2.0', id: 1, result: { echo: 'tools/list' } });
       const refused = await ask({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'navigate_page', arguments: { url: 'https://example.com/' } } });
       expect(refused).toMatchObject({ id: 2, error: { code: -32602 } });
       const allowed = await ask({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'navigate_page', arguments: { url: 'http://localhost:3000/' } } });
       expect(allowed).toEqual({ jsonrpc: '2.0', id: 3, result: { echo: 'tools/call' } });
+      const otherPort = await ask({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'navigate_page', arguments: { url: 'http://localhost:5432/' } } });
+      expect(otherPort).toMatchObject({ id: 4, error: { code: -32602 } });
+      const hostFile = await ask({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'take_screenshot', arguments: { filePath: '/tmp/x.png' } } });
+      expect(hostFile).toMatchObject({ id: 5, error: { code: -32602 } });
+      const upload = await ask({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'upload_file', arguments: { uid: '1' } } });
+      expect(upload).toMatchObject({ id: 6, error: { code: -32602 } });
     } finally {
       controller.abort();
       await run;

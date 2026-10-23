@@ -162,11 +162,15 @@ export function registerContainerSettings(): void {
       category: 'container',
       detailedDescription:
         'An object of name: { command?, args?, env?, allowOrigins? }; edit the config file by hand (host config only, never the ' +
-        'blueprint). Off while empty. {"chrome": {}} runs npx -y chrome-devtools-mcp@latest --isolated (an empty, isolated ' +
-        "browser profile) on this machine when `kunj ct agent` starts, and adds a matching entry to the container user's " +
-        '~/.claude.json. The server gets only PATH, HOME and its env. allowOrigins (default http://localhost and ' +
-        'http://127.0.0.1, any port) limits the URLs navigate_page and new_page may open. One session at a time per server.',
-      examples: ['{"chrome": {}}', '{"chrome": {"allowOrigins": ["http://localhost", "https://staging.example.com"]}}'],
+        'blueprint). Off while empty, because the agent then drives a browser on this machine and its network. {"chrome": {}} ' +
+        'runs npx -y chrome-devtools-mcp@latest --isolated (an empty, throwaway profile; performance, memory and file: ' +
+        "navigation off) when `kunj ct agent` starts, and adds a matching entry to the container user's ~/.claude.json. The " +
+        'server gets only PATH, HOME and its env. Only a fixed list of browser tools passes, never an argument naming a host ' +
+        'file, so the agent cannot read or write files on this machine. navigate_page and new_page may open only the host ' +
+        'ports forwarded for the container, unless allowOrigins lists origins (with a port: that port; without: any port, ' +
+        'which is broad). This limits explicit navigation only: a click or a script can still take the page elsewhere. ' +
+        'One session at a time per server.',
+      examples: ['{"chrome": {}}', '{"chrome": {"allowOrigins": ["http://localhost:3000", "https://staging.example.com"]}}'],
       validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
     },
   ]);

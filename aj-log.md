@@ -11,6 +11,46 @@ Changes made with Claude, and why.
   latest`. Moved the item to Done in `docs/specs/README.md`. Why: user installed tmux and asked for it.
 ## 2026-10-23 — Containers: host MCP bridge (phase 2, Task 6)
 
+Fix round 1 (security review), on top of the entry below:
+
+- Sandbox escape closed. chrome-devtools-mcp tools take host paths (evaluate_script `filePath`/
+  `sourcePath`, upload_file `filePaths`, take_screenshot/take_snapshot `filePath`, heap snapshot, trace
+  and Lighthouse output paths), so a request reaching it could read or write any file on the Mac. The
+  container→host filter is now deny by default: `BROWSER_TOOLS` (checked against chrome-devtools-mcp
+  1.12.0's tool definitions: pages/navigation, input, snapshot/screenshot, console and network reads,
+  evaluate_script, emulate/resize_page; no upload_file, memory, performance, lighthouse, screencast,
+  extensions, PWA, WebMCP), any key that looks like a path (`isPathKey`: filePath, sourcePath,
+  outputDirPath, ...Path/Paths/File/Dir) anywhere in the arguments is refused, only listed JSON-RPC
+  methods pass (resources/read and prompts/get are refused), and the tools/list reply is rewritten to
+  the allowlist with path-like schema properties removed. Defence in depth: the default args add
+  `--categoryPerformance=false --categoryMemory=false --fileNavigations=false` and the env
+  `CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY=1`, so a global cd4a config cannot switch them back on. There is no
+  flag to switch off file output of screenshots or evaluate_script, so the filter is the guard.
+- Root no longer writes into the user's directory. Root runs only `mkdir`/`chown`/`chmod 700` of
+  `/run/kunj-mcp`, and refuses a symlink there. The listener (no socat `user=`), its pid file and the
+  stop now run as the user. The stop signals the pid only when `/proc/<pid>/cmdline` is that socat
+  listener. Why: a user-owned directory plus root writes allowed symlink attacks, and writing `1` into
+  the pid file stopped the container.
+- One container run: the bridge records `containerRun().startedAt` and ends as soon as the container
+  is seen stopped or restarted; only a failed inspect gets two strikes. PREPARE runs before every
+  listener. Why: after a quick stop/start the bridge exec'd into the new run before its READY.
+- Host memory: a line over 4 MB from the container ends the session; while `server.stdin.write()`
+  returns false the container stream is paused until 'drain' (and the other way round). The server
+  starts only on the first complete message that passes the filter.
+- Default origins: unset `allowOrigins` now means only the host ports forwarded or published for the
+  container, read when the call arrives (http/https, localhost/127.0.0.1). An entry with a port allows
+  that port, one without allows any port (documented as broad).
+- Lines that are not JSON-RPC messages are dropped (fail closed), logged once per bridge.
+- Shared `pidRegistry(file, isRecord)` (pidregistry.ts) under the forward and bridge registries (files
+  and JSON unchanged). `spawnDetached`'s error names the command instead of "forwarder".
+- Pre-existing hole closed: `migrateLegacyKunjDir` copied a repository's `./.kunj/` into
+  `~/.kunj/<repo>/`, so a committed `.kunj/config.json` could set `hooks.*` or `container.mcp.command`
+  on the host. It now copies only files `git ls-files` does not list, never `blueprint.json` or
+  `presets/`, and nothing at all when git cannot list them.
+- Docs say plainly that the agent drives a browser on the Mac's network, that the tool allowlist keeps it
+  from your files, and that `allowOrigins` limits explicit navigation only (a navigate without a url,
+  a click, a redirect or a script still goes anywhere).
+
 - New setting `container.mcp` (host config only, never the blueprint; default `{}` = off). v1 bridges only
   `chrome`: `{}` runs `npx -y chrome-devtools-mcp@latest --isolated`; each entry takes `command`, `args`,
   `env`, `allowOrigins` (default `http://localhost`, `http://127.0.0.1`). Other names warn and are

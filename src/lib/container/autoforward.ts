@@ -7,11 +7,11 @@
 // ~/.kunj/container-forwards.json so that `kunj ct list` can show them and `kunj ct agent` does not
 // start a second forwarder.
 import { spawn } from 'child_process';
-import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ContainerBackend } from './backend';
 import { Forwarder, forwardPort } from './forward';
+import { pidRegistry } from './pidregistry';
 
 const POLL_MS = 2000;
 const STATE_POLL_MS = 5000;
@@ -107,55 +107,24 @@ export function forwardsFile(): string {
   return path.join(os.homedir(), '.kunj', 'container-forwards.json');
 }
 
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // EPERM: it exists but belongs to someone else
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
+function isRecord(r: any): r is ForwardRecord {
+  return typeof r.container === 'string' && Number.isInteger(r.port) && Number.isInteger(r.hostPort) && r.kind === 'forward';
 }
 
-function isRecord(r: any): r is ForwardRecord {
-  return (
-    !!r && Number.isInteger(r.pid) && r.pid > 0 && typeof r.container === 'string' &&
-    Number.isInteger(r.port) && Number.isInteger(r.hostPort) && r.kind === 'forward'
-  );
-}
+const registry = pidRegistry<ForwardRecord>(forwardsFile, isRecord);
 
 /** The live forwards; entries of dead processes are pruned (and the file rewritten without them). */
 export function readForwards(file: string = forwardsFile()): ForwardRecord[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return [];
-  }
-  const all = Array.isArray(parsed) ? parsed.filter(isRecord) : [];
-  const live = all.filter(r => isAlive(r.pid));
-  if (live.length !== (Array.isArray(parsed) ? parsed.length : -1)) {
-    try {
-      writeForwards(live, file);
-    } catch {
-      // read-only home: the pruned list is still right for this caller
-    }
-  }
-  return live;
+  return registry.read(file);
 }
 
 /** Written to a temp file and renamed, so concurrent forwarders never see a half-written file. */
 export function writeForwards(records: ForwardRecord[], file: string = forwardsFile()): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(records, null, 2) + '\n');
-  fs.renameSync(tmp, file);
+  registry.write(records, file);
 }
 
 export function updateForwards(change: (records: ForwardRecord[]) => ForwardRecord[], file: string = forwardsFile()): ForwardRecord[] {
-  const next = change(readForwards(file));
-  writeForwards(next, file);
-  return next;
+  return registry.update(change, file);
 }
 
 /** The pid of a live automatic forwarder for `container`, if one is registered. */
@@ -172,7 +141,7 @@ export function spawnDetached(args: string[]): number {
   const entry = /\.ts$/.test(process.argv[1] ?? '') ? path.resolve(__dirname, '../../../dist/index.js') : process.argv[1];
   const child = spawn(process.execPath, [entry, ...args], { detached: true, stdio: 'ignore', cwd: process.cwd() });
   child.unref();
-  if (!child.pid) throw new Error('Could not start the background forwarder');
+  if (!child.pid) throw new Error(`Could not start kunj ${args.slice(0, 2).join(' ')} in the background`);
   return child.pid;
 }
 

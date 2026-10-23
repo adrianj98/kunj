@@ -19,9 +19,9 @@ export function getGlobalConfigPath(): string {
   return path.join(getGlobalKunjDir(), 'config.json');
 }
 
-function gitSync(args: string): string | null {
+function gitSync(args: string, cwd?: string): string | null {
   try {
-    return execSync(`git ${args}`, { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
+    return execSync(`git ${args}`, { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', ...(cwd ? { cwd } : {}) }).trim();
   } catch {
     return null;
   }
@@ -116,13 +116,17 @@ export function getKunjDir(): string {
 }
 
 // One-time migration: copy a legacy ./.kunj directory into the new location
-function migrateLegacyKunjDir(newDir: string): void {
+// Only files git does not track are copied: repositories now commit .kunj/ (the blueprint, presets),
+// and a committed .kunj/config.json must never become host config (hooks.*, container.mcp). The
+// blueprint and presets are the repository's, never migrated. When git cannot list the tracked files,
+// nothing is copied.
+export function migrateLegacyKunjDir(newDir: string, cwd: string = process.cwd()): void {
   try {
     if (fs.existsSync(newDir)) {
       return;
     }
-    const candidates = [path.join(process.cwd(), KUNJ_DIR)];
-    const toplevel = gitSync('rev-parse --show-toplevel');
+    const candidates = [path.join(cwd, KUNJ_DIR)];
+    const toplevel = gitSync('rev-parse --show-toplevel', cwd);
     if (toplevel) {
       candidates.push(path.join(toplevel, KUNJ_DIR));
     }
@@ -130,9 +134,30 @@ function migrateLegacyKunjDir(newDir: string): void {
     if (!legacy) {
       return;
     }
-    fs.mkdirSync(path.dirname(newDir), { recursive: true });
-    fs.cpSync(legacy, newDir, { recursive: true });
-    console.error(`kunj: migrated ${legacy} -> ${newDir}`);
+    const listed = gitSync('ls-files -z -- .', legacy);
+    if (listed === null) {
+      return;
+    }
+    const tracked = new Set(listed.split('\0').filter(Boolean));
+    const copied: string[] = [];
+    const walk = (rel: string) => {
+      for (const entry of fs.readdirSync(path.join(legacy, rel), { withFileTypes: true })) {
+        const child = rel ? `${rel}/${entry.name}` : entry.name;
+        if (child === 'blueprint.json' || child === 'presets') continue;
+        if (entry.isDirectory()) {
+          walk(child);
+        } else if (entry.isFile() && !tracked.has(child)) {
+          const target = path.join(newDir, ...child.split('/'));
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.copyFileSync(path.join(legacy, ...child.split('/')), target);
+          copied.push(child);
+        }
+      }
+    };
+    walk('');
+    // Created even when nothing was copied, so the check does not run again on every command
+    fs.mkdirSync(newDir, { recursive: true });
+    if (copied.length) console.error(`kunj: migrated ${legacy} -> ${newDir} (${copied.join(', ')})`);
   } catch {
     // Migration is best-effort
   }

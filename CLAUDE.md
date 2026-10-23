@@ -282,11 +282,17 @@ hooks are `pre/post-container-create` and `pre/post-container-delete` with `bran
 `image`; the create hooks are skipped when `start` resumes an existing container.
 
 **MCP bridge:** `mcpbridge.ts` bridges host stdio MCP servers (`container.mcp`, host config only;
-v1 only `chrome`) into the container: a root `docker exec -i … socat UNIX-LISTEN:/run/kunj-mcp/<name>.sock
-STDIO` (mode 600, owned by the user, no `fork`: one session at a time) ↔ the server spawned on the
-host per session with only `cfg.env` + PATH/HOME, through an origin filter on `navigate_page`/`new_page`.
-`kunj ct agent` (and start) merge `mcpServers.<name>` into the user's `~/.claude.json`; agent spawns a
-detached `kunj ct mcp`, registered in `~/.kunj/container-bridges.json`.
+v1 only `chrome`) into the container, for one container run (`containerRun()` StartedAt). Root runs
+only `mkdir`/`chown`/`chmod 700` of `/run/kunj-mcp`; the listener (`socat UNIX-LISTEN:…sock,mode=600
+STDIO`, no `fork`: one session at a time), its pid file and its stop run as the user, and the stop
+checks the pid's cmdline. The host server (only `cfg.env` + PATH/HOME) starts on the first complete
+message. The agent drives a browser on the Mac's network, so the filter is deny by default:
+`BROWSER_TOOLS` only, no path-like argument (`isPathKey`) on any tool, `tools/list` rewritten to match,
+malformed lines dropped, lines capped at 4 MB, navigation only to the forwarded host ports unless
+`allowOrigins` (explicit navigation only, not a network boundary). Never widen that list with a tool
+that takes a host path. `kunj ct agent` (and start) merge `mcpServers.<name>` into the user's
+`~/.claude.json`; agent spawns a detached `kunj ct mcp`, registered in `~/.kunj/container-bridges.json`
+(`pidRegistry`, shared with the forward registry).
 
 **Services:** `services.ts` parses and validates services (blueprint `services`, `container.services`, the
 devcontainer's compose file read through `backend.composeConfig()`, i.e. `docker compose config

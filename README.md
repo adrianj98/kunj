@@ -230,17 +230,26 @@ entries with the forwarder's `pid`. Ports are reached through the container's ne
 by running anything in the branch container, and a forwarder ends when the container stops or restarts.
 
 Browser: with `container.mcp` set to `{"chrome": {}}` (host config only, never the blueprint),
-`kunj ct agent` lets the agent drive a browser on your machine. It adds
+`kunj ct agent` lets the agent drive a browser on your machine. Be clear about what that means: the
+agent then effectively drives a browser on your Mac's network, outside the sandbox and its firewall,
+which is why it is off by default. It adds
 `mcpServers.chrome = { command: "socat", args: ["-", "UNIX-CONNECT:/run/kunj-mcp/chrome.sock"] }` to
 the container user's `~/.claude.json` and starts a background `kunj ct mcp`, which keeps a
-`docker exec … socat UNIX-LISTEN` open on that socket and, when Claude Code connects, runs
-`npx -y chrome-devtools-mcp@latest --isolated` (an empty, throwaway profile) here and pipes the two
-together. Each server takes `command`, `args`, `env` (it gets only those plus `PATH` and `HOME`) and
-`allowOrigins` (default `http://localhost` and `http://127.0.0.1`, any port): `navigate_page` and
-`new_page` calls to other origins are answered with an error and never reach the browser. One session
-at a time per server; the initialize result tells the agent which host port each forwarded container
-port is on. Running bridges are recorded in `~/.kunj/container-bridges.json` and shown by
-`kunj ct list` (`--json`: `bridges: [{ name, pid }]`).
+`docker exec -u <user> … socat UNIX-LISTEN` open on that socket (only creating `/run/kunj-mcp` runs as
+root) and, when Claude Code connects, runs `npx -y chrome-devtools-mcp@latest --isolated
+--categoryPerformance=false --categoryMemory=false --fileNavigations=false` (an empty, throwaway
+profile) here and pipes the two together. Every request is checked on the way: only a fixed list of
+browser tools passes (pages, navigation, input, snapshots and screenshots, console and network reads,
+`evaluate_script`, emulation; never `upload_file`, heap snapshots, traces or Lighthouse), and no
+argument naming a file (`filePath`, `sourcePath`, ...) on any tool, so the agent cannot read or write
+files on your Mac; `tools/list` is cut down to match. `navigate_page`/`new_page` may open only the host
+ports forwarded for the container (`allowOrigins` lists origins instead; one without a port allows
+every port, which is broad). That limits explicit navigation only, not a network boundary: a click or
+`evaluate_script` can still take the page anywhere. Each server takes `command`, `args`, `env` (it gets
+only those plus `PATH` and `HOME`) and `allowOrigins`. One session at a time per server; the bridge
+ends when the container stops or restarts; the initialize result tells the agent which host port each
+forwarded container port is on. Running bridges are recorded in `~/.kunj/container-bridges.json` and
+shown by `kunj ct list` (`--json`: `bridges: [{ name, pid }]`).
 
 Hooks: `pre-container-create`, `post-container-create`, `pre-container-delete` and
 `post-container-delete` receive `branch`, `container` and `image` (see [Hooks](#hooks)). The create
