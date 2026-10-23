@@ -155,7 +155,7 @@ SwiftTerm terminals and Monaco in one WKWebView. Five live Claude Code sessions 
 Terminal.app on `seq` and `cat`, slower on a `yes` flood; Monaco's diff showed in under 1 s (its web
 process 340–420 MB, Monaco's cost in any runtime); menu shortcuts, real key presses and live resize
 worked. Weakness: every tab parses output on the main thread, hidden or not, so five flooding tabs pin
-it at 95% and typing in them lags 0.5–1.2 s 
+it at 95% and typing in them lags 0.5–1.2 s.
 
 ## Decisions
 

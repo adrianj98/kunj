@@ -38,7 +38,7 @@ page only says where each thing stands.
 | Published JSON types | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 36e64a5, d0a490a, 22a8444 |
 | `kunj agent` for worktrees, tmux optional | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 2974aef, 75380f3, ce52ad8, 453f241, e5b15a4 |
 | `kunj ct file read\|write` | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 47fcefe, 5721f17 |
-| `kunj events --json` with status poll | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 189d9ba, 3685ef6, ce5691d |
+| `kunj events --json` with status poll; exits when stopped even while Docker hangs | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 189d9ba, 3685ef6, ce5691d, this commit |
 | `kunj agent` checked with a real tmux 3.8: `-e` gives this branch's `KUNJ_*` with another tmux server running, a rerun reattaches (`-A`, same pane, no second agent), it starts from inside a tmux pane without the nesting error, the session has `window-size latest` | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | verified 2026-10-23 with tmux 3.8 on macOS, and 3.3a and 3.5a in Debian containers (`scripts/check-tmux-agent.sh`); no code change |
 | Specs merged into one folder and checked against the code | this folder | f3a5e35, d1eea00 |
 | Native IDE spike: SwiftTerm handles five live Claude TUIs (6% CPU idle), Monaco diff in one WKWebView in under 1 s, menu shortcuts work with the webview focused; caveat: hidden tabs still parse on the main thread | [spikes/native-ide/REPORT.md](../../spikes/native-ide/REPORT.md) | 1c2aaa3, 1730cd1, 0e41a24 |
@@ -51,7 +51,6 @@ Nothing in progress.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| `kunj events` must exit when stopped while Docker hangs | [workspace-ide.md](workspace-ide.md) | The `docker info` / `docker ps` child is never killed after abort; kill it through a signal in `spawnDocker`, or exit once `watchEvents` resolves. Needed before the app. |
 | Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Designed 2026-10-23; needs an implementation plan |
 | Workspace app v1 | [workspace-ide.md](workspace-ide.md) | Runtime decided: native (AppKit + SwiftTerm, Monaco in one WKWebView); the Electron plan needs rewriting in Swift |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |

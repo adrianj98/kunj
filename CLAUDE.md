@@ -421,7 +421,8 @@ debounced per key (250 ms, the first change starts the timer). An unreachable ba
 `backend unavailable`, then `info()` is retried every 10 s until `available`. Container events map to
 a repo through an id computed once per repo at startup from `git remote get-url origin` (insteadOf,
 includes; userinfo stripped), as the `kunj.repo` label has it (`repoId` is the test seam). It stops on SIGINT/SIGTERM
-or when stdin ends, so a child dies with its parent. On the fast path; a missing directory is skipped.
+or when stdin ends, so a child dies with its parent; docker calls still hung then are killed
+(`LocalDockerBackend.killChildren()`). On the fast path; a missing directory is skipped.
 `index` is a trigger, so `getWorktreeStatus()` runs `git status` with `GIT_OPTIONAL_LOCKS=0`: otherwise
 git rewrites a stale index on every listing, which is another `git` event and another refresh.
 

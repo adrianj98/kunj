@@ -124,6 +124,7 @@ export class EventsCommand extends BaseCommand {
       stdin.off('end', stop);
       stdin.off('error', stop);
       stdin.pause();
+      backend.killChildren(); // a docker call hung past the abort would keep the process alive
     }
   }
 }

@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { ChildProcess, spawn, SpawnOptions } from 'child_process';
 import { Readable } from 'stream';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -210,10 +210,28 @@ export class LocalDockerBackend implements ContainerBackend {
     return this.context ? ['--context', this.context, ...args] : args;
   }
 
+  // Every docker child still running, so a long-lived caller (kunj events) can end hung ones on exit
+  private readonly children = new Set<ChildProcess>();
+
+  private spawnChild(args: string[], options: SpawnOptions): ChildProcess {
+    const child = spawn(this.dockerPath, this.argv(args), options);
+    this.children.add(child);
+    const forget = () => this.children.delete(child);
+    child.on('close', forget);
+    child.on('error', forget);
+    return child;
+  }
+
+  /** End the docker processes still running (a hung `docker info` would otherwise keep us alive). */
+  killChildren(): void {
+    for (const child of this.children) child.kill('SIGTERM');
+    this.children.clear();
+  }
+
   /** Run docker to completion. `echo` sends both output streams to our stderr (keeps --json stdout clean). */
   private spawnDocker(args: string[], opts: SpawnOpts = {}): Promise<Output> {
     return new Promise((resolve, reject) => {
-      const child = spawn(this.dockerPath, this.argv(args), {
+      const child = this.spawnChild(args, {
         stdio: [opts.input ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         ...(opts.cwd ? { cwd: opts.cwd } : {}),
         ...(opts.env ? { env: opts.env } : {}),
@@ -410,7 +428,7 @@ export class LocalDockerBackend implements ContainerBackend {
     ];
 
     return new Promise((resolve, reject) => {
-      const child = spawn(this.dockerPath, this.argv(args), { stdio });
+      const child = this.spawnChild(args, { stdio });
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
       let timer: NodeJS.Timeout | undefined;
@@ -502,7 +520,7 @@ export class LocalDockerBackend implements ContainerBackend {
     args.push(id);
     const { onLine } = opts;
     return new Promise((resolve, reject) => {
-      const child = spawn(this.dockerPath, this.argv(args), { stdio: ['ignore', onLine ? 'pipe' : 'inherit', onLine ? 'pipe' : 'inherit'] });
+      const child = this.spawnChild(args, { stdio: ['ignore', onLine ? 'pipe' : 'inherit', onLine ? 'pipe' : 'inherit'] });
       if (onLine) {
         for (const stream of ['stdout', 'stderr'] as const) {
           let pending = '';
@@ -527,7 +545,7 @@ export class LocalDockerBackend implements ContainerBackend {
     for (const [k, v] of Object.entries(filter)) args.push('--filter', v === '' ? `label=${k}` : `label=${k}=${v}`);
     return new Promise((resolve, reject) => {
       if (signal.aborted) return resolve();
-      const child = spawn(this.dockerPath, this.argv(args), { stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = this.spawnChild(args, { stdio: ['ignore', 'pipe', 'pipe'] });
       const onAbort = () => child.kill();
       signal.addEventListener('abort', onAbort, { once: true });
       let pending = '';

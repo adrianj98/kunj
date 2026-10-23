@@ -254,6 +254,17 @@ describe('docker backend', () => {
       expect(spawnMock).toHaveBeenCalledTimes(1);
     });
 
+    it('killChildren ends docker processes still running, and forgets finished ones', async () => {
+      const backend = new LocalDockerBackend();
+      results.push({ stdout: '' });
+      await backend.imageExists('done:1');
+      const hung = backend.info(); // no result queued: this child never exits
+      hung.catch(() => {});
+      backend.killChildren();
+      expect(children[0].kill).not.toHaveBeenCalled();
+      expect(children[1].kill).toHaveBeenCalledWith('SIGTERM');
+    });
+
     it('info fails when the daemon reported errors in its JSON', async () => {
       results.push({ stdout: '{"ServerErrors":["Cannot connect to the Docker daemon"]}\n' });
       await expect(new LocalDockerBackend().info()).rejects.toThrow('Docker is not available: Cannot connect to the Docker daemon');
