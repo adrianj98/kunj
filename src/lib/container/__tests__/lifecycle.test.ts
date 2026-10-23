@@ -311,6 +311,19 @@ describe('startContainer', () => {
     expect(execs.some(a => (a[1] as string[]).some(x => x.includes('.kunj/bin')))).toBe(false);
   });
 
+  it('a failed bundle seed names private submodules, not a token', async () => {
+    const hostPath = path.join(tmp, 'origin.bundle');
+    fs.writeFileSync(hostPath, 'bundle');
+    const b = backend();
+    const real = b.exec.bind(b);
+    b.exec = async (id, cmd, io) => ((cmd[2] ?? '').startsWith('set -e') ? { exitCode: 1, stdout: '' } : real(id, cmd, io));
+    const err = await startContainer(b, options({ bundle: { hostPath, containerPath: '/tmp/kunj-origin.bundle' } })).catch(e => e);
+    expect(err).toMatchObject({ code: 'seed' });
+    expect(err.message).toContain("Cloning the host's bundle of");
+    expect(err.message).toContain('private submodules');
+    expect(err.message).not.toContain('forward a token');
+  });
+
   it('bundle skips the no-token and unpushed gates', async () => {
     mocked.inspectOrigin.mockResolvedValue({
       originUrl: 'git@github.com:acme/app.git',

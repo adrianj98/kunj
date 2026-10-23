@@ -410,6 +410,11 @@ const BRANCH_ALLOW = 'it-allow';
       };
     }
 
+    /** A clone or fetch of the git:// origin in any exec; the URL is shell-quoted in the seed script. */
+    const NETWORK_CLONE = /git clone [^\n]*git:\/\//;
+    const networkGit = (execs: string[][]) =>
+      execs.map(argv => argv.join(' ')).filter(s => NETWORK_CLONE.test(s) || s.includes('git fetch origin'));
+
     /** Records every exec's argv, to tell a clone from a seed copy. */
     class RecordingBackend extends LocalDockerBackend {
       execs: string[][] = [];
@@ -473,7 +478,7 @@ const BRANCH_ALLOW = 'it-allow';
       const result = await snapshotBlueprint(rec, { ...snapshotOptions(await resolved()), rebuild: true });
       expect(result).toMatchObject({ tag, hash, viaBundle: true, reused: false });
       const scripts = rec.execs.map(argv => argv.join(' '));
-      expect(scripts.filter(s => s.includes('git clone git://'))).toEqual([]);
+      expect(networkGit(rec.execs)).toEqual([]);
       expect(scripts.some(s => s.includes("git clone --no-checkout -b 'main' '/tmp/kunj-origin.bundle' /workspace"))).toBe(true);
 
       const originHead = git(['rev-parse', 'main'], bare);
@@ -523,8 +528,11 @@ const BRANCH_ALLOW = 'it-allow';
     });
 
     it('--no-snapshot clones and runs setup', async () => {
-      const started = await startContainer(backend, bpStart('it-bp-fresh', { noSnapshot: true }));
+      const rec = new RecordingBackend();
+      const started = await startContainer(rec, bpStart('it-bp-fresh', { noSnapshot: true }));
       try {
+        // The matcher the bundle test relies on does catch a clone from origin
+        expect(rec.execs.some(argv => NETWORK_CLONE.test(argv.join(' ')))).toBe(true);
         expect(started.blueprint).toMatchObject({ snapshot: null, setupRan: true, maintainRan: true });
         expect(started.image).not.toBe(tag);
         const r = await inside(started.containerId, 'test -f installed && test -f maintained && command -v jq');

@@ -499,7 +499,11 @@ async function seedIfNeeded(
         : `Cloning ${origin.originUrl}`;
     throw new StartError(
       `${what} in the container failed (exit ${r.exitCode}).` +
-        (hasToken || bundle ? '' : ' If origin needs authentication, forward a token with container.env (GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN).'),
+        (bundle
+          ? ' If the repository has private submodules, they cannot be fetched during a snapshot yet.'
+          : hasToken
+            ? ''
+            : ' If origin needs authentication, forward a token with container.env (GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN).'),
       'seed'
     );
   }
