@@ -31,6 +31,7 @@ jest.mock('../../lib/config', () => ({
   getRepoCommonRoot: jest.fn(() => '/repo'),
   getRepoCommonDir: jest.fn(() => '/repo/.git'),
   getOriginUrl: jest.fn(() => 'https://github.com/acme/app.git'),
+  resetRepoCache: jest.fn(),
 }));
 
 jest.mock('../../lib/git', () => ({
@@ -57,7 +58,17 @@ jest.mock('../../lib/container/blueprint', () => ({
   resolveBlueprint: jest.fn(async () => null),
 }));
 
-jest.mock('../../lib/repos', () => ({ recordRepo: jest.fn() }));
+let mockRepos: Array<{ root: string; exists: boolean }> = [];
+jest.mock('../../lib/repos', () => ({ recordRepo: jest.fn(), listRepos: jest.fn(() => mockRepos) }));
+
+jest.mock('../../lib/container/prune', () => ({
+  ...jest.requireActual('../../lib/container/prune'),
+  planPrune: jest.fn(),
+  applyPrune: jest.fn(async () => ({ removed: ['kunj-app-gone-abc123'], failed: [] })),
+}));
+
+let mockConfirm = true;
+jest.mock('inquirer', () => ({ __esModule: true, default: { prompt: jest.fn(async () => ({ ok: mockConfirm })) } }));
 
 jest.mock('../../lib/container/forward', () => ({
   ...jest.requireActual('../../lib/container/forward'),
@@ -122,6 +133,10 @@ import { detectDefaultBranch } from '../../lib/base-branch';
 import { loadResolvedConfig } from '../../lib/config';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri } from '../../lib/container/editor';
 import * as autoforward from '../../lib/container/autoforward';
+import * as prune from '../../lib/container/prune';
+import * as config from '../../lib/config';
+import { runActionHook } from '../../lib/hooks';
+import inquirer from 'inquirer';
 
 const REPO_ID = repoIdFromUrl('https://github.com/acme/app.git');
 
@@ -169,6 +184,9 @@ beforeEach(() => {
   backend.calls = [];
   backend.existing = [];
   backend.execResults.clear();
+  backend.volumes.clear();
+  backend.volumeLabels.clear();
+  backend.networks.clear();
   mockForwards.length = 0;
   stdout = [];
   writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
@@ -221,7 +239,7 @@ describe('ContainerCommand', () => {
   it('rejects unknown actions', async () => {
     await new ContainerCommand().execute('frobnicate', {});
     expect(errors).toEqual([
-      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, logs, list, stop, remove, blueprint",
+      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, logs, list, stop, remove, prune, blueprint",
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -406,6 +424,7 @@ describe('ContainerCommand', () => {
           services: [],
         },
       ],
+      orphans: [],
     });
   });
 
@@ -1062,6 +1081,118 @@ describe('ContainerCommand', () => {
       await new ContainerCommand().execute('open', 'feat', {});
       expect(errors).toEqual(['✗ No container for feat; run kunj ct start feat']);
       expect(mockSpawned).toEqual([]);
+    });
+  });
+  describe('prune', () => {
+    const NAMES = containerNames('app', REPO_ID, 'gone');
+    const PLAN = {
+      containers: [{ branch: 'gone', names: NAMES, reason: 'branch-gone', image: 'kunj-sandbox:1', guard: { unpushedRefs: [], stashes: 0, dirty: false, originReachable: true } }],
+      orphans: [{ kind: 'volume', name: 'kunj-app-old-123456-ws' }],
+      images: ['kunj-blueprint-app:old'],
+      bytes: 5 * 1024 * 1024,
+      warnings: [],
+    };
+    let isTTY: boolean | undefined;
+
+    beforeEach(() => {
+      (prune.planPrune as jest.Mock).mockImplementation(async () => JSON.parse(JSON.stringify(PLAN)));
+      isTTY = process.stdout.isTTY;
+      mockConfirm = true;
+      mockRepos = [];
+    });
+    afterEach(() => {
+      Object.defineProperty(process.stdout, 'isTTY', { value: isTTY, configurable: true });
+    });
+    const tty = (value: boolean) => Object.defineProperty(process.stdout, 'isTTY', { value, configurable: true });
+
+    it('is a dry run when stdout is not a TTY', async () => {
+      tty(false);
+      await new ContainerCommand().execute('prune', { json: true });
+      expect(prune.planPrune).toHaveBeenCalledWith(backend, expect.objectContaining({ repoId: REPO_ID, repoName: 'app', cwd: '/repo', force: false }));
+      expect(prune.applyPrune).not.toHaveBeenCalled();
+      expect(JSON.parse(stdout.join(''))).toEqual({ success: true, dryRun: true, plan: PLAN, removed: [], failed: [] });
+    });
+
+    it('--dry-run on a TTY lists what would go, with sizes', async () => {
+      tty(true);
+      await new ContainerCommand().execute('prune', { dryRun: true });
+      expect(prune.applyPrune).not.toHaveBeenCalled();
+      expect(inquirer.prompt).not.toHaveBeenCalled();
+      const printed = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(printed).toContain(NAMES.container);
+      expect(printed).toContain('kunj-app-old-123456-ws');
+      expect(printed).toMatch(/kunj-blueprint-app:old/);
+      expect(printed).toMatch(/5 MB/);
+    });
+
+    it('confirms once on a TTY, then removes with the container-delete hooks', async () => {
+      tty(true);
+      await new ContainerCommand().execute('prune', {});
+      expect(inquirer.prompt).toHaveBeenCalledTimes(1);
+      expect(prune.applyPrune).toHaveBeenCalledWith(backend, PLAN, expect.objectContaining({ repoId: REPO_ID }));
+      const hook = (prune.applyPrune as jest.Mock).mock.calls[0][2].hook;
+      await hook('pre-container-delete', { branch: 'gone', container: NAMES.container, image: 'kunj-sandbox:1' });
+      expect(runActionHook).toHaveBeenCalledWith('pre-container-delete', { branch: 'gone', container: NAMES.container, image: 'kunj-sandbox:1' }, expect.objectContaining({ skip: false }));
+    });
+
+    it('removes nothing when the confirmation is declined', async () => {
+      tty(true);
+      mockConfirm = false;
+      await new ContainerCommand().execute('prune', {});
+      expect(prune.applyPrune).not.toHaveBeenCalled();
+    });
+
+    it('--force skips the confirmation and the guard; --yes applies without a TTY', async () => {
+      tty(true);
+      await new ContainerCommand().execute('prune', { force: true, hooks: false });
+      expect(inquirer.prompt).not.toHaveBeenCalled();
+      expect(prune.planPrune).toHaveBeenCalledWith(backend, expect.objectContaining({ force: true }));
+      expect(prune.applyPrune).toHaveBeenCalledTimes(1);
+
+      tty(false);
+      await new ContainerCommand().execute('prune', { yes: true, json: true });
+      expect(prune.planPrune).toHaveBeenLastCalledWith(backend, expect.objectContaining({ force: false }));
+      expect(prune.applyPrune).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(stdout.join(''))).toMatchObject({ success: true, dryRun: false, removed: ['kunj-app-gone-abc123'], failed: [] });
+    });
+
+    it('--all plans every recorded repository from its own directory, asking about kunj images once', async () => {
+      tty(false);
+      const dirs = [fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-a-')), fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-b-'))].map(d => fs.realpathSync(d));
+      mockRepos = [{ root: dirs[0], exists: true }, { root: dirs[1], exists: true }, { root: '/gone', exists: false }];
+      const seen: string[] = [];
+      (config.getRepoCommonRoot as jest.Mock).mockImplementation(() => process.cwd());
+      (prune.planPrune as jest.Mock).mockImplementation(async (_b: unknown, c: { cwd: string; kunjImages?: boolean }) => {
+        seen.push(`${c.cwd}:${c.kunjImages}`);
+        return { containers: [], orphans: [], images: [], bytes: 0, warnings: [] };
+      });
+      const cwd = process.cwd();
+      try {
+        await new ContainerCommand().execute('prune', { all: true, json: true });
+      } finally {
+        (config.getRepoCommonRoot as jest.Mock).mockImplementation(() => '/repo');
+        dirs.forEach(d => fs.rmSync(d, { recursive: true, force: true }));
+      }
+      expect(seen).toEqual([`${dirs[0]}:true`, `${dirs[1]}:false`]);
+      expect(process.cwd()).toBe(cwd);
+      expect(config.resetRepoCache).toHaveBeenCalled();
+      expect(JSON.parse(stdout.join(''))).toMatchObject({ success: true, dryRun: true });
+    });
+
+    it('list reports orphans in JSON and as a line in text', async () => {
+      backend.existing = [mainContainer('feat')];
+      (lifecycle.containerStatus as jest.Mock).mockResolvedValue({ agentRunning: false, head: null, ahead: 0, dirty: false, status: 'ok' });
+      const old = containerNames('app', REPO_ID, 'old');
+      backend.volumes.add(old.workspaceVolume);
+      backend.volumeLabels.set(old.workspaceVolume, { 'kunj.repo': REPO_ID, 'kunj.branch': 'old' });
+      backend.networks.set(old.network, { 'kunj.repo': REPO_ID, 'kunj.branch': 'old' });
+      await new ContainerCommand().execute('list', { json: true });
+      expect(JSON.parse(stdout.join('')).orphans).toEqual([
+        { kind: 'volume', name: old.workspaceVolume },
+        { kind: 'network', name: old.network },
+      ]);
+      await new ContainerCommand().execute('list', {});
+      expect(logSpy.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/orphans.*2.*kunj ct prune/);
     });
   });
 });

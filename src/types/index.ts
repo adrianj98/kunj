@@ -67,6 +67,8 @@ export interface KunjConfig {
     memory?: string;
     publish?: string[];
     forward?: { auto?: boolean; ignore?: Array<number | string> | number | string };
+    // `kunj container prune` removes stopped containers created longer ago (0/unset = off)
+    pruneAfterDays?: number;
     // Sidecar services by name (validated by parseServices in src/lib/container/services.ts)
     services?: Record<string, unknown>;
   };

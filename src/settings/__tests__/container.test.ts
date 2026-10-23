@@ -17,7 +17,10 @@ describe('container settings', () => {
       publish: [],
       services: {},
       forward: { auto: true, ignore: [] },
+      pruneAfterDays: 0,
     });
+    expect(settingsRegistry.get('container.pruneAfterDays')?.validate?.(30)).toBe(true);
+    expect(settingsRegistry.get('container.pruneAfterDays')?.validate?.(-1)).toBe(false);
     expect(settingsRegistry.get('container.services')?.validate?.({ pg: { image: 'p' } })).toBe(true);
     expect(settingsRegistry.get('container.services')?.validate?.('pg')).toBe(false);
     expect(settingsRegistry.get('hooks.pre-container-create')).toBeDefined();

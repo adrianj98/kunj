@@ -12,6 +12,7 @@ import {
   ExecTimeoutError,
   ImageInfo,
   Labels,
+  LabelledObject,
   isImageRef,
 } from './backend';
 
@@ -252,8 +253,10 @@ export class LocalDockerBackend implements ContainerBackend {
 
   // Two subprocesses whatever the number of images: ls for the matching ids, then one inspect
   // for exact labels, size and every tag
-  async listImages(filter: Labels): Promise<ImageInfo[]> {
+  async listImages(filter: Labels, opts: { references?: string[] } = {}): Promise<ImageInfo[]> {
     const filters = Object.keys(filter).flatMap(k => ['--filter', `label=${k}=${filter[k]}`]);
+    // Several reference filters match any of them
+    for (const r of opts.references ?? []) filters.push('--filter', `reference=${r}`);
     const ls = await this.checked(['image', 'ls', '--no-trunc', '--format', '{{json .}}', ...filters]);
     const ids = [...new Set(parseImageLs(ls.stdout).map(i => i.id))];
     if (ids.length === 0) return [];
@@ -276,6 +279,25 @@ export class LocalDockerBackend implements ContainerBackend {
 
   async volumeExists(name: string): Promise<boolean> {
     return (await this.spawnDocker(['volume', 'inspect', '--format', '{{.Name}}', name])).code === 0;
+  }
+
+  async listVolumes(filter: Labels): Promise<LabelledObject[]> {
+    return this.listLabelled('volume', ['-q'], filter);
+  }
+
+  async listNetworks(filter: Labels): Promise<LabelledObject[]> {
+    return this.listLabelled('network', ['-q', '--no-trunc'], filter);
+  }
+
+  // ls for the names, then one inspect for exact labels: ls prints labels as "k=v,k=v", which
+  // mangles a branch name containing a comma
+  private async listLabelled(kind: 'volume' | 'network', lsFlags: string[], filter: Labels): Promise<LabelledObject[]> {
+    const filters = Object.keys(filter).flatMap(k => ['--filter', `label=${k}=${filter[k]}`]);
+    const ls = await this.checked([kind, 'ls', ...lsFlags, ...filters]);
+    const ids = ls.stdout.split('\n').map(l => l.trim()).filter(Boolean);
+    if (ids.length === 0) return [];
+    const inspect = await this.checked([kind, 'inspect', '--format', '{{json .}}', ...ids]);
+    return jsonLines(inspect.stdout).map(o => ({ name: String(o.Name), labels: o.Labels ?? {} }));
   }
 
   async run(spec: ContainerSpec): Promise<string> {

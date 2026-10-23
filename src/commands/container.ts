@@ -12,6 +12,7 @@
 //   kunj container list [--all] [--no-status]
 //   kunj container stop [branch]
 //   kunj container remove [branch] [--force] [--keep-volumes]
+//   kunj container prune [--all] [--dry-run] [--force] [--yes]
 //   kunj container blueprint init|snapshot|status|remove
 //
 // `ct` is an alias. The command is on the fast path (src/commands/fast.ts): keep heavy
@@ -22,10 +23,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
-import { getKunjDir, getOriginUrl, getRepoCommonDir, getRepoCommonRoot, getRepoName, loadResolvedConfig } from '../lib/config';
+import { getKunjDir, getOriginUrl, getRepoCommonDir, getRepoCommonRoot, getRepoName, loadResolvedConfig, resetRepoCache } from '../lib/config';
 import { getCurrentBranch, getGitRoot } from '../lib/git';
 import { HookError, runActionHook } from '../lib/hooks';
-import { recordRepo } from '../lib/repos';
+import { listRepos, recordRepo } from '../lib/repos';
 import { getVersion } from '../lib/version';
 import { shellQuote } from '../lib/config-vars';
 import { detectDefaultBranch } from '../lib/base-branch';
@@ -51,6 +52,7 @@ import { stripUserinfo } from '../lib/container/seed';
 import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
+import { PrunePlan, applyPrune, findOrphans, planPrune } from '../lib/container/prune';
 import { KunjConfig } from '../types';
 
 interface ContainerOptions {
@@ -76,6 +78,7 @@ interface ContainerOptions {
   newWindow?: boolean;
   auto?: boolean;
   detach?: boolean;
+  dryRun?: boolean;
 }
 
 interface Context {
@@ -93,7 +96,7 @@ class ContainerError extends Error {
   }
 }
 
-const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'logs', 'list', 'stop', 'remove', 'blueprint'];
+const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint'];
 const BLUEPRINT_ACTIONS = ['init', 'snapshot', 'status', 'remove'];
 const WORKSPACE = '/workspace';
 const STATUS_TIMEOUT_MS = 2000;
@@ -123,17 +126,18 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--rebuild', description: '[start] Rebuild the image and recreate the container (volumes are kept); [blueprint snapshot] snapshot again even when up to date' },
         { flags: '--no-snapshot', description: "[start] Neither build nor use the blueprint's snapshot (tools and setup run in the container)" },
         { flags: '--keep-on-error', description: '[start] Keep what a failed start created, for debugging' },
-        { flags: '--no-hooks', description: "[start|remove] Skip kunj hooks (see 'kunj hooks --help')" },
+        { flags: '--no-hooks', description: "[start|remove|prune] Skip kunj hooks (see 'kunj hooks --help')" },
         { flags: '--no-status', description: '[list] Skip the per-container status exec (faster listing)' },
-        { flags: '-a, --all', description: "[list] Show every repository's containers" },
-        { flags: '-f, --force', description: '[remove] Remove even when the container holds unpushed work' },
+        { flags: '-a, --all', description: "[list] Show every repository's containers; [prune] prune every repository in ~/.kunj/repos.json" },
+        { flags: '-f, --force', description: '[remove|prune] Remove even when the container holds unpushed work (prune: also without asking)' },
+        { flags: '--dry-run', description: '[prune] Only list what would be removed (the default when stdout is not a terminal)' },
         { flags: '--keep-volumes', description: "[remove] Keep the workspace and home volumes (and the services' volumes)" },
         { flags: '--follow', description: '[logs] Keep streaming new output' },
         { flags: '-n, --new-window', description: '[open] Open in a new editor window' },
         { flags: '--auto', description: '[forward] Forward every port the container starts listening on (>= 1024, not in container.forward.ignore)' },
         { flags: '--detach', description: '[forward --auto] Run the forwarder in the background; it exits when the container stops' },
         { flags: '--global', description: '[blueprint init] Write the host copy (~/.kunj/<repo>/blueprint.json) instead of .kunj/blueprint.json' },
-        { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file' },
+        { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file; [prune] remove without asking (the guard still applies)' },
         { flags: '--no-bundle', description: '[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)' },
         { flags: '--blueprint <path>', description: '[blueprint snapshot|status] Use this blueprint file instead of the resolved one' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
@@ -153,6 +157,7 @@ export class ContainerCommand extends BaseCommand {
         '  list                                 containers of this repository (the default)',
         '  stop [branch]                        stop, keeping the workspace',
         '  remove [branch]                      remove, refusing while work is unpushed',
+        '  prune [--all] [--dry-run]            remove containers of branches gone from origin, orphans and old images',
         '',
         'Blueprint (how a new container is set up: tools, setup and maintain commands):',
         '  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json',
@@ -255,6 +260,8 @@ export class ContainerCommand extends BaseCommand {
         return this.stop(target, options);
       case 'remove':
         return this.remove(target, options);
+      case 'prune':
+        return this.prune(options);
       case 'blueprint':
         return this.blueprint(target, options);
     }
@@ -805,8 +812,11 @@ export class ContainerCommand extends BaseCommand {
     const commonDir = getRepoCommonDir();
     if (commonDir) recordRepo(commonDir);
 
-    let all = await ctx.backend.list(options.all ? {} : { [LABEL.repo]: ctx.repo.id });
+    const repoFilter: Record<string, string> = options.all ? {} : { [LABEL.repo]: ctx.repo.id };
+    let all = await ctx.backend.list(repoFilter);
     if (options.all) all = all.filter(c => c.labels[LABEL.repo]);
+    // Started now, awaited after the status execs: they do not depend on each other
+    const leftovers = Promise.all([ctx.backend.listVolumes(repoFilter), ctx.backend.listNetworks(repoFilter)]);
     const mains = all.filter(c => this.isMain(c));
     const helpers = new Map(all.filter(c => !this.isMain(c)).map(c => [c.name, c]));
 
@@ -822,6 +832,8 @@ export class ContainerCommand extends BaseCommand {
     const blueprintMains = mains.filter(c => this.recordedOptions(c).imageKind === 'blueprint');
     const currentHash = blueprintMains.some(c => c.labels[LABEL.repo] === ctx.repo.id) ? await this.currentHash(ctx) : null;
 
+    const [volumes, networks] = await leftovers;
+    const orphans = findOrphans(all, volumes, networks);
     const forwards = readForwards().filter(r => r.port > 0);
     const containers = mains.map((c, i) => {
       const s = statuses[i];
@@ -853,6 +865,7 @@ export class ContainerCommand extends BaseCommand {
         repo: ctx.repo.name,
         backend: { kind: 'docker', context: ctx.dockerContext || 'default' },
         containers,
+        orphans,
       });
       return;
     }
@@ -878,6 +891,9 @@ export class ContainerCommand extends BaseCommand {
       if (running && helper?.state !== 'running') line += chalk.red('  [firewall helper down]');
       console.log(line);
     });
+    if (orphans.length) {
+      console.log(chalk.yellow(`orphans: ${orphans.length} (${orphans.map(o => o.name).join(', ')}); run kunj ct prune`));
+    }
     console.log('');
     console.log(chalk.gray("Tip: Use 'kunj ct start <branch>' to start a container"));
   }
@@ -1114,6 +1130,114 @@ export class ContainerCommand extends BaseCommand {
   }
 
   // ---------------------------------------------------------------------
+  // prune
+  // ---------------------------------------------------------------------
+
+  // Two passes: plan every repository, confirm once, then apply. Each repository is planned and
+  // applied from its own directory, because the config, repo name and blueprint come from the cwd.
+  private async prune(options: ContainerOptions): Promise<void> {
+    const dryRun = !!options.dryRun || (!process.stdout.isTTY && !options.yes && !options.force);
+    const startDir = process.cwd();
+    const roots: Array<string | null> = options.all ? listRepos().filter(r => r.exists).map(r => r.root) : [null];
+    const runs: Array<{ root: string | null; ctx: Context; plan: PrunePlan }> = [];
+    const enter = (root: string | null) => {
+      if (!root) return;
+      process.chdir(root);
+      resetRepoCache();
+    };
+
+    try {
+      for (const root of roots) {
+        enter(root);
+        let ctx: Context;
+        try {
+          ctx = await this.context(options);
+        } catch (err) {
+          if (!root) throw err;
+          this.warn(`Skipping ${root}: ${err instanceof Error ? err.message : String(err)}`);
+          continue;
+        }
+        this.progress(chalk.gray(`Planning ${ctx.repo.name}...`));
+        const plan = await planPrune(ctx.backend, {
+          repoId: ctx.repo.id,
+          repoName: ctx.repo.name,
+          cwd: ctx.repo.root,
+          kunjVersion: getVersion(),
+          pruneAfterDays: ctx.config.container?.pruneAfterDays,
+          force: !!options.force,
+          currentBlueprintHash: () => this.currentHash(ctx),
+          kunjImages: runs.length === 0,
+        });
+        runs.push({ root, ctx, plan });
+      }
+
+      const merged = mergePlans(runs.map(r => r.plan));
+      const count = removalCount(merged);
+      if (!this.jsonMode) this.printPrunePlan(runs, dryRun);
+
+      let removed: string[] = [];
+      let failed: string[] = [];
+      let apply = !dryRun && count > 0;
+      if (apply && !this.jsonMode && !options.force && !options.yes) {
+        const inquirer = (await import('inquirer')).default;
+        const { ok } = await inquirer.prompt([{ type: 'confirm', name: 'ok', message: `Remove ${count} object${count === 1 ? '' : 's'}?`, default: false }]);
+        apply = ok;
+        if (!ok) console.log(chalk.gray('Nothing removed'));
+      }
+      if (apply) {
+        for (const run of runs) {
+          if (removalCount(run.plan) === 0) continue;
+          enter(run.root);
+          const hookOptions = { hooks: run.ctx.config.hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
+          const result = await applyPrune(run.ctx.backend, run.plan, {
+            repoId: run.ctx.repo.id,
+            kunjVersion: getVersion(),
+            hook: async (name, values) => {
+              await runActionHook(name, values, hookOptions);
+            },
+          });
+          removed = removed.concat(result.removed);
+          failed = failed.concat(result.failed);
+        }
+      }
+
+      if (this.jsonMode) {
+        this.outputJSON({ success: failed.length === 0, dryRun, plan: merged, removed, failed });
+        return;
+      }
+      if (apply) {
+        console.log(chalk.green(`✓ Removed ${removed.length} object${removed.length === 1 ? '' : 's'}`));
+        for (const f of failed) console.error(chalk.red(`✗ ${f}`));
+        if (failed.length) process.exitCode = 1;
+      } else if (dryRun && count > 0) {
+        const how = options.dryRun ? 'without --dry-run' : 'in a terminal, or with --yes,';
+        console.log(chalk.gray(`Dry run: nothing removed. Run kunj ct prune${options.all ? ' --all' : ''} ${how} to remove these.`));
+      }
+    } finally {
+      if (options.all) {
+        process.chdir(startDir);
+        resetRepoCache();
+      }
+    }
+  }
+
+  private printPrunePlan(runs: Array<{ ctx: Context; plan: PrunePlan }>, dryRun: boolean): void {
+    for (const { ctx, plan } of runs) {
+      console.log(chalk.blue(`Prune ${ctx.repo.name}${dryRun ? ' (dry run)' : ''}:`));
+      for (const w of plan.warnings) console.log(chalk.yellow(`  ⚠ ${w}`));
+      if (removalCount(plan) === 0 && !plan.containers.length) console.log(chalk.gray('  nothing to prune'));
+      for (const c of plan.containers) {
+        const why = c.reason === 'branch-gone' ? `branch ${c.branch} is gone from origin` : `stopped, created over ${ctx.config.container?.pruneAfterDays} days ago`;
+        if (c.kept) console.log(`  ${chalk.yellow('keep  ')} ${c.names.container}  ${chalk.gray(`${why}, but: ${c.kept}`)}`);
+        else console.log(`  ${chalk.red('remove')} ${c.names.container}  ${chalk.gray(why)}`);
+      }
+      for (const o of plan.orphans) console.log(`  ${chalk.red('remove')} ${o.kind} ${o.name}  ${chalk.gray('orphan: its branch container is gone')}`);
+      for (const tag of plan.images) console.log(`  ${chalk.red('remove')} image ${tag}`);
+      if (plan.images.length) console.log(chalk.gray(`  images: ${megabytes(plan.bytes)} MB`));
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // stop / remove
   // ---------------------------------------------------------------------
 
@@ -1164,6 +1288,21 @@ export class ContainerCommand extends BaseCommand {
 // container.agentCommand is shell text (it may quote its own arguments); extra args are data
 export function agentCommandLine(setting: string | undefined, args: string[]): string {
   return [(setting || CONTAINER_AGENT_COMMAND_DEFAULT).trim(), ...args.map(shellQuote)].join(' ');
+}
+
+function removalCount(plan: PrunePlan): number {
+  return plan.containers.filter(c => !c.kept).length + plan.orphans.length + plan.images.length;
+}
+
+function mergePlans(plans: PrunePlan[]): PrunePlan {
+  if (plans.length === 1) return plans[0];
+  return {
+    containers: plans.flatMap(p => p.containers),
+    orphans: plans.flatMap(p => p.orphans),
+    images: plans.flatMap(p => p.images),
+    bytes: plans.reduce((sum, p) => sum + p.bytes, 0),
+    warnings: plans.flatMap(p => p.warnings),
+  };
 }
 
 function megabytes(bytes: number): number {

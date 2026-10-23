@@ -21,6 +21,7 @@ import { resolveHelperImage } from '../image';
 import { getVersion } from '../../version';
 import { parseBlueprint, resolveBlueprint, snapshotTag, SEED_DIR } from '../blueprint';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint } from '../snapshot';
+import { applyPrune, parseLsRemoteHeads, planPrune } from '../prune';
 import { KunjConfig } from '../../../types';
 
 let dockerUp = false;
@@ -730,6 +731,58 @@ const BRANCH_ALLOW = 'it-allow';
       } finally {
         await removeSnapshots(backend, REPO_NAME, repoId);
       }
+    });
+  });
+  describe('prune', () => {
+    const ORPH = 'it-prune-orphan';
+    const WIP = 'it-prune-wip';
+    const ctx = { user: USER, kunjVersion: VERSION, force: true, keepVolumes: false };
+
+    beforeAll(() => {
+      const work = path.join(tmp, 'prune-work');
+      git(['clone', '-q', bare, work], tmp);
+      git(['push', '-q', 'origin', `origin/main:refs/heads/${ORPH}`, `origin/main:refs/heads/${WIP}`], work);
+      git(['fetch', '-q', bare, '+refs/heads/*:refs/remotes/origin/*'], hostClone);
+    });
+
+    it('removes the helper, volumes and network a container removed out of band left, and keeps unpushed work on a deleted branch', async () => {
+      const orphan = await startContainer(backend, startOptions(ORPH, config({ allowHost: true })));
+      const wip = await startContainer(backend, startOptions(WIP, config({ allowHost: true })));
+      try {
+        expect((await inside(wip.containerId, 'echo w > w.txt && git add w.txt && git commit -qm wip')).exitCode).toBe(0);
+        // The branch is deleted on origin (merged, say) while the container still has a commit it never pushed
+        git(['update-ref', '-d', `refs/heads/${WIP}`], bare);
+        // The main container goes behind kunj's back
+        await backend.remove({ containers: [orphan.names.container] });
+
+        const plan = await planPrune(backend, {
+          repoId,
+          repoName: REPO_NAME,
+          cwd: hostClone,
+          kunjVersion: VERSION,
+          force: false,
+          // The host cannot resolve host.docker.internal, origin's name inside the container
+          remoteBranches: async () => parseLsRemoteHeads(git(['ls-remote', '--heads', bare], tmp)),
+          kunjImages: false,
+        });
+        expect(plan.orphans).toEqual(expect.arrayContaining([
+          { kind: 'container', name: orphan.names.helper },
+          { kind: 'volume', name: orphan.names.workspaceVolume },
+          { kind: 'volume', name: orphan.names.homeVolume },
+          { kind: 'network', name: orphan.names.network },
+        ]));
+        const kept = plan.containers.find(c => c.branch === WIP);
+        expect(kept).toMatchObject({ reason: 'branch-gone', kept: expect.stringMatching(/unpushed commits/) });
+
+        const result = await applyPrune(backend, { ...plan, images: [] }, { repoId, kunjVersion: VERSION, forwardsFile: path.join(tmp, 'forwards.json') });
+        expect(result.failed).toEqual([]);
+        expect(labelledFor(ORPH)).toEqual([]);
+        expect(docker(['ps', '-aq', '--filter', `name=^${wip.names.container}$`])).not.toBe('');
+      } finally {
+        await removeContainer(backend, orphan.names, ctx);
+        await removeContainer(backend, wip.names, ctx);
+      }
+      expect(labelledFor(WIP)).toEqual([]);
     });
   });
 });

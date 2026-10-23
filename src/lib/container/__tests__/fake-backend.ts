@@ -22,6 +22,10 @@ export class FakeBackend implements ContainerBackend {
   images: ImageInfo[] = [];
   /** Volumes that exist; createVolume adds to it. */
   volumes = new Set<string>();
+  /** Labels of volumes, by name (createVolume records them); unlisted volumes have none. */
+  volumeLabels = new Map<string, Labels>();
+  /** Networks that exist, with their labels; createNetwork adds to it. */
+  networks = new Map<string, Labels>();
   /** composeConfig results keyed by the compose text; unlisted texts give an empty project. */
   composeConfigs = new Map<string, unknown>();
   /** containerState results by id; unlisted ids are 'running'. */
@@ -68,9 +72,11 @@ export class FakeBackend implements ContainerBackend {
     this.images.push({ tag, id: `img-${this.nextImageId++}`, createdAt: new Date().toISOString(), labels, size: 0 });
   }
 
-  async listImages(filter: Labels): Promise<ImageInfo[]> {
-    this.record('listImages', [filter]);
-    return this.images.filter(i => Object.keys(filter).every(k => i.labels[k] === filter[k]));
+  async listImages(filter: Labels, opts?: { references?: string[] }): Promise<ImageInfo[]> {
+    this.record('listImages', opts ? [filter, opts] : [filter]);
+    return this.images.filter(i =>
+      Object.keys(filter).every(k => i.labels[k] === filter[k]) &&
+      (!opts?.references || opts.references.includes(i.tag.slice(0, i.tag.lastIndexOf(':')))));
   }
 
   async removeImage(tag: string): Promise<void> {
@@ -81,16 +87,32 @@ export class FakeBackend implements ContainerBackend {
 
   async createNetwork(name: string, labels: Labels): Promise<void> {
     this.record('createNetwork', [name, labels]);
+    this.networks.set(name, labels);
   }
 
   async createVolume(name: string, labels: Labels): Promise<void> {
     this.record('createVolume', [name, labels]);
     this.volumes.add(name);
+    this.volumeLabels.set(name, labels);
   }
 
   async volumeExists(name: string): Promise<boolean> {
     this.record('volumeExists', [name]);
     return this.volumes.has(name);
+  }
+
+  async listVolumes(filter: Labels): Promise<Array<{ name: string; labels: Labels }>> {
+    this.record('listVolumes', [filter]);
+    return [...this.volumes]
+      .map(name => ({ name, labels: this.volumeLabels.get(name) ?? {} }))
+      .filter(v => Object.keys(filter).every(k => v.labels[k] === filter[k]));
+  }
+
+  async listNetworks(filter: Labels): Promise<Array<{ name: string; labels: Labels }>> {
+    this.record('listNetworks', [filter]);
+    return [...this.networks]
+      .map(([name, labels]) => ({ name, labels }))
+      .filter(v => Object.keys(filter).every(k => v.labels[k] === filter[k]));
   }
 
   async run(spec: ContainerSpec): Promise<string> {

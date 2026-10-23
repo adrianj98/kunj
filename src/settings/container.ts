@@ -107,6 +107,16 @@ export function registerContainerSettings(): void {
       examples: ['9229'],
     },
     {
+      key: 'container.pruneAfterDays',
+      description: '`kunj container prune` also removes stopped containers created more than this many days ago (0 = off)',
+      detailedDescription: 'Off by default. A container removed this way still has to pass the remove guard (no unpushed commits, stashes or uncommitted changes) unless prune is run with --force.',
+      type: 'number',
+      defaultValue: 0,
+      category: 'container',
+      validate: (value: number) => Number.isInteger(value) && value >= 0,
+      examples: ['30'],
+    },
+    {
       key: 'container.services',
       description: 'Sidecar services (Postgres, Redis, ...) started next to each branch container, by name',
       type: 'string',

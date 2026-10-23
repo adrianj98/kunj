@@ -176,10 +176,15 @@ The VS Code extension in `vscode-extension/` is a separate npm package (own `pac
 own clone, mainly to run an agent with permissions skipped. Origin is the only channel in and out;
 nothing from the host is bind-mounted. Design: docs/superpowers/specs/2026-10-21-branch-containers-design.md.
 Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sidecar services, `open` and
-`forward --auto`; no `prune` or Docker-in-Docker yet. Phase 3 (not started) is the workspace IDE:
+`forward --auto` and `prune`; no Docker-in-Docker yet. Phase 3 (not started) is the workspace IDE:
 docs/superpowers/specs/2026-10-23-workspace-ide-design.md.
 
-**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor}.ts`.
+**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor,prune}.ts`.
+`prune.ts` (`planPrune`/`applyPrune`) removes containers of branches gone from origin (one `git ls-remote
+--heads origin`; unreachable origin removes none) only when the remove guard is clean or `--force`,
+orphans found by labels (helpers, services, volumes, networks of a repo/branch with no main container),
+snapshots of another hash (all kept when the hash is unknown), other versions' `kunj-sandbox`/`kunj-nethelper`
+tags and stopped containers older than `container.pruneAfterDays`; never an image a container uses.
 `autoforward.ts` polls `/proc/net/tcp{,6}` (not `ss`, which most images lack) and forwards new listeners (127.0.0.1 only); running forwarders are in
 `~/.kunj/container-forwards.json` (dead pids pruned on read, atomic writes), and `agent` spawns a detached
 one unless `container.forward.auto` is `false` or one is registered for the container.

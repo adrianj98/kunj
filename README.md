@@ -165,11 +165,16 @@ git fetch origin && git switch feature/x   # the agent's pushes arrive via origi
 kunj ct list                           # containers of this repository (-a for all)
 kunj ct stop feature/x                 # keeps the workspace
 kunj ct remove feature/x               # refuses while work is unpushed (-f to override)
+kunj ct prune                          # containers of branches gone from origin, orphans, old images
 ```
 
 The branch defaults to the current one. `start` takes `--base <ref>`, `--image <img>`,
 `--publish <ports>`, `--rebuild`, `--no-snapshot` (see [Blueprints](#blueprints)) and `--keep-on-error`; `remove` takes `--force` and
-`--keep-volumes`; `open` starts a stopped container and opens `worktree.editorCommand` attached to it
+`--keep-volumes`; `prune` removes the containers of branches deleted on origin (only those without
+unpushed work, unless `--force`), helpers, services, volumes and networks left without their
+container, snapshot and `kunj-sandbox` images that are no longer current, and stopped containers
+older than `container.pruneAfterDays`; it asks first, takes `--dry-run` (the default when stdout is
+not a terminal; `--yes` applies there) and `--all` (every recorded repository); `open` starts a stopped container and opens `worktree.editorCommand` attached to it
 (VS Code and Cursor, through the Dev Containers extension; other editors get the `docker exec`
 command to run; while attached, the extension forwards your host's git credentials, SSH agent and
 gpg-agent into the container unless `dev.containers.copyGitConfig` is `false` and
@@ -194,6 +199,7 @@ Settings (`kunj config`):
 | `container.forward.auto` | `true` | `kunj ct agent` starts a background `forward --auto` |
 | `container.forward.ignore` | none | Container ports `forward --auto` never forwards |
 | `container.services` | none | Sidecar services by name (see [Services](#services)) |
+| `container.pruneAfterDays` | `0` (off) | `kunj ct prune` also removes stopped containers created longer ago |
 
 Network: by default the internet is open but the Docker host, the LAN and private ranges are
 blocked, except origin itself on its own port (so a self-hosted origin on the LAN still works). Set `container.network.allow` to restrict egress to a list of domains (plus GitHub, npm

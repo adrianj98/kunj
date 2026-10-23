@@ -28,6 +28,12 @@ export interface ImageInfo {
   size: number;
 }
 
+/** A volume or network: its name and exact labels. */
+export interface LabelledObject {
+  name: string;
+  labels: Labels;
+}
+
 export interface ContainerSpec {
   name: string;
   image: string;
@@ -87,13 +93,18 @@ export interface ContainerBackend {
   buildImage(tag: string, context: NodeJS.ReadableStream, opts?: BuildOptions): Promise<void>;
   /** Snapshot a container as an image; each label becomes a LABEL instruction, each of `changes` (Dockerfile syntax, e.g. ENV) another --change. */
   commitContainer(id: string, tag: string, labels: Labels, changes?: string[]): Promise<void>;
-  /** One entry per tag of every image carrying all of `filter`'s labels; untagged images are skipped. */
-  listImages(filter: Labels): Promise<ImageInfo[]>;
+  /** One entry per tag of every image carrying all of `filter`'s labels (and, with `references`, in one
+   * of those repositories, e.g. 'kunj-sandbox'); untagged images are skipped. */
+  listImages(filter: Labels, opts?: { references?: string[] }): Promise<ImageInfo[]>;
   /** Idempotent: an image that is already gone is not a failure. */
   removeImage(tag: string): Promise<void>;
   createNetwork(name: string, labels: Labels): Promise<void>;
   createVolume(name: string, labels: Labels): Promise<void>;
   volumeExists(name: string): Promise<boolean>;
+  /** Volumes carrying all of `filter`'s labels, with their exact labels. */
+  listVolumes(filter: Labels): Promise<LabelledObject[]>;
+  /** Networks carrying all of `filter`'s labels, with their exact labels. */
+  listNetworks(filter: Labels): Promise<LabelledObject[]>;
   run(spec: ContainerSpec): Promise<string>;
   list(filter: Labels): Promise<ContainerInfo[]>;
   /** null when the object does not exist */

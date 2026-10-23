@@ -1418,6 +1418,20 @@
     "sensitive": false
   },
   {
+    "key": "container.pruneAfterDays",
+    "type": "number",
+    "category": "container",
+    "default": 0,
+    "description": "`kunj container prune` also removes stopped containers created more than this many days ago (0 = off)",
+    "detailedDescription": "Off by default. A container removed this way still has to pass the remove guard (no unpushed commits, stashes or uncommitted changes) unless prune is run with --force.",
+    "options": null,
+    "examples": [
+      "30"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "container.services",
     "type": "string",
     "category": "container",

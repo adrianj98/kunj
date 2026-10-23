@@ -141,6 +141,17 @@ kunj config --set container.forward.ignore=[9229,5555]
 `container.dockerContext` makes every docker call use that context, for example to run containers in
 Colima while Docker Desktop stays your default; `--context` overrides it for one command.
 
+## Pruning old containers
+
+[`kunj ct prune`](../commands/#prune) always removes the containers of branches deleted on origin. To
+also remove containers that have been sitting stopped for a while, set `container.pruneAfterDays`
+(off by default). A container's age counts from when it was created, and it still has to pass the
+check for unpushed work:
+
+```bash
+kunj config --set container.pruneAfterDays=30
+```
+
 ## devcontainer.json
 
 When neither `--image` nor `container.image` is set, kunj looks for `.devcontainer/devcontainer.json`

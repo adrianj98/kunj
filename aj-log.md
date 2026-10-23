@@ -2,6 +2,36 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Containers: `kunj ct prune` (phase 2, Task 4)
+
+- New `src/lib/container/prune.ts`: `planPrune()` builds a serialisable `PrunePlan` (`containers` with
+  reason `branch-gone`/`age`, guard and `kept` reason; `orphans`; `images`; `bytes`; `warnings`) and
+  `applyPrune()` carries it out, reporting `removed`/`failed` and carrying on after a failure. Why: phase 2
+  spec section 4, so merged branches' containers, leftovers and old images do not pile up in Docker.
+- Branch gone = not in one `git ls-remote --heads origin` (no prompt, 15 s timeout). Origin unreachable:
+  nothing is removed for that reason and the plan carries a warning (fail safe). Such a container is
+  removed only when `inspectForRemove`/`describeGuard` is clean (or `--force`), through `removeContainer`,
+  with the `pre/post-container-delete` hooks; otherwise it is listed as kept with the reason. Snapshot
+  build containers (`<branch>:snapshot`) are left alone.
+- Orphans are matched by the `kunj.repo`/`kunj.branch` labels, never by name: helpers, services, volumes and
+  networks whose branch has no main container. This resolves the Task 1 finding about services left after
+  a `docker rm` of the branch container. Volumes kept by `remove --keep-volumes` count as orphans (documented).
+- Images: snapshots whose `kunj.blueprint.hash` is not the current hash (the command's `currentHash()`,
+  the same computation `list` and `start` use; unknown hash keeps them all), and `kunj-sandbox`/
+  `kunj-nethelper` tags other than this version's; an image any container uses is never removed. Sizes
+  from `listImages`, each image once.
+- `ContainerBackend` gains `listVolumes`/`listNetworks` (ls, then one inspect for exact labels, because
+  ls mangles a label containing a comma) and `listImages(filter, { references })`.
+- `kunj ct prune [--all] [--dry-run] [--force] [--yes]`: plans every repository first (`--all` runs each
+  from its own directory over `~/.kunj/repos.json`), confirms once with inquirer (lazy), then applies.
+  Dry run is the default when stdout is not a TTY unless `--yes` (keeps the guard) or `--force`; without
+  that a script could never prune. `--json`: `{ success, dryRun, plan, removed, failed }`.
+- Stale `~/.kunj/container-forwards.json` entries (containers that no longer exist) are dropped after a prune.
+- New setting `container.pruneAfterDays` (default 0 = off). `kunj ct list` gains `orphans: [{ kind, name }]`
+  in JSON and an `orphans:` line in text.
+- Docs: README, docs-site containers commands (`prune`, list orphans) and configuration pages, regenerated
+  reference JSON, CLAUDE.md Branch Containers paragraph.
+
 ## 2026-10-23 — Containers: `kunj ct forward --auto` (phase 2, Task 3)
 
 - New `src/lib/container/autoforward.ts`: `parseSsListen()` reads `ss -ltnH` (IPv4, IPv6, wildcard and

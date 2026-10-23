@@ -261,6 +261,10 @@ it back).
 | `-a, --all` | List the containers of every repository. |
 | `--no-status` | Skip the per-container check, for a faster listing. |
 
+When a helper, service, volume or network is left over from a branch container that no longer
+exists (one deleted with `docker rm`, say), the listing ends with an `orphans:` line, and `--json`
+lists them in `orphans` (`[{ "kind": "volume", "name": "..." }]`). [`prune`](#prune) removes them.
+
 ## logs
 
 Prints the output of the container, or of one of its [services](../services/):
@@ -314,6 +318,60 @@ Untracked files are not protected, as with `git worktree remove`.
 <Aside type="caution">
 `--force` deletes the workspace volume, and with it everything in the container that was not pushed.
 Use `--keep-volumes` if you are not sure.
+</Aside>
+
+## prune
+
+Cleans up what branch containers leave behind in Docker:
+
+```bash
+kunj ct prune             # this repository: show the plan, ask once, remove
+kunj ct prune --dry-run   # only show the plan
+kunj ct prune --all       # every repository kunj has recorded (kunj repos)
+```
+
+It removes:
+
+- **containers of branches deleted on origin** (a merged pull request, say), with their helper,
+  services, network and volumes, as [`remove`](#remove) does. The same check for unpushed work runs
+  first: a container that holds commits, stashes or changes origin does not have is kept, and the plan
+  says why. kunj asks origin once (`git ls-remote --heads origin`); when origin cannot be reached, no
+  container is removed for this reason.
+- **orphans**: helpers, services, volumes and networks labelled for a branch whose container no
+  longer exists. This includes volumes kept by `remove --keep-volumes`.
+- **old snapshot images**: [blueprint snapshots](../blueprints/) whose hash is not the current one.
+  When the current hash cannot be worked out, every snapshot is kept.
+- **old kunj images**: `kunj-sandbox` and `kunj-nethelper` tags of other kunj versions.
+- **stopped containers older than `container.pruneAfterDays`** days, when you set it (off by
+  default), after the same check for unpushed work.
+
+An image a container still uses is never removed.
+
+```text
+Prune shop:
+  remove kunj-shop-fix-cart-total-9b2e4f  branch fix/cart-total is gone from origin
+  keep   kunj-shop-spike-cache-1c7d3a  branch spike/cache is gone from origin, but: unpushed commits on spike/cache
+  remove volume kunj-shop-old-ui-5e8f20-ws  orphan: its branch container is gone
+  remove image kunj-blueprint-shop:0a6c1d9e4b2f
+  images: 812 MB
+? Remove 3 objects? (y/N)
+```
+
+When stdout is not a terminal (a script, `| less`, the VS Code extension), prune only lists the plan
+unless you pass `--yes` or `--force`. Each container removed runs the `pre/post-container-delete`
+hooks.
+
+| Flag | Use it to |
+|---|---|
+| `--dry-run` | Show the plan and remove nothing. |
+| `-a, --all` | Prune every repository in `~/.kunj/repos.json` that is not hidden. |
+| `-y, --yes` | Remove without asking; the check for unpushed work still applies. |
+| `-f, --force` | Remove without asking and without the check for unpushed work. |
+| `--no-hooks` | Skip the `pre/post-container-delete` hooks. |
+
+<Aside type="caution">
+`--force` removes containers of deleted branches even when they hold unpushed work. Run
+`kunj ct prune --dry-run` first.
 </Aside>
 
 ## blueprint

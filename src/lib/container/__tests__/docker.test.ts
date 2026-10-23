@@ -413,5 +413,33 @@ describe('docker backend', () => {
       await expect(backend.volumeExists('w')).resolves.toBe(false);
       expect(argvOf(0)).toEqual(['volume', 'inspect', '--format', '{{.Name}}', 'v']);
     });
+
+    it('listImages narrows to a repository with reference', async () => {
+      results.push({ code: 0, stdout: '' });
+      await new LocalDockerBackend().listImages({}, { references: ['kunj-sandbox', 'kunj-nethelper'] });
+      expect(argvOf(0)).toEqual(['image', 'ls', '--no-trunc', '--format', '{{json .}}', '--filter', 'reference=kunj-sandbox', '--filter', 'reference=kunj-nethelper']);
+    });
+
+    it('listVolumes and listNetworks filter by label and take exact labels from one inspect', async () => {
+      const backend = new LocalDockerBackend();
+      results.push({ code: 0, stdout: 'v1\nv2\n' });
+      results.push({ code: 0, stdout: [{ Name: 'v1', Labels: { 'kunj.branch': 'a,b' } }, { Name: 'v2', Labels: null }].map(o => JSON.stringify(o)).join('\n') + '\n' });
+      await expect(backend.listVolumes({ 'kunj.repo': 'r' })).resolves.toEqual([
+        { name: 'v1', labels: { 'kunj.branch': 'a,b' } },
+        { name: 'v2', labels: {} },
+      ]);
+      expect(argvOf(0)).toEqual(['volume', 'ls', '-q', '--filter', 'label=kunj.repo=r']);
+      expect(argvOf(1)).toEqual(['volume', 'inspect', '--format', '{{json .}}', 'v1', 'v2']);
+
+      results.push({ code: 0, stdout: 'n1\n' });
+      results.push({ code: 0, stdout: JSON.stringify({ Name: 'net-1', Labels: { 'kunj.repo': 'r' } }) + '\n' });
+      await expect(backend.listNetworks({ 'kunj.repo': 'r' })).resolves.toEqual([{ name: 'net-1', labels: { 'kunj.repo': 'r' } }]);
+      expect(argvOf(2)).toEqual(['network', 'ls', '-q', '--no-trunc', '--filter', 'label=kunj.repo=r']);
+      expect(argvOf(3)).toEqual(['network', 'inspect', '--format', '{{json .}}', 'n1']);
+
+      results.push({ code: 0, stdout: '' });
+      await expect(backend.listNetworks({})).resolves.toEqual([]);
+      expect(spawnMock).toHaveBeenCalledTimes(5);
+    });
   });
 });
