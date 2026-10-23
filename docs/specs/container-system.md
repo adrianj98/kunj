@@ -29,6 +29,7 @@ the host).*
 | Workspace IDE (phase 3) | CLI contract shipped; app proposed | [workspace-ide.md](workspace-ide.md) |
 | Containers in the VS Code extension and the macOS app | Not started | — |
 | Remote Docker host (`kunj serve`) | Not started | — |
+| Secret manager (`kunj secret`, `kunj run`, delivery to containers and worktrees) | Designed, not started | [Secrets](#secrets) below |
 
 ## Rules every part follows
 
@@ -64,12 +65,112 @@ change must not break.
 (`*.docker.test.ts`) drives a real Docker daemon, builds the images and checks the firewall; it skips
 itself when Docker is unavailable.
 
+## Secrets
+
+*Designed 2026-10-23, not built.* Today secrets reach a container only as host environment variables
+named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
+plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
+desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
+manager stores secrets once, encrypted, and kunj delivers each one only where it was told to.
+
+**Goals.** No more hand-exported tokens (`GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, API keys). Per-repo and
+per-branch app secrets (`DATABASE_URL`, payment keys) replacing plaintext `.env` keep files. Import of
+existing `.env` files. **Non-goals for v1:** sharing with a team, SOPS or committed secret files (some
+repos cannot hold them), external vaults (1Password, AWS Secrets Manager), short-lived or per-container
+tokens. Nothing is ever written into the repository.
+
+### Storage
+
+- `~/.kunj/secrets.enc` holds global secrets; `~/.kunj/<repo>/secrets.enc` holds the repo's, including
+  branch-scoped ones. Each is a JSON envelope `{ version: 1, kdf: "keychain" | "passphrase", salt, iv,
+  ciphertext, tag }`, AES-256-GCM with Node's `crypto` (no new dependency), written atomically with mode
+  0600. Names are inside the ciphertext, so the file reveals nothing.
+- A decrypted entry:
+
+  ```json
+  { "name": "DATABASE_URL", "value": "postgres://…", "scope": { "branch": "feature/x" },
+    "targets": ["host", "container"], "delivery": { "env": true, "file": ".env" },
+    "updatedAt": "2026-10-23T…" }
+  ```
+
+  `scope.branch` is optional; a branch entry overrides the repo entry of the same name for that branch.
+  `targets` is required and explicit: `host`, `container` or both. Nothing reaches a container unless
+  its secret says `container`. `delivery.env` injects it as an environment variable; `delivery.file`
+  renders it as a `NAME=value` line into that file (relative to the worktree or container root; several
+  secrets may share one file). Global secrets are environment variables only.
+- Resolution for a branch: global, then repo, then branch; the most specific wins.
+- **Key.** A random 32-byte key in the macOS Keychain (generic password `kunj-secrets`, created on first
+  use, read once per command with `security find-generic-password`), or libsecret `secret-tool` on Linux.
+  Without either: a passphrase stretched with scrypt, prompted once per command; `KUNJ_SECRETS_KEY`
+  supplies the key for CI and scripts. The vault is only unlocked by commands that deliver or manage
+  secrets, never by listings, so the fast path does not change.
+
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `kunj secret set NAME [--branch b] [--global] [--targets host,container] [--file .env] [--no-env]` | Value from a hidden prompt, or stdin when piped; never argv (visible in `ps` and shell history) |
+| `kunj secret import <file> [--branch b] [--global] [--targets …] [--file …] [--delete] [--yes]` | Import a `.env` file (see below) |
+| `kunj secret list [--branch b] [--global] [--json]` | Names, scope, targets, delivery; never values |
+| `kunj secret get NAME [--branch b]` | One value on stdout for scripts; refused with `--json` |
+| `kunj secret rm NAME [--branch b] [--global]` | Remove one |
+| `kunj secret env [--branch b] [--target host]` | Resolved secrets as `export NAME='…'` lines for `eval` |
+| `kunj secret apply [-a]` | Render file deliveries into this worktree (or all), like `keep apply` |
+| `kunj run [--branch b] -- <cmd…>` | Run a host command with the host secrets in its environment, file deliveries rendered first |
+
+`secret` and `run` are on the fast path (no AWS, LangChain or inquirer at top level). The branch
+defaults to the current one.
+
+**`.env` import.** Standard dotenv syntax: `KEY=value`, single and double quotes, `export KEY=`,
+comments, blank lines, multi-line values in double quotes; no `${X}` expansion (stored literally).
+Defaults: repo scope, `targets: host,container`, env plus `file: .env` (so the worktree gets its `.env`
+back). In a terminal it shows the names it will add or replace, never values, and asks once (`--yes`
+skips; `--json` prints the names). `--delete` removes the source afterwards; when the source is a keep
+file it is removed from the keep store too.
+
+### Delivery
+
+- **Containers** (`kunj ct start`, on create and resume): container-targeted `env` secrets join the
+  existing `docker run` env file, so the container rules hold (never `docker exec -e`, never a label,
+  never a snapshot; snapshot builds get no secrets). A stored secret overrides a `container.env` entry
+  of the same name. `file` deliveries render into `/workspace/<file>` as the sandbox user, mode 0600,
+  added to `.git/info/exclude` so the agent cannot commit them. A secret changed after the container
+  started reaches it on the next start or resume; `ct list` shows `secretsChanged: true` until then.
+- **Host:** `kunj agent`, `kunj run` and the workspace app's worktree terminals get host-targeted `env`
+  secrets (tmux sessions through `new-session -e`, like `KUNJ_*`). `file` deliveries render into the
+  worktree when `kunj worktree add` creates it (where keep files apply today) and on
+  `kunj secret apply`. A rendered file that git does not ignore is refused unless `--force`.
+- **The workspace app** never reads the vault; it runs kunj commands, which unlock through the keychain,
+  so an app launched from Finder works without shell variables.
+
+### Errors, migration, testing
+
+- **Errors** (`jsonCode`, opt-in shape): `secrets-locked` (no key and no terminal to prompt),
+  `secrets-corrupt` (authentication tag fails; the file is left untouched and named in the message),
+  `secret-not-found`, `bad-name` (names must match `[A-Za-z_][A-Za-z0-9_]*`), `not-ignored`. A wrong
+  passphrase is `secrets-locked` after three tries.
+- **Migration:** nothing changes for existing users. `container.env` and keep files keep working; when a
+  repo has a keep `.env` and no secrets, `kunj secret import` suggests it, and `kunj setup` offers it.
+- **Tests:** crypto round trip and tamper detection; dotenv parser table (quotes, `export`, multi-line,
+  comments, `${X}` literal); resolution order; target filtering (a host-only secret never reaches the
+  container env file); rendering, mode 0600, `.git/info/exclude`; the not-ignored refusal; a fake key
+  provider so tests never touch the real Keychain. Docker test: a container-targeted secret is visible
+  in the container, a host-only one is not, and neither is in `docker inspect` or a snapshot image.
+
+**Code map (planned):** `src/lib/secrets/{vault,keyprovider,dotenv,resolve,deliver}.ts`,
+`src/commands/secret.ts`, `src/commands/run.ts`, `secrets.*` settings in `src/settings/secrets.ts`,
+`SecretListJson` in `src/lib/json-types.ts`; container delivery hooks into `src/lib/container/env.ts`
+and `lifecycle.ts`.
+
 ## Roadmap
 
 **Phase 2, left:** the host MCP bridge.
 
 **Next:**
 
+- [ ] **Secret manager** ([Secrets](#secrets)): `kunj secret set|import|list|get|rm|env|apply`,
+  `kunj run`, encrypted vault with a Keychain key, delivery to containers and worktrees by explicit
+  target, `.env` import. Needs an implementation plan.
 - Copy the safe parts of `~/.claude` (CLAUDE.md, settings, skills, agents, commands) into containers;
   never session history or credentials.
 - Run `kunj` itself inside the container, with the user's kunj config minus sensitive settings.
@@ -90,3 +191,6 @@ Auth, TLS and multi-user get their own spec.
 - **2026-10-21** The remote backend is a later addition, not a redesign: no shared filesystem assumed.
 - **2026-10-23** Phase order: phase 2 (services, editor, auto forward, prune, Docker-in-Docker, MCP
   bridge) before the workspace IDE; `forward --auto` moved from the UI phase into phase 2.
+- **2026-10-23** Secrets: a local encrypted vault in `~/.kunj` (AES-256-GCM, key in the OS keychain),
+  explicit targets per secret, delivery by env or rendered file, `.env` import. No SOPS or committed
+  secret files (some repos cannot hold them); no team sharing or external vaults in v1.

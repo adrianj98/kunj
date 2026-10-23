@@ -699,3 +699,5 @@ macOS app zip (`kunj install macos` needs a release that has one).
   native-shell spike, app plan on hold) and deleted `docs/superpowers/specs/`. Why: one spec per topic.
 - Workspace CLI contract final fixes: `kunj agent` passes KUNJ_* with tmux `-e`, drops TMUX and runs without tmux (`--no-tmux`); `kunj events` gains a 10 s worktree/container status poll, origin-based repo ids, `hello` once armed, abort-raced Docker calls and restarted subwatchers; tmux failures are no longer read as "no agents". Why: final review of the contract (app depends on the stream being complete and prompt).
 - docs/specs/workspace-ide.md: tmux-optional and events status poll marked shipped. Why: the fix wave landed both.
+- docs/specs/container-system.md: secret manager design (encrypted vault in ~/.kunj, explicit targets, env or file delivery, .env import) and a roadmap to-do. Why: the user asked for a secret manager in the containers spec.
+- docs/specs/README.md is now the project tracker (done with commits, in progress, to do, waiting on you); CLAUDE.md says to keep it current. Why: the user asked to keep track of what is done in one place.

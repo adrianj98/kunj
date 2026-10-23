@@ -39,6 +39,10 @@ npm run lint
 
 also commit and push changes
 
+Track work in `docs/specs/README.md`: it lists what is done (with commits), in progress, to do and
+waiting on the user. Move a line there in the same commit that ships or starts the work, and keep the
+spec's own status table in step. Design specs live in `docs/specs/<topic>.md`, one per topic.
+
 Work directly on `main`, in this checkout: no feature branches and no git worktrees (not even for
 plan execution or subagents), even when another session is working here at the same time. Pull
 before you start, commit small, and push.
