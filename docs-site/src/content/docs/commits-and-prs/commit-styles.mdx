@@ -1,0 +1,117 @@
+---
+title: Commit message styles
+description: Choose how AI-written commit messages look, from Conventional Commits to gitmoji, or describe your own format.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+The `ai.commitStyle` setting decides the format of the messages that [`kunj commit`](../commit/)
+asks the AI for. The same style is passed to the AI when [`kunj pr`](../pull-requests/) writes a
+pull request title and description, so commits and PRs read alike.
+
+```bash
+kunj config --set ai.commitStyle=gitmoji            # this repository
+kunj config --global --set ai.commitStyle=simple    # every repository
+```
+
+## The styles
+
+Each style gives the model its own rules. kunj then assembles the subject from the category the
+model chose and the subject line it wrote, and adds a body unless `ai.includeBody` is off. The
+examples below are what a commit adding a retry to a flaky API call might look like.
+
+### `conventional` (default)
+
+[Conventional Commits](https://www.conventionalcommits.org/): a lowercase type, a colon, and a
+present-tense subject with no trailing period. Types are `feat`, `fix`, `docs`, `style`,
+`refactor`, `test`, `chore`, `build`, `ci` and `perf`.
+
+```text
+fix: retry PR lookups when the GitHub API times out
+
+The pr cache now retries a timed-out gh call once before giving up,
+so a slow network no longer leaves the worktree list without PR numbers.
+```
+
+### `semantic`
+
+Types tied to semantic versioning, in square brackets: `MAJOR` (breaking), `MINOR` (feature),
+`PATCH` (fix), `DOCS`, `STYLE`, `REFACTOR`, `TEST`, `CHORE`. Subjects are in the imperative mood.
+
+```text
+[PATCH] Retry PR lookups when the GitHub API times out
+```
+
+### `simple`
+
+No prefix at all, just a subject that starts with a verb.
+
+```text
+Retry PR lookups when the GitHub API times out
+```
+
+### `gitmoji`
+
+An emoji from [gitmoji](https://gitmoji.dev/) in front of the subject: ✨ new feature, 🐛 bug
+fix, 📝 docs, ♻️ refactor, ⚡️ performance, ✅ tests, 🔧 configuration, 🔥 removal, ⬆️ dependency
+upgrade, and so on.
+
+```text
+🐛 Retry PR lookups when the GitHub API times out
+```
+
+### `caveman`
+
+Conventional format with an optional scope, written as tersely as possible: imperative, no
+filler, no "this commit…", no AI attribution, at most 72 characters. A body is added only when the
+change needs one (a non-obvious reason, a breaking change, a migration, a security fix, a revert).
+
+```text
+fix(pr-cache): retry gh call once on timeout
+```
+
+Choosing `caveman` also makes kunj's other AI output terse: [work log](../../work-logs/work-log/)
+entries, standup bullets and PR descriptions all switch to a compressed format.
+
+### `custom`
+
+Your own rules, written in `ai.customInstructions`. The model is told to keep the subject under
+`ai.subjectMaxLength`, to be clear and concise, and then to follow your instructions.
+
+```text
+PROJ-142: Retry PR lookups when the GitHub API times out
+```
+
+## Setting up a custom style
+
+```bash
+kunj config --set ai.commitStyle=custom
+kunj config --set "ai.customInstructions=Use the Jira key from the branch name as the category (for example PROJ-142). Write the subject in sentence case. Mention any config keys that changed in the body."
+```
+
+<Aside type="note">
+In the `custom` style kunj still asks the model for a category and puts it in front of the
+subject as `category: subject`. Tell the model in your instructions what the category should be
+(a ticket key, a component name, a type), otherwise it picks one itself.
+</Aside>
+
+`ai.customInstructions` is not only for the `custom` style: with any other style the text is
+appended to that style's rules as "Additional instructions". That is the easiest way to nudge an
+existing style:
+
+```bash
+kunj config --set "ai.customInstructions=Never mention file names in the subject. Use British spelling."
+```
+
+## Settings
+
+<SettingsTable prefix="ai.commitStyle" />
+<SettingsTable prefix="ai.subjectMaxLength" />
+<SettingsTable prefix="ai.includeBody" />
+<SettingsTable prefix="ai.customInstructions" />
+
+See [Configuration](../../configuration/overview/) for where these are stored and how local
+settings override global ones.

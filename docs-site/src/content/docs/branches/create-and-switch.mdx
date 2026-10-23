@@ -1,0 +1,175 @@
+---
+title: Create and switch branches
+description: Start new branches from an up-to-date base and move between branches without losing uncommitted work.
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+`kunj create` and `kunj switch` replace `git switch -c` and `git switch`. They do two things git
+does not: new branches start from a fresh copy of your base branch on origin, and uncommitted
+changes are stashed when you leave a branch and restored when you come back.
+
+## Create a branch
+
+```bash
+kunj create feature/login-form
+```
+
+```text
+Creating branch 'feature/login-form' from origin/main and switching to it...
+📦 Stashed changes from branch 'main'
+✓ Successfully created and switched to branch 'feature/login-form'
+```
+
+You can give the branch a description and tags as you create it. They show up in
+[`kunj list`](../list/) and the interactive switch menu (see [Branch metadata](../metadata/)):
+
+```bash
+kunj create fix/session-timeout -d "Session expires after 5 minutes" -t bug urgent
+```
+
+If the branch name contains a Jira key (for example `PROJ-123-login`) and Jira is enabled, kunj
+looks the issue up and links it to the branch, so `kunj list` shows its key, status and title.
+
+<CommandReference name="create" optionsOnly />
+
+## Switch branches
+
+Give a branch name to switch straight to it:
+
+```bash
+kunj switch feature/login-form
+```
+
+Run it without a name to pick from a menu. Each entry shows the branch's description (or its last
+activity), its tags, and any changes kunj stashed on it:
+
+```bash
+kunj switch
+```
+
+```text
+? Select a branch to switch to:
+❯ ● feature/login-form (current) - Login form with validation #wip
+    fix/session-timeout - Session expires after 5 minutes #bug #urgent 📦 [2 files, +14, -3]
+    main - 3 days ago
+```
+
+The menu lists local branches, sorted by `preferences.branchSort` and filtered the same way as
+[`kunj list`](../list/): `--wip` and `--configured` narrow it, `--all` ignores the filter settings.
+
+### Create while switching
+
+`-c` creates the branch when it does not exist, exactly as `kunj create` would. Without a name it
+asks for one:
+
+```bash
+kunj switch -c feature/login-form
+kunj switch -c            # prompts: Enter new branch name
+```
+
+If the branch already exists, `-c` just switches to it.
+
+<CommandReference name="switch" optionsOnly />
+
+## Which commit a new branch starts from
+
+`kunj create`, `kunj switch -c` and `kunj worktree add -b/-c` (see
+[Worktrees](../../worktrees/overview/)) all choose the starting point the same way:
+
+1. `--base <ref>` if you pass one.
+2. Otherwise the `preferences.defaultBaseBranch` setting.
+3. Otherwise the repository's default branch: what `origin/HEAD` points to, else `main`, else
+   `master`.
+
+If none of those exists (a brand-new repository, say), the branch starts from the current `HEAD`,
+like plain `git switch -c`.
+
+**From origin.** With `preferences.baseFromOrigin` on (the default), kunj fetches the base
+branch and creates the new branch from `origin/<base>`, so it starts from the latest pushed
+commit even when your local `main` is behind. Pass `--no-origin` to use the local branch for one
+command, or turn the setting off for good.
+
+kunj falls back gracefully:
+
+- When the fetch fails (offline, for instance) but an `origin/<base>` from an earlier fetch exists,
+  it uses that and warns `Could not fetch origin/main; using the last fetched copy`.
+- When the repository has no `origin`, or the base is not on origin, it uses the local branch and
+  says so.
+- When the base exists nowhere, the command stops with `Base branch 'x' not found locally or on
+  origin` before anything is stashed.
+
+**Naming origin directly.** `--base origin/release-2.4` always fetches and uses the remote branch,
+even with `--no-origin`.
+
+**Commits and tags.** A base that is not a branch, such as a tag, a commit hash or `HEAD~2`, is
+used as given, without a fetch:
+
+```bash
+kunj create hotfix/cve-patch --base v2.3.1
+kunj create experiment --base HEAD~3
+kunj create feature/payments --base develop --no-origin
+```
+
+**No upstream.** New branches are created with `--no-track`, so they do not treat the base as
+their upstream and `git push` does not try to push to `main`. Push them the usual way the first
+time:
+
+```bash
+git push -u origin feature/login-form
+```
+
+<SettingsTable prefix="preferences.defaultBaseBranch" />
+<SettingsTable prefix="preferences.baseFromOrigin" />
+
+Set them per repository or globally with [`kunj config`](../../configuration/overview/):
+
+```bash
+kunj config --set preferences.defaultBaseBranch=develop
+kunj config --global --set preferences.baseFromOrigin=false
+```
+
+`preferences.defaultBaseBranch` is also the branch pull requests target.
+
+## Auto-stash
+
+With `preferences.autoStash` on (the default), leaving a branch with uncommitted changes stashes
+them, tracked files and untracked files alike, and records the stash against that branch. When
+you later `kunj switch` back to the branch, kunj finds that stash and pops it:
+
+```bash
+# on feature/login-form, with edits in progress
+kunj switch main
+# 📦 Stashed changes from branch 'feature/login-form'
+# ✓ Successfully switched to branch 'main'
+
+kunj switch feature/login-form
+# ✓ Successfully switched to branch 'feature/login-form'
+# 📤 Restored stashed changes for branch 'feature/login-form'
+```
+
+A few details:
+
+- Each branch can have several kunj stashes; switching back restores the most recent one. The
+  rest stay listed under the branch in `kunj list` and in the switch menu.
+- If popping the stash conflicts, kunj leaves the conflict for you to resolve and stops tracking
+  that stash.
+- The stash is an ordinary git stash named `kunj-auto-stash-<branch>-<timestamp>`, so
+  `git stash list` and [`kunj stash`](../stash/) show it too. Popping it by hand works; kunj
+  notices it is gone and cleans up its record.
+- `kunj create` stashes but never pops, since a new branch has nothing to restore. `kunj switch -c`
+  does pop when it finds an earlier stash recorded for that branch name.
+- `--no-stash` turns stashing and restoring off for one command. With `preferences.autoStash` off,
+  your changes either come with you or git refuses the switch, as with plain `git switch`.
+
+<SettingsTable prefix="preferences.autoStash" />
+
+<Aside>
+Auto-stash runs the `pre-stash` and `post-stash` [hooks](../../configuration/hooks/). A failing
+`pre-stash` hook stops the switch before anything moves. `kunj create` and `kunj switch` also run
+`pre/post-branch-create` and `pre/post-branch-switch`; `--no-hooks` skips them all.
+</Aside>

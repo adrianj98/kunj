@@ -1,0 +1,51 @@
+---
+// Renders settings from the generated src/data/settings.json, filtered by category or key prefix.
+import settings from '../data/settings.json';
+import { inline } from './inline';
+
+interface Props {
+  category?: string;
+  /** Only keys starting with this, e.g. "worktree." */
+  prefix?: string;
+  /** Show the long description, examples and related settings under each row */
+  details?: boolean;
+}
+
+const { category, prefix, details = true } = Astro.props;
+const rows = settings.filter(
+  s => (!category || s.category === category) && (!prefix || s.key.startsWith(prefix))
+);
+if (rows.length === 0) throw new Error(`SettingsTable: nothing matches category=${category} prefix=${prefix}`);
+
+const show = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
+---
+
+<div class="kunj-ref">
+  <table>
+    <thead><tr><th>Setting</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      {rows.map(s => (
+        <tr id={`setting-${s.key}`}>
+          <td><code>{s.key}</code></td>
+          <td>{s.type === 'enum' && s.options ? s.options.map((o, i) => <>{i > 0 && ' | '}<code>{o}</code></>) : s.type}</td>
+          <td>
+            {s.sensitive ? <span class="muted">secret</span>
+              : s.default === null || s.default === '' ? <span class="muted">—</span>
+              : <code>{show(s.default)}</code>}
+          </td>
+          <td>
+            <Fragment set:html={inline(s.description)} />
+            {details && (s.detailedDescription || s.examples || s.relatedSettings) && (
+              <details>
+                <summary>More</summary>
+                {s.detailedDescription && <p set:html={inline(s.detailedDescription)} />}
+                {s.examples && <p>Examples: {s.examples.map((e, i) => <>{i > 0 && ', '}<code>{e}</code></>)}</p>}
+                {s.relatedSettings && <p>Related: {s.relatedSettings.map((r, i) => <>{i > 0 && ', '}<code>{r}</code></>)}</p>}
+              </details>
+            )}
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>

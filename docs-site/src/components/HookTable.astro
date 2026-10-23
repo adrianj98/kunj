@@ -1,0 +1,33 @@
+---
+// Renders hook definitions from the generated src/data/hooks.json (src/lib/hook-defs.ts).
+import hooks from '../data/hooks.json';
+import { inline } from './inline';
+
+interface Props {
+  /** Only hooks whose name contains this, e.g. "worktree" */
+  filter?: string;
+}
+
+const { filter } = Astro.props;
+const rows = hooks.filter(h => !filter || h.name.includes(filter));
+---
+
+<div class="kunj-ref">
+  <table>
+    <thead><tr><th>Hook</th><th>When</th><th>Arguments (positional / env / variable)</th><th>Aborts on failure</th></tr></thead>
+    <tbody>
+      {rows.map(h => (
+        <tr id={`hook-${h.name}`}>
+          <td><code>{h.name}</code></td>
+          <td set:html={inline(h.description)} />
+          <td>
+            {h.args.length === 0 ? <span class="muted">none</span> : h.args.map((a, i) => (
+              <div>{`$${i + 1}`} <code>{a.env}</code> <code>{'${' + a.variable + '}'}</code></div>
+            ))}
+          </td>
+          <td>{h.abortsOnFailure ? 'yes' : 'no'}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>

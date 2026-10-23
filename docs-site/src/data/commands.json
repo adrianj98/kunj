@@ -1,0 +1,1054 @@
+[
+  {
+    "name": "branch-desc",
+    "usage": "branch-desc [branch] [description...]",
+    "description": "Set or view description for a branch",
+    "arguments": "[branch] [description...]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-c, --clear",
+        "description": "Clear the description for the branch",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "branch-note",
+    "usage": "branch-note [branch] [note...]",
+    "description": "Add or view notes for a branch",
+    "arguments": "[branch] [note...]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-c, --clear",
+        "description": "Clear the notes for the branch",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "branch-tag",
+    "usage": "branch-tag [branch] [tags...]",
+    "description": "Add or view tags for a branch",
+    "arguments": "[branch] [tags...]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-c, --clear",
+        "description": "Clear all tags for the branch",
+        "default": null
+      },
+      {
+        "flags": "-r, --remove <tag>",
+        "description": "Remove a specific tag",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "commit",
+    "usage": "commit",
+    "description": "Interactive commit - select files and commit with message",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-a, --all",
+        "description": "Stage all changed files automatically",
+        "default": null
+      },
+      {
+        "flags": "-m, --message <message>",
+        "description": "Commit message (skip interactive prompt)",
+        "default": null
+      },
+      {
+        "flags": "--amend",
+        "description": "Amend the last commit",
+        "default": null
+      },
+      {
+        "flags": "--auto",
+        "description": "Auto mode: use AI for commit message and auto-push",
+        "default": null
+      },
+      {
+        "flags": "--no-hooks",
+        "description": "Skip kunj hooks; git's own hooks still run (see 'kunj hooks --help')",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "completion",
+    "usage": "completion",
+    "description": "Manage shell tab completion",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--install",
+        "description": "Install shell completion",
+        "default": null
+      },
+      {
+        "flags": "--uninstall",
+        "description": "Uninstall shell completion",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "config",
+    "usage": "config",
+    "description": "View or edit configuration",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-s, --set <key=value>",
+        "description": "Set a configuration value",
+        "default": null
+      },
+      {
+        "flags": "-g, --get <key>",
+        "description": "Get a configuration value",
+        "default": null
+      },
+      {
+        "flags": "-l, --list",
+        "description": "List all configuration",
+        "default": null
+      },
+      {
+        "flags": "-i, --interactive",
+        "description": "Interactive configuration editor",
+        "default": null
+      },
+      {
+        "flags": "-r, --reset",
+        "description": "Reset to default configuration",
+        "default": null
+      },
+      {
+        "flags": "--global",
+        "description": "Use global configuration instead of local",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "container",
+    "usage": "container [action] [target] [extra...]",
+    "description": "Run a branch in a sandboxed container cloned from origin",
+    "arguments": "[action] [target] [extra...]",
+    "aliases": [
+      "ct"
+    ],
+    "options": [
+      {
+        "flags": "-c, --create",
+        "description": "[start] Create the branch in the container from origin/<base>",
+        "default": null
+      },
+      {
+        "flags": "--base <ref>",
+        "description": "[start] Base for a new branch (default: preferences.defaultBaseBranch, else the repo default)",
+        "default": null
+      },
+      {
+        "flags": "--image <img>",
+        "description": "[start] Use this image instead of the configured one",
+        "default": null
+      },
+      {
+        "flags": "--publish <ports>",
+        "description": "[start] Publish container ports, e.g. 3000,5432",
+        "default": null
+      },
+      {
+        "flags": "--rebuild",
+        "description": "[start] Rebuild the image and recreate the container (volumes are kept); [blueprint snapshot] snapshot again even when up to date",
+        "default": null
+      },
+      {
+        "flags": "--no-snapshot",
+        "description": "[start] Neither build nor use the blueprint's snapshot (tools and setup run in the container)",
+        "default": null
+      },
+      {
+        "flags": "--keep-on-error",
+        "description": "[start] Keep what a failed start created, for debugging",
+        "default": null
+      },
+      {
+        "flags": "--no-hooks",
+        "description": "[start|remove] Skip kunj hooks (see 'kunj hooks --help')",
+        "default": null
+      },
+      {
+        "flags": "--no-status",
+        "description": "[list] Skip the per-container status exec (faster listing)",
+        "default": null
+      },
+      {
+        "flags": "-a, --all",
+        "description": "[list] Show every repository's containers",
+        "default": null
+      },
+      {
+        "flags": "-f, --force",
+        "description": "[remove] Remove even when the container holds unpushed work",
+        "default": null
+      },
+      {
+        "flags": "--keep-volumes",
+        "description": "[remove] Keep the workspace and home volumes",
+        "default": null
+      },
+      {
+        "flags": "--global",
+        "description": "[blueprint init] Write the host copy (~/.kunj/<repo>/blueprint.json) instead of .kunj/blueprint.json",
+        "default": null
+      },
+      {
+        "flags": "-y, --yes",
+        "description": "[blueprint init] Accept the inferred blueprint and overwrite an existing file",
+        "default": null
+      },
+      {
+        "flags": "--no-bundle",
+        "description": "[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)",
+        "default": null
+      },
+      {
+        "flags": "--blueprint <path>",
+        "description": "[blueprint snapshot|status] Use this blueprint file instead of the resolved one",
+        "default": null
+      },
+      {
+        "flags": "--context <name>",
+        "description": "Docker context (default: container.dockerContext)",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Actions:\n  start [branch]                       create or resume the branch's container\n  shell [branch]                       login shell in /workspace\n  exec [branch] -- <cmd...>            run a command in the container\n  agent [branch] [-- <args>]           start or reattach the agent's tmux session\n  attach [branch]                      reattach to the agent's tmux session\n  forward [branch] <port>|<host>:<port>...  forward localhost ports into the container\n  list                                 containers of this repository (the default)\n  stop [branch]                        stop, keeping the workspace\n  remove [branch]                      remove, refusing while work is unpushed\n\nBlueprint (how a new container is set up: tools, setup and maintain commands):\n  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json\n  blueprint snapshot [--base <ref>]    optional: build the snapshot ahead of time (--rebuild forces it)\n  blueprint status                     which blueprint, its hash and snapshot, stale or not\n  blueprint remove                     delete this repository's snapshot images\n\nThe blueprint is read from .kunj/blueprint.json in this working tree, else\norigin/<default branch>:.kunj/blueprint.json, else ~/.kunj/<repo>/blueprint.json. A new\ncontainer starts from its snapshot; start builds the snapshot first when there is none or the\nblueprint changed (the first start runs setup once), and falls back to running setup in the\ncontainer if that fails. --no-snapshot skips the snapshot.\n\n[branch] defaults to the current branch. `ct` is short for `container`."
+  },
+  {
+    "name": "create",
+    "usage": "create <branch>",
+    "description": "Create a new branch and switch to it",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--no-stash",
+        "description": "Disable automatic stashing of changes",
+        "default": null
+      },
+      {
+        "flags": "-d, --desc <description>",
+        "description": "Set a description for the new branch",
+        "default": null
+      },
+      {
+        "flags": "-t, --tag <tags...>",
+        "description": "Add tags to the new branch",
+        "default": null
+      },
+      {
+        "flags": "--base <branch>",
+        "description": "Branch to create from (default: preferences.defaultBaseBranch, else the repo default)",
+        "default": null
+      },
+      {
+        "flags": "--no-origin",
+        "description": "Create from the local base branch instead of fetching origin/<base>",
+        "default": null
+      },
+      {
+        "flags": "--no-hooks",
+        "description": "Skip kunj hooks (see 'kunj hooks --help')",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "delete",
+    "usage": "delete <branch>",
+    "description": "Delete a branch",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-f, --force",
+        "description": "Force delete the branch",
+        "default": null
+      },
+      {
+        "flags": "--no-hooks",
+        "description": "Skip kunj hooks (see 'kunj hooks --help')",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "diff",
+    "usage": "diff",
+    "description": "View file changes with beautiful syntax highlighting",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-f, --file <path>",
+        "description": "Show diff for specific file",
+        "default": null
+      },
+      {
+        "flags": "-s, --side-by-side",
+        "description": "Show diff in side-by-side format",
+        "default": null
+      },
+      {
+        "flags": "--summary",
+        "description": "Show summary of changed files only",
+        "default": null
+      },
+      {
+        "flags": "--staged",
+        "description": "Show only staged changes",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "flow",
+    "usage": "flow",
+    "description": "Git Flow workflow management",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "graph",
+    "usage": "graph",
+    "description": "Visualize git commit history with subway map style graph",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-a, --all",
+        "description": "Show all branches (default: current branch only)",
+        "default": null
+      },
+      {
+        "flags": "-n, --limit <number>",
+        "description": "Limit number of commits to show (default: 20)",
+        "default": null
+      },
+      {
+        "flags": "-o, --oneline",
+        "description": "Compact one-line format",
+        "default": null
+      },
+      {
+        "flags": "-u, --unicode",
+        "description": "Use Unicode box-drawing characters for prettier graph",
+        "default": null
+      },
+      {
+        "flags": "--style <style>",
+        "description": "Color style: default, light, or dark (default: default)",
+        "default": null
+      },
+      {
+        "flags": "--author <name>",
+        "description": "Filter commits by author",
+        "default": null
+      },
+      {
+        "flags": "--since <date>",
+        "description": "Show commits since date (e.g., \"2 weeks ago\", \"2024-01-01\")",
+        "default": null
+      },
+      {
+        "flags": "--until <date>",
+        "description": "Show commits until date",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "hooks",
+    "usage": "hooks [action] [hook] [target]",
+    "description": "Manage hooks: your scripts that run before and after kunj actions (like git hooks)",
+    "arguments": "[action] [hook] [target]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-g, --global",
+        "description": "[add|path] Use the global hooks directory (~/.kunj/hooks)",
+        "default": null
+      },
+      {
+        "flags": "-f, --force",
+        "description": "[add] Overwrite an existing hook script",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Hooks are your own scripts or commands that kunj runs before and after its actions, like\ngit hooks, but around kunj commands (create, switch, commit, pr, ...) rather than git itself.\n\nActions:\n  list (default)          Show every hook, what it receives and what is installed for it\n  add <hook> [-g] [-f]    Create a starter script for <hook>, ready for you to edit:\n                          a commented /bin/sh template listing the hook's arguments and\n                          KUNJ_* variables, already executable (chmod +x).\n                          Written to this repository's hooks directory:\n                            ~/.kunj/kunj/hooks/<hook>\n                          or, with -g/--global, the one used by every repository:\n                            ~/.kunj/hooks/<hook>\n                          An existing script is left alone unless -f/--force is given.\n                          For a one-line command, set hooks.<hook> in the config instead.\n  run <hook> [target]     Run a hook now, to test it. [target] is a worktree for the worktree\n                          hooks and a branch for the others (default: the current one)\n  path [-g]               Print the repo (or global) hooks directory\n\nHooks:\n  pre-worktree-create    Runs before `kunj worktree add` creates a worktree. Can abort.\n                         args: $1 worktree-path, $2 branch\n  post-worktree-create   Runs inside a freshly created worktree, after keep files have been\n                         copied in (e.g. to install dependencies).\n                         args: $1 worktree-path, $2 branch\n  pre-worktree-delete    Runs inside a worktree before `kunj worktree remove` deletes it.\n                         Can abort.\n                         args: $1 worktree-path, $2 branch\n  post-worktree-delete   Runs from the main worktree after a worktree has been removed (e.g.\n                         to clean up containers or databases).\n                         args: $1 worktree-path, $2 branch\n  pre-branch-create      Runs before `kunj create` or `kunj switch -c` creates a branch. Can\n                         abort.\n                         args: $1 branch, $2 previous-branch\n  post-branch-create     Runs after `kunj create` or `kunj switch -c` has created and\n                         switched to a branch.\n                         args: $1 branch, $2 previous-branch\n  pre-branch-switch      Runs before `kunj switch` changes branch. Can abort.\n                         args: $1 branch, $2 previous-branch\n  post-branch-switch     Runs after `kunj switch` has changed branch and restored its stash\n                         (e.g. to install dependencies).\n                         args: $1 branch, $2 previous-branch\n  pre-branch-delete      Runs before `kunj delete` deletes a branch. Can abort.\n                         args: $1 branch\n  post-branch-delete     Runs after `kunj delete` has deleted a branch.\n                         args: $1 branch\n  pre-commit             Runs after `kunj commit` has staged the files, before the message\n                         is written. Can abort.\n                         args: $1 branch\n  commit-msg             Runs with the (AI-generated or typed) message in a file before\n                         `kunj commit` commits; it may edit the file. Can abort.\n                         args: $1 message-file, $2 branch\n  post-commit            Runs after `kunj commit` has created a commit, before pushing.\n                         args: $1 branch\n  pre-pr-create          Runs before `kunj pr` pushes the branch and opens a pull request.\n                         Can abort.\n                         args: $1 branch, $2 base-branch, $3 title\n  post-pr-create         Runs after `kunj pr` has opened a pull request.\n                         args: $1 branch, $2 base-branch, $3 title, $4 pr-url\n  pre-stash              Runs before kunj stashes changes (`kunj stash` or the auto-stash on\n                         create/switch). Can abort.\n                         args: $1 branch, $2 message\n  post-stash             Runs after kunj has stashed changes.\n                         args: $1 branch, $2 message\n  pre-container-create   Runs before `kunj container start` creates a container. Can abort.\n                         args: $1 branch, $2 container, $3 image\n  post-container-create  Runs after `kunj container start` has created and seeded a\n                         container.\n                         args: $1 branch, $2 container, $3 image\n  pre-container-delete   Runs before `kunj container remove` deletes a container. Can abort.\n                         args: $1 branch, $2 container, $3 image\n  post-container-delete  Runs after `kunj container remove` has removed a container.\n                         args: $1 branch, $2 container, $3 image\n\nWhere hooks come from (all of them run, in this order):\n  1. ~/.kunj/hooks/<hook>            global, every repository\n  2. ~/.kunj/<repo>/hooks/<hook>     this repository only\n     Either may also be a directory <hook>.d/ whose scripts run in name order.\n     Scripts must be executable (chmod +x); *.sample files and dotfiles are ignored.\n  3. The hooks.<hook> config setting: a shell command, or a JSON array of commands\n\nWhat a hook receives:\n  Arguments      as listed above, as $1, $2, ...\n  Environment    each argument as KUNJ_<ARG> (KUNJ_BRANCH, KUNJ_PREVIOUS_BRANCH, KUNJ_PR_URL, ...),\n                 plus KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_REPO_CONFIG and KUNJ_REPO_NAME\n  Config vars    config commands can use each argument as a camelCase ${...} variable\n                 (${branch}, ${previousBranch}, ${prUrl}, ${worktree}) and ${repoRoot}, ${repoName}, ...\n                 Values are quoted for you: ${branch} and \"${branch}\" both pass them literally.\n  Directory      the worktree for post-worktree-create and pre-worktree-delete, the main\n                 worktree for the other worktree hooks, otherwise where kunj was run\n\nExit status:\n  A pre-* or commit-msg hook that exits non-zero stops the action and later hooks do not run.\n  A post-* hook cannot undo anything; a failure is shown as a warning.\n  commit-msg may rewrite the message file ($1); kunj commits whatever the file holds afterwards.\n  Pass --no-hooks to create, switch, delete, commit, pr, stash or worktree to skip hooks once.\n  With --json, hook output goes to stderr so the JSON on stdout stays clean.\n\nExamples:\n  kunj hooks                                   list hooks and what is installed\n  kunj hooks add post-branch-switch            scaffold ~/.kunj/<repo>/hooks/post-branch-switch\n  kunj hooks add pre-commit -g                 scaffold a global pre-commit hook\n  kunj hooks run commit-msg                    try commit-msg against a sample message\n  kunj config --set hooks.post-worktree-create=\"npm install\"\n  kunj config --set hooks.pre-pr-create=\"npm run lint && npm test\"\n  kunj commit --no-hooks                       commit without running kunj hooks"
+  },
+  {
+    "name": "install",
+    "usage": "install [app]",
+    "description": "Install the VS Code extension and the macOS menu bar app",
+    "arguments": "[app]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--release <version>",
+        "description": "Install from this release (default: the CLI version, else the newest)",
+        "default": null
+      },
+      {
+        "flags": "--editor <cli>",
+        "description": "Editor CLI for the extension, e.g. cursor (default: code)",
+        "default": null
+      },
+      {
+        "flags": "-y, --yes",
+        "description": "Install everything available without asking",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Apps:\n  vscode   Kunj Worktrees extension for VS Code (and VS Code-like editors via --editor)\n  macos    Kunj menu bar app, installed to /Applications (or ~/Applications)\n  all      Both, where available\n\nBoth are downloaded from https://github.com/adrianj98/kunj/releases. The macOS app is not\nnotarized; the download quarantine is cleared so it opens without a warning."
+  },
+  {
+    "name": "issue",
+    "usage": "issue",
+    "description": "Create a GitHub issue",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-t, --title <title>",
+        "description": "Issue title",
+        "default": null
+      },
+      {
+        "flags": "-f, --body-file <path>",
+        "description": "Read description from a file",
+        "default": null
+      },
+      {
+        "flags": "-l, --label <label>",
+        "description": "Pre-select a label",
+        "default": null
+      },
+      {
+        "flags": "--tag <tagName>",
+        "description": "Git tag to create after issue is made",
+        "default": null
+      },
+      {
+        "flags": "--no-tag",
+        "description": "Skip git tag creation",
+        "default": null
+      },
+      {
+        "flags": "-w, --web",
+        "description": "Open issue in browser after creation",
+        "default": null
+      },
+      {
+        "flags": "--no-web",
+        "description": "Skip the open-in-browser prompt",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "jira",
+    "usage": "jira",
+    "description": "Jira integration commands",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "list",
+    "usage": "list",
+    "description": "List all branches with their metadata and stashed changes",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-a, --all",
+        "description": "Show all branches (override filters)",
+        "default": null
+      },
+      {
+        "flags": "-w, --wip",
+        "description": "Show only work-in-progress branches",
+        "default": null
+      },
+      {
+        "flags": "-c, --configured",
+        "description": "Show only configured branches",
+        "default": null
+      },
+      {
+        "flags": "-v, --verbose",
+        "description": "Show detailed information including notes",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "log",
+    "usage": "log",
+    "description": "View daily work logs",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-y, --yesterday",
+        "description": "View yesterday's work log",
+        "default": null
+      },
+      {
+        "flags": "-d, --date <date>",
+        "description": "View work log for specific date (YYYY-MM-DD)",
+        "default": null
+      },
+      {
+        "flags": "-l, --list",
+        "description": "List all available work logs",
+        "default": null
+      },
+      {
+        "flags": "-s, --standup",
+        "description": "Format as standup bullets (concise one-liners)",
+        "default": null
+      },
+      {
+        "flags": "--ai",
+        "description": "Use AI to generate super concise standup bullets (5-8 words each)",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "pr",
+    "usage": "pr [prNumber]",
+    "description": "Create or view pull requests on GitHub",
+    "arguments": "[prNumber]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-t, --title <title>",
+        "description": "PR title",
+        "default": null
+      },
+      {
+        "flags": "-b, --body <body>",
+        "description": "PR body/description",
+        "default": null
+      },
+      {
+        "flags": "--base <branch>",
+        "description": "Base branch (overrides config setting)",
+        "default": null
+      },
+      {
+        "flags": "-d, --draft",
+        "description": "Create as draft PR",
+        "default": null
+      },
+      {
+        "flags": "-w, --web",
+        "description": "Open PR in web browser after creation",
+        "default": null
+      },
+      {
+        "flags": "-s, --status",
+        "description": "View status of current branch's PR",
+        "default": null
+      },
+      {
+        "flags": "-l, --list",
+        "description": "List all open PRs",
+        "default": null
+      },
+      {
+        "flags": "--detailed",
+        "description": "Show detailed GitHub Actions steps",
+        "default": null
+      },
+      {
+        "flags": "--no-hooks",
+        "description": "Skip kunj hooks (see 'kunj hooks --help')",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "prompt-info",
+    "usage": "prompt-info",
+    "description": "Output PR info for shell prompt integration",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--format <type>",
+        "description": "Output format: simple (default), detailed, json",
+        "default": "simple"
+      },
+      {
+        "flags": "--show-branch",
+        "description": "Include branch name in output",
+        "default": null
+      },
+      {
+        "flags": "--show-status",
+        "description": "Include PR status (OPEN/MERGED/CLOSED)",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "repos",
+    "usage": "repos [action] [path]",
+    "description": "List the repositories kunj has been used in",
+    "arguments": "[action] [path]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-a, --all",
+        "description": "[list] Include hidden repositories",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Actions:\n  list (default)   Known repositories, most recently used first\n  add [path]       Add the repository containing path (default: current directory)\n  remove <path>    Hide a repository; it stays hidden until added again\n  prune            Forget repositories whose directory no longer exists\n\nRepositories are recorded as kunj runs in them, in ~/.kunj/repos.json"
+  },
+  {
+    "name": "setup",
+    "usage": "setup",
+    "description": "Set up kunj aliases and shell configuration",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-s, --shell <shell>",
+        "description": "Shell type (bash, zsh, fish)",
+        "default": null
+      },
+      {
+        "flags": "-f, --force",
+        "description": "Force overwrite existing aliases",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "stash",
+    "usage": "stash [action]",
+    "description": "Stash changes with AI-generated messages",
+    "arguments": "[action]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-l, --list",
+        "description": "List all stashes",
+        "default": null
+      },
+      {
+        "flags": "-p, --pop",
+        "description": "Pop the latest stash",
+        "default": null
+      },
+      {
+        "flags": "-a, --apply <index>",
+        "description": "Apply a specific stash by index (e.g., stash@{0})",
+        "default": null
+      },
+      {
+        "flags": "-d, --drop <index>",
+        "description": "Drop a specific stash by index",
+        "default": null
+      },
+      {
+        "flags": "-m, --message <message>",
+        "description": "Custom stash message (skips AI generation)",
+        "default": null
+      },
+      {
+        "flags": "-u, --include-untracked",
+        "description": "Include untracked files in stash",
+        "default": null
+      },
+      {
+        "flags": "--no-hooks",
+        "description": "Skip kunj hooks (see 'kunj hooks --help')",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "switch",
+    "usage": "switch [branch]",
+    "description": "Switch to a branch (interactive if no branch specified)",
+    "arguments": "[branch]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--no-stash",
+        "description": "Disable automatic stashing of changes",
+        "default": null
+      },
+      {
+        "flags": "-a, --all",
+        "description": "Show all branches (override filters)",
+        "default": null
+      },
+      {
+        "flags": "-w, --wip",
+        "description": "Show only work-in-progress branches",
+        "default": null
+      },
+      {
+        "flags": "-c, --create",
+        "description": "Create new branch if it doesn't exist",
+        "default": null
+      },
+      {
+        "flags": "-d, --desc <description>",
+        "description": "Set description when creating branch",
+        "default": null
+      },
+      {
+        "flags": "-t, --tag <tags...>",
+        "description": "Add tags when creating branch",
+        "default": null
+      },
+      {
+        "flags": "--base <branch>",
+        "description": "With -c: branch to create from (default: preferences.defaultBaseBranch, else the repo default)",
+        "default": null
+      },
+      {
+        "flags": "--no-origin",
+        "description": "With -c: create from the local base branch instead of fetching origin/<base>",
+        "default": null
+      },
+      {
+        "flags": "--configured",
+        "description": "Show only configured branches",
+        "default": null
+      },
+      {
+        "flags": "--no-hooks",
+        "description": "Skip kunj hooks (see 'kunj hooks --help')",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "team",
+    "usage": "team",
+    "description": "Fetch open PRs, save diffs, and generate a team activity report",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--no-ai",
+        "description": "Skip AI summary, generate structured report only",
+        "default": null
+      },
+      {
+        "flags": "-l, --limit <n>",
+        "description": "Max PRs to fetch (default: 50)",
+        "default": "50"
+      },
+      {
+        "flags": "-f, --force",
+        "description": "Force re-fetch all diffs, ignoring cache",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "ui",
+    "usage": "ui",
+    "description": "Start web dashboard",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-p, --port <port>",
+        "description": "Port number (default: 3333)",
+        "default": "3333"
+      },
+      {
+        "flags": "--no-open",
+        "description": "Do not open browser automatically",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  },
+  {
+    "name": "worktree",
+    "usage": "worktree [action] [target] [extra]",
+    "description": "Manage git worktrees and see which ones are open in an editor",
+    "arguments": "[action] [target] [extra]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--no-status",
+        "description": "Skip per-worktree git status (faster listing)",
+        "default": null
+      },
+      {
+        "flags": "--no-pr",
+        "description": "[list] Skip pull request lookup (gh / glab)",
+        "default": null
+      },
+      {
+        "flags": "--fresh",
+        "description": "[list|pr] Bypass the 60s pull request cache",
+        "default": null
+      },
+      {
+        "flags": "-w, --web",
+        "description": "[pr] Open the pull request in the browser",
+        "default": null
+      },
+      {
+        "flags": "-b, --new-branch",
+        "description": "[add] Create a new branch for the worktree",
+        "default": null
+      },
+      {
+        "flags": "-c, --create",
+        "description": "[add] Create the branch if it does not exist",
+        "default": null
+      },
+      {
+        "flags": "--base <ref>",
+        "description": "[add] Base for a new branch (default: preferences.defaultBaseBranch, else the repo default)",
+        "default": null
+      },
+      {
+        "flags": "--no-origin",
+        "description": "[add] Create a new branch from the local base instead of fetching origin/<base>",
+        "default": null
+      },
+      {
+        "flags": "-p, --path <dir>",
+        "description": "[add|session] Explicit worktree path",
+        "default": null
+      },
+      {
+        "flags": "-f, --force",
+        "description": "[add|remove] Force the git operation",
+        "default": null
+      },
+      {
+        "flags": "--no-hooks",
+        "description": "[add|remove] Skip kunj hooks (see 'kunj hooks --help')",
+        "default": null
+      },
+      {
+        "flags": "-n, --new-window",
+        "description": "[open] Open in a new editor window",
+        "default": null
+      },
+      {
+        "flags": "-a, --all",
+        "description": "[keep apply] Apply keep files to every worktree",
+        "default": null
+      },
+      {
+        "flags": "--pid <pid>",
+        "description": "[session] Owning process id",
+        "default": null
+      },
+      {
+        "flags": "--editor <name>",
+        "description": "[session] Editor name (e.g. vscode)",
+        "default": null
+      },
+      {
+        "flags": "--label <text>",
+        "description": "[session] Human readable window label",
+        "default": null
+      },
+      {
+        "flags": "--id <id>",
+        "description": "[session] Session id",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": null
+  }
+]

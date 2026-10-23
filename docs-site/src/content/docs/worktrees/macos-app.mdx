@@ -1,0 +1,134 @@
+---
+title: macOS menu bar app
+description: The Kunj menu bar app shows the worktrees of every repository you use with kunj, with their status, editor windows and pull requests.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+
+The Kunj menu bar app (macOS 14 or newer) does what the [VS Code extension](../vscode-extension/)
+does, but for every repository kunj knows about instead of the folders of one editor window. Click
+its icon and you get one section per repository with all of its worktrees: uncommitted changes,
+ahead/behind, which editor windows have them open, and the pull request with its checks and review
+state.
+
+Like the extension, the app does everything through `kunj … --json` and never runs git itself.
+
+## Install
+
+```bash
+kunj install macos
+```
+
+This downloads `Kunj-macos-<version>.zip` from the GitHub release (the one matching your CLI
+version when it has the app, else the newest), installs `Kunj.app` into `/Applications` (or
+`~/Applications`), clears the download quarantine and launches it. Run it again to update. See
+[Companion apps](../../integrations/apps/).
+
+To install by hand, unzip the release asset, move `Kunj.app` to `/Applications` and clear the
+quarantine, because the app is not notarized:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Kunj.app
+```
+
+The app needs the kunj CLI. It looks `kunj` up on your login shell's `PATH` (apps started from
+Finder don't get one otherwise); if it can't find it, set the command in Settings, for example
+`/opt/homebrew/bin/kunj` or `node /path/to/kunj/dist/index.js`.
+
+## What it does
+
+- **Open a worktree** by clicking it: it opens in your editor through `kunj worktree open`, so it
+  uses `worktree.editorCommand` (default `code`), and an already open VS Code window is brought to
+  the front. Hover a row for buttons to open in a new window, open a terminal, or remove it.
+  Right-click for the rest: open or copy the pull request, create one (runs `kunj pr` in a
+  terminal), reveal in Finder, copy the path or the branch name.
+- **New Worktree…** opens a window to check out an existing branch or create a new one from the
+  repository default or any base, fetched from origin unless you untick **Fetch the base from
+  origin**. Leave the folder empty for the default location (`worktree.baseDir`).
+- **Remove** asks for confirmation and offers to force it when the worktree has uncommitted changes
+  or is open somewhere, like the extension. **Prune Stale Worktrees** is in each repository's ⋯ menu.
+- **Filter** worktrees by typing, or switch on **Open only** to see just the ones open in an editor.
+- **Pull request notifications** when checks fail or pass, or a pull request is approved or merged,
+  and the number of failing checks in the menu bar.
+- **Open worktree switcher**: a global shortcut (⌥⌘K by default, changeable in Settings) shows the
+  worktrees open in an editor in the middle of the screen; ↑/↓ and ↩ bring one to the front.
+- **Organize Windows** (⚙ menu) gives each worktree a desktop on a chosen screen and tiles its
+  editor and terminal windows side by side (or one above the other). It needs Accessibility access
+  (System Settings › Privacy & Security › Accessibility) and works by driving Mission Control, so
+  leave the keyboard and mouse alone for the few seconds it runs.
+
+The list refreshes on a timer you choose (30 seconds by default) and right away when an editor opens
+or closes a worktree or a repository is added.
+
+### Settings
+
+Open **Settings…** from the ⚙ menu:
+
+| Section | Settings |
+| --- | --- |
+| kunj CLI | The command to run |
+| Worktrees | Refresh interval, show changes and ahead/behind, show pull requests, show paths, terminal app |
+| Open worktree switcher | Turn the global shortcut on or off and record a different one |
+| Organize | Screen, layout (editor left, editor right, editor above), whether editor and terminal windows take part, and whether to remove empty desktops afterwards |
+| Pull requests | Notifications and the failing-checks count in the menu bar |
+| General | Launch at login |
+
+The editor is not an app setting: the app uses kunj's `worktree.editorCommand`, so set it with
+`kunj config --global --set worktree.editorCommand=cursor`.
+
+## Which repositories are shown
+
+The app shows the repositories in `kunj repos`. A repository is added to that list automatically
+when you use kunj in it, and whenever an editor with the kunj VS Code extension opens a folder in
+it, so in practice the list fills itself.
+
+- **Add Repository…** in the ⚙ menu (or `kunj repos add <path>`) adds one you haven't used kunj in.
+- **Remove from List** in a repository's ⋯ menu (or `kunj repos remove <path>`) hides it. It
+  stays hidden, even when you run kunj there again, until you add it back.
+
+## `kunj repos`
+
+```bash
+kunj repos                      # known repositories, most recently used first
+kunj repos add ~/src/infra      # add the repository containing this path
+kunj repos remove ~/src/infra   # hide it
+kunj repos list --all           # include hidden ones
+kunj repos prune                # forget repositories whose directory is gone
+```
+
+```text
+shop-api /Users/me/src/shop-api
+infra /Users/me/src/infra [hidden]
+dotfiles.git /Users/me/src/dotfiles.git [bare]
+old-prototype /Users/me/src/old-prototype [missing]
+```
+
+`add` accepts any path inside the repository, including a worktree; the repository is recorded by
+its main directory. `remove` takes the repository's directory. The list is stored in
+`~/.kunj/repos.json`.
+
+<CommandReference name="repos" optionsOnly />
+
+## Build from source
+
+You need macOS 14 and the Swift toolchain (Xcode or the Command Line Tools):
+
+```bash
+cd macos-app
+scripts/bundle.sh             # builds build/Kunj.app (universal, ad-hoc signed)
+scripts/bundle.sh --install   # also copies it to /Applications and launches it
+```
+
+When the Command Line Tools' newest SDK lacks the SwiftUI macro plugin, the script retries with an
+older installed SDK by itself.
+
+<Aside type="note">
+macOS ties the Accessibility permission that Organize Windows needs to the app's signature, and an
+ad-hoc signature changes with every build, so a rebuilt app asks again. To keep the permission
+across builds, create a self-signed code signing certificate in Keychain Access (Certificate
+Assistant › Create a Certificate…, type Code Signing) and build with
+`CODESIGN_IDENTITY="<certificate name>" scripts/bundle.sh --install`.
+</Aside>

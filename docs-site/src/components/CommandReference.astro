@@ -1,0 +1,41 @@
+---
+// Renders one command from the generated src/data/commands.json: usage, aliases, options and the
+// extra help text (sub-actions) exactly as `kunj <command> --help` prints them.
+import commands from '../data/commands.json';
+import { inline } from './inline';
+
+interface Props {
+  name: string;
+  /** Hide the usage line and description when the page already introduces the command */
+  optionsOnly?: boolean;
+}
+
+const { name, optionsOnly = false } = Astro.props;
+const command = commands.find(c => c.name === name);
+if (!command) throw new Error(`CommandReference: no command named "${name}" in commands.json`);
+---
+
+<div class="kunj-ref">
+  {!optionsOnly && (
+    <>
+      <p class="usage"><code>kunj {command.usage}</code></p>
+      <p set:html={inline(command.description)} />
+      {command.aliases.length > 0 && (
+        <p>Aliases: {command.aliases.map((a, i) => <>{i > 0 && ', '}<code>{a}</code></>)}</p>
+      )}
+    </>
+  )}
+  <table>
+    <thead><tr><th>Option</th><th>Description</th><th>Default</th></tr></thead>
+    <tbody>
+      {command.options.map(o => (
+        <tr>
+          <td><code>{o.flags}</code></td>
+          <td set:html={inline(o.description)} />
+          <td>{o.default === null ? <span class="muted">—</span> : <code>{JSON.stringify(o.default)}</code>}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+  {command.helpText && <pre><code>{command.helpText}</code></pre>}
+</div>

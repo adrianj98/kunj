@@ -1,0 +1,79 @@
+---
+title: Slack
+description: Feed recent messages from your team's Slack channels into kunj team reports.
+sidebar:
+  order: 4
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+kunj reads Slack; it doesn't post to it. With Slack set up, [`kunj team`](../team/) pulls the
+last two days of messages from the channels you choose and gives them to the AI next to the open
+pull requests and Jira issues, so the team report can say "@sam is fixing the PR cache, see the
+thread in #dev-tools" rather than only listing PRs. No other command uses Slack.
+
+## Create a Slack app
+
+<Steps>
+
+1. Go to [https://api.slack.com/apps](https://api.slack.com/apps), choose **Create New App → From scratch**, and pick your
+   workspace.
+2. Under **OAuth & Permissions → Bot Token Scopes**, add `channels:history`, `channels:read`,
+   `groups:history`, `groups:read` and `users:read`.
+3. **Install to Workspace** and copy the **Bot User OAuth Token** (`xoxb-…`).
+4. Invite the bot to each channel you want in reports: `/invite @your-app` in the channel. kunj
+   can only read channels the bot is a member of.
+
+</Steps>
+
+## Configure kunj
+
+```bash
+kunj config --set slack.enabled=true
+kunj config --set slack.token=xoxb-your-bot-token
+```
+
+kunj also picks up the token from `SLACK_BOT_TOKEN` when `slack.token` is empty, so you can keep
+it out of the config file.
+
+Then choose the channels. The easiest way is the interactive editor, which checks the token and
+lists your workspace's channels, the ones the bot is already in first:
+
+```bash
+kunj config -i
+```
+
+Pick `slack.channels` and then **Browse channels from Slack**. You can also enter channel IDs
+directly (find one under the channel's name → **About** → bottom of the panel):
+
+```bash
+kunj config --set "slack.channels=[C0123456789,C0987654321]"
+```
+
+<SettingsTable category="slack" />
+
+<Aside type="note">
+`slack.signingSecret` and `slack.appToken` are accepted but not used by anything yet; only the bot
+token is needed. Despite the setting's wording, reports are not posted to the channels in
+`slack.channels`: those are the channels kunj reads from.
+</Aside>
+
+## What a team report gets
+
+Each `kunj team` run fetches, from every channel in `slack.channels`:
+
+- up to 50 messages per channel from the last 48 hours, oldest first,
+- with user IDs turned into names, and thread reply counts,
+- leaving out bot messages and join/leave events.
+
+Messages from earlier runs within those 48 hours are cached and merged with the new ones, so a
+second run the same day only asks Slack for what's new (`--force` refetches everything). The
+messages are saved to `~/.kunj/<repo>/team/slack/messages-<date>.json`.
+
+In the AI report, Slack discussion is woven into the per-person summary and the project sections.
+In the `--no-ai` report, a **Slack Activity** section lists the messages by channel.
+
+If the token is invalid, kunj prints a warning and builds the report without Slack. A channel the
+bot can't read is skipped silently, so if a channel never shows up, check that the bot was
+invited to it.

@@ -1,0 +1,238 @@
+---
+title: Container configuration
+description: Choose the image, forward secrets and files, publish ports, use a devcontainer.json, and run hooks around branch containers.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import SettingsTable from '../../../components/SettingsTable.astro';
+import HookTable from '../../../components/HookTable.astro';
+
+Container settings live under `container.*` in kunj's configuration. Like every setting they can
+be global (`~/.kunj/config.json`) or per repository (`~/.kunj/<repo>/config.json`); see
+[Configuration](../../configuration/overview/). A typical per-repository setup:
+
+```json
+{
+  "container": {
+    "env": ["ANTHROPIC_API_KEY", "GH_TOKEN", "NODE_ENV=development"],
+    "files": ["~/.npmrc:~/.npmrc"],
+    "publish": ["3000"],
+    "memory": "6g",
+    "cpus": "4"
+  }
+}
+```
+
+Most settings take effect when a container is **created**. To apply a change to an existing
+container, recreate it on its volumes with `kunj ct start <branch> --rebuild`. The firewall settings
+are the exception: they are read again every time a stopped container is started.
+
+## Settings
+
+<SettingsTable category="container" />
+
+## Which image a container runs
+
+kunj picks the first of:
+
+1. `--image <img>` on `kunj ct start`;
+2. the `container.image` setting;
+3. the repository's `devcontainer.json`, read from origin at the branch's tip (see
+   [below](#devcontainerjson));
+4. kunj's own `kunj-sandbox` image.
+
+When the repository has a [blueprint](../blueprints/), a new container starts from the blueprint's
+snapshot instead, which is built on top of the image chosen above (never with `--image`).
+
+An image chosen with `--image` or `container.image` runs as the image's own user, and its home
+directory is not kept in a volume (kunj warns about this). The sandbox image and devcontainers with a
+`remoteUser` get a home volume.
+
+Whatever the image, it should have `git`, and `tmux` and `socat` for `agent` and `forward` to work
+fully. kunj warns when they are missing.
+
+## Environment and secrets
+
+`container.env` lists what the container's environment gets. Each entry is either:
+
+- a **name** (`GH_TOKEN`): the variable is copied from your environment when it is set there, and
+  skipped when it is not;
+- a **`NAME=value`** pair (`NODE_ENV=development`): passed as written, with
+  [`${...}` variables](../../configuration/overview/) such as `${repoName}` or `${branch}` expanded.
+
+The default forwards the model credentials and a GitHub token:
+
+```json
+["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "GH_TOKEN"]
+```
+
+Setting `container.env` replaces this list, so keep the entries you still need. When
+`CLAUDE_CODE_USE_BEDROCK` is on, the AWS keys and `AWS_PROFILE` are forwarded as well. Values
+cannot contain newlines.
+
+To clone a private repository, forward a token: `GH_TOKEN` (default), `GITHUB_TOKEN` or
+`GITLAB_TOKEN`. kunj's git credential helper hands it to git, for origin's host only. `GITHUB_TOKEN`
+and `GITLAB_TOKEN` are not in the default list, so add them if that is where your token lives:
+
+```json
+{ "container": { "env": ["ANTHROPIC_API_KEY", "GITLAB_TOKEN"] } }
+```
+
+Secrets reach the container only through the environment of `docker run`; see
+[how secrets reach the container](../security/#how-secrets-reach-the-container).
+
+## Files
+
+Two kinds of host files can be copied into a new container. Both are copies, made once when the
+container is created: later edits on either side do not sync.
+
+**Keep files.** Files you keep out of git, such as `.env`, and have stored with
+[`kunj worktree keep`](../../worktrees/keep-files/) are copied into `/workspace` at their usual
+paths. Turn this off with `container.keepFiles: false`.
+
+**`container.files`.** Any other file or directory, as `hostPath:containerPath`:
+
+```json
+{
+  "container": {
+    "files": [
+      "~/.npmrc:~/.npmrc",
+      "~/.zshrc:~/.zshrc",
+      "${home}/.aws/config:~/.aws/config",
+      "~/.claude/settings.json:~/.claude/settings.json"
+    ]
+  }
+}
+```
+
+`~` and `${...}` variables are expanded on both sides; a container path that is not absolute (or
+starts with `~`) is relative to the container user's home. A missing host file is skipped with a
+warning.
+
+<Aside type="caution">
+Everything you copy in is readable by the agent. Don't copy credentials it does not need.
+
+Don't copy your `~/.gitconfig`: it would replace the one kunj writes in the container, which holds
+your git identity and the credential helper that lets git use the forwarded token.
+</Aside>
+
+## Ports
+
+`--publish`, `container.publish` and a devcontainer's `forwardPorts` are all published when the
+container is created, on `127.0.0.1` only. For ports you need now and then, use
+[`kunj ct forward`](../commands/#forward) instead, which needs no rebuild and reaches servers bound to
+`localhost`.
+
+## Resources and Docker context
+
+`container.cpus` and `container.memory` are passed to `docker run` as `--cpus` and `--memory`.
+`container.dockerContext` makes every docker call use that context, for example to run containers in
+Colima while Docker Desktop stays your default; `--context` overrides it for one command.
+
+## devcontainer.json
+
+When neither `--image` nor `container.image` is set, kunj looks for `.devcontainer/devcontainer.json`
+or `.devcontainer.json` on origin, at the tip of the branch being started (or the base, with `-c`).
+Comments and trailing commas are allowed. kunj supports this part of the spec:
+
+| Key | What kunj does with it |
+|---|---|
+| `image` | Runs that image. |
+| `build.dockerfile`, `build.context`, `build.args` | Builds the image from the branch's files, tagged `kunj-<repo>:<hash>`; rebuilt when the Dockerfile, its context or the arguments change. Paths must stay inside the repository. |
+| `remoteUser` | Runs as that user, with a home volume at `/home/<user>`. Must not be `root`. |
+| `containerEnv` | Added to the environment. It cannot override forwarded secrets or `KUNJ_*`. |
+| `forwardPorts` | Published on `127.0.0.1` like `--publish`. |
+| `postCreateCommand` | Runs once per container, in `/workspace`, as the user. If it fails it runs again on the next start. |
+| `postStartCommand` | Runs on every start of the container. |
+| `dockerComposeFile` | Not supported: kunj warns, and services are not started. |
+
+Anything else (features, `onCreateCommand`, `customizations`, mounts, `runArgs`, ...) is ignored
+with a warning naming the keys.
+
+```jsonc
+// .devcontainer/devcontainer.json
+{
+  "build": { "dockerfile": "Dockerfile", "args": { "NODE_VERSION": "22" } },
+  "remoteUser": "node",
+  "containerEnv": { "DATABASE_URL": "postgres://localhost:5432/dev" },
+  "forwardPorts": [3000],
+  "postCreateCommand": "npm ci",
+  "postStartCommand": "npm run db:migrate"
+}
+```
+
+<Aside>
+The devcontainer is read from the branch, which the agent can change and push. kunj refuses a root
+user, replaces the image's entrypoint so nothing in it runs before the firewall, and warns before it
+builds a Dockerfile the branch has changed, since image builds have full network access. See
+[Security](../security/#capabilities-and-users).
+</Aside>
+
+## The sandbox image
+
+Without a devcontainer, containers run `kunj-sandbox`, which kunj builds locally the first time you
+need it (tagged `kunj-sandbox:<kunj version>-<hash>`, so a new kunj version rebuilds it). It is
+Debian bookworm-slim with:
+
+- `git`, `git-lfs`, `curl`, `tmux`, `socat`, `zsh`, `openssh-client`, `gnupg`, `procps`, `iproute2`;
+- Node.js 22, the GitHub CLI `gh`, and Claude Code;
+- a user `dev` (uid 1000) with zsh as its shell, and no `sudo`.
+
+Global npm packages install into `~/.npm-global`, inside the home volume, so the agent can add tools
+without root and they survive restarts. For tools every container of a repository needs, use a
+[blueprint](../blueprints/) instead.
+
+### Shell defaults
+
+The image's `/etc/zsh/zshrc` sets up a usable shell without a dotfile:
+
+- a prompt that shows the branch: `kunj ▸ feature/search /workspace ❯`, with `sandbox` on the right
+  and a red arrow after a failed command;
+- 50,000 lines of shared history in `~/.zsh_history`, kept in the home volume;
+- completion with a menu, `autocd`, emacs key bindings;
+- aliases `ll`, `gs` (`git status -sb`) and `gl` (`git log --oneline -20`);
+- new shells start in `/workspace`;
+- environment written by blueprint presets (such as `JAVA_HOME`) is loaded.
+
+To use your own configuration, copy your `~/.zshrc` in with `container.files`. It is read after the
+defaults, so it wins.
+
+### Environment inside the container
+
+kunj sets these in every container, whatever the image:
+
+| Variable | Value |
+|---|---|
+| `KUNJ_CONTAINER` | `1`, so scripts can tell they run in a kunj container |
+| `KUNJ_BRANCH` | The branch the container was started for |
+| `KUNJ_REPO` | The repository's name |
+| `KUNJ_CREDENTIAL_HOST` | Origin's host (and port), the only host the credential helper answers for |
+
+`shell`, `exec` and `agent` also pass your terminal's `TERM` (and `COLORTERM`) and a UTF-8 locale,
+so full-screen tools render as they do on your machine.
+
+## Hooks
+
+kunj runs hooks around creating and removing containers. Install them as scripts or commands as
+described in [Hooks](../../configuration/hooks/).
+
+<HookTable filter="container" />
+
+- The create hooks run only when `kunj ct start` creates a container (including `--rebuild`), not
+  when it resumes one. `pre-container-create` runs before the image is chosen, so its `image` is
+  empty.
+- A failing `pre-container-create` or `pre-container-delete` hook aborts the command before anything
+  is created or deleted.
+- `--no-hooks` on `start` or `remove` skips them.
+
+Hooks run on your machine, not in the container. For example, to note each new container in a log:
+
+```json
+{
+  "hooks": {
+    "post-container-create": "echo \"$(date) ${container} ${image}\" >> ~/.kunj/containers.log"
+  }
+}
+```

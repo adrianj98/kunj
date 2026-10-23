@@ -1,0 +1,151 @@
+---
+title: Git Flow
+description: Start and finish feature, release and hotfix branches with kunj flow, merging locally or through pull requests.
+sidebar:
+  order: 7
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+`kunj flow` implements the Git Flow branching model: features branch off a development branch and
+merge back into it, releases and hotfixes merge into the production branch (and back into
+development), and releases are tagged. It can do the merges locally, or open and merge pull
+requests on GitHub or GitLab.
+
+## Set it up
+
+```bash
+kunj flow init
+```
+
+`init` asks for:
+
+- the **main** (production) branch, suggesting `main` or `master`, whichever exists;
+- the **development** branch, suggesting `develop`, `dev` or `development`, whichever exists;
+- the **mode**: local merges, or pull requests;
+- in PR mode, the **provider**: GitHub (uses `gh`) or GitLab (uses `glab`);
+- whether releases and hotfixes are **merged back** into the development branch.
+
+The main branch must already exist. If the development branch does not, kunj creates it from main
+(and leaves you on it). The answers are saved in the repository's local kunj config, so each
+repository has its own flow setup; running `init` again asks before overwriting it. Every other
+`kunj flow` command refuses to run until `init` has been done.
+
+## Features
+
+```bash
+kunj flow feature start login-form
+# ✓ Created and switched to feature branch 'feature/login-form'
+
+# ... commit as usual ...
+
+kunj flow feature finish
+```
+
+`start` creates `<featurePrefix><name>` from the development branch and switches to it. Leave out
+the name and kunj asks for it.
+
+`finish` works on the branch you name (the prefix is added if you leave it off), else on the
+current branch if it has the feature prefix, else it lets you pick from your feature branches. It
+shows what will happen and asks for confirmation:
+
+```text
+? Finish feature 'feature/login-form'?
+  → Merge into: develop
+  → Delete branch: yes
+  Continue? (Y/n)
+```
+
+In local mode it switches to the development branch, merges with `--no-ff` (so the feature stays
+visible as a merge commit), and deletes the feature branch if `flow.autoDeleteOnFinish` is on.
+
+## Releases
+
+```bash
+kunj flow release start 2.4.0
+# ✓ Created and switched to release branch 'release/2.4.0'
+
+# bump versions, update the changelog, commit
+
+kunj flow release finish
+```
+
+`start` creates `<releasePrefix><version>` from the development branch. `finish` picks the branch
+the same way as features, then asks whether to tag the release, suggesting `v<version>` (here
+`v2.4.0`). In local mode it then:
+
+<Steps>
+1. switches to the main branch and merges the release with `--no-ff`;
+2. creates the annotated tag on main, if you asked for one;
+3. switches to the development branch and, with `flow.mergeBackToDevelop` on, merges the release
+   into it;
+4. deletes the release branch if `flow.autoDeleteOnFinish` is on.
+</Steps>
+
+Local mode does not push anything. When you are happy with the result:
+
+```bash
+git push origin main develop --follow-tags
+```
+
+## Hotfixes
+
+```bash
+kunj flow hotfix start 2.4.1
+# ✓ Created and switched to hotfix branch 'hotfix/2.4.1'
+
+kunj flow hotfix finish
+```
+
+Hotfixes are like releases, except they start from the **main** branch instead of the development
+branch. Finishing one merges it into main, offers a `v2.4.1` tag, merges it back into development
+(if configured) and deletes the branch.
+
+## Pull request mode
+
+With `flow.mode` set to `pr`, kunj goes through your Git host instead of merging locally. You need
+the `gh` (GitHub) or `glab` (GitLab) CLI installed and logged in.
+
+- **start** switches to the base branch and pulls it, creates the new branch, pushes it with
+  `-u`, and tries to open a pull request: features into development, releases and hotfixes into
+  main. A brand-new branch has no commits yet, so the PR usually cannot be created at this
+  point; kunj tells you so. For features, `finish` creates the PR if it is still missing. For
+  releases and hotfixes it does not, so once you have pushed a commit, open the PR yourself (for
+  example with `kunj pr`) before finishing.
+- **feature finish** pushes the branch, opens the PR if there is none, merges it, then switches
+  to the development branch, pulls, and deletes the local branch.
+- **release / hotfix finish** pushes the branch, merges its PR into main, switches to main and
+  pulls, creates and pushes the tag, and with `flow.mergeBackToDevelop` opens and merges a
+  main-to-development PR. It ends on the development branch, pulled.
+
+On GitHub the PRs are merged with a merge commit and the remote branch is deleted; on GitLab with
+`glab mr merge`.
+
+## Before you finish
+
+Every `finish` switches to the branch being finished and refuses to continue while there are
+uncommitted changes, so commit or [stash](../stash/) first. If a merge conflicts, kunj stops and
+leaves the conflict in your working tree; resolve and commit it, then complete the remaining steps
+with git.
+
+<Aside>
+With `flow.autoDeleteOnFinish` off, kunj keeps the finished branch and does not ask about it;
+delete it later with [`kunj delete`](../delete/).
+</Aside>
+
+## Settings
+
+`kunj flow init` writes `flow.enabled`, the branch names, the mode, the provider and
+`flow.mergeBackToDevelop`. Change the prefixes and the rest with
+[`kunj config`](../../configuration/overview/):
+
+```bash
+kunj config --set flow.featurePrefix=feat/
+kunj config --set flow.autoDeleteOnFinish=false
+```
+
+An empty prefix means no prefix: `kunj flow feature start login-form` then creates `login-form`,
+and `finish` with no name uses the current branch.
+
+<SettingsTable category="flow" />

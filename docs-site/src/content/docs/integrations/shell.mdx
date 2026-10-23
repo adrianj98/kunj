@@ -1,0 +1,182 @@
+---
+title: Shell integration
+description: Tab completion for kunj commands and the current branch's PR number in your zsh or bash prompt.
+sidebar:
+  order: 1
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+
+## Tab completion
+
+`kunj completion` prints a completion script; `--install` adds a line to your shell's startup file
+that loads it each time a shell starts.
+
+```bash
+kunj completion --install
+source ~/.zshrc     # or ~/.bashrc
+```
+
+Then `kunj sw<Tab>` completes to `kunj switch`. Completion covers command names only, not options
+or branch names, and only this fixed list: `create`, `switch`, `list`, `commit`, `pr`, `delete`,
+`config`, `setup`, `log`, `graph`, `diff`, `stash`, `flow`, `jira`, `completion` and `prompt-info`.
+Newer commands such as `worktree` and `container` are not completed yet.
+
+<CommandReference name="completion" optionsOnly />
+
+`--install` picks the file from `$SHELL`: `~/.zshrc` for zsh, otherwise `~/.bashrc`. It appends
+this block, and does nothing if the block is already there:
+
+```bash
+# Kunj completion
+if command -v kunj &> /dev/null; then
+  source <(kunj completion 2>/dev/null || true)
+fi
+# End Kunj completion
+```
+
+`kunj completion --uninstall` removes the block again.
+
+<Aside type="caution" title="zsh needs bash completion support">
+The script uses bash's `complete` command. zsh only has it after `bashcompinit` is loaded, otherwise
+every new shell prints `command not found: complete`. Oh My Zsh and most frameworks already load
+it; if yours doesn't, add these lines to `~/.zshrc` above the kunj block:
+
+```zsh
+autoload -U +X compinit && compinit
+autoload -U +X bashcompinit && bashcompinit
+```
+</Aside>
+
+<Aside type="note">
+fish is not supported: `--install` writes the bash snippet above into `~/.config/fish/config.fish`,
+which fish can't run. Remove it with `kunj completion --uninstall`.
+</Aside>
+
+To set it up by hand, add the block above to your startup file yourself.
+
+## PR number in your prompt
+
+`kunj prompt-info` prints the pull request number of the current branch, such as `#482`, and nothing
+at all when there is no PR, you are outside a git repository or on a detached HEAD. It never prints
+errors, so it is safe to call from a prompt.
+
+```bash
+$ kunj prompt-info
+#482
+```
+
+<CommandReference name="prompt-info" optionsOnly />
+
+kunj first looks for the PR URL saved with the branch, which [`kunj pr`](../../commits-and-prs/pull-requests/)
+stores when it creates a pull request. That needs no network. Otherwise it asks the GitHub CLI
+(`gh pr list --head <branch>`), which takes a network round trip on every prompt. Only GitHub pull
+requests are recognised.
+
+### Output formats
+
+```bash
+kunj prompt-info
+# #482
+
+kunj prompt-info --format detailed --show-branch --show-status
+# feature/rate-limit PR#482 [OPEN]
+
+kunj prompt-info --format json --show-status
+# {"branch":"feature/rate-limit","prNumber":"482","prStatus":"OPEN"}
+```
+
+`--show-branch` only applies to `detailed`; the JSON always includes the branch. `--show-status`
+calls `gh pr view` each time, so leave it out if your prompt feels slow.
+
+### Adding it to the prompt
+
+<Tabs syncKey="shell">
+  <TabItem label="zsh">
+    Add to `~/.zshrc`:
+
+    ```zsh
+    setopt PROMPT_SUBST
+
+    kunj_prompt_pr() {
+      local pr=$(kunj prompt-info 2>/dev/null)
+      [ -n "$pr" ] && echo " %F{cyan}$pr%f"
+    }
+
+    RPROMPT='$(kunj_prompt_pr)'
+    ```
+
+    With branch and status:
+
+    ```zsh
+    kunj_prompt_pr() {
+      local pr=$(kunj prompt-info --format detailed --show-branch --show-status 2>/dev/null)
+      [ -n "$pr" ] && echo "%F{cyan}[$pr]%f"
+    }
+    ```
+  </TabItem>
+  <TabItem label="bash">
+    Add to `~/.bashrc`:
+
+    ```bash
+    kunj_prompt_pr() {
+      local pr=$(kunj prompt-info 2>/dev/null)
+      [ -n "$pr" ] && echo " $pr"
+    }
+
+    PS1='\u@\h:\w$(kunj_prompt_pr)\$ '
+    ```
+  </TabItem>
+  <TabItem label="Starship">
+    Add to `~/.config/starship.toml`:
+
+    ```toml
+    [custom.kunj_pr]
+    command = "kunj prompt-info"
+    when = "git rev-parse --git-dir 2> /dev/null"
+    format = "[$output]($style) "
+    style = "bold cyan"
+    ```
+  </TabItem>
+  <TabItem label="Powerlevel10k">
+    Add `kunj_pr` to `POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS` in `~/.p10k.zsh` and define the segment:
+
+    ```zsh
+    function prompt_kunj_pr() {
+      local pr=$(kunj prompt-info 2>/dev/null)
+      [ -n "$pr" ] && p10k segment -f 208 -t "$pr"
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+Reload with `source ~/.zshrc` (or `~/.bashrc`) or open a new terminal.
+
+### Troubleshooting
+
+- **Nothing shows.** Run `kunj prompt-info --format json` in the repository. If it prints nothing,
+  the branch has no PR that kunj or `gh` can find: check `gh auth status` and
+  `gh pr list --head "$(git branch --show-current)"`.
+- **The prompt is slow.** Drop `--show-status`. A PR created outside kunj is looked up with `gh` on
+  every prompt; one created with `kunj pr` is not.
+
+## cd into a worktree
+
+A command can't change your shell's directory, but `kunj worktree path <branch>` prints just the
+path, so a small function can:
+
+```zsh
+# ~/.zshrc or ~/.bashrc
+kcd() {
+  local dir
+  dir=$(kunj worktree path "$1") || return
+  cd "$dir"
+}
+```
+
+```bash
+kcd fix/login-redirect
+```
+
+See [Worktrees](../../worktrees/overview/) for creating them.

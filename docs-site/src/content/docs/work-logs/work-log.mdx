@@ -1,0 +1,118 @@
+---
+title: Daily work log
+description: kunj keeps a Markdown diary of your AI commits and pull requests, and turns it into standup bullets with kunj log.
+sidebar:
+  order: 1
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+
+Every time you commit with an AI-written message or open a pull request with `kunj pr`, kunj adds
+a short, itemised entry to a per-day Markdown file. `kunj log` reads those files back, and
+`kunj log --standup` boils them down to what you did yesterday and today.
+
+```bash
+kunj log                    # today's log
+kunj log --yesterday        # yesterday's
+kunj log --date 2026-10-20  # a given day
+kunj log --list             # every day that has a log
+kunj log --standup --ai     # standup bullets for yesterday and today
+```
+
+## Where the logs live
+
+One file per day, per repository, in kunj's directory for the repository (shared by all its
+worktrees):
+
+<FileTree>
+- ~/.kunj/
+  - my-app/
+    - work-logs/
+      - 2026-10-21.md
+      - 2026-10-22.md
+      - 2026-10-23.md
+</FileTree>
+
+`my-app` is the repository name kunj derives from the `origin` URL. The files are plain Markdown,
+so you can edit them, add your own notes under a new `## HH:MM` heading, or keep them in a notes
+app.
+
+## What gets written
+
+**AI commits.** After [`kunj commit`](../../commits-and-prs/commit/) makes a commit whose message
+the AI wrote (picked from the menu or `--auto`), kunj sends the commit (`git show HEAD`, first
+4,000 characters) to the AI and appends what it writes. Commits made with `-m` or a typed message,
+and plain `git commit`, are not logged.
+
+**Pull requests.** After [`kunj pr`](../../commits-and-prs/pull-requests/) opens a PR, kunj logs a
+PR-level summary of the whole branch with the PR number.
+
+Each entry is a timestamped section with a tag, a few short "what changed" bullets, and the main
+files or the PR number:
+
+```markdown
+# Work Log - Friday, October 23, 2026
+
+## 10:42
+
+[bug] Fixed PR cache timeouts
+- Added retry around gh call
+- Kept stale entry during retry
+- Added timeout tests
+Files: src/lib/worktree.ts, src/lib/__tests__/worktree.test.ts
+
+## 15:08
+
+[feature] Added worktree PR retry
+- Retried timed-out PR lookups
+- Served stale cache meanwhile
+- Covered retry path in tests
+PR: #482
+```
+
+Tags are `[feature]`, `[bug]`, `[refactor]`, `[perf]`, `[docs]`, `[test]` and `[chore]`. With the
+[`caveman` commit style](../../commits-and-prs/commit-styles/#caveman) the entries get even
+shorter.
+
+Writing entries needs AI to be enabled and working (see
+[AWS Bedrock](../../integrations/aws-bedrock/)). If the AI call fails, the commit or PR still goes
+through and kunj tells you the log entry wasn't written.
+
+## Standup summaries
+
+`kunj log --standup` shows one bullet per entry for yesterday and today. Without `--ai` that is a
+rough cut: each entry trimmed to its first sentence or first 120 characters, without any
+rewriting. Add `--ai` to have the AI rewrite each day into three to five casual one-liners,
+grouped by area, the way you'd say them out loud:
+
+```bash
+kunj log --standup --ai
+```
+
+```text
+🎤 Daily Standup Summary
+
+Yesterday:
+  • Worktrees: Added keep files to new worktrees
+  • Docs: Wrote up keep files
+
+Today:
+  • Worktrees: Fixed PR numbers going missing offline
+```
+
+Entries tagged `[bug]` come out as "Fixed …", features as "Added/Built …", refactors as "Cleaned
+up …". If the AI call fails, kunj falls back to the first-sentence bullets.
+
+<Aside type="note">
+"Yesterday" means the previous calendar day, so on a Monday it shows Sunday's log. Use
+`kunj log --date 2026-10-16` to look at Friday.
+</Aside>
+
+## Options
+
+<CommandReference name="log" optionsOnly />
+
+`--ai` only has an effect together with `--standup`. With `--json`, `kunj log` returns
+`{ "date": "...", "content": "..." }` and `kunj log --list --json` returns `{ "logs": [...] }`,
+newest first.

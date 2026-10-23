@@ -1,0 +1,73 @@
+---
+title: List branches
+description: See your local branches with their descriptions, tags, Jira issues and stashed changes, and filter them down to the ones you are working on.
+sidebar:
+  order: 2
+---
+
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+`kunj list` shows your local branches with everything kunj knows about them: description, tags,
+linked Jira issue, and the changes it [auto-stashed](../create-and-switch/#auto-stash) on each.
+
+```bash
+kunj list
+```
+
+```text
+Branches (sorted by recent):
+──────────────────────────────────────────────────────────────────────
+● feature/login-form [current] - 2 hours ago
+  │ Login form with validation
+  │ [PROJ-412] In Progress - Add login form
+  │ Tags: #wip #frontend
+  fix/session-timeout - 2 days ago
+  │ Session expires after 5 minutes
+  │ Tags: #bug
+  ├─ 📦 Auto-stashed 2 days ago (2 files, +14, -3)
+  main - 3 days ago
+
+Total stashes: 1
+```
+
+Add `-v` to also print each branch's [note](../metadata/). `--json` prints the same information
+as JSON (name, current, last activity, description, tags, notes, Jira fields and stashes).
+
+Branches are sorted by `preferences.branchSort`: `recent` (most recent commit first, the default)
+or `alphabetical`.
+
+<CommandReference name="list" optionsOnly />
+
+## Filtering
+
+By default every local branch is shown. Two filters narrow the list, either for one command
+(`-w`, `-c`) or permanently through settings. They also apply to the
+[`kunj switch`](../create-and-switch/#switch-branches) menu, and `--all` ignores both.
+
+**Configured branches** (`-c`, `preferences.showOnlyConfigured`) are branches kunj has any record
+of: a description, tag or note, a stash, or simply having been created or switched to with kunj.
+
+**Work-in-progress branches** (`-w`, `preferences.showOnlyWIP`) are decided in one of two ways:
+
+- **Personal mode** (`preferences.personalWIPMode`, on by default) asks "am I working on this?".
+  A branch counts when it is the current branch, when you switched to it with kunj within the
+  last `preferences.recentDays` days, or when it has a kunj stash newer than
+  `preferences.stashAgeDays` days.
+- **Tag mode** (personal mode off) goes by [tags](../metadata/#tags). A branch with no tags
+  counts as in progress. A branch with any of `preferences.doneTags` does not. Otherwise it counts
+  only if it has one of `preferences.wipTags`. Tags are compared case-insensitively.
+
+```bash
+kunj list -w                       # what am I working on?
+kunj config --set preferences.personalWIPMode=false
+kunj branch-tag fix/session-timeout done
+kunj list -w                       # fix/session-timeout is gone
+```
+
+When a filter is on through settings and nothing matches, kunj says so and suggests `--all`.
+
+<SettingsTable category="filtering" />
+
+`preferences.stashAgeDays` and `preferences.showStashDetails` (the file and line counts after each
+stash) are described under [Stash](../stash/#settings).

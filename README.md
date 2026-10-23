@@ -2,6 +2,8 @@
 
 A simple and intuitive command-line tool for managing Git branches.
 
+**User docs:** <https://adrianj98.github.io/kunj/docs/> (source in [`docs-site/`](docs-site/README.md)).
+
 ## Installation
 
 ### 1. The CLI

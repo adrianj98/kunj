@@ -1,0 +1,79 @@
+---
+title: Companion apps
+description: Install the VS Code extension and the macOS menu bar app with kunj install.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+
+Two apps show your worktrees, which ones are open in an editor and their pull requests, without a
+terminal:
+
+- **Kunj Worktrees**, a VS Code extension that also works in VS Code-like editors such as Cursor.
+  See [VS Code extension](../../worktrees/vscode-extension/).
+- **Kunj.app**, a macOS menu bar app (macOS 14 or later). See
+  [macOS app](../../worktrees/macos-app/).
+
+Both run the `kunj` CLI for everything, so install kunj first. `kunj install` downloads them from
+the [GitHub releases](https://github.com/adrianj98/kunj/releases) and installs them. `kunj setup`
+offers the same choice at the end.
+
+```bash
+kunj install            # choose from a checklist
+kunj install vscode     # just the extension
+kunj install macos      # just the menu bar app
+kunj install all -y     # everything available on this machine
+```
+
+<CommandReference name="install" optionsOnly />
+
+## Which release
+
+kunj installs the apps from the release that matches your CLI version. If that release doesn't
+have the app, it uses the newest release that does and says so:
+
+```text
+Looking for the macOS menu bar app (Kunj.app) in the GitHub releases...
+  1.0.0 has no Kunj download; using v1.2.0
+  Downloading Kunj-macos-1.2.0.zip (v1.2.0)...
+✓ Installed /Applications/Kunj.app v1.2.0 and launched it. Look for the branch icon in the menu bar.
+```
+
+Use `--release 1.2.0` to install from a particular release. Running `kunj install` again updates
+the apps; in the checklist, apps that are already installed are marked "installed - update" and
+start unchecked.
+
+## VS Code extension
+
+The `.vsix` is installed with `code --install-extension`. For another editor, pass its CLI:
+
+```bash
+kunj install vscode --editor cursor
+```
+
+If the editor's CLI isn't on your `PATH`, kunj says so: in VS Code run **Shell Command: Install
+'code' command in PATH** from the command palette, then try again. Reload open VS Code windows
+afterwards to load the extension.
+
+## macOS app
+
+The app is unpacked into `/Applications`, or `~/Applications` when `/Applications` isn't writable
+(an existing copy is replaced where it is, after quitting it), and then launched. Look for the
+branch icon in the menu bar. `kunj install` only offers it on macOS.
+
+<Aside type="note">
+The app is not notarized by Apple. kunj clears the download quarantine flag so it opens without a
+Gatekeeper warning. If you download the zip by hand instead, right-click the app and choose
+**Open** the first time.
+</Aside>
+
+## Building from source
+
+If no release has an app yet, `kunj install` tells you to build it from a clone of the repository:
+
+```bash
+cd vscode-extension && npm install && npm run install-local   # the VS Code extension
+cd macos-app && scripts/bundle.sh --install                   # the menu bar app
+```

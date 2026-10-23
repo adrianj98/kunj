@@ -1,0 +1,92 @@
+---
+title: Branch metadata
+description: Attach a description, tags and notes to a branch so lists and menus tell you what each one is for.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+
+Branch names are short. kunj lets you keep a little more about each branch: a one-line
+**description**, a set of **tags**, and free-form **notes**. Descriptions and tags appear in
+[`kunj list`](../list/) and in the [`kunj switch`](../create-and-switch/#switch-branches) menu;
+notes appear in `kunj list -v`. Tags also drive the work-in-progress filter in
+[tag mode](../list/#filtering).
+
+All three commands take the branch first and the value after it. With no value they show what is
+set; with no branch at all they show the current branch's value.
+
+<Aside type="caution">
+To **set** a value you have to name the branch, even the current one. `kunj branch-desc "Fix login"`
+treats `Fix login` as a branch name and shows its (empty) description.
+</Aside>
+
+## Descriptions
+
+```bash
+kunj branch-desc feature/login-form Login form with client-side validation
+kunj branch-desc feature/login-form     # show it
+kunj branch-desc                        # show the current branch's description
+kunj branch-desc feature/login-form --clear
+```
+
+Everything after the branch name is joined into the description, so quotes are optional. Setting
+a description replaces the previous one. You can also set it when creating the branch with
+`kunj create <branch> -d "..."`.
+
+<CommandReference name="branch-desc" optionsOnly />
+
+## Tags
+
+```bash
+kunj branch-tag feature/login-form wip frontend
+kunj branch-tag feature/login-form             # list its tags
+kunj branch-tag feature/login-form -r wip      # remove one tag
+kunj branch-tag feature/login-form --clear     # remove them all
+```
+
+New tags are added to the existing ones; duplicates are ignored. `kunj create <branch> -t a b`
+sets tags at creation. Tags show as `#wip #frontend` in lists.
+
+<CommandReference name="branch-tag" optionsOnly />
+
+## Notes
+
+```bash
+kunj branch-note feature/login-form Waiting on design review for the error states
+kunj branch-note feature/login-form            # show the note
+kunj branch-note feature/login-form --clear
+```
+
+A branch has one note; setting it again replaces it.
+
+<CommandReference name="branch-note" optionsOnly />
+
+## Where it is stored
+
+Metadata lives outside the repository, in `~/.kunj/<repo>/branches.json`, where `<repo>` is named
+after the repository's `origin` remote (see [Configuration](../../configuration/overview/)). It is
+never committed and never pushed, so it is personal to you and your machine. All worktrees of a
+repository share the same file.
+
+Besides what you set by hand, kunj keeps a few things there itself: when you last switched to each
+branch (used by the [personal WIP filter](../list/#filtering)), the
+[auto-stashes](../create-and-switch/#auto-stash) it made, linked Jira issue details, and
+[Git Flow](../git-flow/) bookkeeping.
+
+```json
+{
+  "branches": {
+    "feature/login-form": {
+      "description": "Login form with client-side validation",
+      "tags": ["wip", "frontend"],
+      "notes": "Waiting on design review for the error states",
+      "lastSwitched": "2026-10-23T09:14:02.311Z",
+      "stashes": []
+    }
+  }
+}
+```
+
+Deleting a branch with [`kunj delete`](../delete/) leaves its entry in place.

@@ -1,0 +1,59 @@
+---
+title: Introduction
+description: What kunj is, what it does for you, and where to go next.
+sidebar:
+  order: 1
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+kunj is a command-line tool that sits next to `git` and takes care of the things you do around a
+branch: making it from the right base, switching without losing work, writing the commit message
+and pull request description, giving it its own worktree, and, when you want, running it in a
+sandboxed Docker container.
+
+It does not replace `git`. Every repository kunj touches stays an ordinary git repository, and you
+can keep using `git` commands alongside it.
+
+```bash
+kunj create feature/rate-limit     # new branch from origin's default branch, work stashed
+kunj commit                        # pick files, let the AI write the message
+kunj pr                            # push and open a PR with an AI-written description
+kunj worktree add fix/login -c     # the same, but in its own directory
+```
+
+## What it does
+
+- **Branches.** `kunj create` and `kunj switch` stash and restore your uncommitted changes
+  automatically, start new branches from a consistent base (by default a freshly fetched
+  `origin/<default branch>`), and remember a description, tags and notes for each branch.
+- **AI commits and pull requests.** `kunj commit` reads your staged diff and suggests a commit
+  message in the style you choose (Conventional Commits, gitmoji and others). `kunj pr` writes a
+  pull request title and description from the whole branch and creates it with the GitHub CLI.
+  Both use Claude on AWS Bedrock with your own AWS credentials.
+- **Worktrees.** `kunj worktree` puts each branch in its own directory, copies in files you keep
+  out of git (such as `.env`), shows each worktree's pull request and which ones are open in an
+  editor.
+- **Branch containers.** `kunj container` (`kunj ct`) runs a branch in a firewalled Docker
+  container with its own clone, so you can run an agent with permissions skipped without exposing
+  your machine.
+- **Work logs.** Every commit is recorded in a daily log that kunj can turn into standup bullets.
+- **Configuration and hooks.** Global and per-repository settings, and your own scripts that run
+  before and after kunj actions.
+- **Companion apps.** A VS Code extension and a macOS menu bar app show your worktrees and their
+  pull requests.
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="Installation" description="Install kunj and the tools it works with." href="../installation/" />
+  <LinkCard title="Quick start" description="A first day with kunj, from branch to pull request." href="../quick-start/" />
+  <LinkCard title="Branches" description="Create and switch branches with auto-stash." href="../../branches/create-and-switch/" />
+  <LinkCard title="Commits" description="Interactive commits with AI-written messages." href="../../commits-and-prs/commit/" />
+  <LinkCard title="Pull requests" description="Pull requests with AI-written descriptions." href="../../commits-and-prs/pull-requests/" />
+  <LinkCard title="Worktrees" description="A directory per branch, with keep files and PR status." href="../../worktrees/overview/" />
+  <LinkCard title="Branch containers" description="Run a branch in a sandboxed Docker container." href="../../containers/overview/" />
+  <LinkCard title="Configuration" description="Global and per-repository settings and hooks." href="../../configuration/overview/" />
+  <LinkCard title="AI setup" description="Connect kunj to Claude on AWS Bedrock." href="../../integrations/aws-bedrock/" />
+  <LinkCard title="Command reference" description="Every command and option." href="../../reference/commands/" />
+</CardGrid>

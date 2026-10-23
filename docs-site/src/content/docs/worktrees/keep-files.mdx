@@ -1,0 +1,106 @@
+---
+title: Keep files
+description: Store untracked files such as .env once per repository and have kunj copy them into every new worktree.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A fresh worktree contains only what is committed. The files you deliberately keep out of git, like
+`.env`, `.env.local`, a `config/master.key` or an editor's local settings, are missing, and the app
+won't start until you copy them over by hand.
+
+Keep files fix that. You store a copy of such a file once, and kunj copies it into every worktree
+it creates for that repository.
+
+```bash
+kunj worktree keep add .env
+kunj worktree keep add config/credentials/development.key
+```
+
+```text
+✓ Kept .env  → /Users/me/.kunj/shop-api/keep/.env
+✓ Kept config/credentials/development.key  → /Users/me/.kunj/shop-api/keep/config/credentials/development.key
+```
+
+From now on `kunj worktree add` restores them:
+
+```text
+Restored 2 keep file(s): .env, config/credentials/development.key
+```
+
+## How it works
+
+- Files are stored in `~/.kunj/<repo>/keep/`, under their path relative to the worktree root. The
+  store belongs to the repository, so every worktree of it (and the main checkout) shares it. See
+  [Files and data](../../configuration/files-and-data/) for how `<repo>` is chosen.
+- `keep add` takes a **copy**. Editing `.env` in a worktree later does not change the stored copy;
+  run `kunj worktree keep add .env` again from the worktree whose version you want to keep.
+- The path is resolved from your current directory and must be inside the worktree you are in.
+  Inside `packages/api`, `kunj worktree keep add .env` stores `packages/api/.env`.
+- You can keep a directory; kunj copies it as a whole and then treats each file in it as a keep file.
+- `kunj worktree add` copies keep files into the new worktree right after git creates it and before
+  the `post-worktree-create` hook runs, so a hook can rely on them (for example to run migrations
+  against the database in `.env`).
+- Copying overwrites a file of the same name in the worktree. A problem copying keep files never
+  makes `kunj worktree add` fail.
+
+<Aside type="caution">
+Keep files are plain copies in your home directory. They are not encrypted and are not shared with
+anyone; treat `~/.kunj` with the same care as the files themselves.
+</Aside>
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `kunj worktree keep` | Interactive menu: add, apply here, apply everywhere, delete, show |
+| `kunj worktree keep add <file>` | Store a copy of `<file>` (also: `kunj worktree keep <file>`) |
+| `kunj worktree keep list` | Show the stored files and where the store is |
+| `kunj worktree keep apply` | Copy every keep file into the worktree you are in |
+| `kunj worktree keep apply -a` | Copy them into every worktree of the repository |
+| `kunj worktree keep delete <file>` | Remove a file from the store (also `remove`) |
+
+`add` and `delete` take one file at a time. `delete` accepts the stored path (`config/master.key`)
+or a path on disk; it removes only the stored copy, never the file in your worktrees.
+
+### Bring existing worktrees up to date
+
+Keep files are only copied automatically into worktrees created after you added them. For older
+worktrees, or after you changed the stored copy, apply them by hand:
+
+```bash
+kunj worktree keep add .env        # from the worktree with the right version
+kunj worktree keep apply --all     # push it into every worktree
+```
+
+```text
+✓ Applied 2 keep file(s) to /Users/me/src/shop-api
+  - .env
+  - config/credentials/development.key
+✓ Applied 2 keep file(s) to /Users/me/src/shop-api/.git/kunj/worktrees/fix-login-timeout
+  - .env
+  - config/credentials/development.key
+```
+
+### List
+
+```bash
+kunj worktree keep list
+```
+
+```text
+📌 Keep files (2) in /Users/me/.kunj/shop-api/keep:
+
+  .env
+  config/credentials/development.key
+```
+
+With `--json`, `list` returns `{ "keepDir": "...", "files": [...] }`.
+
+## Branch containers
+
+[Branch containers](../../containers/overview/) get the same keep files: they are copied into each
+new container's clone. Turn that off with `container.keepFiles=false` if the container should not
+see them (for example, when `.env` holds production credentials).

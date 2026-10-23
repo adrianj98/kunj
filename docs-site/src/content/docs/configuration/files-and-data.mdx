@@ -1,0 +1,124 @@
+---
+title: Files and data
+description: Everything kunj stores under ~/.kunj, what each file is for, and what is safe to edit or delete.
+sidebar:
+  order: 3
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+
+kunj keeps all of its state in `~/.kunj/` in your home directory, never inside your repositories,
+so nothing it writes is committed or shows up in `git status`. Files at the top level are global;
+each repository gets a directory of its own.
+
+<FileTree>
+
+- ~/.kunj/
+  - config.json global settings
+  - repos.json repositories kunj has been used in
+  - worktree-sessions.json editor windows and the worktrees they have open
+  - pr-cache.json pull requests, cached for 60 seconds
+  - hooks/ global hook scripts
+    - pre-commit
+  - presets/ your own container blueprint presets
+    - rust.sh
+  - shop-api/ one directory per repository
+    - config.json settings for this repository
+    - branches.json branch descriptions, tags, notes and stash history
+    - blueprint.json host copy of the container blueprint (optional)
+    - hooks/ hook scripts for this repository
+      - post-worktree-create
+      - post-worktree-create.d/
+        - 10-install
+    - keep/ keep files copied into new worktrees
+      - .env
+      - config/
+        - master.key
+    - work-logs/ daily work logs
+      - 2026-10-22.md
+      - 2026-10-23.md
+    - team/ output of kunj team
+  - infra/
+
+</FileTree>
+
+## Which directory is a repository's
+
+The per-repository directory is `~/.kunj/<repo>/`, where `<repo>` is the name in the `origin`
+remote's URL (`https://github.com/acme/shop-api.git` → `shop-api`), or the repository directory's
+name when there is no `origin`. All worktrees of a repository use the same directory, so a
+description you give a branch in one worktree, or a keep file you add there, is there in all of
+them. Outside a git repository, kunj uses `./.kunj/` in the current directory instead.
+
+If you used an older kunj that kept a `.kunj/` directory inside the repository, it is copied here
+the first time (see [Configuration](../overview/#coming-from-an-older-version)).
+
+## Global files
+
+| File | What it holds | Written by |
+| --- | --- | --- |
+| `config.json` | Your global settings | `kunj config --global`, `kunj setup`, you |
+| `repos.json` | Every repository kunj has run in: directory, `.git` directory, name, whether it is bare or hidden, when it was last seen | kunj, whenever it runs in a repository; `kunj repos add\|remove\|prune` |
+| `worktree-sessions.json` | Editor windows that registered a worktree: path, process id, host, editor, label | `kunj worktree session`, used by the [VS Code extension](../../worktrees/vscode-extension/) |
+| `pr-cache.json` | Each repository's pull requests from `gh`/`glab`, with the time they were fetched | `kunj worktree` (list and `pr`) |
+| `hooks/` | Hook scripts that run in every repository | `kunj hooks add --global`, you |
+| `presets/` | `<name>.sh` presets for [container blueprints](../../containers/overview/), used before the built-in ones | you |
+
+`repos.json` is what the [macOS app](../../worktrees/macos-app/) shows. A repository removed with
+`kunj repos remove` stays in the file marked `hidden`, so it does not come back the next time you
+run kunj there.
+
+`worktree-sessions.json` cleans itself up: a session whose process has exited is dropped the next
+time kunj reads the file. `pr-cache.json` keeps one entry per repository and drops entries older than
+a day.
+
+## Per-repository files
+
+| File | What it holds | Written by |
+| --- | --- | --- |
+| `config.json` | This repository's settings, merged over the global ones | `kunj config`, you |
+| `branches.json` | Per-branch metadata: description, tags, notes, related issues, stash history, when you last switched to it, its pull request URL, Jira issue and git-flow details | `kunj create`, `switch`, `stash`, `pr` and the other branch commands |
+| `blueprint.json` | A container blueprint used when the repository has none committed | `kunj ct blueprint init --global`, you |
+| `hooks/` | Hook scripts for this repository | `kunj hooks add`, you |
+| `keep/` | [Keep files](../../worktrees/keep-files/), stored under their path in the worktree | `kunj worktree keep` |
+| `work-logs/` | One Markdown file per day, `YYYY-MM-DD.md`, with your commits and standup notes | `kunj commit`, `kunj pr`, `kunj log` |
+| `team/` | Pull request diffs, activity and a cache used by `kunj team` | `kunj team` |
+
+`branches.json` looks like this:
+
+```json title="~/.kunj/shop-api/branches.json"
+{
+  "branches": {
+    "fix/login-timeout": {
+      "description": "Retry login on slow networks",
+      "tags": ["wip", "auth"],
+      "lastSwitched": "2026-10-23T09:14:02.511Z",
+      "prUrl": "https://github.com/acme/shop-api/pull/412",
+      "jiraIssueKey": "SHOP-1182"
+    }
+  }
+}
+```
+
+## Editing and deleting
+
+Everything here is plain JSON, Markdown or ordinary files, and you can edit any of it by hand.
+`kunj config` reads `config.json` fresh on every run.
+
+What deleting each one costs you:
+
+- `pr-cache.json`, `worktree-sessions.json`: nothing. They are rebuilt on the next run (open editor
+  windows register again within a few minutes).
+- `repos.json`: the repository list in the macOS app, until kunj has run in each repository again.
+  Hidden repositories come back.
+- `config.json` (either one): your settings. `kunj config --reset` does the same but keeps the file.
+- `branches.json`: branch descriptions, tags, notes and stash history. Your branches and stashes
+  themselves are in git and are not affected.
+- `keep/`: the stored copies only; files already copied into worktrees stay.
+- `work-logs/`: your work log history.
+
+<Aside type="caution">
+`keep/` and `config.json` can hold secrets: `.env` files, and API tokens such as `jira.apiToken` or
+`slack.token`. kunj stores them in plain text, readable by your user account. Keep `~/.kunj` out of
+dotfile repositories and backups you share.
+</Aside>

@@ -1,0 +1,205 @@
+---
+title: Configuration
+description: How kunj config works, where the global and per-repository config files live, how they merge, and the ${...} variables you can use in settings.
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+
+kunj reads its settings from two JSON files: a global one for you as a user and a local one per
+repository. Every setting has a default, so both files only hold what you changed. The full list of
+settings is in the [settings reference](../../reference/settings/).
+
+## `kunj config`
+
+```bash
+kunj config                                        # list every setting and where its value comes from
+kunj config -i                                     # interactive editor
+kunj config --get preferences.defaultBaseBranch    # print one value
+kunj config --set preferences.defaultBaseBranch=develop
+kunj config --global --set ai.commitStyle=conventional
+kunj config --reset                                # empty this repository's config file
+```
+
+Without `--global`, `kunj config` works on the **local** file of the repository you are in;
+with `--global` it works on the global file.
+
+<Aside type="caution">
+`-g` is short for `--get`, not `--global`. `--global` has no short form.
+</Aside>
+
+### Listing
+
+`kunj config` (or `-l`) lists every registered setting by category, with its current value, a
+description and where the value comes from:
+
+```text
+  Worktree Settings
+  ────────────────────────────────────────────────────────────────────────────────────────────────
+    ${repoconfig}/kunj/worktrees baseDir                  [default]  Directory where new worktrees are created
+      → /Users/me/src/shop-api/.git/kunj/worktrees
+    cursor               editorCommand            [global]   Command used by `kunj worktree open` to open a worktree
+```
+
+`[local]` beats `[global]`, which beats `[default]`. A value that uses a `${...}` variable is
+followed by what it resolves to in the current repository. Secrets (`jira.apiToken`, `slack.token`
+and the like) are shown as `********`. `kunj config --json` prints the global and local files and
+the merged result as `{ "global": …, "local": …, "merged": … }`.
+
+### Setting values
+
+`--set key=value` writes one value into the local file (or the global one with `--global`). The
+key is the dotted path shown in the settings reference. The value is converted for you:
+
+| You write | Stored as |
+| --- | --- |
+| `true`, `false` | boolean |
+| `42`, `0.5` | number |
+| `[main,develop]` | array of strings |
+| anything else | string |
+
+Only the first `=` separates key and value, so values may contain `=`. Quote the whole argument
+when the value has spaces, and use single quotes when it contains `${...}` so your shell does not
+expand it:
+
+```bash
+kunj config --set preferences.wipTags=[wip,draft]
+kunj config --set "hooks.pre-pr-create=npm run lint && npm test"
+kunj config --global --set 'worktree.baseDir=~/worktrees/${repoName}'
+```
+
+`--get` prints the effective (merged) value, as it is written in the file, so a template shows
+as `${repoconfig}/kunj/worktrees`.
+
+### Interactive editor
+
+`kunj config -i` (or `kunj config --global -i`) opens a menu of every setting with its value and
+source. Select one to see its full description, default, allowed values and examples, and to change
+it; booleans and enums are picked from a list, and `ai.model` can be chosen from the models your AWS
+account can use. Nothing is written until you choose **Save and Exit**.
+
+### Resetting
+
+`kunj config --reset` empties the local file, so this repository falls back to your global settings
+and the defaults. `kunj config --global --reset` empties the global file.
+
+<CommandReference name="config" optionsOnly />
+
+## Global and per-repository files
+
+| File | Scope |
+| --- | --- |
+| `~/.kunj/config.json` | You, in every repository |
+| `~/.kunj/<repo>/config.json` | One repository, shared by all of its worktrees |
+
+The per-repository file is **not** inside the repository, so it is never committed and never shows
+up in `git status`, and every worktree of the repository sees the same settings.
+
+`<repo>` is the repository's name, taken from the `origin` remote's URL
+(`git@github.com:acme/shop-api.git` → `shop-api`). Without an `origin` it is the name of the
+repository's directory (for a bare repository, without a trailing `.git`). Outside a git
+repository kunj uses `./.kunj/` in the current directory instead.
+
+<Aside type="note">
+Two different repositories with the same name, say two forks both called `shop-api`, share
+`~/.kunj/shop-api/`.
+</Aside>
+
+### Coming from an older version
+
+Older versions of kunj kept the local config in a `.kunj/` directory inside the repository. The
+first time a newer kunj resolves `~/.kunj/<repo>/` and finds it does not exist yet, it copies a
+`.kunj/` directory from the current directory or the repository root (one with a `config.json` or
+`branches.json`) into it and prints:
+
+```text
+kunj: migrated /Users/me/src/shop-api/.kunj -> /Users/me/.kunj/shop-api
+```
+
+The old directory is left in place; delete it once you are happy.
+
+### How the files merge
+
+kunj starts with the defaults, merges the global file over them, then the local file over that.
+Objects merge key by key; anything else, including strings and arrays, is replaced as a whole. A
+local `preferences.wipTags` replaces the global list rather than adding to it, and a local
+`hooks.post-worktree-create` replaces the global command for that hook.
+
+For example, with this global file:
+
+```json title="~/.kunj/config.json"
+{
+  "preferences": {
+    "defaultBaseBranch": "main",
+    "branchSort": "recent",
+    "wipTags": ["wip", "draft"]
+  },
+  "ai": {
+    "commitStyle": "conventional",
+    "includeBody": true
+  },
+  "worktree": {
+    "baseDir": "~/worktrees/${repoName}",
+    "editorCommand": "cursor"
+  }
+}
+```
+
+and this one for a repository that branches from `develop` and needs dependencies in every new
+worktree:
+
+```json title="~/.kunj/shop-api/config.json"
+{
+  "preferences": {
+    "defaultBaseBranch": "develop"
+  },
+  "ai": {
+    "customInstructions": "Mention the Jira key from the branch name in the subject."
+  },
+  "hooks": {
+    "post-worktree-create": ["npm ci", "cp ${repoRoot}/.env.example .env"]
+  }
+}
+```
+
+`shop-api` branches from `develop`, keeps `branchSort: recent`, the two WIP tags, conventional
+commit messages with a body and the global worktree settings, and adds its own hook commands. You
+can edit either file by hand; `kunj config` shows the result.
+
+## Variables
+
+Some settings hold paths or commands that depend on the repository. They can use `${...}`
+variables, which kunj fills in when it uses the value:
+
+| Variable | Value |
+| --- | --- |
+| `${repoconfig}` | The repository's `.git` directory, or the repository itself when it is bare |
+| `${repoRoot}` | The main worktree's directory (the repository itself when bare) |
+| `${repoName}` | The name of that directory |
+| `${home}` | Your home directory |
+| `${branch}` | The branch, where one is in scope |
+| `${worktree}` | The worktree's path, in the worktree hooks |
+
+For a normal clone at `/Users/me/src/shop-api`, `${repoconfig}` is `/Users/me/src/shop-api/.git`,
+`${repoRoot}` is `/Users/me/src/shop-api` and `${repoName}` is `shop-api`, whichever worktree you
+are in.
+
+- Names are case-insensitive: `${repoRoot}`, `${reporoot}` and `${REPOROOT}` are the same.
+- An unknown name is left exactly as written, so a literal `${something}` in a commit template or
+  prompt survives.
+- The values come from the repository where kunj runs, so one global setting gives each repository
+  its own path.
+
+Variables are filled in where a setting is used as a path or a command: `worktree.baseDir`, the
+`hooks.*` commands (which also get the hook's arguments, see [Hooks](../hooks/)) and the
+`container.*` settings. `kunj config` shows the raw template, with the resolved value underneath.
+
+```bash
+kunj config --global --set 'worktree.baseDir=${repoRoot}/../${repoName}-worktrees'
+kunj config --set 'hooks.post-worktree-create=direnv allow ${worktree}'
+```
+
+`${repoName}` is the directory name, which is usually but not always the same as the `<repo>` in
+`~/.kunj/<repo>/` (that one comes from origin's URL).

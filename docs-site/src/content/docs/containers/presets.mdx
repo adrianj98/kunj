@@ -1,0 +1,175 @@
+---
+title: Presets
+description: The tool installers a blueprint's tools section runs, the ones kunj ships, and how to write your own.
+sidebar:
+  order: 6
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Each entry in a [blueprint's](../blueprints/) `tools` names a **preset**: a small shell script that
+installs one tool, as root, before `setup` runs. Presets are how a blueprint says "install Node 24"
+or "add `jq`" without a Dockerfile.
+
+```json
+{ "tools": { "apt": ["jq"], "node": "24", "pnpm": "corepack" } }
+```
+
+They run in a fixed order whatever order you write them in: `apt` first, then the runtimes (`node`,
+`python`, `go`, `rust`, `java`), then what needs a runtime (`yarn`, `pnpm`, `bun`, `playwright`,
+`supabase`), then any preset of your own in the order written. Each prints
+`installed <name> <version>` when it is done.
+
+## Built-in presets
+
+| Preset | Value | What it installs |
+|---|---|---|
+| `apt` | A list of packages: `["jq", "postgresql-client"]` | Debian/Ubuntu packages with `apt-get install`. Needs an apt-based image. |
+| `node` | `"24"`, `"22.12"`, `"22.12.0"`, `"lts"`, `"current"`, or `"nvmrc"`; default `lts` | The official Node.js build into `/usr/local`, replacing the image's Node. `"nvmrc"` reads `.nvmrc` or `.node-version` from the repository. Also sets up a shared corepack directory. |
+| `python` | `"3.12"`; default `3.12` | A CPython through [uv](https://docs.astral.sh/uv/), plus uv itself, linked as `python` and `python3`. |
+| `go` | `"1.22"` (newest patch) or `"1.22.5"` | The official Go tarball into `/usr/local/go`, with `GOTOOLCHAIN=local`. A version is required. |
+| `rust` | `"stable"`, `"1.80"`, ...; default `stable` | A rustup toolchain (minimal profile) shared system-wide: `cargo`, `rustc`, `rustfmt`, `cargo-clippy`. |
+| `java` | `"21"`, `"17"`, ... (a major version); default `21` | The latest Eclipse Temurin JDK of that version, with `JAVA_HOME` set. |
+| `yarn` | `"corepack"` (the version in `packageManager`) or `"4.6.0"` | Yarn through corepack. Needs Node with corepack. |
+| `pnpm` | `"corepack"` (the version in `packageManager`) or `"9.12.0"` | pnpm through corepack. Needs Node with corepack. |
+| `bun` | `true` (latest) or `"1.2.5"` | Bun with its official installer, into `/usr/local`. Needs `unzip`: add `"apt": ["unzip"]` on the sandbox image. |
+| `playwright` | `true` (all browsers) or `"chromium"`, `"chromium firefox"` | Playwright's browsers and their system libraries, shared system-wide. Uses the `@playwright/test` version your `package.json` declares, so browsers match. Needs Node. |
+| `supabase` | `"latest"` or `"2.20.5"` | The Supabase CLI into `/usr/local/bin`. `supabase start` needs Docker, which containers do not have; migrations, `db diff` and `gen types` against a remote project work. |
+
+### Allowlist domains
+
+In the default network mode presets can download from anywhere. In allowlist mode, add the sites
+they download from to `container.network.allow` (`nodejs.org` and `registry.npmjs.org` are always
+allowed):
+
+| Preset | Domains to allow |
+|---|---|
+| `apt`, `playwright` | The image's package mirror: `deb.debian.org` for the sandbox image |
+| `python` | `astral.sh`, `github.com`, `objects.githubusercontent.com` |
+| `go` | `go.dev`, `dl.google.com` |
+| `rust` | `sh.rustup.rs`, `static.rust-lang.org` |
+| `java` | `api.adoptium.net`, `github.com`, `objects.githubusercontent.com` |
+| `bun` | `bun.sh`, `github.com`, `objects.githubusercontent.com` |
+| `playwright` | also `playwright.download.prss.microsoft.com`, `cdn.playwright.dev` |
+| `supabase` | `github.com`, `api.github.com`, `objects.githubusercontent.com` |
+| `yarn`, `pnpm` | Nothing extra: corepack downloads from `registry.npmjs.org` |
+
+## Writing your own preset
+
+A preset is a file named `<name>.sh`, where the name uses only `a-z`, `0-9` and `-`. kunj looks for
+it in this order and uses the first it finds:
+
+1. `.kunj/presets/<name>.sh` in the repository (its main working tree): shared with everyone who
+   uses the repository's blueprint;
+2. `~/.kunj/presets/<name>.sh`: your own, on your machine;
+3. the presets built into kunj.
+
+So a repository can also override a built-in preset, for example with its own `node.sh`.
+
+### How a preset runs
+
+- As **root**, with `sh`, inside the container and behind its firewall.
+- With these variables set:
+
+  | Variable | Value |
+  |---|---|
+  | `KUNJ_TOOL_NAME` | The preset's name. |
+  | `KUNJ_TOOL_VERSION` | The value from `tools`: the string, an array joined with spaces, or empty for `true`. |
+  | `KUNJ_TOOL_USER` | The container's user, who runs `setup` and the agent later. |
+
+- It should start with `set -eu` and source kunj's helper library with
+  `. "$(dirname "$0")/_lib.sh"`.
+- It must **end with `kunj_done <version>`**, which is how kunj learns what was installed. Without
+  it kunj warns.
+
+<Aside type="caution">
+**Install outside the home directory.** The user's home is a volume, and volumes are not part of
+the snapshot image, so anything a preset puts in `/home/<user>` or `/root` is lost. Install under
+`/usr/local` (`$KUNJ_PREFIX`) or `/opt`, and make it readable by every user.
+</Aside>
+
+A preset that changes its own script (or the built-in library) changes the blueprint's hash, so the
+next start rebuilds the snapshot with it.
+
+### Helpers in `_lib.sh`
+
+| Helper | What it does |
+|---|---|
+| `kunj_env KEY=VALUE` | Persists an environment variable: it becomes an `ENV` of the snapshot image and is exported in login shells (`/etc/profile.d/kunj-tools.sh`). A later call with the same key replaces the value. |
+| `kunj_done <version>` | Reports what was installed; call it last. Prints `installed <name> <version>`. |
+| `kunj_check_words <regex>` | Exits with an error unless every word of `KUNJ_TOOL_VERSION` matches the basic regular expression (as a whole word). Use it before passing the value to a command. |
+| `kunj_need <command>` | Exits with an error naming the command when the image does not have it. |
+| `kunj_arch` | `x86_64` or `aarch64` (fails on other machines). `kunj_arch_node` gives `x64`/`arm64`, `kunj_arch_deb` gives `amd64`/`arm64`. |
+| `kunj_tree` | The directory that holds the repository's files while presets run, for reading version files. |
+| `$KUNJ_PREFIX` | `/usr/local`. |
+
+### Values are untrusted
+
+The blueprint is a file the agent can edit and push, and presets run as root. kunj already rejects
+tool values that start with `-` or contain `/`, spaces inside a word or shell characters, but check
+the value again in your preset with `kunj_check_words`, with a pattern as tight as the tool allows,
+and quote it when you use it. Never let a value become an option or a path.
+
+### Example: `just`
+
+A preset that installs [just](https://github.com/casey/just) from its GitHub release, as
+`.kunj/presets/just.sh`:
+
+```sh
+#!/bin/sh
+# kunj preset: just — the command runner, into /usr/local/bin. tools: { "just": "1.36.0" }
+# Allowlist mode needs github.com and objects.githubusercontent.com in container.network.allow.
+set -eu
+. "$(dirname "$0")/_lib.sh"
+kunj_need curl
+
+want="${KUNJ_TOOL_VERSION:-}"
+[ -n "$want" ] || { echo "just: give a version, e.g. \"1.36.0\"" >&2; exit 1; }
+# A plain version number only: no options, paths or shell characters
+kunj_check_words '[0-9][0-9.]*'
+
+arch="$(kunj_arch)"   # x86_64 or aarch64, as just's release names spell them
+url="https://github.com/casey/just/releases/download/$want/just-$want-$arch-unknown-linux-musl.tar.gz"
+
+tmp="$(mktemp -d)"
+curl -fsSL "$url" | tar -xz -C "$tmp" --no-same-owner just
+install -m 0755 "$tmp/just" "$KUNJ_PREFIX/bin/just"
+rm -rf "$tmp"
+
+kunj_done "$("$KUNJ_PREFIX/bin/just" --version | cut -d' ' -f2)"
+```
+
+Use it from the blueprint like any built-in preset:
+
+```json
+{
+  "tools": { "node": "22", "just": "1.36.0" },
+  "setup": ["just install"]
+}
+```
+
+```bash
+kunj ct blueprint snapshot
+```
+
+```text
+installed node 22.20.0
+installed just 1.36.0
+Committing snapshot…
+✓ Snapshot kunj-blueprint-shop:a71c03e95d42 (1207 MB) from 9b2e4c1 (from a host bundle)
+```
+
+A preset that needs an environment variable at run time, such as a tool's home directory, records
+it with `kunj_env`:
+
+```sh
+kunj_env "TERRAFORM_PLUGIN_CACHE_DIR=/opt/terraform/plugins"
+```
+
+The variable is then set in the snapshot image and in every login shell, so `setup`, `maintain`,
+`kunj ct shell` and the agent all see it.
+
+<Aside>
+An unknown preset name stops the start or snapshot with an error that lists the three directories
+kunj searched.
+</Aside>

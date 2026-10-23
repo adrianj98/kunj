@@ -1,0 +1,81 @@
+---
+title: Installation
+description: Install kunj from npm or from source, and the tools it works with.
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+## Requirements
+
+| Tool | Needed for | Notes |
+| --- | --- | --- |
+| [Node.js](https://nodejs.org) 20 | everything | kunj is built and tested on Node 20. It needs at least Node 18 (it uses the built-in `fetch`). |
+| [git](https://git-scm.com) | everything | kunj runs `git` for every operation, including `git worktree`. |
+| [GitHub CLI](https://cli.github.com) (`gh`) | `kunj pr`, PR numbers in listings and the prompt | Run `gh auth login` once. |
+| [GitLab CLI](https://gitlab.com/gitlab-org/cli) (`glab`) | merge requests in `kunj worktree list` on GitLab | Optional. |
+| [Docker](https://docs.docker.com/get-docker/) | `kunj container` | Optional. Only the container commands use it. |
+| AWS account with Bedrock access | AI commit messages, PR descriptions, work logs | Optional. See [AWS Bedrock](../../integrations/aws-bedrock/). |
+
+Everything except Node.js and git is optional: kunj works without AI, falls back to hand-written
+messages, and only asks for `gh` or Docker when you run a command that needs them.
+
+## Install from npm
+
+```bash
+npm install -g kunj
+```
+
+This puts the `kunj` command on your `PATH`.
+
+## Verify
+
+```bash
+kunj -V
+```
+
+prints the installed version, for example `1.0.0`. `kunj --help` lists every command, and
+`kunj <command> --help` shows a command's options.
+
+## Build from source
+
+Use this to try unreleased changes or to work on kunj itself.
+
+<Steps>
+
+1. Clone the repository and install its dependencies.
+
+   ```bash
+   git clone https://github.com/adrianj98/kunj.git
+   cd kunj
+   npm install
+   ```
+
+2. Build it. This compiles the TypeScript to `dist/` and copies the container image files there.
+
+   ```bash
+   npm run build
+   ```
+
+3. Link it so `kunj` on your `PATH` runs your build.
+
+   ```bash
+   npm link
+   kunj -V
+   ```
+
+</Steps>
+
+Run `npm run build` again after pulling changes. To remove the link, run `npm unlink -g kunj`.
+
+<Aside type="tip">
+The VS Code extension and the macOS menu bar app are installed separately with `kunj install`.
+See [Companion apps](../../integrations/apps/).
+</Aside>
+
+## Next steps
+
+- Run [`kunj setup`](../setup/) to add shell aliases and, optionally, connect Jira and install the
+  companion apps.
+- Follow the [Quick start](../quick-start/) for a first branch, commit and pull request.

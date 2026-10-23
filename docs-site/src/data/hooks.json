@@ -1,0 +1,374 @@
+[
+  {
+    "name": "pre-worktree-create",
+    "description": "Runs before `kunj worktree add` creates a worktree. A non-zero exit aborts the creation.",
+    "args": [
+      {
+        "name": "worktree-path",
+        "env": "KUNJ_WORKTREE_PATH",
+        "variable": "worktreePath"
+      },
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-worktree-create",
+    "description": "Runs inside a freshly created worktree, after keep files have been copied in (e.g. to install dependencies).",
+    "args": [
+      {
+        "name": "worktree-path",
+        "env": "KUNJ_WORKTREE_PATH",
+        "variable": "worktreePath"
+      },
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-worktree-delete",
+    "description": "Runs inside a worktree before `kunj worktree remove` deletes it. A non-zero exit aborts the removal.",
+    "args": [
+      {
+        "name": "worktree-path",
+        "env": "KUNJ_WORKTREE_PATH",
+        "variable": "worktreePath"
+      },
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-worktree-delete",
+    "description": "Runs from the main worktree after a worktree has been removed (e.g. to clean up containers or databases).",
+    "args": [
+      {
+        "name": "worktree-path",
+        "env": "KUNJ_WORKTREE_PATH",
+        "variable": "worktreePath"
+      },
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-branch-create",
+    "description": "Runs before `kunj create` or `kunj switch -c` creates a branch. A non-zero exit aborts the creation.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "previous-branch",
+        "env": "KUNJ_PREVIOUS_BRANCH",
+        "variable": "previousBranch"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-branch-create",
+    "description": "Runs after `kunj create` or `kunj switch -c` has created and switched to a branch.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "previous-branch",
+        "env": "KUNJ_PREVIOUS_BRANCH",
+        "variable": "previousBranch"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-branch-switch",
+    "description": "Runs before `kunj switch` changes branch. A non-zero exit aborts the switch.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "previous-branch",
+        "env": "KUNJ_PREVIOUS_BRANCH",
+        "variable": "previousBranch"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-branch-switch",
+    "description": "Runs after `kunj switch` has changed branch and restored its stash (e.g. to install dependencies).",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "previous-branch",
+        "env": "KUNJ_PREVIOUS_BRANCH",
+        "variable": "previousBranch"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-branch-delete",
+    "description": "Runs before `kunj delete` deletes a branch. A non-zero exit aborts the deletion.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-branch-delete",
+    "description": "Runs after `kunj delete` has deleted a branch.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-commit",
+    "description": "Runs after `kunj commit` has staged the files, before the message is written. A non-zero exit aborts the commit.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "commit-msg",
+    "description": "Runs with the (AI-generated or typed) message in a file before `kunj commit` commits; it may edit the file. A non-zero exit aborts the commit.",
+    "args": [
+      {
+        "name": "message-file",
+        "env": "KUNJ_MESSAGE_FILE",
+        "variable": "messageFile"
+      },
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-commit",
+    "description": "Runs after `kunj commit` has created a commit, before pushing.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-pr-create",
+    "description": "Runs before `kunj pr` pushes the branch and opens a pull request. A non-zero exit aborts the pull request.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "base-branch",
+        "env": "KUNJ_BASE_BRANCH",
+        "variable": "baseBranch"
+      },
+      {
+        "name": "title",
+        "env": "KUNJ_TITLE",
+        "variable": "title"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-pr-create",
+    "description": "Runs after `kunj pr` has opened a pull request.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "base-branch",
+        "env": "KUNJ_BASE_BRANCH",
+        "variable": "baseBranch"
+      },
+      {
+        "name": "title",
+        "env": "KUNJ_TITLE",
+        "variable": "title"
+      },
+      {
+        "name": "pr-url",
+        "env": "KUNJ_PR_URL",
+        "variable": "prUrl"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-stash",
+    "description": "Runs before kunj stashes changes (`kunj stash` or the auto-stash on create/switch). A non-zero exit aborts the operation.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "message",
+        "env": "KUNJ_MESSAGE",
+        "variable": "message"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-stash",
+    "description": "Runs after kunj has stashed changes.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "message",
+        "env": "KUNJ_MESSAGE",
+        "variable": "message"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-container-create",
+    "description": "Runs before `kunj container start` creates a container. A non-zero exit aborts it.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "container",
+        "env": "KUNJ_CONTAINER",
+        "variable": "container"
+      },
+      {
+        "name": "image",
+        "env": "KUNJ_IMAGE",
+        "variable": "image"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-container-create",
+    "description": "Runs after `kunj container start` has created and seeded a container.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "container",
+        "env": "KUNJ_CONTAINER",
+        "variable": "container"
+      },
+      {
+        "name": "image",
+        "env": "KUNJ_IMAGE",
+        "variable": "image"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-container-delete",
+    "description": "Runs before `kunj container remove` deletes a container. A non-zero exit aborts it.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "container",
+        "env": "KUNJ_CONTAINER",
+        "variable": "container"
+      },
+      {
+        "name": "image",
+        "env": "KUNJ_IMAGE",
+        "variable": "image"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-container-delete",
+    "description": "Runs after `kunj container remove` has removed a container.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "container",
+        "env": "KUNJ_CONTAINER",
+        "variable": "container"
+      },
+      {
+        "name": "image",
+        "env": "KUNJ_IMAGE",
+        "variable": "image"
+      }
+    ],
+    "abortsOnFailure": false
+  }
+]

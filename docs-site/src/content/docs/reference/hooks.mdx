@@ -1,0 +1,14 @@
+---
+title: Hook reference
+description: Every hook kunj runs, its arguments and whether a failure aborts the command.
+sidebar:
+  order: 3
+---
+
+import HookTable from '../../../components/HookTable.astro';
+
+Generated from `src/lib/hook-defs.ts`. See [Hooks](../../configuration/hooks/) for how to install them.
+Each argument arrives positionally (`$1`, `$2`, …), as an environment variable, and as a `${variable}`
+in configured hook commands.
+
+<HookTable />

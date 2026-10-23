@@ -346,6 +346,15 @@ Core git operations abstracted in src/lib/git.ts:
 - Functions return structured results or throw errors
 - File status parsing handles standard git status codes (M, A, D, R, C, U)
 
+## User Docs
+
+`docs-site/` is the user documentation (Astro Starlight, MDX), published by `.github/workflows/pages.yml`
+at `/kunj/docs/` next to the landing page in `site/`. Authoring rules and components are in
+docs-site/README.md. The command, settings and hook reference is generated from the sources
+(`docs-site/scripts/gen-reference.cjs` → `docs-site/src/data/*.json`, run by `npm run build` there):
+after changing a command's options, a setting or a hook, run `npm run gen` in docs-site and commit the
+JSON. When behaviour changes, update the matching page under `docs-site/src/content/docs/`.
+
 ## Release Process
 
 Tag-based automatic releases via GitHub Actions:

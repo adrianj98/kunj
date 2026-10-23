@@ -1,0 +1,1394 @@
+[
+  {
+    "key": "preferences.autoStash",
+    "type": "boolean",
+    "category": "general",
+    "default": true,
+    "description": "Auto-stash changes when switching",
+    "detailedDescription": "Automatically stash uncommitted changes when switching branches. When enabled, Kunj will save your work-in-progress before switching and restore it when you return to the branch. This prevents losing uncommitted changes when moving between branches.",
+    "options": null,
+    "examples": [
+      "true - Automatically stash changes (recommended)",
+      "false - Never stash, require clean working tree"
+    ],
+    "relatedSettings": [
+      "preferences.showStashDetails"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "preferences.branchSort",
+    "type": "enum",
+    "category": "general",
+    "default": "recent",
+    "description": "Sort: recent/alphabetical",
+    "detailedDescription": "Determines how branches are sorted in lists and menus. \"recent\" sorts by last activity (most recently used first), while \"alphabetical\" sorts branches by name in A-Z order.",
+    "options": [
+      "recent",
+      "alphabetical"
+    ],
+    "examples": [
+      "recent - Show most recently used branches first",
+      "alphabetical - Sort branches by name"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "preferences.pageSize",
+    "type": "number",
+    "category": "general",
+    "default": 15,
+    "description": "Items per page",
+    "detailedDescription": "Number of items to display per page in interactive menus. Larger values show more items at once but may be harder to navigate. Smaller values require more scrolling but are easier to scan.",
+    "options": null,
+    "examples": [
+      "10 - Compact view",
+      "15 - Balanced (default)",
+      "20 - Show more items at once",
+      "30 - Maximum visibility"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "preferences.graphUnicode",
+    "type": "boolean",
+    "category": "general",
+    "default": false,
+    "description": "Use Unicode in graph",
+    "detailedDescription": "Use Unicode box-drawing characters (│ ├ ─ ╮ ╯ ●) instead of ASCII (* | / \\) in commit graphs. Unicode provides a more polished, continuous look but may not render correctly in all terminals.",
+    "options": null,
+    "examples": [
+      "true - Use Unicode characters for prettier graphs",
+      "false - Use ASCII characters for compatibility (default)"
+    ],
+    "relatedSettings": [
+      "preferences.graphStyle"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "preferences.graphStyle",
+    "type": "enum",
+    "category": "general",
+    "default": "default",
+    "description": "Graph color style",
+    "detailedDescription": "Color scheme for commit graphs. Choose based on your terminal background: \"default\" for balanced colors, \"light\" optimized for light backgrounds with darker colors, \"dark\" optimized for dark backgrounds with brighter colors.",
+    "options": [
+      "default",
+      "light",
+      "dark"
+    ],
+    "examples": [
+      "default - Balanced color scheme",
+      "light - Optimized for light terminal backgrounds",
+      "dark - Optimized for dark terminal backgrounds"
+    ],
+    "relatedSettings": [
+      "preferences.graphUnicode"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "preferences.defaultBaseBranch",
+    "type": "string",
+    "category": "general",
+    "default": "",
+    "description": "Default base branch for new branches and PRs",
+    "detailedDescription": "The branch new branches are created from (kunj create, switch -c, worktree add -b/-c) and that pull requests target. Common values are \"main\", \"master\", or \"develop\". If not set, the repository default (origin/HEAD, else main or master) is used. --base overrides it for one command.",
+    "options": null,
+    "examples": [
+      "main - Use main as the default base branch",
+      "master - Use master as the default base branch",
+      "develop - Use develop as the default base branch",
+      "(empty) - Auto-detect from repository (default)"
+    ],
+    "relatedSettings": [
+      "preferences.baseFromOrigin"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "preferences.baseFromOrigin",
+    "type": "boolean",
+    "category": "general",
+    "default": true,
+    "description": "Create new branches from origin",
+    "detailedDescription": "Fetch the base branch from origin and create new branches from origin/<base> rather than the local copy, so they start from the latest remote commit. Falls back to the local branch when the repository has no origin or the branch is not on it. --no-origin turns it off for one command. New branches never track the base; push them with -u as usual.",
+    "options": null,
+    "examples": [
+      "true - Fetch and branch from origin/<base> (default)",
+      "false - Branch from the local <base> without fetching"
+    ],
+    "relatedSettings": [
+      "preferences.defaultBaseBranch"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "preferences.showOnlyWIP",
+    "type": "boolean",
+    "category": "filtering",
+    "default": false,
+    "description": "Filter to WIP branches",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "preferences.showOnlyConfigured",
+    "type": "boolean",
+    "category": "filtering",
+    "default": false,
+    "description": "Filter to configured branches",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "preferences.personalWIPMode",
+    "type": "boolean",
+    "category": "filtering",
+    "default": true,
+    "description": "Personal WIP detection",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "preferences.recentDays",
+    "type": "number",
+    "category": "filtering",
+    "default": 7,
+    "description": "Days for recent branches",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "preferences.wipTags",
+    "type": "array",
+    "category": "filtering",
+    "default": [
+      "wip",
+      "in-progress",
+      "working",
+      "draft"
+    ],
+    "description": "WIP tags",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "preferences.doneTags",
+    "type": "array",
+    "category": "filtering",
+    "default": [
+      "done",
+      "completed",
+      "merged",
+      "ready"
+    ],
+    "description": "Done tags",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "preferences.showStashDetails",
+    "type": "boolean",
+    "category": "stash",
+    "default": true,
+    "description": "Show stash file/line counts",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "preferences.stashAgeDays",
+    "type": "number",
+    "category": "stash",
+    "default": 30,
+    "description": "Days for recent stashes",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.enabled",
+    "type": "boolean",
+    "category": "ai",
+    "default": true,
+    "description": "AI features enabled",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.provider",
+    "type": "enum",
+    "category": "ai",
+    "default": "bedrock",
+    "description": "AI provider",
+    "detailedDescription": null,
+    "options": [
+      "bedrock",
+      "openai",
+      "anthropic"
+    ],
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.model",
+    "type": "string",
+    "category": "ai",
+    "default": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "description": "Model name",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.modelSmall",
+    "type": "string",
+    "category": "ai",
+    "default": "anthropic.claude-3-haiku-20240307-v1:0",
+    "description": "Small/cheap model for bulk operations (e.g. map phase in team reports)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.awsRegion",
+    "type": "string",
+    "category": "ai",
+    "default": "us-east-1",
+    "description": "AWS region",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.autoGenerateCommitMessage",
+    "type": "boolean",
+    "category": "ai",
+    "default": true,
+    "description": "Auto-generate commits",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.includeBranchContext",
+    "type": "boolean",
+    "category": "ai",
+    "default": true,
+    "description": "Include branch context",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.maxContextCommits",
+    "type": "number",
+    "category": "ai",
+    "default": 10,
+    "description": "Max context commits",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.commitStyle",
+    "type": "enum",
+    "category": "ai",
+    "default": "conventional",
+    "description": "Commit message style",
+    "detailedDescription": "Choose the format for AI-generated commit messages and PR descriptions. Each style follows different conventions for organizing and presenting changes. This applies to both commit messages and pull request descriptions.",
+    "options": [
+      "conventional",
+      "semantic",
+      "simple",
+      "gitmoji",
+      "caveman",
+      "custom"
+    ],
+    "examples": [
+      "conventional - \"feat: Add user authentication\" (standard)",
+      "semantic - \"[MINOR] Add user authentication\"",
+      "simple - \"Add user authentication\" (no prefix)",
+      "gitmoji - \"✨ Add user authentication\" (with emoji)",
+      "caveman - \"feat(api): add GET /users/:id\" (terse, no fluff)",
+      "custom - Use customInstructions for your own format"
+    ],
+    "relatedSettings": [
+      "ai.customInstructions",
+      "ai.includeBody"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "ai.subjectMaxLength",
+    "type": "number",
+    "category": "ai",
+    "default": 50,
+    "description": "Max subject line length",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.includeBody",
+    "type": "boolean",
+    "category": "ai",
+    "default": true,
+    "description": "Include detailed body",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "ai.customInstructions",
+    "type": "string",
+    "category": "ai",
+    "default": "",
+    "description": "Custom AI instructions",
+    "detailedDescription": "Additional instructions for the AI to follow when generating commit messages and PR descriptions. Use this to enforce team conventions, add specific requirements, or customize the output format. These instructions are added to all AI prompts.",
+    "options": null,
+    "examples": [
+      "\"Always include the JIRA ticket ID\"",
+      "\"Focus on business value over technical details\"",
+      "\"Mention breaking changes prominently\"",
+      "\"Use present tense and active voice\"",
+      "\"Keep descriptions under 3 sentences\""
+    ],
+    "relatedSettings": [
+      "ai.commitStyle",
+      "ai.includeBody"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "ai.autoGeneratePRDescription",
+    "type": "boolean",
+    "category": "ai",
+    "default": true,
+    "description": "Auto-generate PR descriptions",
+    "detailedDescription": "When enabled, AI automatically generates pull request titles and descriptions when you run \"kunj pr\". The AI analyzes code changes, commit history, and branch metadata to create comprehensive PR descriptions. Falls back to heuristic generation if AI fails.",
+    "options": null,
+    "examples": [
+      "true - Use AI for PR descriptions (recommended)",
+      "false - Use simple heuristic generation"
+    ],
+    "relatedSettings": [
+      "ai.enabled",
+      "ai.includeDiffInPR",
+      "ai.commitStyle"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "ai.includeDiffInPR",
+    "type": "boolean",
+    "category": "ai",
+    "default": true,
+    "description": "Include full diff for PR context",
+    "detailedDescription": "When generating PR descriptions, include the full code diff for AI analysis. This provides better context and more accurate descriptions, but may be slower for large changes. If disabled, the AI only uses commit messages and branch metadata.",
+    "options": null,
+    "examples": [
+      "true - Analyze full code changes (better quality)",
+      "false - Only use commit messages (faster)"
+    ],
+    "relatedSettings": [
+      "ai.autoGeneratePRDescription"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "flow.enabled",
+    "type": "boolean",
+    "category": "flow",
+    "default": false,
+    "description": "Enable Git Flow",
+    "detailedDescription": "Enable Git Flow branching model in this repository. When enabled, you can use the `kunj flow` command to manage feature, release, and hotfix branches following the Git Flow methodology.",
+    "options": null,
+    "examples": [
+      "true - Enable Git Flow commands",
+      "false - Disable Git Flow (default)"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "flow.mainBranch",
+    "type": "string",
+    "category": "flow",
+    "default": "main",
+    "description": "Main/production branch",
+    "detailedDescription": "The main production branch where stable releases are maintained. This is typically \"main\" or \"master\". Release and hotfix branches will be merged into this branch.",
+    "options": null,
+    "examples": [
+      "main - Use main as production branch (default)",
+      "master - Use master as production branch"
+    ],
+    "relatedSettings": [
+      "flow.developBranch"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "flow.developBranch",
+    "type": "string",
+    "category": "flow",
+    "default": "develop",
+    "description": "Development branch",
+    "detailedDescription": "The integration branch for ongoing development. Feature branches are created from and merged back into this branch. This is typically \"develop\" or \"dev\".",
+    "options": null,
+    "examples": [
+      "develop - Use develop as integration branch (default)",
+      "dev - Use dev as integration branch",
+      "development - Use development as integration branch"
+    ],
+    "relatedSettings": [
+      "flow.mainBranch"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "flow.featurePrefix",
+    "type": "string",
+    "category": "flow",
+    "default": "feature/",
+    "description": "Feature branch prefix",
+    "detailedDescription": "Prefix for feature branch names. Feature branches are created for new features and improvements. Use empty string for no prefix.",
+    "options": null,
+    "examples": [
+      "feature/ - Feature branches like feature/user-auth (default)",
+      "feat/ - Feature branches like feat/user-auth",
+      "(empty) - No prefix, just feature name"
+    ],
+    "relatedSettings": [
+      "flow.releasePrefix",
+      "flow.hotfixPrefix"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "flow.releasePrefix",
+    "type": "string",
+    "category": "flow",
+    "default": "release/",
+    "description": "Release branch prefix",
+    "detailedDescription": "Prefix for release branch names. Release branches are created to prepare new production releases. Use empty string for no prefix.",
+    "options": null,
+    "examples": [
+      "release/ - Release branches like release/1.2.0 (default)",
+      "rel/ - Release branches like rel/1.2.0",
+      "(empty) - No prefix, just version number"
+    ],
+    "relatedSettings": [
+      "flow.featurePrefix",
+      "flow.hotfixPrefix"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "flow.hotfixPrefix",
+    "type": "string",
+    "category": "flow",
+    "default": "hotfix/",
+    "description": "Hotfix branch prefix",
+    "detailedDescription": "Prefix for hotfix branch names. Hotfix branches are created from production to quickly patch critical bugs. Use empty string for no prefix.",
+    "options": null,
+    "examples": [
+      "hotfix/ - Hotfix branches like hotfix/1.2.1 (default)",
+      "fix/ - Hotfix branches like fix/1.2.1",
+      "(empty) - No prefix, just version number"
+    ],
+    "relatedSettings": [
+      "flow.featurePrefix",
+      "flow.releasePrefix"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "flow.autoDeleteOnFinish",
+    "type": "boolean",
+    "category": "flow",
+    "default": true,
+    "description": "Auto-delete branch after finish",
+    "detailedDescription": "Automatically delete feature/release/hotfix branches after successfully finishing them. When disabled, you will be prompted to confirm deletion for each branch.",
+    "options": null,
+    "examples": [
+      "true - Automatically delete branches after merge (default)",
+      "false - Always ask before deleting branches"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "flow.mode",
+    "type": "enum",
+    "category": "flow",
+    "default": "local",
+    "description": "Git Flow mode: local or pr",
+    "detailedDescription": "Choose how Git Flow operations are performed. \"local\" uses local git merges, while \"pr\" creates and merges pull requests on your remote provider (GitHub, GitLab, etc.).",
+    "options": [
+      "local",
+      "pr"
+    ],
+    "examples": [
+      "local - Use local git merges (default)",
+      "pr - Use pull requests on remote provider"
+    ],
+    "relatedSettings": [
+      "flow.prProvider"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "flow.prProvider",
+    "type": "enum",
+    "category": "flow",
+    "default": "github",
+    "description": "PR provider: github or gitlab",
+    "detailedDescription": "The pull request provider to use when flow.mode is set to \"pr\". Currently supports GitHub and GitLab.",
+    "options": [
+      "github",
+      "gitlab"
+    ],
+    "examples": [
+      "github - Use GitHub pull requests (default)",
+      "gitlab - Use GitLab merge requests"
+    ],
+    "relatedSettings": [
+      "flow.mode"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "flow.mergeBackToDevelop",
+    "type": "boolean",
+    "category": "flow",
+    "default": true,
+    "description": "Merge releases/hotfixes back to develop",
+    "detailedDescription": "After finishing a release or hotfix, automatically merge the changes back into the develop branch. This keeps develop up to date with production fixes and releases.",
+    "options": null,
+    "examples": [
+      "true - Merge back to develop after release/hotfix (default)",
+      "false - Do not merge back to develop"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "jira.enabled",
+    "type": "boolean",
+    "category": "jira",
+    "default": false,
+    "description": "Jira integration enabled",
+    "detailedDescription": "Enable Jira Cloud integration for ticket management and automatic branch-ticket linking. When enabled, Kunj can list tickets, create issues, and automatically link branches to Jira tickets.",
+    "options": null,
+    "examples": null,
+    "relatedSettings": [
+      "jira.baseUrl",
+      "jira.email",
+      "jira.apiToken"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "jira.baseUrl",
+    "type": "string",
+    "category": "jira",
+    "default": "",
+    "description": "Jira Cloud URL",
+    "detailedDescription": "Your Jira Cloud instance URL (e.g., https://company.atlassian.net). This is required for API access.",
+    "options": null,
+    "examples": [
+      "https://company.atlassian.net",
+      "https://myorg.atlassian.net"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "jira.email",
+    "type": "string",
+    "category": "jira",
+    "default": "",
+    "description": "Jira account email",
+    "detailedDescription": "Email address associated with your Jira account. Used for authentication with API token.",
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "jira.apiToken",
+    "type": "string",
+    "category": "jira",
+    "default": null,
+    "description": "Jira API token",
+    "detailedDescription": "API token for authentication. Generate at https://id.atlassian.com/manage-profile/security/api-tokens",
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": true
+  },
+  {
+    "key": "jira.projectKey",
+    "type": "string",
+    "category": "jira",
+    "default": "",
+    "description": "Default project key",
+    "detailedDescription": "Default Jira project key to use when creating tickets (e.g., PROJ, DEV). You can override this when creating tickets.",
+    "options": null,
+    "examples": [
+      "PROJ",
+      "DEV",
+      "TEAM"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "jira.defaultIssueType",
+    "type": "enum",
+    "category": "jira",
+    "default": "Task",
+    "description": "Default issue type",
+    "detailedDescription": "Default type when creating Jira tickets. Can be overridden with --type flag.",
+    "options": [
+      "Story",
+      "Bug",
+      "Task",
+      "Epic"
+    ],
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "jira.boardId",
+    "type": "string",
+    "category": "jira",
+    "default": "",
+    "description": "Board ID for sprints",
+    "detailedDescription": "Jira board ID for sprint operations (optional). Used by \"kunj jira list --sprint\" to show tickets in active sprint. Find this in your board URL.",
+    "options": null,
+    "examples": [
+      "123 - From URL https://company.atlassian.net/jira/software/projects/PROJ/boards/123"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "jira.aiGeneration",
+    "type": "boolean",
+    "category": "jira",
+    "default": true,
+    "description": "Use AI to generate tickets",
+    "detailedDescription": "When enabled, AI will automatically analyze branch commits and generate ticket summaries and descriptions when creating Jira tickets. Requires AI to be enabled.",
+    "options": null,
+    "examples": null,
+    "relatedSettings": [
+      "ai.enabled",
+      "ai.model"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "slack.enabled",
+    "type": "boolean",
+    "category": "slack",
+    "default": false,
+    "description": "Slack integration enabled",
+    "detailedDescription": "Enable Slack integration to pull channel activity into team reports. Requires a Slack app with channels:history, channels:read, groups:read, groups:history, and users:read scopes.",
+    "options": null,
+    "examples": null,
+    "relatedSettings": [
+      "slack.token",
+      "slack.signingSecret",
+      "slack.appToken"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "slack.token",
+    "type": "string",
+    "category": "slack",
+    "default": null,
+    "description": "Slack Bot OAuth token",
+    "detailedDescription": "Bot User OAuth Token (xoxb-...) from your Slack app. Found under OAuth & Permissions in your app settings. Requires scopes: channels:history, channels:read, groups:read, groups:history, users:read.",
+    "options": null,
+    "examples": [
+      "xoxb-1234567890-1234567890123-...."
+    ],
+    "relatedSettings": null,
+    "sensitive": true
+  },
+  {
+    "key": "slack.signingSecret",
+    "type": "string",
+    "category": "slack",
+    "default": null,
+    "description": "Slack signing secret",
+    "detailedDescription": "Signing Secret from your Slack app's Basic Information page. Used to verify requests originate from Slack.",
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": true
+  },
+  {
+    "key": "slack.appToken",
+    "type": "string",
+    "category": "slack",
+    "default": null,
+    "description": "Slack App-Level token",
+    "detailedDescription": "App-Level Token (xapp-...) for Socket Mode. Generate under Basic Information → App-Level Tokens with connections:write scope. Optional — only needed for Socket Mode features.",
+    "options": null,
+    "examples": [
+      "xapp-1-A1234567890-1234567890123-abcdefghijklmnop"
+    ],
+    "relatedSettings": null,
+    "sensitive": true
+  },
+  {
+    "key": "slack.channels",
+    "type": "array",
+    "category": "slack",
+    "default": [],
+    "description": "Channels to post reports to",
+    "detailedDescription": "Slack channel IDs to post team reports to. Reports are automatically posted to all listed channels when running \"kunj team\". Configure via interactive editor for a channel selector.",
+    "options": null,
+    "examples": [
+      "C0123456789",
+      "C0987654321"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "worktree.baseDir",
+    "type": "string",
+    "category": "worktree",
+    "default": "${repoconfig}/kunj/worktrees",
+    "description": "Directory where new worktrees are created",
+    "detailedDescription": "Supports ${repoconfig} (the .git directory, or the repository itself when bare), ${repoRoot}, ${repoName}, ${home} and ${branch}. Relative paths are resolved from the main repository root. Unless ${branch} appears, the branch directory is appended automatically.",
+    "options": null,
+    "examples": [
+      "${repoconfig}/kunj/worktrees",
+      "${repoRoot}/../${repoName}-worktrees",
+      "~/worktrees/${repoName}"
+    ],
+    "relatedSettings": [
+      "worktree.editorCommand"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "worktree.editorCommand",
+    "type": "string",
+    "category": "worktree",
+    "default": "code",
+    "description": "Command used by `kunj worktree open` to open a worktree",
+    "detailedDescription": "The worktree path is appended as the last argument. For VS Code-style editors (code, cursor, codium, windsurf) kunj adds -r to reuse the current window, or -n with --new-window. Set to an empty string to disable opening an editor.",
+    "options": null,
+    "examples": [
+      "code - Open in Visual Studio Code (default)",
+      "code -n - Always open a new VS Code window",
+      "cursor - Open in Cursor",
+      "(empty) - Do not open an editor"
+    ],
+    "relatedSettings": [
+      "worktree.baseDir"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-worktree-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-worktree-create hook",
+    "detailedDescription": "Runs before `kunj worktree add` creates a worktree. A non-zero exit aborts the creation. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${worktree}, ${worktreePath}, ${branch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_WORKTREE_PATH, KUNJ_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-worktree-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.post-worktree-create",
+      "hooks.pre-worktree-delete",
+      "hooks.post-worktree-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-worktree-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-worktree-create hook",
+    "detailedDescription": "Runs inside a freshly created worktree, after keep files have been copied in (e.g. to install dependencies). The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${worktree}, ${worktreePath}, ${branch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_WORKTREE_PATH, KUNJ_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-worktree-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "npm install",
+      "direnv allow ${worktree}",
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-worktree-create",
+      "hooks.pre-worktree-delete",
+      "hooks.post-worktree-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-worktree-delete",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-worktree-delete hook",
+    "detailedDescription": "Runs inside a worktree before `kunj worktree remove` deletes it. A non-zero exit aborts the removal. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${worktree}, ${worktreePath}, ${branch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_WORKTREE_PATH, KUNJ_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-worktree-delete in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "docker compose down",
+      "test -z \"$(git status --porcelain)\"",
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-worktree-create",
+      "hooks.post-worktree-create",
+      "hooks.post-worktree-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-worktree-delete",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-worktree-delete hook",
+    "detailedDescription": "Runs from the main worktree after a worktree has been removed (e.g. to clean up containers or databases). The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${worktree}, ${worktreePath}, ${branch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_WORKTREE_PATH, KUNJ_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-worktree-delete in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-worktree-create",
+      "hooks.post-worktree-create",
+      "hooks.pre-worktree-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-branch-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-branch-create hook",
+    "detailedDescription": "Runs before `kunj create` or `kunj switch -c` creates a branch. A non-zero exit aborts the creation. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${previousBranch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_PREVIOUS_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-branch-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.post-branch-create",
+      "hooks.pre-branch-switch",
+      "hooks.post-branch-switch",
+      "hooks.pre-branch-delete",
+      "hooks.post-branch-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-branch-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-branch-create hook",
+    "detailedDescription": "Runs after `kunj create` or `kunj switch -c` has created and switched to a branch. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${previousBranch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_PREVIOUS_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-branch-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-branch-create",
+      "hooks.pre-branch-switch",
+      "hooks.post-branch-switch",
+      "hooks.pre-branch-delete",
+      "hooks.post-branch-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-branch-switch",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-branch-switch hook",
+    "detailedDescription": "Runs before `kunj switch` changes branch. A non-zero exit aborts the switch. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${previousBranch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_PREVIOUS_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-branch-switch in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-branch-create",
+      "hooks.post-branch-create",
+      "hooks.post-branch-switch",
+      "hooks.pre-branch-delete",
+      "hooks.post-branch-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-branch-switch",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-branch-switch hook",
+    "detailedDescription": "Runs after `kunj switch` has changed branch and restored its stash (e.g. to install dependencies). The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${previousBranch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_PREVIOUS_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-branch-switch in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "npm install",
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-branch-create",
+      "hooks.post-branch-create",
+      "hooks.pre-branch-switch",
+      "hooks.pre-branch-delete",
+      "hooks.post-branch-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-branch-delete",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-branch-delete hook",
+    "detailedDescription": "Runs before `kunj delete` deletes a branch. A non-zero exit aborts the deletion. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-branch-delete in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-branch-create",
+      "hooks.post-branch-create",
+      "hooks.pre-branch-switch",
+      "hooks.post-branch-switch",
+      "hooks.post-branch-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-branch-delete",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-branch-delete hook",
+    "detailedDescription": "Runs after `kunj delete` has deleted a branch. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-branch-delete in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-branch-create",
+      "hooks.post-branch-create",
+      "hooks.pre-branch-switch",
+      "hooks.post-branch-switch",
+      "hooks.pre-branch-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-commit",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-commit hook",
+    "detailedDescription": "Runs after `kunj commit` has staged the files, before the message is written. A non-zero exit aborts the commit. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-commit in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "npm test",
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.commit-msg",
+      "hooks.post-commit"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.commit-msg",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the commit-msg hook",
+    "detailedDescription": "Runs with the (AI-generated or typed) message in a file before `kunj commit` commits; it may edit the file. A non-zero exit aborts the commit. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${messageFile}, ${branch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_MESSAGE_FILE, KUNJ_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named commit-msg in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "grep -qE \"[A-Z]+-[0-9]+\" \"$KUNJ_MESSAGE_FILE\"",
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-commit",
+      "hooks.post-commit"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-commit",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-commit hook",
+    "detailedDescription": "Runs after `kunj commit` has created a commit, before pushing. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-commit in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-commit",
+      "hooks.commit-msg"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-pr-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-pr-create hook",
+    "detailedDescription": "Runs before `kunj pr` pushes the branch and opens a pull request. A non-zero exit aborts the pull request. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${baseBranch}, ${title} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_BASE_BRANCH, KUNJ_TITLE in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-pr-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "npm run lint && npm test",
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.post-pr-create"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-pr-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-pr-create hook",
+    "detailedDescription": "Runs after `kunj pr` has opened a pull request. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${baseBranch}, ${title}, ${prUrl} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_BASE_BRANCH, KUNJ_TITLE, KUNJ_PR_URL in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-pr-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-pr-create"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-stash",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-stash hook",
+    "detailedDescription": "Runs before kunj stashes changes (`kunj stash` or the auto-stash on create/switch). A non-zero exit aborts the operation. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${message} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_MESSAGE in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-stash in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.post-stash"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-stash",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-stash hook",
+    "detailedDescription": "Runs after kunj has stashed changes. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${message} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_MESSAGE in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-stash in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-stash"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-container-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-container-create hook",
+    "detailedDescription": "Runs before `kunj container start` creates a container. A non-zero exit aborts it. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${container}, ${image} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_CONTAINER, KUNJ_IMAGE in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-container-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.post-container-create",
+      "hooks.pre-container-delete",
+      "hooks.post-container-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-container-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-container-create hook",
+    "detailedDescription": "Runs after `kunj container start` has created and seeded a container. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${container}, ${image} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_CONTAINER, KUNJ_IMAGE in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-container-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-container-create",
+      "hooks.pre-container-delete",
+      "hooks.post-container-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-container-delete",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-container-delete hook",
+    "detailedDescription": "Runs before `kunj container remove` deletes a container. A non-zero exit aborts it. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${container}, ${image} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_CONTAINER, KUNJ_IMAGE in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-container-delete in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-container-create",
+      "hooks.post-container-create",
+      "hooks.post-container-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-container-delete",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-container-delete hook",
+    "detailedDescription": "Runs after `kunj container remove` has removed a container. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${container}, ${image} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_CONTAINER, KUNJ_IMAGE in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-container-delete in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-container-create",
+      "hooks.post-container-create",
+      "hooks.pre-container-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "container.image",
+    "type": "string",
+    "category": "container",
+    "default": "",
+    "description": "Container image override (default: the repo's devcontainer, else kunj-sandbox)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "node:22",
+      "my-registry/dev-image:latest"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.agentCommand",
+    "type": "string",
+    "category": "container",
+    "default": "claude --dangerously-skip-permissions",
+    "description": "Command `kunj container agent` runs inside the container (in tmux)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "claude --dangerously-skip-permissions"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.env",
+    "type": "array",
+    "category": "container",
+    "default": [
+      "ANTHROPIC_API_KEY",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "CLAUDE_CODE_USE_BEDROCK",
+      "AWS_REGION",
+      "GH_TOKEN"
+    ],
+    "description": "Host environment variable names forwarded into containers when set; NAME=value entries are passed literally",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "ANTHROPIC_API_KEY",
+      "NODE_ENV=development"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.files",
+    "type": "array",
+    "category": "container",
+    "default": [],
+    "description": "Host files copied into new containers, as hostPath:containerPath",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "~/.gitconfig:/home/node/.gitconfig"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.keepFiles",
+    "type": "boolean",
+    "category": "container",
+    "default": true,
+    "description": "Copy the repository's keep files into new containers",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.network.allow",
+    "type": "array",
+    "category": "container",
+    "default": [],
+    "description": "Egress allowlist of domains; empty means open internet (the host and LAN are always blocked)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "github.com",
+      "registry.npmjs.org"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.network.allowHost",
+    "type": "boolean",
+    "category": "container",
+    "default": false,
+    "description": "Allow containers to reach the Docker host (host.docker.internal)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.dockerContext",
+    "type": "string",
+    "category": "container",
+    "default": "",
+    "description": "Docker context used for every docker call",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "colima",
+      "desktop-linux"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.cpus",
+    "type": "string",
+    "category": "container",
+    "default": "",
+    "description": "CPU limit passed to docker run (e.g. 2)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "2"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.memory",
+    "type": "string",
+    "category": "container",
+    "default": "",
+    "description": "Memory limit passed to docker run (e.g. 4g)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "4g"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.publish",
+    "type": "array",
+    "category": "container",
+    "default": [],
+    "description": "Ports always published at container start",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "3000:3000"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  }
+]

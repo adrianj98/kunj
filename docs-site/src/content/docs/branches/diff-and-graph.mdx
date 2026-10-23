@@ -1,0 +1,112 @@
+---
+title: Diff and graph
+description: Review uncommitted changes file by file with highlighted diffs, and see recent history as a colored commit graph.
+sidebar:
+  order: 6
+---
+
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+## kunj diff
+
+`kunj diff` shows the changes in your working tree, one file at a time, with removed lines on a red
+background, added lines on a green background and line numbers down the side.
+
+```bash
+kunj diff
+```
+
+```text
+? Select file to view diff:
+❯ ○ src/auth/login.ts modified
+  ○ src/auth/session.ts new
+  ○ test/auth.test.ts deleted
+  ──────────────
+  ← Cancel
+```
+
+Pick a file to see its diff, then choose **View another file** to go back to the list or **Exit**.
+New, untracked files are shown in full as added lines.
+
+For each file kunj shows the staged changes if there are any, and otherwise the unstaged ones. A
+file with both staged and unstaged edits therefore shows only its staged part; use `git diff` for
+the rest.
+
+### Side by side
+
+```bash
+kunj diff -s
+```
+
+The old version goes on the left and the new one on the right, each with its own line numbers. It
+uses the full terminal width, so it reads best in a wide window.
+
+### One file, or a summary
+
+```bash
+kunj diff -f src/auth/login.ts          # skip the menu
+kunj diff -f src/auth/login.ts -s
+kunj diff --summary                     # additions and deletions per file
+kunj diff --staged                      # only files with staged changes
+```
+
+`--staged` limits the file list (and the summary) to files that have something staged. The
+summary is built from git's diff, so untracked files do not appear in it.
+
+`kunj diff --json` prints the changed files with their status and whether they are staged, plus
+totals, without any diff text.
+
+<CommandReference name="diff" optionsOnly />
+
+## kunj graph
+
+`kunj graph` draws the recent history of the current branch as a colored graph: short hash,
+branch and tag names, the commit subject (cut to fit your terminal), how long ago, and the author.
+
+```bash
+kunj graph
+```
+
+```text
+*   a41c9e2  (HEAD -> feature/login-form) Validate email on blur        2 hours ago   Priya Shah
+*   7f02bd1  Add login form component                                   5 hours ago   Priya Shah
+*   e9d4a10  (origin/main, main) Merge pull request #212 from fix/csp   3 days ago    Sam Ortiz
+|\
+| * 1c33f8e  Tighten CSP for inline styles                              4 days ago    Sam Ortiz
+|/
+*   0b7e5aa  Release 2.3.0                                              6 days ago    Sam Ortiz
+```
+
+It shows 20 commits by default. Common variations:
+
+```bash
+kunj graph --all                       # every branch, not just the current one
+kunj graph -n 50 --oneline             # more commits, no author column
+kunj graph --author "Priya" --since "2 weeks ago"
+kunj graph --since 2026-10-01 --until 2026-10-15
+```
+
+`--author`, `--since` and `--until` take the same values as `git log`.
+
+### Unicode and colors
+
+`--unicode` replaces the ASCII graph (`* | / \`) with `● │ ╱ ╲` for a smoother look. The
+substitution covers the whole line, so slashes and asterisks in branch names and commit subjects
+change too (`feature/x` shows as `feature╱x`).
+
+`--style` picks a color scheme for the hash, date and author: `default`, `light` (darker colors for
+light terminal backgrounds) or `dark` (brighter colors for dark backgrounds). Make either choice
+the default with settings:
+
+```bash
+kunj config --global --set preferences.graphUnicode=true
+kunj config --global --set preferences.graphStyle=dark
+```
+
+<SettingsTable prefix="preferences.graph" />
+
+`kunj graph --json` prints the commits (full hash, author, ISO date, refs and subject) without the
+graph.
+
+<CommandReference name="graph" optionsOnly />

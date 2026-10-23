@@ -1,0 +1,151 @@
+---
+title: AI with AWS Bedrock
+description: Set up the AI features - AWS credentials, region and model - and the settings that shape commit messages and PR descriptions.
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+kunj's AI features call Claude through [Amazon Bedrock](https://aws.amazon.com/bedrock/) in your own
+AWS account. There is no kunj service in between: the diff goes from your machine to Bedrock with
+your credentials, and you pay Bedrock's normal rates.
+
+The AI writes:
+
+- commit messages in [`kunj commit`](../../commits-and-prs/commit/),
+- pull request titles and descriptions in [`kunj pr`](../../commits-and-prs/pull-requests/),
+- [work log](../../work-logs/work-log/) entries and standup bullets,
+- stash messages in `kunj stash`, Jira tickets in `kunj jira`, and the team report in `kunj team`.
+
+Without AWS, all of these still work; you write the text yourself, and `kunj pr` falls back to a
+description built from the commit list.
+
+## Setting it up
+
+<Steps>
+
+1. **Get AWS credentials.** kunj uses the standard AWS SDK credential chain, so anything that works
+   for the AWS CLI works here, checked in this order: the `AWS_ACCESS_KEY_ID` /
+   `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN`) environment variables, `~/.aws/credentials`,
+   a profile in `~/.aws/config` (choose one with `AWS_PROFILE`), SSO, web identity, a
+   `credential_process`, and container or EC2 instance roles.
+
+   ```bash
+   aws configure sso            # or: aws configure
+   export AWS_PROFILE=dev       # if the profile isn't "default"
+   aws sts get-caller-identity  # check the credentials work
+   ```
+
+   The identity needs permission to invoke the model (`bedrock:InvokeModel`, which Bedrock's
+   Converse API uses). Browsing models in `kunj config -i` also uses `bedrock:ListFoundationModels`
+   and `bedrock:ListInferenceProfiles`.
+
+2. **Enable the model in Bedrock.** In the Bedrock console, open **Model access** in the region you
+   will use and request access to the Anthropic Claude models.
+
+3. **Set the region.** kunj uses the `ai.awsRegion` setting, which defaults to `us-east-1`.
+
+   ```bash
+   kunj config --global --set ai.awsRegion=eu-west-1
+   ```
+
+   <Aside type="caution">
+   Because `ai.awsRegion` always has a value, kunj does not pick up `AWS_REGION` or the region in
+   your AWS profile. Set `ai.awsRegion` whenever your Bedrock models are anywhere other than
+   `us-east-1`.
+   </Aside>
+
+4. **Choose the model.** The default `ai.model` is
+   `anthropic.claude-3-5-sonnet-20240620-v1:0`. The easiest way to pick another is the interactive
+   editor, which can list the models and inference profiles your account can use:
+
+   ```bash
+   kunj config --global -i      # choose AI, then ai.model, then "Browse available models from AWS"
+   ```
+
+   or set it directly:
+
+   ```bash
+   kunj config --global --set ai.model=us.anthropic.claude-sonnet-4-20250514-v1:0
+   ```
+
+   Newer Claude models can only be called through a cross-region *inference profile*, whose ID is
+   the model ID with a region prefix (`us.`, `eu.`, `apac.`…). If you set a bare model ID that
+   needs one, kunj tells you and suggests the prefixed ID.
+
+5. **Try it.**
+
+   ```bash
+   git add -p
+   kunj commit
+   ```
+
+   If AI is working, the first choice in the commit type list is **AI: Generate message with AI**.
+   If it reads **AI: Not configured (set AWS credentials)**, kunj could not reach the model with
+   your credentials, region and model ID. kunj checks this with a one-token request each time
+   `kunj commit` starts.
+
+</Steps>
+
+<Aside type="tip">
+`--global` stores a setting in `~/.kunj/config.json` for every repository. Without it,
+`kunj config --set` writes the current repository's configuration, which overrides the global one.
+See [Configuration](../../configuration/overview/).
+</Aside>
+
+## Project context
+
+To help the AI use your project's vocabulary, kunj reads the first matching file of these, in this
+order, from the directory you run the command in:
+
+1. `claude.md`
+2. `.claude.md`
+3. `CLAUDE.md`
+4. `.claude/context.md`
+5. `README.md`
+
+Only the first 1000 characters go into the prompt, and kunj prints `Using project context from
+<file>` when it finds one. Run kunj from the repository root, or put a short `.claude/context.md`
+there, if you want a specific description used.
+
+## What is sent
+
+- **Commit messages:** the staged diff (the first 3000 characters), the file names, up to
+  `ai.maxContextCommits` commits already on the branch when `ai.includeBranchContext` is on, and the
+  project context.
+- **Pull requests:** the branch's commits and, when `ai.includeDiffInPR` is on, the branch's diff
+  (the first 5000 characters).
+
+Very large changes are truncated, so the AI sees only their beginning.
+
+## Styles and instructions
+
+`ai.commitStyle` sets the format of both commit messages and PR descriptions: `conventional`
+(`feat: add rate limiter`, the default), `semantic` (`[MINOR] Add rate limiter`), `simple` (no
+prefix), `gitmoji` (`✨ Add rate limiter`), `caveman` (terse), or `custom`, which drops the built-in
+conventions and follows your `ai.customInstructions`. Instructions are added to the prompt in every
+style:
+
+```bash
+kunj config --set 'ai.customInstructions=Start the subject with the Jira key from the branch name'
+kunj config --set ai.subjectMaxLength=72
+```
+
+## Settings
+
+<SettingsTable category="ai" />
+
+<Aside type="note">
+`ai.provider` only accepts `bedrock` in practice; the other values are not implemented. The
+`BEDROCK_MODEL` environment variable is read only when `ai.model` is empty, which it never is by
+default. `ai.autoGenerateCommitMessage` is currently not used: AI commit messages are chosen in the
+`kunj commit` prompt or with `kunj commit --auto`.
+</Aside>
+
+To turn the AI off entirely:
+
+```bash
+kunj config --global --set ai.enabled=false
+```

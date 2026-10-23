@@ -2,6 +2,21 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — User docs site (MDX, Astro Starlight) in `docs-site/`
+
+- Added `docs-site/`: an Astro Starlight site (MDX pages) with 40 pages covering getting started,
+  branches, commits/PRs, worktrees, containers, work logs, configuration, integrations and a reference.
+  Why: user asked for user docs on an MDX system, written by going through everything.
+- `docs-site/scripts/gen-reference.cjs` loads the CLI's TypeScript sources and writes
+  `src/data/{commands,settings,hooks}.json`; the `CommandReference`, `SettingsTable` and `HookTable`
+  components render them, so option/setting/hook tables come from the code and cannot drift.
+  Why: hand-written option tables in the old READMEs had gone stale.
+- Pages were checked against `src/`, not the old markdown docs, and describe what the code does today
+  (several old docs were wrong: `kunj config set`, `jira branch`, completion of options, etc.).
+- `.github/workflows/pages.yml` now builds the docs (Node 22, Astro needs >=22.12) and publishes them at
+  `/kunj/docs/` next to the landing page; it also redeploys on changes to commands, settings and hook
+  definitions. The landing page and README link to the docs; CLAUDE.md has a "User Docs" section.
+
 ## 2026-10-23 — Sandbox: default zsh config and KUNJ_* env (Task 11)
 
 - Added `src/container/sandbox/zshrc` (installed as `/etc/zsh/zshrc`: history, compinit, prompt with branch, aliases, no first-run wizard, sources `/etc/profile.d/*.sh`) and `KUNJ_CONTAINER/KUNJ_BRANCH/KUNJ_REPO` in the main container env (after `containerEnv`, so a branch cannot spoof them). Why: the home is a volume, so defaults must live in the image; shells should show which branch they are in.

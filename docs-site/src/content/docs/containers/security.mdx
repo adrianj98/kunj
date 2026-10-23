@@ -1,0 +1,173 @@
+---
+title: Container security
+description: What a branch container isolates, what an agent inside can and cannot reach, and how secrets get in.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A branch container is built so that an agent running with every permission skipped can do anything
+*inside* it and very little *outside* it. This page says exactly what that means, because "sandbox"
+is easy to over-read.
+
+## The short version
+
+| Protected | Not protected |
+|---|---|
+| **Your files.** Nothing on your machine is mounted into the container. The code is a fresh clone in a Docker volume. | **Whatever you forward in.** The agent can read every environment variable and file you give the container (`container.env`, `container.files`, keep files) and, with internet access, send them anywhere. |
+| **Your repository and other branches.** Each container has its own clone. Your `.git` directory and the other branches' containers are out of reach, and each branch is on its own Docker network. | **Origin, within the token's scope.** With a token that can push, the agent can push to any branch the token may write to. Branch protection on your default branch is the backstop. |
+| **Your machine's services and your LAN.** The Docker host (`host.docker.internal`), private address ranges and link-local addresses are blocked, whatever the network mode. | **Data leaving through allowed sites.** An allowlist limits *where* the agent connects, not *what* it sends: GitHub, npm and the model's API are enough to carry a token out. |
+| **Docker itself.** The Docker socket is never mounted, so the agent cannot start containers or reach the daemon. | **The image build.** Building an image (the sandbox image, or a devcontainer's Dockerfile) runs outside the firewall, with full network access. |
+| **The firewall.** The agent's container has no capability to change network rules, so it cannot switch the firewall off. | |
+
+The practical advice follows from the right-hand column: forward as little as you can, prefer a
+token scoped to the one repository, and protect your default branch.
+
+## Its own clone, through origin only
+
+A container never sees your working tree. When it is created, kunj clones `origin` into the
+container's workspace volume and checks out the branch. From then on the agent works on that clone,
+and the only way work leaves is by pushing to origin; you get it with `git fetch`.
+
+This is why `kunj ct start` needs the branch on origin, and why `kunj ct remove` refuses to delete a
+container that holds unpushed work. It also means nothing the agent does to its clone (rewriting
+history, editing hooks, deleting files) can reach your repository except through a push.
+
+Credentials embedded in your origin URL (`https://user:token@host/...`) are stripped before the URL
+reaches the container. Your git name and email are copied in so commits are attributed to you.
+
+## The firewall and the network helper
+
+Every container comes with a second, tiny container, the **network helper**. It shares the main
+container's network stack and applies the firewall with `iptables`. It is the only one of the two that
+holds the `NET_ADMIN` capability; the container the agent runs in does not, so even a root process
+in it cannot change or bypass the rules.
+
+The main container is started with a `sleep` in place of the image's own entrypoint, and kunj runs
+nothing in it (no clone, no setup, no agent) until the helper reports that the rules are in place.
+If the helper does not come up within 20 seconds, the start fails and the container is removed.
+`kunj ct list` flags a running container whose helper has stopped as `[firewall helper down]`.
+
+### Default mode: open internet, closed host
+
+With `container.network.allow` empty (the default), the container can reach the internet, but not:
+
+- the Docker host: `host.docker.internal`, the network's gateway, and whatever the host's names
+  resolve to;
+- private ranges: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, carrier-grade NAT
+  `100.64.0.0/10` (which covers Tailscale), link-local `169.254.0.0/16`, and the IPv6 equivalents
+  `fc00::/7` and `fe80::/10`;
+- any DNS server other than Docker's own resolver, so DNS cannot be used as a side channel to an
+  arbitrary resolver.
+
+Two exceptions keep things working: the container's own branch network stays reachable, and so does
+origin on origin's port, even when origin is a self-hosted server on a private address. Every other
+port on that address is still blocked.
+
+`container.network.allowHost: true` lifts the host and private-range blocks, for example to reach a
+database running on your machine. It gives the agent your LAN as well, so use it only when you need
+it.
+
+### Allowlist mode
+
+Set `container.network.allow` to a list of domains and the container can reach only those, plus:
+
+- origin's host (and GitHub's published address ranges when origin is on GitHub);
+- `api.anthropic.com`, `registry.npmjs.org` and `nodejs.org`;
+- `bedrock-runtime.<region>.amazonaws.com` when Bedrock is turned on.
+
+```bash
+kunj config --set 'container.network.allow=[github.com,pypi.org,files.pythonhosted.org]'
+```
+
+Everything else is rejected immediately, so tools fail fast instead of hanging. Domains are resolved
+when the container starts and again every 5 minutes, because CDN addresses rotate. Before the agent
+can run, the helper proves the allowlist holds: `https://example.com` must be unreachable and origin
+reachable, or the start fails. `kunj ct start` and `kunj ct list --json` report the mode as
+`firewall: default` or `firewall: allowlist`.
+
+<Aside>
+Package installs need their registries in the allowlist. The [presets](../presets/) list the
+domains each one downloads from.
+</Aside>
+
+## Capabilities and users
+
+The main container drops every Linux capability except `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`
+and `SETGID`, which file ownership fixes and `sudo` inside devcontainer images need. It never has
+`NET_ADMIN` or `NET_RAW`.
+
+The default `kunj-sandbox` image runs as an ordinary user, `dev`, and has no `sudo`, so the agent
+cannot become root at all. kunj itself runs a few steps as root (installing blueprint tools), but
+the agent's sessions, `shell` and `exec` run as `dev`.
+
+A repository's `devcontainer.json` comes from the branch, which the agent can edit and push. kunj
+therefore treats it as untrusted:
+
+- `remoteUser: root` (or uid 0) is refused, as is an image that runs as root.
+- The image's entrypoint is replaced, so nothing from the image runs before the firewall.
+- `containerEnv` cannot override the secrets kunj forwards or the `KUNJ_*` variables.
+- When a branch changes the devcontainer's Dockerfile, kunj warns before building it, because image
+  builds run with full network access.
+
+A devcontainer image that ships `sudo` lets the agent become root inside its own container. That root
+still has no `NET_ADMIN`, so the firewall holds.
+
+## How secrets reach the container
+
+Secrets travel one way only: in the environment of `docker run`, written to a temporary file that
+only you can read and deleted as soon as the container exists. They never appear on a command line
+(so not in `ps`), in a `docker exec -e`, or in the container's labels.
+
+Only the variables `container.env` names are forwarded, and only when they are set on your machine.
+The defaults are the model credentials and a GitHub token:
+
+```json
+["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "GH_TOKEN"]
+```
+
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` and `AWS_PROFILE` are added only
+when `CLAUDE_CODE_USE_BEDROCK` is on, because Bedrock cannot work without them. Nothing else from
+your environment is forwarded.
+
+### The git credential helper
+
+When a token is forwarded (`GH_TOKEN`, `GITHUB_TOKEN` or `GITLAB_TOKEN`), kunj installs a small git
+credential helper in the container and points git at it. The helper answers **only for origin's
+host** (and port). If the agent adds another remote, or a dependency points git somewhere else, the
+helper says nothing and the token is not sent.
+
+An SSH origin (`git@github.com:acme/shop.git`) is cloned over HTTPS with the token instead, since the
+container has no SSH keys and your SSH agent is not forwarded. Without a token, `kunj ct start`
+refuses an SSH origin.
+
+The token is still in the container's environment, so tools that read it directly, such as `gh`,
+can use it for anything its scope allows. A fine-grained token limited to the one repository keeps
+that small.
+
+## What an agent inside can and cannot do
+
+**It can:**
+
+- read, change and delete anything in its own clone, and commit;
+- push to origin, as far as the forwarded token allows;
+- reach the internet (default mode) or the allowlisted sites;
+- install packages in its home directory, such as global npm packages;
+- read every environment variable and file you forwarded into the container;
+- start servers you can reach with `kunj ct forward` or published ports.
+
+**It cannot:**
+
+- read or write any file on your machine, including your repository and its `.git`;
+- reach your other branches' containers, the Docker host, your LAN or private networks
+  (unless `allowHost`);
+- use the Docker daemon;
+- change or switch off the firewall;
+- become root in the default image;
+- use the forwarded git token against any host other than origin through git.
+
+<Aside type="caution">
+The firewall is not a data-loss boundary. If a secret is forwarded, assume the agent can send it
+somewhere. Forward only what the work needs.
+</Aside>

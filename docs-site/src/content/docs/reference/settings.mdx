@@ -1,0 +1,51 @@
+---
+title: Settings reference
+description: Every kunj setting, its type, default and meaning, generated from the settings registry.
+sidebar:
+  order: 2
+---
+
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+Generated from the settings registry. Set any of these with `kunj config` (see
+[Configuration](../../configuration/overview/)).
+
+## General
+
+<SettingsTable category="general" />
+
+## Branch filtering
+
+<SettingsTable category="filtering" />
+
+## Stash
+
+<SettingsTable category="stash" />
+
+## AI
+
+<SettingsTable category="ai" />
+
+## Git flow
+
+<SettingsTable category="flow" />
+
+## Jira
+
+<SettingsTable category="jira" />
+
+## Slack
+
+<SettingsTable category="slack" />
+
+## Worktrees
+
+<SettingsTable category="worktree" />
+
+## Containers
+
+<SettingsTable category="container" />
+
+## Hooks
+
+<SettingsTable category="hooks" details={false} />

@@ -1,0 +1,48 @@
+---
+title: kunj
+description: Git branches, worktrees and sandboxed containers from one CLI, with AI-written commit messages and pull request descriptions.
+template: splash
+hero:
+  tagline: Git branches, worktrees and sandboxed branch containers from one CLI, with AI-written commit messages and pull request descriptions.
+  actions:
+    - text: Get started
+      link: getting-started/introduction/
+      icon: right-arrow
+    - text: Command reference
+      link: reference/commands/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+```bash
+npm install -g kunj
+kunj setup
+```
+
+<CardGrid>
+  <Card title="Branches" icon="seti:git">
+    Create, switch and clean up branches with automatic stashing and a consistent base branch.
+    [Branches →](branches/create-and-switch/)
+  </Card>
+  <Card title="AI commits and PRs" icon="pencil">
+    Commit messages from your staged diff and pull request descriptions from the whole branch.
+    [Commits →](commits-and-prs/commit/)
+  </Card>
+  <Card title="Worktrees" icon="list-format">
+    Every branch in its own directory, with keep files, PR status and editor windows.
+    [Worktrees →](worktrees/overview/)
+  </Card>
+  <Card title="Branch containers" icon="rocket">
+    Run a branch, and an agent with permissions skipped, in a firewalled Docker container.
+    [Containers →](containers/overview/)
+  </Card>
+  <Card title="Work logs" icon="document">
+    A daily log of what you committed, turned into standup bullets.
+    [Work logs →](work-logs/work-log/)
+  </Card>
+  <Card title="Hooks and config" icon="setting">
+    Global and per-repository settings, variables, and your own scripts around kunj actions.
+    [Configuration →](configuration/overview/)
+  </Card>
+</CardGrid>

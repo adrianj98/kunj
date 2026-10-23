@@ -1,0 +1,149 @@
+---
+title: Pull requests with kunj pr
+description: Open a GitHub pull request with an AI-written title and description, check its reviews and CI, and list open PRs.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+import HookTable from '../../../components/HookTable.astro';
+
+`kunj pr` opens a pull request for the current branch, writing the title and description from
+the branch's diff and commits. Run it again on a branch that already has one and it shows that
+PR's status instead.
+
+```bash
+kunj pr                 # create a PR for this branch, or show the existing one
+kunj pr 482             # show PR #482 (also accepts "#482")
+kunj pr --status        # status of this branch's PR
+kunj pr --list          # all open PRs in the repository
+```
+
+## Requirements
+
+`kunj pr` talks to GitHub through the [GitHub CLI](https://cli.github.com/). Install it and log
+in once:
+
+```bash
+brew install gh
+gh auth login
+```
+
+kunj checks `gh auth status` before doing anything and stops with install instructions if `gh` is
+missing or not logged in.
+
+<Aside type="note">
+`kunj pr` works with GitHub only. GitLab merge requests (through `glab`) are supported by
+[Git flow](../../branches/git-flow/) in PR mode, where `flow.prProvider` picks `github` or
+`gitlab` and kunj opens and merges the feature, release and hotfix PRs for you.
+</Aside>
+
+## Creating a pull request
+
+```bash
+git switch feature/retry-pr-lookups
+kunj pr
+```
+
+1. **Base branch.** `--base` wins, then `preferences.defaultBaseBranch`. With neither, kunj looks
+   for local `main`, `master`, `develop`, `development` and `dev`: one match is used, several
+   are offered in a list, none falls back to the repository's default branch. You can't open a
+   PR from the base branch itself.
+2. **Existing PR.** If the branch already has a pull request (recorded by an earlier `kunj pr`, or
+   found with `gh pr list --head <branch>`), kunj shows its status and stops.
+3. **Title and description.** Unless you passed both `--title` and `--body`, kunj drafts them
+   (see below) and lets you edit: the title in the prompt, the description in your editor.
+4. **Hooks and push.** The `pre-pr-create` hook runs, the branch is pushed (with `-u origin` the
+   first time, or just the unpushed commits), and `gh pr create` opens the PR, as a draft with
+   `--draft`.
+5. **Afterwards.** The PR URL is saved with the branch, `post-pr-create` runs, a
+   [work log](../../work-logs/work-log/) entry is written for the PR, its status is printed, and
+   you're asked whether to open it in the browser (skipped with `--web`, which opens it directly).
+
+```bash
+# Non-interactive: nothing is generated and nothing is asked until the browser prompt
+kunj pr --title "Retry PR lookups on timeout" --body "Fixes #311" --base develop --draft
+```
+
+## AI descriptions
+
+With `ai.enabled` and `ai.autoGeneratePRDescription` on and working
+[AWS Bedrock](../../integrations/aws-bedrock/) credentials, the AI receives:
+
+- the diff against the base (`git diff <base>...HEAD`, first 5,000 characters; leave it out with
+  `ai.includeDiffInPR=false`),
+- the branch's commits (up to `ai.maxContextCommits`),
+- the branch's description, tags and notes from [branch metadata](../../branches/metadata/),
+- the linked Jira ticket, if there is one (see [Jira](../../work-logs/jira/)),
+- your [commit style](../commit-styles/) and `ai.customInstructions`.
+
+The result is a title plus a description with **Summary** and **Changes** sections, and a
+**Jira Ticket** link at the top when the branch is linked to one:
+
+```markdown
+## Jira Ticket
+
+[PROJ-142](https://acme.atlassian.net/browse/PROJ-142) - Worktree list loses PR numbers offline
+
+## Summary
+
+Retry the gh call behind the PR cache once on a timeout, so a slow network no longer
+leaves the worktree list without PR numbers.
+
+## Changes
+
+- Wrap the `gh pr list` call in a single retry with a 5s timeout
+- Keep serving the stale cache entry while the retry runs
+- Add tests for the timeout and the retry path
+```
+
+Without AI (disabled, no credentials, or the call fails) kunj falls back to a template: the
+branch description or single commit as the title, then Summary, the commit list under Changes, and
+Testing and Checklist sections with checkboxes.
+
+## Viewing a pull request
+
+`kunj pr <number>`, `kunj pr --status` and running `kunj pr` on a branch that has a PR all print
+the same status view:
+
+- number, title, author, state (open, draft, merged, closed), URL and line counts,
+- whether it can be merged or has conflicts,
+- approvals and change requests, with reviewer names,
+- status checks: totals for passed, failed and running, then each check.
+
+Add `--detailed` to also list the jobs and steps (with durations) of the branch's three most
+recent GitHub Actions runs:
+
+```bash
+kunj pr 482 --detailed
+```
+
+`kunj pr --list` shows the 20 most recent open PRs with their checks and approvals;
+`kunj pr --list --json` returns up to 50 with URLs, authors and timestamps.
+
+## Options
+
+<CommandReference name="pr" optionsOnly />
+
+## Pull request hooks
+
+<HookTable filter="pr-" />
+
+`pre-pr-create` runs after you've confirmed the title and before anything is pushed, so it is the
+place for last checks (tests, a lint run, a ticket check). A non-zero exit aborts the PR.
+`post-pr-create` gets the new PR's URL, for example to post it to chat:
+
+```bash
+kunj config --set 'hooks.post-pr-create=echo "Opened ${prUrl} (${title})" >> ~/pr-history.txt'
+```
+
+Skip them with `--no-hooks`. See [Hooks](../../configuration/hooks/) for every way to install a
+hook.
+
+## Related settings
+
+<SettingsTable prefix="ai.autoGeneratePRDescription" details={false} />
+<SettingsTable prefix="ai.includeDiffInPR" details={false} />
+<SettingsTable prefix="preferences.defaultBaseBranch" details={false} />

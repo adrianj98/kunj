@@ -1,0 +1,163 @@
+---
+title: VS Code extension
+description: The Kunj Worktrees extension adds a Worktrees view to VS Code that shows every worktree, which windows have it open, and its pull request.
+sidebar:
+  order: 3
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+**Kunj Worktrees** puts the [`kunj worktree`](../overview/) listing into a VS Code side bar view.
+It shows every worktree of the repositories you have open, marks the ones open in other VS Code
+windows, and lets you create, open and remove worktrees without leaving the editor. It works in
+VS Code 1.85 or newer and in editors built on it, such as Cursor, VSCodium and Windsurf.
+
+Everything the extension shows comes from `kunj worktree … --json`; it never runs git itself. What
+you see in the view is exactly what `kunj worktree` prints in a terminal.
+
+## Install
+
+```bash
+kunj install vscode                   # VS Code
+kunj install vscode --editor cursor   # another VS Code-like editor
+```
+
+This downloads `kunj-worktrees-<version>.vsix` from the GitHub release and installs it with your
+editor's command line. `kunj setup` offers the same at the end. See
+[Companion apps](../../integrations/apps/) for details.
+
+To install by hand, download the `.vsix` from the
+[releases page](https://github.com/adrianj98/kunj/releases) and run:
+
+```bash
+code --install-extension kunj-worktrees-0.1.0.vsix
+```
+
+### Requirements
+
+- The `kunj` CLI on your `PATH` (`npm install -g kunj`), or `kunj.cliPath` pointing at it.
+- git 2.31 or newer.
+- Optional: `gh` (GitHub) or `glab` (GitLab), logged in, for pull request information. Without
+  them the view has no PR badges and everything else works.
+
+For remote workspaces (SSH, WSL, dev containers), install kunj on the remote side; the extension
+runs there too.
+
+## The Worktrees view
+
+Open the **Kunj** icon in the activity bar. Each worktree is a row with its branch name and, after
+it:
+
+- `this window` for the worktree open here, or `open: vscode (…)` / `open in 2 windows` when other
+  windows have it;
+- `✎ 3` for uncommitted changes and `↑2 ↓1` for ahead/behind its upstream;
+- a pull request badge (`#412 ✓`, `#398 draft`, `#377 merged`);
+- `missing`, `prunable` or `locked` when git reports them;
+- the worktree's path.
+
+The icon tells you the same at a glance: green for this window, blue for open elsewhere, a warning
+for a missing directory. Hover a row for the full details, including the commit, upstream and a link
+to the pull request. With several repositories in a multi-root workspace each gets its own group.
+
+Click a worktree to open it. By default it opens in a new window, and if it is already open in
+another VS Code window that window is brought to the front instead of opening a duplicate. Change
+this with `kunj.worktrees.clickAction`.
+
+The status bar shows the worktree of the current window; click it for a quick pick of all worktrees.
+
+### How "open in other windows" works
+
+Each window registers its folders with `kunj worktree session start` when the extension starts,
+refreshes that registration every few minutes and removes it when the window closes. A window that
+crashes is dropped as soon as kunj notices its process is gone. The view watches
+`~/.kunj/worktree-sessions.json`, so opening or closing a worktree in one window shows up in the
+others within about a second.
+
+The same sessions are why `kunj worktree remove` refuses to remove a worktree that is open in a
+window unless you pass `--force`.
+
+## Commands
+
+From the view's toolbar and the command palette (category **Kunj**):
+
+| Command | What it does |
+| --- | --- |
+| Add Worktree… | Pick an existing branch or type a new name, choose a base for a new branch, optionally a folder, then open it |
+| Open Worktree… | Quick pick of every worktree with its open state |
+| Refresh Worktrees | Reloads the view and re-queries pull requests (`--fresh`) |
+| Prune Stale Worktrees | Runs `kunj worktree prune` |
+| Remove Worktree… | Multi-select pick of worktrees to remove |
+
+From a worktree's context menu (some also as inline buttons on hover):
+
+| Command | What it does |
+| --- | --- |
+| Open Worktree / in New Window / in Current Window | Open it, overriding `clickAction` |
+| Add Worktree to Workspace | Add the folder to the current (multi-root) workspace |
+| Open Terminal in Worktree | An integrated terminal with the worktree as its directory |
+| Reveal Worktree in File Manager, Copy Worktree Path | |
+| Open Pull Request, Copy Pull Request URL | When the worktree has a pull request |
+| Create Pull Request… | When it has none: runs [`kunj pr`](../../reference/commands/) in a terminal in that worktree |
+| Remove Worktree… | Remove it, after a confirmation |
+
+Removing asks first and tells you when a worktree has uncommitted changes or is open in another
+window; in that case the button reads **Force Remove** and the worktree is removed with `--force`,
+discarding those changes. If git refuses anyway, you are asked again before forcing. The main
+worktree and the worktree open in the current window are never removed.
+
+### Creating a worktree
+
+<Steps>
+
+1. Run **Kunj: Add Worktree…** (the `+` in the view's title bar).
+2. Pick a branch that has no worktree yet, or type a new branch name.
+3. For a new branch, pick its base: one of your branches, or **HEAD** to use kunj's default base
+   (the same as `kunj worktree add -b` without `--base`, see
+   [New branches](../../branches/create-and-switch/)).
+4. Enter a folder, or leave it empty for the default location (`worktree.baseDir`).
+5. Choose **Open in New Window**, **Open Here** or **Add to Workspace**.
+
+</Steps>
+
+Keep files are copied in and the `post-worktree-create` hook runs, exactly as with
+`kunj worktree add` in a terminal.
+
+## Settings
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `kunj.cliPath` | `kunj` | The kunj executable. May include leading arguments, e.g. `node /path/to/kunj/dist/index.js` |
+| `kunj.worktrees.clickAction` | `newWindow` | What a click does: `newWindow` (or focus the window that has it), `currentWindow`, or `ask` |
+| `kunj.worktrees.refreshInterval` | `30` | Seconds between automatic refreshes; `0` turns them off |
+| `kunj.worktrees.showStatus` | `true` | Show change counts and ahead/behind (runs `git status` per worktree) |
+| `kunj.worktrees.showPullRequests` | `true` | Look up pull requests through `gh` / `glab` |
+| `kunj.worktrees.showPath` | `true` | Show the path next to the branch |
+| `kunj.worktrees.showStatusBar` | `true` | Show the current worktree in the status bar |
+| `kunj.worktrees.trackSessions` | `true` | Register this window so other windows and the CLI can see what it has open |
+
+The view also refreshes when the window regains focus. Pull requests come from a 60-second cache, so
+the periodic refresh never waits on the network; the Refresh button bypasses it.
+
+Where new worktrees go and which editor `kunj worktree open` launches are kunj settings, not
+extension settings: `worktree.baseDir` and `worktree.editorCommand` (see
+[Worktrees](../overview/#where-new-worktrees-go)).
+
+<Aside type="tip">
+If the view says the kunj CLI was not found, VS Code was probably started without your shell's
+`PATH` (common when it is launched from the Dock). Set `kunj.cliPath` to the full path, which
+`which kunj` prints.
+</Aside>
+
+## Build from source
+
+```bash
+cd vscode-extension
+npm install
+npm run build      # bundles to dist/extension.js
+npm run package    # produces kunj-worktrees-<version>.vsix
+code --install-extension kunj-worktrees-0.1.0.vsix
+```
+
+To work on the extension, open the `vscode-extension` folder in VS Code and press F5 for an
+Extension Development Host. Set `kunj.cliPath` to `node /path/to/kunj/dist/index.js` if your
+development build of the CLI is not linked globally.

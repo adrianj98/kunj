@@ -1,0 +1,158 @@
+---
+title: Branch containers
+description: Run a branch in its own Docker container, with its own clone, so an AI agent can work with permissions skipped without touching your machine.
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+`kunj container` (or `kunj ct`) gives a branch its own Docker container, the way
+`kunj worktree` gives it its own directory. The container holds a fresh
+clone of the repository and a firewall. It is mainly for running an AI agent such as Claude Code
+with `--dangerously-skip-permissions`: the agent can install packages, run tests and push commits
+without being able to read your files, your other branches or the services on your network.
+
+The container clones from `origin` and pushes back to it. Nothing on your machine is mounted into
+it, so the only way work gets in or out is through origin: the agent pushes, you fetch.
+
+## What you need
+
+- **Docker**: Docker Desktop, Colima, OrbStack or a Linux Docker engine. kunj drives the `docker`
+  CLI, so `docker info` must work in the shell you run kunj from. To use a Docker context other than
+  the current one, set `container.dockerContext` or pass `--context <name>`.
+- **A remote `origin`**: the container clones from it. A branch that exists only on your machine
+  has to be pushed first (kunj offers to push it for you).
+- **Credentials to forward**: the agent needs to log in to its model, and git inside the container
+  needs a token for a private origin. By default kunj forwards `ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`, `AWS_REGION` and `GH_TOKEN` from your
+  environment when they are set. See [Configuration](../configuration/#environment-and-secrets).
+
+<Aside>
+macOS keychain logins cannot be shared with a Linux container. For Claude Code, export
+`ANTHROPIC_API_KEY`, or a long-lived `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or turn
+on Bedrock. Without any of them, `kunj ct start` warns and Claude Code asks you to log in inside the
+container; that login is kept in the container's home volume for that branch.
+</Aside>
+
+## Quick start
+
+<Steps>
+
+1. Push the branch you want to work on, and make a GitHub token available to the container:
+
+   ```bash
+   git push -u origin feature/search
+   export GH_TOKEN=$(gh auth token)
+   export ANTHROPIC_API_KEY=sk-ant-...
+   ```
+
+2. Start its container:
+
+   ```bash
+   kunj ct start feature/search
+   ```
+
+   ```text
+   Starting the container for 'feature/search'...
+   ✓ Container kunj-shop-feature-search-3fa2c1 created
+     image     kunj-sandbox:1.9.0-8c1d0e4b7a21
+     branch    feature/search
+     user      dev
+     firewall  default
+     kept      .env
+
+   Next: kunj ct agent feature/search
+         kunj ct shell feature/search
+   ```
+
+   The first start builds the `kunj-sandbox` image and the network helper image, which takes a
+   few minutes. Later starts reuse them.
+
+3. Run the agent. It starts in a `tmux` session inside the container:
+
+   ```bash
+   kunj ct agent feature/search
+   ```
+
+   Detach with `Ctrl-b d`; the agent keeps working. Come back with `kunj ct attach feature/search`.
+
+4. Open a shell next to it to run the app or look around:
+
+   ```bash
+   kunj ct shell feature/search
+   ```
+
+5. When the agent has pushed its work, fetch it on your machine and remove the container:
+
+   ```bash
+   git fetch origin feature/search
+   kunj ct remove feature/search
+   ```
+
+</Steps>
+
+To start a container for a branch that does not exist yet, add `-c`. The branch is created inside
+the container from `origin/<base>` and exists only there until it is pushed:
+
+```bash
+kunj ct start -c fix/cart-total --base main
+```
+
+Every action takes the branch as its first argument and falls back to the branch you have checked
+out, so inside a worktree for `feature/search` you can just type `kunj ct start`, `kunj ct agent`
+and so on. Each action is described in [Commands](../commands/).
+
+## What a container is made of
+
+For each branch kunj creates a small set of Docker objects, all named
+`kunj-<repo>-<branch>-<hash>` (the hash keeps `feature/x` and `feature-x` apart):
+
+| Object | What it holds |
+|---|---|
+| Main container | Where the agent, your shells and `exec` commands run, in `/workspace`. |
+| Network helper (`…-net-helper`) | A tiny sidecar that applies the firewall. See [Security](../security/). |
+| Workspace volume (`…-ws`) | The clone at `/workspace`. Survives `stop` and `--rebuild`. |
+| Home volume (`…-home`) | The user's home directory: shell history, the agent's login and settings. |
+| Network (`…-net`) | A network of its own, so containers of different branches cannot reach each other. |
+
+kunj keeps no state file: these objects and their `kunj.*` labels are the state, so `docker ps` and
+`kunj ct list` always agree.
+
+## Lifecycle
+
+```text
+start ──► running ──► stop ──► stopped ──► start (resume) ──► running
+             │                     │
+             └────── remove ◄──────┘
+```
+
+- **`start`** on a branch without a container creates one: it starts the container and its network
+  helper, waits for the firewall, clones origin into `/workspace`, checks out the branch, copies your
+  [keep files](../../worktrees/keep-files/) and `container.files` in. With a
+  [blueprint](../blueprints/), the clone comes from the blueprint's snapshot with its dependencies
+  already installed. Nothing runs inside the container until the
+  firewall is in place.
+- **`start`** on a branch that already has a container resumes it. The clone in the volume is the
+  source of truth from then on: kunj does not reset it to origin, and does not copy files in again.
+- **`stop`** stops the container and its helper. The volumes keep the workspace, including
+  uncommitted changes.
+- **`remove`** deletes the container, helper, network and both volumes. It refuses while the
+  container holds commits, stashes or changes that origin does not have, unless you pass `--force`.
+  `--keep-volumes` keeps the workspace and home volumes, so a later `start` picks up where you left
+  off.
+- **`start --rebuild`** recreates the container from a freshly built image on the same volumes. Use
+  it after changing the image, the published ports or other settings fixed at creation.
+
+## Not yet supported
+
+Branch containers are in their first phase. These are not supported yet:
+
+- **Services**: no sidecar databases or queues. A devcontainer's `dockerComposeFile` is ignored with
+  a warning.
+- **`kunj ct open`**: attaching VS Code or Cursor to a container.
+- **`kunj ct prune`**: removing containers whose branches are merged.
+- **Docker inside the container** (Docker-in-Docker). The host's Docker socket is never mounted.
+- **`kunj ct forward --auto`**: forwarding ports as servers start. Forward ports by hand with
+  [`kunj ct forward`](../commands/#forward).
+- **SSH agent forwarding**: an SSH origin is cloned over HTTPS with a token instead.

@@ -1,0 +1,57 @@
+---
+title: Delete branches
+description: Delete a local branch safely, or force it when it has unmerged work.
+sidebar:
+  order: 3
+---
+
+import CommandReference from '../../../components/CommandReference.astro';
+
+`kunj delete` deletes a local branch.
+
+```bash
+kunj delete feature/login-form
+```
+
+```text
+Deleting branch 'feature/login-form'...
+✓ Successfully deleted branch 'feature/login-form'
+```
+
+By default it uses `git branch -d`, which refuses to delete a branch whose commits are not merged:
+
+```text
+✗ Branch 'experiment' is not fully merged
+Tip: Use --force flag to force delete
+```
+
+If you are sure you no longer need those commits, force it (`git branch -D`):
+
+```bash
+kunj delete experiment --force
+```
+
+You cannot delete the branch you are on; switch away first:
+
+```bash
+kunj switch main && kunj delete feature/login-form
+```
+
+<CommandReference name="delete" optionsOnly />
+
+## What it does not touch
+
+- **The remote branch.** Only the local branch is deleted. Remove the remote one with
+  `git push origin --delete <branch>`.
+- **kunj's records.** The branch's description, tags, notes and stash records stay in kunj's
+  metadata file (see [Branch metadata](../metadata/#where-it-is-stored)), and any auto-stash of the
+  branch stays in `git stash list`. If you recreate a branch with the same name, the old metadata
+  comes back with it.
+- **Worktrees.** A branch that is checked out in another worktree cannot be deleted; git refuses.
+  Remove the worktree with `kunj worktree remove` (see [Worktrees](../../worktrees/overview/)).
+
+## Hooks
+
+`kunj delete` runs the `pre-branch-delete` and `post-branch-delete`
+[hooks](../../configuration/hooks/) with the branch name. A failing `pre-branch-delete` hook stops
+the deletion. `--no-hooks` skips them.

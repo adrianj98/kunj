@@ -1,0 +1,139 @@
+---
+title: Quick start
+description: A first day with kunj - a branch, a switch, an AI-written commit, a pull request and a worktree.
+sidebar:
+  order: 4
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+This walkthrough follows a normal day in a GitHub repository. It assumes you have
+[installed kunj](../installation/), are signed in to the GitHub CLI (`gh auth login`), and, for the
+AI steps, have [AWS Bedrock set up](../../integrations/aws-bedrock/). Without AWS everything still
+works; you type the messages yourself.
+
+<Steps>
+
+1. **Start a branch.**
+
+   You are in the middle of something on `main` and a ticket comes in to add rate limiting.
+
+   ```bash
+   cd ~/code/billing-api
+   kunj create feature/rate-limit -d "Rate limit the public API"
+   ```
+
+   kunj fetches origin, creates `feature/rate-limit` from `origin/main` (not from whatever your
+   local `main` happens to be), and switches to it. Your uncommitted changes on `main` are stashed
+   automatically and tagged with the branch they came from. `-d` saves a description that shows up
+   in `kunj list`. See [Create and switch](../../branches/create-and-switch/) for choosing a
+   different base.
+
+2. **Switch away and back.**
+
+   A colleague asks you to look at something on another branch.
+
+   ```bash
+   kunj switch              # pick a branch from an interactive list
+   kunj switch main         # or name it
+   ```
+
+   Each time, kunj stashes the work on the branch you leave and restores the stash that belongs to
+   the branch you arrive on. Switching back to `main` brings back the changes you had there in
+   step 1.
+
+   ```bash
+   kunj switch feature/rate-limit
+   ```
+
+3. **Commit with an AI-written message.**
+
+   After some work:
+
+   ```bash
+   kunj commit
+   ```
+
+   kunj lists your changed files to pick from (`-a` takes them all), shows your recent commit
+   messages for reference, and offers a commit type. Choose **AI: Generate message with AI**:
+   kunj sends the staged diff to Claude and proposes a message in your configured style, for
+   example:
+
+   ```text
+   feat(api): add token bucket rate limiter
+
+   Limit each API key to 100 requests per minute and return 429 with a
+   Retry-After header when the bucket is empty.
+   ```
+
+   kunj commits with that message straight away; there is no separate confirmation, so use
+   `git commit --amend` if you want to reword it. The AI also writes a short description of the
+   branch, which replaces the one you set with `-d`. After an AI commit kunj adds an entry to
+   today's [work log](../../work-logs/work-log/), then asks whether to push, push and create a PR,
+   or skip.
+
+   If you pick a commit type such as `feat` instead, you type the subject and an optional body and
+   confirm before kunj commits.
+
+   <Aside type="tip">
+   `kunj commit --auto` does all of this without questions: AI message, commit and push.
+   </Aside>
+
+4. **Open a pull request.**
+
+   ```bash
+   kunj pr
+   ```
+
+   kunj asks for the base branch if you haven't configured one, reads the branch's commits and diff,
+   and drafts a title and description. You can edit both before it pushes the branch and runs
+   `gh pr create`. The PR's URL is saved with the branch, so `kunj pr --status` and your
+   [shell prompt](../../integrations/shell/) can show it later.
+
+   ```bash
+   kunj pr --status      # status and CI checks of this branch's PR
+   kunj pr --draft       # create it as a draft instead
+   ```
+
+5. **Pick up a bug fix in its own worktree.**
+
+   A bug report comes in while your feature is half done. Rather than switching, give the fix its
+   own directory:
+
+   ```bash
+   kunj worktree add fix/login-redirect -c
+   kunj worktree open fix/login-redirect
+   ```
+
+   `-c` creates the branch (from the same base as `kunj create`) because it doesn't exist yet. The
+   worktree lives outside your checkout, under the repository's `.git` directory, and gets any
+   [keep files](../../worktrees/overview/) such as `.env` copied in. `open` launches it in your
+   editor (`code` by default). Your feature branch is untouched in the original directory.
+
+6. **See where everything stands.**
+
+   ```bash
+   kunj list               # branches with descriptions, tags and stashed changes
+   kunj worktree list      # worktrees with git status, their PRs and open editors
+   ```
+
+   `kunj list` hides branches you have filtered out in your settings; `kunj list --all` shows
+   everything.
+
+7. **End the day.**
+
+   ```bash
+   kunj log                # today's work log
+   ```
+
+   See [Work logs](../../work-logs/work-log/) for turning it into standup bullets.
+
+</Steps>
+
+## Where next
+
+- [Branch containers](../../containers/overview/) to run a branch, or an agent, in a sandbox.
+- [Configuration](../../configuration/overview/) to change the commit style, the base branch or the
+  editor.
+- [Hooks](../../configuration/hooks/) to run your own scripts around kunj actions.
+- [Command reference](../../reference/commands/) for every option.

@@ -1,0 +1,12 @@
+---
+// Every command from the generated src/data/commands.json, each under its own heading.
+import commands from '../data/commands.json';
+import CommandReference from './CommandReference.astro';
+---
+
+{commands.map(c => (
+  <section>
+    <h2 id={c.name}>kunj {c.name}</h2>
+    <CommandReference name={c.name} />
+  </section>
+))}

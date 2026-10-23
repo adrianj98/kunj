@@ -1,0 +1,230 @@
+---
+title: Blueprints
+description: Describe once how a repository installs itself, and let every new branch container start from a ready-made snapshot.
+sidebar:
+  order: 5
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+A fresh clone is not ready to work in: it needs its runtimes, its packages, perhaps a build. A
+**blueprint** says how to get there. kunj runs it once in a throwaway container, saves the result as
+a **snapshot** image, and every new branch container starts from that snapshot with dependencies
+already installed, in seconds instead of minutes.
+
+## The blueprint file
+
+The blueprint is `.kunj/blueprint.json` in the repository. Comments and trailing commas are allowed:
+
+```jsonc
+{
+  // System tools, installed as root by presets before setup
+  "tools": {
+    "apt": ["jq", "postgresql-client"],
+    "node": "24",
+    "pnpm": "corepack",
+    "playwright": "chromium"
+  },
+  // Run once, in /workspace, when the snapshot is built
+  "setup": ["pnpm install --frozen-lockfile", "pnpm build"],
+  // Run on every container start, to pick up lockfile changes
+  "maintain": ["pnpm install --frozen-lockfile"],
+  // Files whose change means the snapshot is out of date
+  "lockfiles": ["pnpm-lock.yaml"],
+  // Shown by `kunj ct blueprint status`
+  "notes": "E2E tests need the API on :4000 - run `pnpm dev:api` first"
+}
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `tools` | object | Preset name → version or option (a string, an array of strings, or `true`). Each one runs a [preset](../presets/) as root. Values may contain only plain words: no options (`-x`), paths or shell characters. |
+| `setup` | array of commands | Run in order, in `/workspace`, as the container's user, through a login shell. Runs once, when the snapshot is built. The first failure stops it. |
+| `maintain` | array of commands | Run the same way on every later start of a container, to absorb drift between the snapshot and the branch. A failure is a warning, not an error. |
+| `lockfiles` | array of paths | Paths from the repository root that decide when the snapshot is stale. When omitted, kunj looks for the usual ones: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `requirements*.txt`, `go.sum`, `Cargo.lock`, `Gemfile.lock`. |
+| `notes` | string | Free text for people, shown by `status`. kunj does nothing else with it. |
+
+Unknown keys are ignored, and `status` lists them. The blueprint can only describe commands that run
+inside the container: nothing in it can widen the firewall, forward a secret or change the image,
+so it is safe for the agent to be able to edit it.
+
+## Create one
+
+`kunj ct blueprint init` looks at your checkout and proposes a blueprint:
+
+```bash
+kunj ct blueprint init
+```
+
+```text
+  packageManager pnpm@9.12.0 → pnpm
+  pnpm: install with `pnpm install --frozen-lockfile`
+  pnpm: provided by corepack
+  package.json has a build script → `pnpm build` in setup
+  engines.node ">=24" → node: 24
+  playwright in package.json → playwright: true
+? Tools (name=value, ...): pnpm=corepack, node=24, playwright=true
+? Setup commands (comma-separated): pnpm install --frozen-lockfile, pnpm build
+? Maintain commands (comma-separated): pnpm install --frozen-lockfile
+✓ Wrote /Users/me/src/shop/.kunj/blueprint.json
+
+Next: commit .kunj/blueprint.json; kunj ct start <branch> builds the snapshot on first use
+```
+
+It recognises npm, yarn, pnpm and bun (from `packageManager` or the lockfile), a `build` script,
+Node versions in `.nvmrc`, `.node-version` and `engines.node`, Playwright, a Supabase project,
+Poetry, uv and `requirements.txt`, `.python-version` and `requires-python`, Go modules, Cargo and
+`rust-toolchain`, Bundler, and asdf's `.tool-versions`. A Node requirement the sandbox image's
+Node 22 already meets is left out. For npm, `maintain` uses `npm install` rather than `npm ci`, which
+would reinstall everything on every start.
+
+| Flag | Use it to |
+|---|---|
+| `--yes` | Accept the proposal without prompting, and overwrite an existing file. |
+| `--global` | Write `~/.kunj/<repo>/blueprint.json` instead: a blueprint for your machine only, not committed. |
+
+Overwriting an existing blueprint keeps its `notes`. Commit the file so everyone's containers, and
+the snapshots built from origin, use it.
+
+## How a container uses it
+
+<Steps>
+
+1. **Find the blueprint.** kunj uses the first of: `.kunj/blueprint.json` in the working tree you
+   run kunj from (so a blueprint works before you push it), the same file on origin's default
+   branch, and `~/.kunj/<repo>/blueprint.json` on your machine.
+
+2. **Find or build the snapshot.** The snapshot for the current blueprint is the image
+   `kunj-blueprint-<repo>:<hash>`. When it does not exist, because this is the first start or the
+   blueprint has changed, `kunj ct start` builds it first:
+
+   ```text
+   Building blueprint snapshot (first use; this runs setup once)…
+   Fetching main from origin for the snapshot…
+   installed node 24.10.0
+   installed pnpm 9.12.0
+   Committing snapshot…
+   Starting the container for 'feature/search'...
+   ```
+
+   That first start takes as long as your setup. Every later new container skips it.
+
+3. **Start from it.** The new container copies the snapshot's prepared checkout into its own
+   workspace, moves it to the branch's commit on origin, and runs `maintain` (but not `setup`).
+
+</Steps>
+
+Resuming an existing container never builds or uses a snapshot: its workspace already exists. It
+only runs `maintain` again.
+
+If the snapshot cannot be built, the start does not fail because of it. kunj warns and falls back to
+the previous snapshot when there is one, or else clones origin and runs the tools and `setup` inside
+the new container. If `setup` fails there, the start fails and what it created is removed.
+
+### What makes a snapshot stale
+
+The snapshot's hash covers:
+
+- the blueprint's text;
+- the lockfiles' contents **on origin's default branch** (not your current branch);
+- the base image the snapshot is built on (the sandbox image or your devcontainer image);
+- the presets the blueprint uses.
+
+Change any of them and the next new container rebuilds the snapshot. A branch whose lockfile
+differs from the default branch's does not invalidate the snapshot; `maintain` installs the
+difference when its container starts. `kunj ct list` marks containers started from an older
+snapshot as `[blueprint stale]`.
+
+### What is in a snapshot
+
+The snapshot is built from origin's default branch (or `--base`) in a temporary container that is an
+ordinary, firewalled container **without** your secrets, keep files, `container.files`, published
+ports or agent. It holds the tools the presets installed and the checkout after `setup`, and nothing
+private, so it is safe to keep around. kunj keeps one snapshot per repository and deletes older ones
+when it builds a new one.
+
+### Private origins
+
+The temporary container needs no token. kunj fetches the branch on your machine, with your own git
+credentials, packs it into a git bundle and clones that inside the container. Two consequences:
+
+- **Private submodules** cannot be fetched while building a snapshot yet. Public ones are fetched
+  from their own URLs.
+- **Private package registries** are not reachable during `setup` if they need a secret, since no
+  secrets are forwarded into a snapshot. Install those packages in `maintain` instead, which runs in
+  the real container with its forwarded environment.
+
+With `--no-bundle`, `kunj ct blueprint snapshot` clones origin inside the container instead, which
+only works when origin is public.
+
+### Skipping the snapshot
+
+`kunj ct start --no-snapshot` neither builds nor uses a snapshot: it clones origin and runs the tools
+and `setup` in the new container. `--image` never uses a snapshot either.
+
+## Commands
+
+```bash
+kunj ct blueprint init [--global] [--yes]
+kunj ct blueprint snapshot [--base <ref>] [--rebuild] [--blueprint <path>] [--no-bundle]
+kunj ct blueprint status [--blueprint <path>]
+kunj ct blueprint remove
+```
+
+### snapshot
+
+Builds the snapshot now, so the next `start` is quick. You rarely need it, since `start` builds the
+snapshot on its own; use it to build ahead of time, to force a rebuild with `--rebuild`, or to try a
+blueprint file with `--blueprint <path>`.
+
+```bash
+kunj ct blueprint snapshot
+```
+
+```text
+Snapshotting the blueprint (/Users/me/src/shop/.kunj/blueprint.json) from main...
+Fetching main from origin for the snapshot…
+installed apt jq postgresql-client
+installed node 24.10.0
+Committing snapshot…
+✓ Snapshot kunj-blueprint-shop:4d1f0a9c2b7e (1843 MB) from 9b2e4c1 (from a host bundle)
+  installed apt jq postgresql-client
+  installed node 24.10.0
+```
+
+When the snapshot is already up to date it says so and does nothing, unless you pass `--rebuild`.
+`--base <ref>` builds from another branch than the default one.
+
+### status
+
+Shows which blueprint applies, its hash, and whether the snapshot is current:
+
+```bash
+kunj ct blueprint status
+```
+
+```text
+Blueprint: origin/main:.kunj/blueprint.json (repo)
+  hash      4d1f0a9c2b7e
+  snapshot  kunj-blueprint-shop:4d1f0a9c2b7e  2026-10-22T09:14:03.000Z  1843 MB
+  notes     E2E tests need the API on :4000 - run `pnpm dev:api` first
+```
+
+The source in brackets is `worktree`, `repo` (origin's default branch), `host` (`~/.kunj/<repo>/`) or
+`file` (`--blueprint`). A stale snapshot is reported as such, with a note that the next start rebuilds
+it.
+
+### remove
+
+Deletes the repository's snapshot images. Existing containers keep running; the next new container
+builds a fresh snapshot.
+
+```bash
+kunj ct blueprint remove
+```
+
+<Aside>
+Network access during `setup` follows your firewall settings. In allowlist mode, add your package
+registries (and the download sites of your [presets](../presets/)) to `container.network.allow`, or
+the snapshot build fails.
+</Aside>

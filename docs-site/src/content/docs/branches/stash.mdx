@@ -1,0 +1,103 @@
+---
+title: Stash
+description: Stash changes with an AI-written message, and browse, apply, pop or drop stashes from a menu.
+sidebar:
+  order: 5
+---
+
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+`kunj stash` is a friendlier front end to `git stash`. It works on the same stash list, so
+everything it creates is visible to git and the other way round. (For the stashes kunj makes by
+itself when you change branch, see [Auto-stash](../create-and-switch/#auto-stash).)
+
+## Stash your changes
+
+```bash
+kunj stash
+```
+
+```text
+📦 Stashing 3 file(s):
+
+  - src/auth/login.ts
+  - src/auth/session.ts
+  - test/auth.test.ts
+
+🤖 Generating stash message with AI...
+✓ Generated: "WIP: refactor session refresh into login flow"
+? Stash these changes? (Y/n)
+```
+
+kunj lists the files, asks the AI for a short message describing them, and asks before stashing.
+If the AI is not set up or fails, it falls back to `WIP: Changes in 3 file(s)`. Give your own
+message to skip the AI entirely:
+
+```bash
+kunj stash -m "Half-done session refresh"
+```
+
+Untracked files are left out unless you pass `-u`:
+
+```bash
+kunj stash -u -m "Spike with new files"
+```
+
+After stashing, kunj opens the stash menu described below.
+
+## Browse stashes
+
+```bash
+kunj stash list      # or: kunj stash -l
+```
+
+This opens a menu of every stash. Pick one, then choose what to do with it:
+
+- **Pop**: apply it and remove it from the list.
+- **Apply**: apply it and keep it.
+- **Show diff**: page through its changes in `less`, then pop, apply or drop it.
+- **Drop**: delete it, after a confirmation.
+
+With `--json`, `kunj stash list` prints the stashes instead of opening the menu:
+
+```bash
+kunj stash list --json
+```
+
+```json
+{
+  "stashes": [
+    { "ref": "stash@{0}", "index": 0, "description": "On feature/login-form: Half-done session refresh" },
+    { "ref": "stash@{1}", "index": 1, "description": "On main: kunj-auto-stash-main-1761210000000" }
+  ]
+}
+```
+
+## Pop, apply and drop directly
+
+```bash
+kunj stash pop           # pop the latest stash (or: kunj stash -p)
+kunj stash --apply 1     # apply stash@{1}, keep it in the list
+kunj stash --drop 1      # drop stash@{1}, after a confirmation
+```
+
+`--apply` and `--drop` take the stash's **number**, not the full `stash@{1}` ref. If applying
+conflicts, kunj stops and leaves the conflicts for you to resolve.
+
+<CommandReference name="stash" optionsOnly />
+
+## Hooks
+
+Creating a stash runs the `pre-stash` and `post-stash` [hooks](../../configuration/hooks/), with
+the branch and the stash message. A failing `pre-stash` hook stops the stash. `--no-hooks` skips
+them. Pop, apply and drop run no hooks.
+
+## Settings
+
+These settings are about the stashes kunj makes when you switch branches:
+`preferences.showStashDetails` adds the file and line counts after each stash in
+[`kunj list`](../list/), and `preferences.stashAgeDays` decides how recent a stash must be for its
+branch to count as in progress in the [personal WIP filter](../list/#filtering).
+
+<SettingsTable category="stash" />

@@ -1,0 +1,105 @@
+---
+title: Web dashboard
+description: kunj ui serves a local dashboard of the current repository's branches, changes, pull requests, work logs and team report, with a point-and-click commit page.
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+
+`kunj ui` starts a small web server for the repository you run it in and opens it in your
+browser. It shows the same information as `kunj list`, `kunj diff`, `kunj pr --list`,
+`kunj log` and `kunj team` on one screen, and has a commit page if you'd rather click than use
+the terminal picker.
+
+```bash
+cd ~/src/my-app
+kunj ui                 # http://localhost:3333, opened in your browser
+kunj ui --port 4000     # another port
+kunj ui --no-open       # don't open a browser (e.g. over SSH with a port forward)
+```
+
+The server runs until you press <kbd>Ctrl-C</kbd>. It always works on the repository of the
+directory it was started in; start another one on a different port for a second repository.
+
+## The dashboard
+
+The home page has a widget per source, several of which refresh on their own:
+
+| Widget | Shows | Refreshes |
+| --- | --- | --- |
+| **Branches** | Branches with descriptions and stashes, like `kunj list` | every 30 s |
+| **Pull Requests** | Open PRs with author, draft state, checks and approvals (needs `gh`) | every 60 s |
+| **Changes** | Files changed in the working tree | every 15 s |
+| **Team Report** | The latest team report, or a hint to run `kunj team` | on reload |
+| **Jira Issues** | Listed, but not filled in yet | |
+
+The sidebar also links to pages for the **Commit Graph**, **Stashes**, **Work Logs** and
+**Configuration**, which show the same data as the matching commands, and to the action pages
+(**Create Branch**, **Delete Branch**, **Commit**, **Create Issue**). A **Worktrees** entry is
+listed too but has no data yet; use `kunj worktree list` or the VS Code extension.
+
+<Aside type="caution">
+Apart from the Commit page, the action pages and the **Run Command** form on each page only list
+the command's options for now; submitting them doesn't run anything. Run those commands in the
+terminal.
+</Aside>
+
+## Committing from the browser
+
+The **Commit** page is a graphical version of [`kunj commit`](../../commits-and-prs/commit/):
+
+- tick the files to commit (select all / deselect all) and click a file to see its diff, against
+  the working tree or against main,
+- revert or delete a file,
+- pick a type prefix (or *No prefix*) and write the message, with your recent commit messages for
+  reference,
+- let AI write the message from the staged files, when AI is available,
+- commit, then push (setting the upstream the first time).
+
+<Aside type="note">
+The web commit page commits directly with git: kunj's `pre-commit`, `commit-msg` and
+`post-commit` [hooks](../../configuration/hooks/) don't run, and no
+[work log](../work-log/) entry is written. Git's own hooks still run.
+</Aside>
+
+## The team page
+
+The **Team Report** page presents the data saved by [`kunj team`](../team/): a team summary,
+active and older projects (each with lead, contributors, PRs, Jira tickets and Slack highlights),
+Jira issues by status, and important Slack messages.
+
+- **Analyze** re-runs the AI team analysis from the PR summaries `kunj team` already cached,
+  without fetching from GitHub again, and streams its progress.
+- Opening a project and asking for its **Detailed Report** has the AI read that project's diffs and
+  write key changes, decisions, risks, next steps and a per-PR analysis.
+
+Both need working [AWS Bedrock](../../integrations/aws-bedrock/) credentials. Run `kunj team`
+first: with no saved data the page just tells you to.
+
+## JSON endpoints
+
+The pages are built on a small JSON API you can script against while the server runs:
+
+```bash
+curl -s localhost:3333/api/commands | jq '.[].name'
+curl -s localhost:3333/api/data/list | jq '.branches[0]'
+curl -s localhost:3333/api/data/pr   | jq '.pullRequests[] | {number, title}'
+```
+
+`/api/data/<name>` exists for `list`, `pr`, `diff`, `graph`, `stash`, `log`, `config` and
+`team`.
+
+<Aside type="danger">
+The server has no login and listens on every network interface, not only `localhost`. Anyone who
+can reach the port can read your branches and diffs and commit, revert, delete files and push in
+your repository. Only run it on a trusted network, or behind a firewall that blocks the port.
+</Aside>
+
+The pages load Tailwind and htmx from public CDNs, so the browser needs internet access for the
+styling and live refresh to work.
+
+## Options
+
+<CommandReference name="ui" optionsOnly />

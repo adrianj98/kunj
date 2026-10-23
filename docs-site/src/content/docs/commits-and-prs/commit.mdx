@@ -1,0 +1,157 @@
+---
+title: Committing with kunj commit
+description: Pick files in a side-by-side diff view, let AI write the commit message from your staged diff, then push or open a pull request in one go.
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+import HookTable from '../../../components/HookTable.astro';
+
+`kunj commit` takes you from a dirty working tree to a pushed commit: you choose the files, kunj
+(or you) writes the message, and it offers to push and open a pull request at the end.
+
+```bash
+kunj commit          # interactive: pick files, pick a message type or AI, push
+kunj commit -a       # stage everything that changed, skip the file picker
+kunj commit --auto   # AI message, no questions, push when done
+```
+
+## The interactive flow
+
+<Steps>
+
+1. **Pick files.** If anything is unstaged, kunj opens a full-screen picker: the file list on the
+   left, the diff of the highlighted file on the right. Files that are already staged start
+   selected.
+
+   | Key | Action |
+   | --- | --- |
+   | <kbd>↑</kbd> <kbd>↓</kbd> | Move between files |
+   | <kbd>Space</kbd> | Select or deselect the file |
+   | <kbd>a</kbd> | Select all, or clear the selection if everything is selected |
+   | <kbd>j</kbd> <kbd>k</kbd> (or <kbd>PgDn</kbd> <kbd>PgUp</kbd>) | Scroll the diff by half a screen |
+   | <kbd>m</kbd> | Switch the diff between "working tree" and "compared with main" |
+   | <kbd>r</kbd> | Revert the file (asks first; not available for new files) |
+   | <kbd>d</kbd> | Delete the file (asks first) |
+   | <kbd>Enter</kbd> | Done, stage the selected files |
+   | <kbd>q</kbd> / <kbd>Ctrl-C</kbd> | Cancel |
+
+   If everything is already staged, the picker is skipped and the staged files are committed.
+   With `-a`, every changed file is staged and the picker is skipped.
+
+2. **Choose a message.** kunj lists your last five commit messages for reference and asks for a
+   commit type. The first choice is **AI: Generate message with AI**, selected by default when AI
+   is available. Below it are the conventional types (`feat`, `fix`, `docs`, `refactor`, …) and
+   *(none)*.
+
+   - With **AI**, the generated message is printed and used straight away; there is no
+     confirmation step.
+   - With a **type**, you type a subject (up to 100 characters), optionally write a body in your
+     editor, and confirm a preview. The result is `type: subject`.
+
+3. **Commit.** kunj runs your [commit hooks](#commit-hooks), creates the commit, and lists the
+   files it committed.
+
+4. **Push.** You are asked what to do next: **Push to remote**, **Push and create PR**, or
+   **Skip**. If the branch has no upstream yet it is pushed with `-u origin <branch>`. *Push and
+   create PR* continues straight into [`kunj pr`](../pull-requests/).
+
+</Steps>
+
+## AI-written messages
+
+When you pick AI (or use `--auto`), kunj sends the model:
+
+- the staged diff (`git diff --cached`), cut to its first 3,000 characters,
+- the list of files being committed,
+- the commits already on the branch (up to `ai.maxContextCommits`, unless
+  `ai.includeBranchContext` is off),
+- the first 1,000 characters of a project context file, the first one found in the current
+  directory of `claude.md`, `.claude.md`, `CLAUDE.md`, `.claude/context.md` or `README.md`,
+- the rules of your [commit style](../commit-styles/) and any `ai.customInstructions`.
+
+The reply also includes a five-to-ten word summary of what the branch is doing. kunj saves it as
+the branch description (the one shown by `kunj list` and used by `kunj pr`), so after the first AI
+commit your branch is described without you doing anything.
+
+After an AI commit, kunj also writes an entry to today's [work log](../../work-logs/work-log/)
+from the commit it just made.
+
+AI needs working AWS Bedrock credentials; see [AWS Bedrock](../../integrations/aws-bedrock/).
+Before showing the menu, kunj makes a tiny test call to Bedrock. If it fails, the AI entry is shown
+greyed out with the reason ("Disabled" when `ai.enabled` is false, "Not configured" when the
+credentials don't work) and you can still commit by hand.
+
+<Aside type="caution">
+If the model call fails part-way, kunj prints the error and falls back to a placeholder such as
+`feat: Update 3 files`, and because AI messages are not confirmed, that placeholder is what gets
+committed. Amend it with `git commit --amend` if that happens, or add a
+[`commit-msg` hook](#commit-hooks) that rejects messages you don't want.
+</Aside>
+
+## Non-interactive use
+
+```bash
+# Your own message, no prompts except the push question
+kunj commit -a -m "fix: handle empty branch names in kunj list"
+
+# AI message and push, nothing to answer (handy in scripts and agents)
+kunj commit -a --auto
+```
+
+`--auto` skips the message prompts and the push question and always pushes. Combine it with `-a`,
+otherwise the file picker still opens when there are unstaged changes. A message given with `-m`
+does not produce a work log entry; only AI messages do.
+
+## Options
+
+<CommandReference name="commit" optionsOnly />
+
+<Aside type="note">
+`--amend` is accepted but currently has no effect: kunj always creates a new commit. Use
+`git commit --amend` to amend.
+</Aside>
+
+## Commit hooks
+
+kunj runs three hooks around the commit. They are kunj hooks, installed in `~/.kunj/hooks/`,
+`~/.kunj/<repo>/hooks/` or the `hooks.<name>` setting (see [Hooks](../../configuration/hooks/));
+git's own `.git/hooks/pre-commit` and friends still run as usual when the commit is made.
+
+<HookTable filter="commit" />
+
+- `pre-commit` runs after the files are staged and before the message is chosen. If it fails, the
+  commit is aborted and the files stay staged.
+- `commit-msg` gets the final message (typed or AI-written) in a file and may rewrite it; kunj
+  commits whatever the file holds afterwards and tells you when it changed. Leaving the file empty
+  or exiting non-zero aborts the commit.
+- `post-commit` runs after the commit and before the push question. A failure is shown as a
+  warning.
+
+For example, to put the Jira key from the branch name at the front of every message:
+
+```bash
+#!/bin/sh
+# ~/.kunj/hooks/commit-msg
+msg_file="$1"
+key=$(printf '%s' "$KUNJ_BRANCH" | grep -oE '[A-Z]+-[0-9]+' | head -n1)
+[ -n "$key" ] || exit 0          # no key in the branch name: leave the message alone
+grep -q "^$key" "$msg_file" && exit 0
+{ printf '%s ' "$key"; cat "$msg_file"; } > "$msg_file.new" && mv "$msg_file.new" "$msg_file"
+```
+
+```bash
+chmod +x ~/.kunj/hooks/commit-msg
+```
+
+Pass `--no-hooks` to skip kunj's hooks for one commit.
+
+## Related settings
+
+<SettingsTable prefix="ai.maxContextCommits" details={false} />
+<SettingsTable prefix="ai.includeBranchContext" details={false} />
+
+The message format itself is controlled by the [commit style](../commit-styles/) settings.

@@ -1,0 +1,302 @@
+---
+title: Worktrees
+description: Check out several branches at once with kunj worktree, see their status and pull requests, and open them in your editor.
+sidebar:
+  order: 1
+---
+
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+import HookTable from '../../../components/HookTable.astro';
+
+A git worktree is a second (third, fourth…) checkout of the same repository, each on its own
+branch, sharing one set of objects and refs. `kunj worktree` wraps `git worktree` and adds what you
+usually want around it: a sensible place to put new worktrees, per-worktree status and pull request
+information in one listing, opening a worktree in your editor, and copying untracked files such as
+`.env` into each new one.
+
+Reach for a worktree when you want to keep working on one branch while something else runs on
+another: reviewing a pull request, letting an agent work on a fix, or keeping a long build going.
+Unlike `kunj switch`, nothing is stashed and nothing in your current checkout changes.
+
+```bash
+kunj worktree add -c fix/login-timeout   # new branch from origin/main, in its own directory
+kunj worktree open fix/login-timeout     # open it in VS Code
+kunj worktree                            # see every worktree, its changes and its PR
+kunj worktree remove fix/login-timeout   # done with it
+```
+
+## List worktrees
+
+`kunj worktree` on its own (or `kunj worktree list`) lists every worktree of the repository you are
+in, whichever worktree you run it from:
+
+```bash
+kunj worktree
+```
+
+```text
+Worktrees for shop-api:
+──────────────────────────────────────────────────────────────────────
+● main [main]
+  │ /Users/me/src/shop-api
+  │ clean
+  fix/login-timeout
+  │ /Users/me/src/shop-api/.git/kunj/worktrees/fix-login-timeout
+  │ 3 changed ↑2
+  │ open in: vscode (shop-api [fix/login-timeout])
+  │ PR #412 open checks ✓ approved - Fix login timeout on slow networks
+  review/pr-398
+  │ /Users/me/src/shop-api/.git/kunj/worktrees/review-pr-398
+  │ clean ↓5
+  │ PR #398 draft checks … review required - Move sessions to Redis
+```
+
+For each worktree you get:
+
+- the branch (or `detached@<sha>`), with `●` marking the one you are standing in;
+- markers: `[main]` for the main worktree, `[detached]`, `[locked]`, `[prunable]` (git has
+  lost track of it) and `[missing]` (its directory is gone);
+- the number of changed files and how far it is ahead (`↑`) or behind (`↓`) its upstream;
+- the editor windows it is open in, as registered by the
+  [VS Code extension](../vscode-extension/) and other editor integrations;
+- its pull request: number, state (open, draft, merged, closed), CI checks and review decision.
+
+`--no-status` skips the per-worktree `git status`, and `--no-pr` skips the pull request lookup, when
+you want the list as fast as possible. `--json` prints the same information as a JSON document.
+
+### Pull request information
+
+Pull requests come from the GitHub CLI (`gh`) or, for GitLab, `glab`, which must be installed and
+logged in. kunj picks the tool from origin's URL (`github.com` → `gh`, a host containing `gitlab` →
+`glab`, anything else, such as GitHub Enterprise, tries `gh` and then `glab`). All of the
+repository's pull requests are fetched in one call and matched to worktrees by branch name; when a
+branch has several, the open one wins, otherwise the most recently updated.
+
+The result is cached for 60 seconds in `~/.kunj/pr-cache.json`, so listing repeatedly (as the
+editor integrations do) does not hit the network each time. Pass `--fresh` to bypass the cache, for
+example right after you pushed or a check finished. Without `gh` or `glab` the listing simply has no
+PR lines.
+
+## Create a worktree
+
+```bash
+kunj worktree add <branch> [path]
+```
+
+What happens depends on whether the branch exists:
+
+| Command | Branch exists | Branch does not exist |
+| --- | --- | --- |
+| `kunj worktree add feature/search` | Checks it out | Error from git |
+| `kunj worktree add -c feature/search` | Checks it out | Creates it from the base, then checks it out |
+| `kunj worktree add -b feature/search` | Error from git | Creates it from the base, then checks it out |
+
+"Exists" includes a remote branch: `kunj worktree add feature/search` for a branch only on origin
+creates a local `feature/search` tracking `origin/feature/search`, which is the easy way to check
+out a colleague's branch for review. `-c` is the one to use when you don't know or don't care.
+
+A new branch starts from the same base as [`kunj create`](../../branches/create-and-switch/):
+`--base <ref>`, else `preferences.defaultBaseBranch`, else the repository's default branch, fetched
+from origin first and created from `origin/<base>` unless you pass `--no-origin` or turn
+`preferences.baseFromOrigin` off. The new branch does not track its base.
+
+```bash
+kunj worktree add -c hotfix/2.4.1 --base release/2.4
+```
+
+```text
+Creating worktree for 'hotfix/2.4.1' at /Users/me/src/shop-api/.git/kunj/worktrees/hotfix-2.4.1...
+Fetching the base branch from origin...
+Branching from origin/release/2.4
+Restored 1 keep file(s): .env
+✓ Created branch 'hotfix/2.4.1' from origin/release/2.4
+✓ Worktree created at /Users/me/src/shop-api/.git/kunj/worktrees/hotfix-2.4.1
+  post-worktree-create: 1 ran
+Tip: kunj worktree open hotfix/2.4.1
+```
+
+A branch can only be checked out in one worktree at a time, so kunj refuses to add a second
+worktree for a branch that already has one and tells you where it is.
+
+After git has created the worktree, kunj copies your [keep files](../keep-files/) into it and then
+runs the `post-worktree-create` hook, which is the place for `npm install` and the like (see
+[Hooks](#hooks) below).
+
+### Where new worktrees go
+
+Without a `[path]` argument (or `-p, --path <dir>`), a worktree is created at
+`worktree.baseDir/<branch>`, with slashes and other unsafe characters in the branch name turned into
+`-` (`feature/search` → `feature-search`). The default base directory is
+`${repoconfig}/kunj/worktrees`, where `${repoconfig}` is the repository's `.git` directory:
+
+```text
+/Users/me/src/shop-api/.git/kunj/worktrees/feature-search
+```
+
+This keeps worktrees out of your working tree (no stray directories for `git status`, your editor's
+search or your test runner to pick up) and next to the repository they belong to.
+
+You can put them anywhere else with the `${...}` [variables](../../configuration/overview/#variables):
+
+```bash
+# Next to the repository: ~/src/shop-api-worktrees/feature-search
+kunj config --set 'worktree.baseDir=${repoRoot}/../${repoName}-worktrees'
+
+# One tree for all repositories: ~/worktrees/shop-api/feature-search
+kunj config --global --set 'worktree.baseDir=~/worktrees/${repoName}'
+
+# Full control: name the branch yourself and nothing is appended
+kunj config --set 'worktree.baseDir=${home}/wt/${repoName}--${branch}'
+```
+
+A relative `baseDir` is resolved from the main worktree, `~` expands to your home directory, and the
+branch directory is appended unless the template contains `${branch}` itself. Use single quotes on
+the command line so your shell leaves `${...}` alone.
+
+### Bare repositories
+
+Everything works in a bare repository too (a layout where the repository directory holds only git
+data and every checkout is a worktree). There `${repoconfig}` is the repository directory itself, so
+the default puts worktrees inside it:
+
+```bash
+git clone --bare git@github.com:acme/shop-api.git shop-api.git
+cd shop-api.git
+kunj worktree add main
+kunj worktree add -c feature/search
+```
+
+```text
+shop-api.git/kunj/worktrees/main
+shop-api.git/kunj/worktrees/feature-search
+```
+
+You can run `kunj worktree` commands from the bare repository directory or from any of its
+worktrees.
+
+## Open a worktree in your editor
+
+```bash
+kunj worktree open fix/login-timeout
+kunj worktree open fix/login-timeout --new-window
+```
+
+The target is a branch name or a path; with no target the main worktree is opened. kunj runs
+`worktree.editorCommand` (default `code`) with the worktree's path as its last argument, detached
+from your terminal.
+
+- For VS Code and editors that share its command line (`code`, `code-insiders`, `codium`,
+  `vscodium`, `cursor`, `windsurf`), `-n`/`--new-window` adds `-n` so the worktree opens in a new
+  window. Without it, the editor decides: VS Code focuses the window that already has the folder
+  open. If your configured command already contains `-n`, `--new-window`, `-r` or `--reuse-window`,
+  kunj adds nothing.
+- Any other editor gets the path appended and nothing else, for example
+  `kunj config --set "worktree.editorCommand=idea"` or `zed`.
+- An empty command turns opening off: `kunj worktree open` then just prints the path.
+
+```bash
+kunj config --global --set "worktree.editorCommand=cursor"
+kunj config --global --set "worktree.editorCommand=code -n"   # always a new window
+```
+
+### Jump to a worktree in the shell
+
+`kunj worktree path <target>` prints the worktree's directory and nothing else, which makes it easy
+to `cd` into:
+
+```bash
+cd "$(kunj worktree path fix/login-timeout)"
+```
+
+```zsh
+# ~/.zshrc: wcd fix/login-timeout
+wcd() { cd "$(kunj worktree path "$1")" }
+```
+
+With no target it prints the main worktree.
+
+## Pull request of a worktree
+
+```bash
+kunj worktree pr fix/login-timeout       # show it
+kunj worktree pr fix/login-timeout -w    # and open it in the browser
+```
+
+```text
+PR #412 open checks ✓ approved - Fix login timeout on slow networks
+  https://github.com/acme/shop-api/pull/412
+```
+
+It uses the same 60-second cache as the listing; add `--fresh` for an up-to-the-second answer. When
+there is no pull request yet, create one from inside the worktree with
+[`kunj pr`](../../reference/commands/).
+
+## Remove and prune
+
+```bash
+kunj worktree remove fix/login-timeout
+```
+
+The target is a branch name or a path. kunj refuses, unless you pass `-f`/`--force`, when:
+
+- the worktree has uncommitted or untracked changes (git's own check);
+- you are standing in it;
+- it is open in an editor window (a registered session).
+
+The main worktree can never be removed. Removing a worktree leaves its branch alone; delete the
+branch afterwards with [`kunj delete`](../../reference/commands/) if you are done with it.
+
+If you deleted a worktree's directory by hand, git still lists it as `[prunable]` or `[missing]`.
+`kunj worktree prune` cleans those records up (it runs `git worktree prune -v`):
+
+```bash
+kunj worktree prune
+```
+
+## Hooks
+
+`add` runs `pre-worktree-create` before anything is created and `post-worktree-create` inside the
+new worktree after keep files are in place. `remove` runs `pre-worktree-delete` inside the worktree
+while it still exists and `post-worktree-delete` from the main worktree afterwards. A failing `pre-`
+hook stops the command; `--no-hooks` skips them for one run.
+
+```bash
+kunj config --set "hooks.post-worktree-create=npm ci"
+kunj config --set "hooks.pre-worktree-delete=docker compose down"
+```
+
+<HookTable filter="worktree" />
+
+See [Hooks](../../configuration/hooks/) for scripts, arguments and environment variables.
+
+## Editor sessions
+
+Editors register the worktrees they have open with `kunj worktree session start`, which is how the
+listing knows what is open where and why `remove` refuses an open worktree. You normally never call
+it yourself: the [VS Code extension](../vscode-extension/) does it for every window. To see the
+registered windows:
+
+```bash
+kunj worktree session list
+```
+
+```text
+vscode (shop-api [fix/login-timeout]) pid 48211 → /Users/me/src/shop-api/.git/kunj/worktrees/fix-login-timeout
+```
+
+Sessions are kept in `~/.kunj/worktree-sessions.json` and disappear by themselves when the editor
+process is gone. An integration of your own can register with
+`kunj worktree session start --pid <pid> --editor <name> [--label <text>] [--path <dir>]` and
+unregister with `kunj worktree session end --pid <pid>` (or `--id`, or `--path`).
+
+## Options
+
+<CommandReference name="worktree" optionsOnly />
+
+Every action accepts `--json`. The [VS Code extension](../vscode-extension/) and the
+[macOS menu bar app](../macos-app/) are built entirely on that output.
+
+## Settings
+
+<SettingsTable category="worktree" details={false} />

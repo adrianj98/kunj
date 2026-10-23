@@ -1,0 +1,162 @@
+---
+title: Jira and GitHub issues
+description: List, view and create Jira tickets from the terminal, link them to branches so PRs mention them, and file GitHub issues with kunj issue.
+sidebar:
+  order: 3
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+kunj connects to Jira Cloud so you can see your tickets, link a ticket to the branch you're
+working on, and create tickets (optionally written by AI from the branch's commits) without leaving
+the terminal. A linked ticket then shows up in the [pull request](../../commits-and-prs/pull-requests/)
+kunj writes and in the [team report](../team/).
+
+For GitHub issues there is a separate command, [`kunj issue`](#github-issues-with-kunj-issue).
+
+## Setting up Jira
+
+The quickest way is `kunj setup`, which asks for the details below, tests them, and optionally
+asks for a board ID for sprint features. It saves them to the current repository's config.
+
+To set them yourself, create an API token at
+[https://id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) and run:
+
+```bash
+kunj config --global --set jira.enabled=true
+kunj config --global --set jira.baseUrl=https://acme.atlassian.net
+kunj config --global --set jira.email=you@acme.com
+kunj config --global --set jira.apiToken=ATATT3xFfGF0...
+kunj config --set jira.projectKey=PROJ      # per repository
+kunj config --set jira.boardId=42           # optional, for --sprint
+```
+
+Your board ID is the number in the board's URL (`.../jira/software/projects/PROJ/boards/42`).
+
+Instead of storing them, the URL, email and token can come from the environment;
+`jira.enabled` must still be `true` in the config:
+
+```bash
+export JIRA_BASE_URL=https://acme.atlassian.net
+export JIRA_EMAIL=you@acme.com
+export JIRA_API_TOKEN=ATATT3xFfGF0...
+```
+
+<SettingsTable category="jira" />
+
+## Your tickets
+
+```bash
+kunj jira list            # unresolved tickets assigned to you
+kunj jira list --sprint   # assigned to you in the board's active sprint
+kunj jira list --all      # assigned to you, including resolved ones
+```
+
+```text
+My Assigned Tickets
+────────────────────────────────────────────────────────────────────────────
+PROJ-142 [Bug] In Progress Worktree list loses PR numbers offline
+PROJ-139 [Story] To Do Branch containers: blueprint snapshots
+────────────────────────────────────────────────────────────────────────────
+Total: 2 tickets
+```
+
+`--sprint` needs `jira.boardId`; with no active sprint it falls back to your unresolved tickets.
+Up to 50 tickets are shown. Add `--json` for machine-readable output.
+
+## Linking a ticket to a branch
+
+```bash
+kunj jira link PROJ-142
+```
+
+The ticket's key, title, status and type are stored with the current branch's
+[metadata](../../branches/metadata/). From then on:
+
+- `kunj jira view` with no key shows that ticket,
+- [`kunj pr`](../../commits-and-prs/pull-requests/) puts a **Jira Ticket** link at the top of the
+  description and gives the AI the ticket title as context; without AI the PR title becomes
+  `PROJ-142: <title>`.
+
+`kunj jira view` also works without a link when the branch name contains a key, such as
+`feature/PROJ-142-pr-cache`.
+
+```bash
+kunj jira view            # the linked ticket, or the key in the branch name
+kunj jira view PROJ-139   # any ticket
+```
+
+It prints the key, title, type, status, priority, assignee, reporter, description and URL.
+
+## Creating a ticket
+
+```bash
+kunj jira create
+kunj jira create -s "Retry PR lookups on timeout" -t Bug --assign --sprint
+```
+
+<Steps>
+
+1. kunj needs `jira.projectKey`; tickets are always created in that project.
+2. **On a feature branch**, with AI available and `jira.aiGeneration` on, the AI drafts a summary
+   and description from the branch's commits and its diff against the main branch. `--ai` and
+   `--no-ai` override `jira.aiGeneration` for one run. Passing `-s` or `-d` skips the AI.
+3. You are asked for whatever wasn't given on the command line: summary, issue type (Story, Bug,
+   Task, Epic; default `jira.defaultIssueType`), description (in your editor), whether to assign
+   it to yourself, and, when a board is configured, whether to add it to the active sprint.
+4. The ticket is created and its URL printed.
+5. **On a feature branch**, the ticket is linked to it. **On a default branch** (`main`,
+   `master`, `develop`, `dev`, `trunk`, or the Git flow main/develop branches), kunj offers to
+   create a branch for it, suggesting `feature/PROJ-143-short-name`, switches to it with
+   `kunj create` and links the ticket.
+
+</Steps>
+
+```text
+✓ Ticket created successfully
+  PROJ-143: Retry PR lookups on timeout
+  https://acme.atlassian.net/browse/PROJ-143
+
+? Create a new branch for this ticket? Yes
+? Branch name: feature/PROJ-143-retry-pr
+```
+
+<Aside type="note">
+AI drafting is skipped on a default branch, because there are no branch commits to describe. Write
+the ticket by hand there, or create it from the feature branch once you have commits.
+</Aside>
+
+| Subcommand | Options |
+| --- | --- |
+| `kunj jira list` | `--sprint`, `--all`, `--json` |
+| `kunj jira view [key]` | `--json` |
+| `kunj jira link <key>` | |
+| `kunj jira create` | `-s, --summary <text>`, `-t, --type <type>`, `-d, --description <text>`, `--assign`, `--sprint`, `--ai`, `--no-ai` |
+
+## GitHub issues with kunj issue
+
+`kunj issue` files an issue in the repository's GitHub project through the
+[GitHub CLI](https://cli.github.com/) (`gh auth login` first). It has nothing to do with Jira.
+
+```bash
+kunj issue
+kunj issue -t "worktree list hangs without network" -f notes/hang.md -l bug --no-web
+```
+
+1. **Title**: from `-t`, or asked for.
+2. **Description**: read from the file given with `-f`, or written in your editor (leave it empty
+   to skip).
+3. **Labels**: `-l` uses that one label; otherwise kunj fetches the repository's labels and lets
+   you tick any number of them.
+4. The issue is created and its URL is recorded as a related issue of the current branch.
+5. kunj asks whether to create a git tag for it (suggesting `issue-<number>`, or the name given
+   with `--tag`); `--no-tag` skips the question.
+6. kunj asks whether to open the issue in the browser; `-w` opens it, `--no-web` skips the
+   question.
+
+With `--json` it prints `{ "success": true, "url": "...", "number": 311, "title": "...", "labels": [...] }`
+and stops after creating the issue.
+
+<CommandReference name="issue" optionsOnly />

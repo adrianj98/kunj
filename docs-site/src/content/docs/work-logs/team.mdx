@@ -1,0 +1,117 @@
+---
+title: Team activity report
+description: kunj team reads every open pull request, plus recent Jira and Slack activity, and writes a report of who is working on what.
+sidebar:
+  order: 2
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+Where [`kunj log`](../work-log/) is about your own day, `kunj team` is about everyone's. It reads
+the open pull requests in the repository, their diffs and the last day of comments and reviews,
+and turns them into a Markdown report: a line per person and a section per project or effort.
+
+```bash
+kunj team             # fetch, summarise with AI, write today's report
+kunj team --no-ai     # structured report only, no AI calls
+kunj team --force     # re-fetch every diff and re-summarise every PR
+kunj team --limit 100 # look at up to 100 open PRs (default 50)
+```
+
+It needs the [GitHub CLI](https://cli.github.com/), logged in (`gh auth login`), and, for the AI
+report, working [AWS Bedrock](../../integrations/aws-bedrock/) credentials.
+
+## What it collects
+
+1. **Open pull requests** (`gh pr list --state open`), with author, branch, labels, size and draft
+   state.
+2. **Diffs.** Each PR's diff is saved to disk. A PR whose head commit and update time haven't
+   changed since the last run is skipped, so repeat runs are quick.
+3. **Recent discussion.** Comments and reviews from the last 24 hours, or since the previous run
+   if that was more recent.
+4. **Jira**, when [Jira is set up](../jira/): issues in `jira.projectKey` (or anywhere, without a
+   project key) updated in the last 24 hours.
+5. **Slack**, when [Slack is set up](../slack/): the last 48 hours of messages in the channels in
+   `slack.channels`.
+
+## The AI report
+
+With AI available, kunj works in two passes:
+
+- **Per PR.** Each PR is summarised on its own (its purpose, area and recent discussion), five
+  at a time, with `ai.modelSmall` (a cheaper model; it falls back to `ai.model` when empty).
+  Summaries are cached and only redone for PRs that changed, or for all of them with `--force`.
+- **Whole team.** The summaries, Jira issues and Slack messages go to `ai.model` together, which
+  writes a team summary and groups the work into projects, each with a lead, the rest of the
+  team, a summary and recent activity. kunj then writes a detailed report for each project.
+
+```markdown
+# Team Activity Report - 2026-10-23
+
+## Team Summary
+
+- @priya: Moving branch containers onto the new blueprint snapshots
+- @sam: Fixing PR cache timeouts in the worktree list
+- @lee: Reviewing the VS Code extension's session handling
+
+## Projects & Efforts
+
+### Branch containers
+
+**Status:** active | **Last updated:** 2026-10-23
+
+**Lead:** @priya | **Team:** @lee
+
+Snapshots are now built from a host-made bundle, so private origins need no token...
+
+**Pull Requests:**
+- PR #478 by @priya: Snapshot from a host-made bundle
+- PR #481 by @lee: Default zsh config in the sandbox
+```
+
+If AI is off, `--no-ai` is passed, the credentials don't work or the AI call fails, you get the
+structured report instead: an overview, PRs grouped by label with their size and recent
+comments, Jira issues grouped by status, and Slack messages grouped by channel.
+
+## Where the output goes
+
+Everything is saved under the repository's kunj directory:
+
+<FileTree>
+- ~/.kunj/my-app/team/
+  - report-2026-10-23.md the report kunj prints the path of
+  - analysis-2026-10-23.json team summary and projects, used by the web UI
+  - cache.json what was fetched and summarised, to skip unchanged PRs
+  - diffs/
+    - pr-482-retry-pr-lookups.diff
+  - activity/ comments and reviews per PR
+  - summaries/ per-PR AI summaries per day
+  - project-reports/ detailed report per project per day
+  - jira/ fetched Jira issues per day
+  - slack/ fetched Slack messages per day
+</FileTree>
+
+The saved diffs are handy on their own, for example to grep across every open PR or to hand a
+colleague's PR to an agent.
+
+The [web UI](../web-ui/) has a Team page that reads this data and can re-run the AI analysis from
+the cached summaries without fetching again.
+
+## JSON output
+
+```bash
+kunj team --json | jq '.pullRequests[] | {number, author: .author.login, title}'
+```
+
+`--json` prints `pullRequests`, `summaries` (or `null` without AI), `jiraIssues`, `slackMessages`,
+`activity` (comments and reviews by PR number), the `report` Markdown and its `reportPath`.
+
+## Options
+
+<CommandReference name="team" optionsOnly />
+
+## Related settings
+
+<SettingsTable prefix="ai.model" details={false} />

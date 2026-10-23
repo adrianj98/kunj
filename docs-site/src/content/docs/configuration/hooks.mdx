@@ -1,0 +1,244 @@
+---
+title: Hooks
+description: Run your own scripts and commands before and after kunj actions, such as installing dependencies in a new worktree or testing before a pull request.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+import HookTable from '../../../components/HookTable.astro';
+
+Hooks are your own scripts or shell commands that kunj runs at fixed points: before and after it
+creates a worktree, switches branch, commits, opens a pull request, and so on. They work like git
+hooks, but around kunj's actions rather than git's, and they live outside the repository, so they
+are yours and never committed.
+
+Typical uses:
+
+```bash
+# Install dependencies in every new worktree
+kunj config --set "hooks.post-worktree-create=npm ci"
+
+# Don't open a PR that fails lint or tests
+kunj config --set "hooks.pre-pr-create=npm run lint && npm test"
+
+# Stop the worktree's containers before it is removed
+kunj config --set "hooks.pre-worktree-delete=docker compose down"
+
+# Require a Jira key in every commit message
+kunj config --set 'hooks.commit-msg=grep -qE "[A-Z]+-[0-9]+" "$KUNJ_MESSAGE_FILE"'
+```
+
+## The hooks
+
+<HookTable />
+
+A hook whose last column says it aborts is a gate: when it fails, kunj stops. `post-*` hooks run
+after the fact and cannot undo anything.
+
+## Three ways to install a hook
+
+Everything installed for a hook runs, in this order:
+
+1. **Global scripts** in `~/.kunj/hooks/`, for every repository.
+2. **Repository scripts** in `~/.kunj/<repo>/hooks/`, for one repository and all its worktrees.
+3. **Commands in the config**: the `hooks.<name>` setting, global or local.
+
+In both script directories a hook is either a file named after the hook (`post-worktree-create`)
+or a directory `<hook>.d/` whose scripts run in name order, which is handy when several unrelated
+things should happen:
+
+```text
+~/.kunj/shop-api/hooks/
+├── pre-commit
+└── post-worktree-create.d/
+    ├── 10-install
+    ├── 20-env
+    └── 30-db.sample        ← ignored
+```
+
+Scripts must be executable (`chmod +x`). Files ending in `.sample` and dotfiles are ignored. A
+script that is not executable is skipped with a warning, and `kunj hooks` marks it
+`(not executable, ignored)`.
+
+### Scripts: `kunj hooks add`
+
+```bash
+kunj hooks add post-worktree-create        # this repository
+kunj hooks add pre-commit --global         # every repository
+```
+
+```text
+✓ Created repo post-worktree-create hook
+  /Users/me/.kunj/shop-api/hooks/post-worktree-create
+Edit the script to make it do something useful.
+```
+
+This writes an executable `/bin/sh` starter script that lists the hook's arguments and environment
+variables and echoes them, so you can see it fire before you fill it in. An existing script is left
+alone unless you pass `--force`. Scripts can be in any language: replace the `#!/bin/sh` line.
+
+```sh title="~/.kunj/shop-api/hooks/post-worktree-create"
+#!/bin/sh
+set -e
+cd "$1"
+npm ci
+cp "$KUNJ_REPO_ROOT/.env.local" .env.local 2>/dev/null || true
+```
+
+`kunj hooks path` prints the repository's hooks directory (`--global` for the global one):
+
+```bash
+cd "$(kunj hooks path)"
+```
+
+### Commands: `hooks.<name>`
+
+For a one-liner, set a command instead of writing a script:
+
+```bash
+kunj config --set "hooks.post-branch-switch=npm install"
+```
+
+The value is run by your shell, so `&&`, pipes and redirects work. To run several commands, give a
+list, either with `--set "hooks.post-worktree-create=[npm ci,npm run db:migrate]"` or by editing the
+config file:
+
+```json title="~/.kunj/shop-api/config.json"
+{
+  "hooks": {
+    "post-worktree-create": ["npm ci", "npm run db:migrate"],
+    "pre-pr-create": "npm run lint && npm test"
+  }
+}
+```
+
+The commands run one after another, after any scripts. A local `hooks.<name>` replaces the global
+one for that hook rather than adding to it (see
+[how the files merge](../overview/#how-the-files-merge)); use a global script if you want both.
+
+## What a hook receives
+
+Each hook gets its arguments three ways. Take `post-branch-switch`, whose arguments are `branch`
+and `previous-branch`:
+
+| In | As |
+| --- | --- |
+| Scripts | Positional arguments: `$1` is the branch, `$2` the previous branch |
+| Environment (scripts and commands) | `KUNJ_BRANCH`, `KUNJ_PREVIOUS_BRANCH` |
+| Config commands | `${branch}`, `${previousBranch}` |
+
+The environment variable is the argument in upper case with `-` turned into `_`; the `${...}`
+variable is the argument in camelCase (`pr-url` → `KUNJ_PR_URL`, `${prUrl}`). Every hook also gets:
+
+| Environment | `${...}` | Value |
+| --- | --- | --- |
+| `KUNJ_HOOK` | | The hook's name |
+| `KUNJ_REPO_ROOT` | `${repoRoot}` | The main worktree's directory |
+| `KUNJ_REPO_CONFIG` | `${repoconfig}` | The repository's `.git` directory |
+| `KUNJ_REPO_NAME` | `${repoName}` | The main worktree's directory name |
+| | `${home}` | Your home directory |
+
+The worktree hooks can also use `${worktree}` for the worktree's path (the same as
+`${worktreePath}`). See [Variables](../overview/#variables).
+
+### Where it runs
+
+- `post-worktree-create` and `pre-worktree-delete` run **inside the worktree**.
+- `pre-worktree-create` and `post-worktree-delete` run in the main worktree, because the worktree
+  does not exist yet or any more.
+- Every other hook runs in the directory where you ran kunj.
+
+### Quoting is done for you
+
+`${...}` values in config commands are inserted so that the shell sees them as plain text, however
+you quote them. A branch called `fix/$(rm -rf ~)` can't run anything:
+
+```bash
+kunj config --set 'hooks.post-branch-create=echo ${branch} >> ~/branches.log'
+kunj config --set 'hooks.post-branch-create=echo "created ${branch}" >> ~/branches.log'
+kunj config --set "hooks.post-branch-create=echo 'created \${branch}' >> ~/branches.log"
+```
+
+All three log the branch name literally: bare, inside double quotes and inside single quotes. The
+same holds inside `$(...)` and backticks. So write the command the way that reads best, and don't
+add quotes of your own around `${...}` to protect it; they're not needed. Environment variables
+such as `"$KUNJ_BRANCH"` are ordinary shell variables, so quote those as you normally would.
+
+## When a hook fails
+
+A hook fails when it exits with a non-zero status (or cannot be started).
+
+- A failing **`pre-*`** or **`commit-msg`** hook stops the command, nothing is changed, and the
+  remaining hooks for that point do not run:
+
+  ```text
+  ✗ pre-pr-create hook failed (exit code 1): npm run lint && npm test
+  ```
+
+- A failing **`post-*`** hook is reported as a warning; the action has already happened and the
+  other hooks still run:
+
+  ```text
+  ⚠ post-worktree-create hook failed (exit code 1): /Users/me/.kunj/shop-api/hooks/post-worktree-create
+  ```
+
+`commit-msg` gets the commit message in a file (`$1`, `KUNJ_MESSAGE_FILE`) and may rewrite it; kunj
+commits whatever the file holds when the hook is done.
+
+### Skipping hooks once
+
+Pass `--no-hooks` to skip every hook for one run. It is accepted by `create`, `switch`, `delete`,
+`commit`, `pr`, `stash`, `worktree add`/`remove` and `container start`/`remove`:
+
+```bash
+kunj commit --no-hooks
+kunj worktree add -c spike/try-bun --no-hooks
+```
+
+### With `--json`
+
+When a command runs with `--json`, hook output is sent to stderr and hooks get no standard input, so
+the JSON on stdout stays valid for whatever reads it (the VS Code extension and the macOS app run
+kunj this way). Results such as `kunj worktree add --json` include a `hooks` array with each hook
+that ran, its command, status, exit code and duration.
+
+## Inspect and test
+
+`kunj hooks` (or `kunj hooks list`) shows every hook, its arguments and everything installed for it:
+
+```text
+Kunj hooks
+──────────────────────────────────────────────────────────────────────
+● post-worktree-create
+  │ Runs inside a freshly created worktree, after keep files have been copied in (e.g. to install dependencies).
+  │ args: $1 worktree-path, $2 branch
+  │ repo   /Users/me/.kunj/shop-api/hooks/post-worktree-create
+  │ config npm run db:migrate
+○ pre-worktree-delete  (a non-zero exit aborts)
+  │ Runs inside a worktree before `kunj worktree remove` deletes it. A non-zero exit aborts the removal.
+  │ args: $1 worktree-path, $2 branch
+```
+
+`kunj hooks run <hook> [target]` runs a hook right now so you can try it without doing the real
+thing. The target is a worktree (branch or path) for the worktree hooks and a branch for the others;
+it defaults to the current one. Arguments that only exist during a real action get sample values
+(base branch `main`, title `kunj hooks run`), and `commit-msg` gets a temporary message file.
+
+```bash
+kunj hooks run post-worktree-create fix/login-timeout
+```
+
+```text
+Running post-worktree-create for fix/login-timeout (/Users/me/src/shop-api/.git/kunj/worktrees/fix-login-timeout)...
+✓ /Users/me/.kunj/shop-api/hooks/post-worktree-create 8412ms
+✓ npm run db:migrate 1290ms
+```
+
+<Aside type="caution">
+`kunj hooks run` really runs the hook. A `pre-worktree-delete` that runs `docker compose down` will
+stop your containers.
+</Aside>
+
+<CommandReference name="hooks" optionsOnly />

@@ -1,0 +1,30 @@
+/* Matches the landing page in ../site: mint accent, Space Grotesk and JetBrains Mono */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+:root {
+  --sl-font: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --sl-color-accent-low: #0d3a35;
+  --sl-color-accent: #14b8a6;
+  --sl-color-accent-high: #99f6e4;
+  --sl-color-black: #080b11;
+  --sl-color-gray-6: #0f1620;
+  --sl-color-gray-5: #1d2735;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #ccfbf1;
+  --sl-color-accent: #0f766e;
+  --sl-color-accent-high: #134e4a;
+  --sl-color-white: #080b11;
+  --sl-color-gray-6: #eef2f6;
+  --sl-color-gray-5: #d5dde6;
+  --sl-color-black: #ffffff;
+}
+
+.kunj-ref table { display: table; width: 100%; font-size: var(--sl-text-sm); }
+.kunj-ref td:first-child { white-space: nowrap; }
+.kunj-ref code { white-space: nowrap; }
+.kunj-ref .muted { color: var(--sl-color-gray-3); }
+.kunj-ref details { margin-top: 0.5rem; }
+.kunj-ref .usage { font-family: var(--sl-font-mono); font-size: var(--sl-text-sm); }

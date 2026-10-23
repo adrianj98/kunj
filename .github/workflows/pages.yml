@@ -1,10 +1,17 @@
 name: Deploy site to GitHub Pages
 
+# Publishes the landing page (site/) at /kunj/ and the user docs (docs-site/, Astro Starlight)
+# at /kunj/docs/. The docs' reference pages are generated from the CLI sources, so changes under
+# src/ redeploy too.
 on:
   push:
     branches: [main]
     paths:
       - 'site/**'
+      - 'docs-site/**'
+      - 'src/commands/**'
+      - 'src/settings/**'
+      - 'src/lib/hook-defs.ts'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -29,13 +36,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            docs-site/package-lock.json
+
+      # The docs generator loads the CLI's TypeScript sources through the root ts-node
+      - name: Install CLI dependencies
+        run: npm ci
+
+      - name: Build docs
+        working-directory: docs-site
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -R site/. _site/
+          cp -R docs-site/dist _site/docs
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./site
+          path: ./_site
 
       - name: Deploy to GitHub Pages
         id: deployment

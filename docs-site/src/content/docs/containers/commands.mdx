@@ -1,0 +1,249 @@
+---
+title: Container commands
+description: Start, use, stop and remove branch containers with kunj ct, and forward their ports.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+
+All container actions live under `kunj container`, usually typed as `kunj ct`:
+
+```bash
+kunj ct <action> [branch] [arguments]
+```
+
+`[branch]` defaults to the branch you have checked out. If you are not on a branch (a detached
+HEAD) and the terminal is interactive, kunj lets you pick from the repository's containers, or from
+origin's branches when there are none. With no action at all, `kunj ct` lists the containers.
+
+Every action accepts `--json` for machine-readable output; progress and warnings then go to stderr.
+`--context <name>` runs that one command against another Docker context.
+
+## start
+
+Creates the branch's container, or resumes it if it already exists.
+
+```bash
+kunj ct start feature/search
+```
+
+A new container clones origin, so origin must have the branch with all of its commits. If the branch
+is missing from origin or has unpushed commits, kunj asks whether to push it (in an interactive
+terminal) and otherwise stops with `push it first (the container clones from origin)`.
+
+| Flag | Use it to |
+|---|---|
+| `-c, --create` | Create a new branch inside the container from `origin/<base>`. Your local repository is not touched; the branch exists only in the container until it is pushed. |
+| `--base <ref>` | Choose the base for `-c`. Defaults to `preferences.defaultBaseBranch`, else the repository's default branch. The base must exist on origin. |
+| `--image <img>` | Use another image for this container, instead of `container.image`, the devcontainer or `kunj-sandbox`. A blueprint snapshot is never used with `--image`. |
+| `--publish <ports>` | Publish container ports on `127.0.0.1`, e.g. `--publish 3000,5432`. See [Ports](#ports). |
+| `--rebuild` | Rebuild the image and recreate the container on the same volumes. The workspace and home are kept. |
+| `--no-snapshot` | Start without the blueprint's snapshot: clone origin and run the blueprint's tools and setup in the container. See [Blueprints](../blueprints/). |
+| `--keep-on-error` | Keep what a failed start created, for debugging. A container whose firewall never came up is stopped, never left running. |
+| `--no-hooks` | Skip the `pre/post-container-create` hooks. |
+
+```bash
+# A new branch from develop, with the dev server's port published
+kunj ct start -c feat/onboarding --base develop --publish 5173
+
+# Pick up a new image (or new settings) without losing the workspace
+kunj ct start feature/search --rebuild
+```
+
+Resuming a stopped container starts it behind a fresh network helper, runs the blueprint's
+`maintain` commands and the devcontainer's `postStartCommand`, and leaves the clone as it was.
+Resuming a container that is already running does nothing.
+
+## agent
+
+Starts the agent in a `tmux` session named `agent`, or reattaches to it if it is already running.
+
+```bash
+kunj ct agent feature/search
+```
+
+The command is `container.agentCommand`, by default `claude --dangerously-skip-permissions`.
+Anything after `--` is passed to it as extra arguments:
+
+```bash
+kunj ct agent feature/search -- --model opus "Fix the failing search tests and push"
+```
+
+Detach with `Ctrl-b d`. The agent keeps running inside the container until it exits or the
+container stops. If the image has no `tmux`, kunj warns and runs the agent directly, in which case it
+stops when you leave.
+
+## attach
+
+Reattaches to the agent's `tmux` session:
+
+```bash
+kunj ct attach feature/search
+```
+
+It fails with `No agent session` when the agent is not running; start it with `kunj ct agent`.
+
+## shell
+
+Opens an interactive login shell in `/workspace`, as the container's user. It uses zsh when the
+image has it (the default image does), else bash, else sh.
+
+```bash
+kunj ct shell feature/search
+```
+
+```text
+kunj ▸ feature/search /workspace ❯ git log --oneline -3
+```
+
+The shell's exit code becomes kunj's exit code.
+
+## exec
+
+Runs one command in `/workspace` and exits with its exit code. Put the command after `--`:
+
+```bash
+kunj ct exec feature/search -- npm test
+kunj ct exec feature/search -- git push
+kunj ct exec -- git status -sb          # the current branch's container
+```
+
+The command is run directly, not through a shell. For pipes or `&&`, wrap it:
+
+```bash
+kunj ct exec feature/search -- sh -lc 'npm run build && npm run test:e2e'
+```
+
+Output streams to your terminal, and stdin is connected, so interactive tools work.
+
+## forward
+
+Forwards ports on your machine into the container, for as long as the command runs:
+
+```bash
+kunj ct forward feature/search 3000
+kunj ct forward 8080:3000 5173          # current branch: host 8080 → container 3000, and 5173
+```
+
+```text
+localhost:8080 → :3000
+localhost:5173 → :5173
+Forwarding; press Ctrl-C to stop
+```
+
+kunj listens on `127.0.0.1` only. A bare port uses the same port on your machine when it is free,
+and another free port when it is not (the output says which). Each connection is tunnelled through
+`docker exec`, so it reaches servers that listen only on `localhost` inside the container and needs
+nothing set up when the container was created. Each new connection costs a moment to open: fine for
+a browser and hot reload, not for load tests.
+
+### Ports
+
+There are two ways to reach a server in the container:
+
+| | `kunj ct forward` | `--publish`, `container.publish`, devcontainer `forwardPorts` |
+|---|---|---|
+| When | Any time, while the command runs | Fixed when the container is created |
+| Server must listen on | `localhost` or `0.0.0.0` | `0.0.0.0` |
+| Speed | One `docker exec` per connection | Native Docker port mapping |
+| Change it | Run it again | `kunj ct start --rebuild` |
+
+Published ports are bound to `127.0.0.1` on your machine, never to the LAN. If the port is taken,
+kunj picks the next free one; `kunj ct start` and `kunj ct list` print the mapping.
+
+## list
+
+Lists the containers of the current repository. It is also what `kunj ct` does with no action.
+
+```bash
+kunj ct list
+```
+
+```text
+Containers for shop:
+──────────────────────────────────────────────────────────────────────
+● feature/search  running  kunj-blueprint-shop:4d1f0a9c2b7e  [blueprint]  [agent]  +2 ahead
+○ fix/cart-total  exited  kunj-sandbox:1.9.0-8c1d0e4b7a21
+```
+
+For each running container it shows whether the agent is running, how many commits the branch is
+ahead of origin and whether the workspace has uncommitted changes. `[blueprint stale]` means the
+container was started from a snapshot that no longer matches the blueprint, and
+`[firewall helper down]` means the network helper is not running (start the container again to bring
+it back).
+
+| Flag | Use it to |
+|---|---|
+| `-a, --all` | List the containers of every repository. |
+| `--no-status` | Skip the per-container check, for a faster listing. |
+
+## stop
+
+Stops the container and its network helper. The workspace and home volumes are kept, so nothing is
+lost; `kunj ct start` resumes it.
+
+```bash
+kunj ct stop feature/search
+```
+
+## remove
+
+Deletes the container, its network helper, its network and its volumes.
+
+```bash
+kunj ct remove feature/search
+```
+
+Before deleting anything kunj checks the clone inside the container (starting it behind its firewall
+first if it is stopped). It refuses when it finds any of:
+
+- commits on any local branch, or a detached HEAD, that origin does not have;
+- stashes;
+- uncommitted changes to tracked files;
+- an origin it cannot reach, since it then cannot tell what was pushed.
+
+```text
+✗ kunj-shop-feature-search-3fa2c1 holds work origin does not have:
+  - unpushed commits on feature/search
+  - 1 stash
+Push it first, or use --force
+```
+
+Untracked files are not protected, as with `git worktree remove`.
+
+| Flag | Use it to |
+|---|---|
+| `-f, --force` | Remove without checking for unpushed work. |
+| `--keep-volumes` | Keep the workspace and home volumes. A later `kunj ct start` of the branch reuses them. |
+| `--no-hooks` | Skip the `pre/post-container-delete` hooks. |
+
+<Aside type="caution">
+`--force` deletes the workspace volume, and with it everything in the container that was not pushed.
+Use `--keep-volumes` if you are not sure.
+</Aside>
+
+## blueprint
+
+`kunj ct blueprint init|snapshot|status|remove` manages the repository's
+[blueprint](../blueprints/): how a new container installs its tools and dependencies, and the
+snapshot image new containers start from.
+
+## Getting work out
+
+There is no "copy out" command, on purpose: origin is the only channel. The agent (or you, through
+`kunj ct shell` or `exec`) commits and pushes; you fetch on your machine:
+
+```bash
+kunj ct exec feature/search -- git push
+git fetch origin feature/search
+```
+
+The first `git push` of a new branch needs no `-u`: containers have `push.autoSetupRemote` turned
+on. Opening a pull request from inside works too when the token allows it, since `gh` is in the
+default image.
+
+## All options
+
+<CommandReference name="container" optionsOnly />
