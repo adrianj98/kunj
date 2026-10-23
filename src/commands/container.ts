@@ -14,6 +14,7 @@
 //   kunj container remove [branch] [--force] [--keep-volumes]
 //   kunj container prune [--all] [--dry-run] [--force] [--yes]
 //   kunj container blueprint init|snapshot|status|remove
+//   kunj container file read|write [branch] <path>
 //
 // `ct` is an alias. The command is on the fast path (src/commands/fast.ts): keep heavy
 // imports out of this module, and load inquirer lazily.
@@ -37,6 +38,8 @@ import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, wri
 import { Forwarder, TUNNEL_PROBE, forwardPort, parseForwardSpec, parseTunnelProbe } from '../lib/container/forward';
 import { ForwardRecord, forwarderFor, ignoredPorts, readForwards, runAutoForward, spawnDetached, updateForwards } from '../lib/container/autoforward';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
+import { ContainerError } from '../lib/container/errors';
+import { readWorkspaceFile, validateWorkspacePath, writeWorkspaceFile } from '../lib/container/files';
 import { ContainerNames, LABEL, containerNames, repoIdFromUrl } from '../lib/container/names';
 import {
   StartError,
@@ -54,6 +57,7 @@ import { inferBlueprint } from '../lib/container/infer';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
 import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount } from '../lib/container/prune';
 import { KunjConfig } from '../types';
+import type { ContainerJson, ContainerListJson, FileReadJson, FileWriteJson } from '../lib/json-types';
 
 interface ContainerOptions {
   json?: boolean;
@@ -88,15 +92,8 @@ interface Context {
   dockerContext?: string;
 }
 
-// Expected outcomes (not running, nothing to remove, ...): printed without a stack trace
-class ContainerError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ContainerError';
-  }
-}
-
-const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint'];
+const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file'];
+const FILE_ACTIONS = ['read', 'write'];
 const BLUEPRINT_ACTIONS = ['init', 'snapshot', 'status', 'remove'];
 const WORKSPACE = '/workspace';
 const STATUS_TIMEOUT_MS = 2000;
@@ -158,6 +155,8 @@ export class ContainerCommand extends BaseCommand {
         '  stop [branch]                        stop, keeping the workspace',
         '  remove [branch]                      remove, refusing while work is unpushed',
         '  prune [--all] [--dry-run]            remove containers of branches gone from origin, orphans and old images',
+        '  file read [branch] <path>            print a file of /workspace',
+        '  file write [branch] <path>           write stdin to a file of /workspace (content on stdin)',
         '',
         'Blueprint (how a new container is set up: tools, setup and maintain commands):',
         '  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json',
@@ -206,7 +205,9 @@ export class ContainerCommand extends BaseCommand {
       const error = await this.explainDockerError(caught);
       const message = error instanceof Error ? error.message : String(error);
       if (this.jsonMode) {
-        const code = error instanceof StartError ? error.code : error instanceof HookError ? 'hook' : 'error';
+        // Always an object here (documented for `kunj ct`): the code is the start/hook code, else the error's jsonCode, else 'error'
+        const jsonCode = (error as { jsonCode?: unknown } | null)?.jsonCode;
+        const code = error instanceof StartError ? error.code : error instanceof HookError ? 'hook' : typeof jsonCode === 'string' ? jsonCode : 'error';
         process.stdout.write(JSON.stringify({ error: { code, message } }) + '\n');
         process.exit(1);
       }
@@ -264,6 +265,8 @@ export class ContainerCommand extends BaseCommand {
         return this.prune(options);
       case 'blueprint':
         return this.blueprint(target, options);
+      case 'file':
+        return this.file(target, rest, options);
     }
   }
 
@@ -836,7 +839,7 @@ export class ContainerCommand extends BaseCommand {
     const [volumes, networks] = await leftovers;
     const orphans = findOrphans(all, volumes, networks);
     const forwards = readForwards().filter(r => r.port > 0);
-    const containers = mains.map((c, i) => {
+    const containers: ContainerJson[] = mains.map((c, i) => {
       const s = statuses[i];
       const recorded = this.recordedOptions(c);
       const stale = currentHash === null || c.labels[LABEL.repo] !== ctx.repo.id ? null : recorded.blueprintHash !== currentHash;
@@ -868,7 +871,7 @@ export class ContainerCommand extends BaseCommand {
         backend: { kind: 'docker', context: ctx.dockerContext || 'default' },
         containers,
         orphans,
-      });
+      } satisfies ContainerListJson);
       return;
     }
 
@@ -899,6 +902,32 @@ export class ContainerCommand extends BaseCommand {
     }
     console.log('');
     console.log(chalk.gray("Tip: Use 'kunj ct start <branch>' to start a container"));
+  }
+
+  // ---------------------------------------------------------------------
+  // file
+  // ---------------------------------------------------------------------
+
+  // `file read <path>` (current branch) or `file read <branch> <path>`; same for write
+  private async file(sub: string | undefined, args: string[], options: ContainerOptions): Promise<void> {
+    if (sub !== 'read' && sub !== 'write') {
+      throw new ContainerError(`Unknown file action '${sub ?? ''}'. Expected one of: ${FILE_ACTIONS.join(', ')}`);
+    }
+    if (args.length < 1 || args.length > 2) throw new ContainerError(`Usage: kunj ct file ${sub} [branch] <path>`);
+    const relPath = validateWorkspacePath(args[args.length - 1]);
+    const ctx = await this.context(options);
+    const branch = await this.resolveBranch(ctx, args.length === 2 ? args[0] : undefined);
+    const main = await this.requireRunning(ctx, branch);
+    const user = this.userOf(main) || undefined;
+    if (sub === 'read') {
+      const content = await readWorkspaceFile(ctx.backend, main.id, relPath, user);
+      if (this.jsonMode) this.outputJSON({ path: relPath, content } satisfies FileReadJson);
+      else process.stdout.write(content);
+      return;
+    }
+    await writeWorkspaceFile(ctx.backend, main.id, relPath, process.stdin, user);
+    if (this.jsonMode) this.outputJSON({ success: true, path: relPath } satisfies FileWriteJson);
+    else console.log(chalk.green(`✓ wrote ${relPath}`));
   }
 
   // ---------------------------------------------------------------------

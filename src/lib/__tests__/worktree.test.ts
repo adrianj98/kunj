@@ -1,7 +1,20 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, WorktreeSession, PullRequestInfo } from '../worktree';
+import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, listWorktreesDetailed, WorktreeSession, PullRequestInfo } from '../worktree';
+import { agentSessionName, listTmuxSessions } from '../agent-session';
+import { repoIdentity } from '../repo-identity';
+import { repoIdFromUrl } from '../container/names';
+
+const mockExec = jest.fn<(cmd: string, opts: unknown, cb: (e: Error | null, r: { stdout: string; stderr: string }) => void) => void>();
+
+const tmuxMock = listTmuxSessions as unknown as jest.Mock<() => Promise<string[] | null>>;
+const identityMock = repoIdentity as unknown as jest.Mock<() => unknown>;
+
+jest.mock('child_process', () => ({ ...jest.requireActual<object>('child_process'), exec: (...args: unknown[]) => (mockExec as unknown as (...a: unknown[]) => void)(...args) }));
+jest.mock('../agent-session', () => ({ ...jest.requireActual<object>('../agent-session'), listTmuxSessions: jest.fn() }));
+jest.mock('../repo-identity', () => ({ repoIdentity: jest.fn() }));
 
 describe('worktree utilities', () => {
   describe('parseWorktreeList', () => {
@@ -183,5 +196,70 @@ describe('buildOpenCommand', () => {
   it('leaves non-VS-Code editors alone', () => {
     expect(buildOpenCommand('idea', '/tmp/wt')).toEqual(['idea', '/tmp/wt']);
     expect(buildOpenCommand('vim', '/tmp/wt', { newWindow: true })).toEqual(['vim', '/tmp/wt']);
+  });
+});
+
+describe('agent status', () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-agent-')));
+  const gitCommonDir = path.join(dir, '.git');
+  const featureA = path.join(dir, 'feature-a');
+  fs.mkdirSync(featureA);
+
+  beforeEach(() => {
+    mockExec.mockImplementation((cmd, _opts, cb) => {
+      let stdout = '';
+      if (cmd.startsWith('git worktree list')) {
+        stdout = `worktree ${dir}\nHEAD 1111111111111111111111111111111111111111\nbranch refs/heads/main\n\nworktree ${featureA}\nHEAD 2222222222222222222222222222222222222222\nbranch refs/heads/feature-a\n`;
+      } else if (cmd.startsWith('git rev-parse')) {
+        stdout = `${gitCommonDir}\n${dir}\n`;
+      }
+      cb(null, { stdout, stderr: '' });
+    });
+    identityMock.mockReset();
+    identityMock.mockReturnValue({ root: dir, name: 'app', id: 'github.com/acme/app', originUrl: '' });
+    tmuxMock.mockReset();
+  });
+
+  it('worktree agent.running comes from one tmux listing', async () => {
+    tmuxMock.mockResolvedValue([agentSessionName('app', 'github.com/acme/app', 'feature-a')]);
+    const listing = await listWorktreesDetailed({ includeStatus: true, includePullRequests: false });
+    const a = listing.worktrees.find(w => w.branch === 'feature-a')!;
+    expect(a.agent).toEqual({ running: true, session: expect.stringMatching(/^kunj-/) });
+    expect(listing.worktrees.find(w => w.branch === 'main')!.agent!.running).toBe(false);
+    expect(tmuxMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('agent.running is null when tmux is missing', async () => {
+    tmuxMock.mockResolvedValue(null);
+    const listing = await listWorktreesDetailed({ includeStatus: true, includePullRequests: false });
+    expect(listing.worktrees.find(w => w.branch === 'feature-a')!.agent!.running).toBeNull();
+  });
+
+  it('names sessions from the origin in the git config file, as kunj agent does', async () => {
+    const url = 'https://github.com/acme/app.git';
+    fs.mkdirSync(gitCommonDir, { recursive: true });
+    fs.writeFileSync(path.join(gitCommonDir, 'config'), `[remote "origin"]\n\turl = ${url}\n`);
+    identityMock.mockImplementation(((where: never) => jest.requireActual<typeof import('../repo-identity')>('../repo-identity').repoIdentity(where)) as never);
+    tmuxMock.mockResolvedValue([]);
+    const listing = await listWorktreesDetailed({ includeStatus: true, includePullRequests: false });
+    expect(listing.worktrees.find(w => w.branch === 'feature-a')!.agent!.session).toBe(agentSessionName('app', repoIdFromUrl(url), 'feature-a'));
+  });
+
+  it('does not ask tmux when status is not included', async () => {
+    const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
+    expect(listing.worktrees.every(w => w.agent === undefined)).toBe(true);
+    expect(tmuxMock).not.toHaveBeenCalled();
+  });
+
+  it('names sessions from the directory when the repository identity is unavailable', async () => {
+    identityMock.mockImplementation(() => {
+      throw new Error('Not in a git repository');
+    });
+    tmuxMock.mockResolvedValue([]);
+    const listing = await listWorktreesDetailed({ includeStatus: true, includePullRequests: false });
+    expect(listing.worktrees.find(w => w.branch === 'feature-a')!.agent).toEqual({
+      running: false,
+      session: agentSessionName(path.basename(dir), gitCommonDir, 'feature-a'),
+    });
   });
 });

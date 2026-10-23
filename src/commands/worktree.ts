@@ -58,6 +58,7 @@ import {
 } from '../lib/keep';
 import { resolveBaseRef } from '../lib/base-branch';
 import { recordRepo } from '../lib/repos';
+import type { WorktreeJson, WorktreeListJson } from '../lib/json-types';
 
 interface WorktreeOptions {
   all?: boolean;
@@ -185,7 +186,7 @@ export class WorktreeCommand extends BaseCommand {
         pullRequestLookup: listing.pullRequestLookup,
         pullRequestsFromCache: listing.pullRequestsFromCache,
         worktrees: worktrees.map(wt => this.toJSON(wt)),
-      });
+      } satisfies WorktreeListJson);
       return;
     }
 
@@ -231,7 +232,7 @@ export class WorktreeCommand extends BaseCommand {
     return session.label ? `${editor} (${session.label})` : editor;
   }
 
-  private toJSON(wt: WorktreeInfo) {
+  private toJSON(wt: WorktreeInfo): WorktreeJson {
     return {
       ...wt,
       openCount: wt.sessions.length,

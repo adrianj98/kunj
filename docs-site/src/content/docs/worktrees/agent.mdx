@@ -1,0 +1,54 @@
+---
+title: Agents in worktrees
+description: Run an agent in a tmux session for a worktree with kunj agent, reattach to it later, and see which worktrees have one running.
+sidebar:
+  order: 5
+---
+
+import CommandReference from '../../../components/CommandReference.astro';
+import SettingsTable from '../../../components/SettingsTable.astro';
+
+`kunj agent` runs a coding agent inside a [tmux](https://github.com/tmux/tmux) session for a
+worktree. The session keeps running when you close the terminal, and running the command again
+reattaches to it. It is the host-side counterpart of `kunj ct agent`, which does the same inside a
+[branch container](../../containers/overview/).
+
+```bash
+kunj agent                 # the current branch's worktree
+kunj agent fix/login       # another worktree
+kunj agent status fix/login
+kunj agent stop fix/login
+```
+
+`start` is the default action, so `kunj agent fix/login` starts (or reattaches). `status` says
+whether the session exists and `stop` kills it. All three take `--json`.
+
+The command is `agent.command` (default `claude`); `--command <cmd>` overrides it for one run. The
+agent starts in the worktree's directory with `KUNJ_BRANCH`, `KUNJ_REPO` and `KUNJ_WORKTREE` set.
+`kunj agent` needs tmux and a terminal; without tmux it stops with an install hint.
+
+## Session names
+
+One tmux server serves the whole machine, so kunj picks the session name rather than using the
+branch name. It is the branch container's name (`kunj-<repo>-<branch>-<hash>`, the hash covering the
+exact branch name so `feature/x` and `feature-x` differ) with every `.` and `:` replaced by `-`,
+because tmux treats those as target separators.
+
+## In the worktree list
+
+`kunj worktree list --json` adds an `agent` field to every worktree that exists and is on a branch:
+
+```json
+{ "agent": { "running": true, "session": "kunj-shop-api-fix-login-timeout-3fa9c1" } }
+```
+
+`running` is `null` when tmux is not installed. The listing asks tmux once, not once per worktree,
+and skips it with `--no-status`.
+
+## Setting
+
+<SettingsTable category="agent" />
+
+## Options
+
+<CommandReference name="agent" optionsOnly />

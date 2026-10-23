@@ -89,13 +89,15 @@ export abstract class BaseCommand {
         await this.execute(...args);
       } catch (error) {
         if (this.jsonMode) {
-          process.stdout.write(
-            JSON.stringify({ error: error instanceof Error ? error.message : String(error) }) + "\n"
-          );
+          const message = error instanceof Error ? error.message : String(error);
+          // Opt-in: only errors with a string jsonCode (AgentError) print { code, message }; all others keep the plain string
+          const code = (error as { jsonCode?: unknown } | null)?.jsonCode;
+          const payload = typeof code === "string" ? { error: { code, message } } : { error: message };
+          process.stdout.write(JSON.stringify(payload) + "\n");
           process.exit(1);
         }
         // A failing pre-* hook or a missing base branch is an expected outcome, not a crash: no stack trace
-        if (error instanceof Error && ["HookError", "BaseBranchError", "StartError", "ContainerError"].includes(error.name)) {
+        if (error instanceof Error && ["HookError", "BaseBranchError", "StartError", "ContainerError", "AgentError"].includes(error.name)) {
           console.error(`✗ ${error.message}`);
           process.exit(1);
         }

@@ -10,6 +10,7 @@ import { registerSlackSettings } from './slack';
 import { registerWorktreeSettings } from './worktree';
 import { registerHookSettings } from './hooks';
 import { registerContainerSettings } from './container';
+import { registerAgentSettings } from './agent';
 import { settingsRegistry } from '../lib/settings-registry';
 
 let initialized = false;
@@ -31,6 +32,7 @@ export function initializeSettings(): void {
   registerWorktreeSettings();
   registerHookSettings();
   registerContainerSettings();
+  registerAgentSettings();
 
   initialized = true;
 }
