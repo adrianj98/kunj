@@ -29,6 +29,7 @@ import {
   BUNDLE_CONTAINER_PATH,
   SEED_COPY_SCRIPT,
   SNAPSHOT_READ_SCRIPT,
+  ensureSnapshot,
   makeBranchBundle,
   removeSnapshots,
   snapshotBlueprint,
@@ -363,6 +364,63 @@ describe('snapshot bundle', () => {
     const result = await snapshotBlueprint(backendWith(), options({ noBundle: true }));
     expect(startOptionsPassed().bundle).toBeUndefined();
     expect(result.viaBundle).toBe(false);
+  });
+});
+
+describe('ensureSnapshot', () => {
+  const ensureOptions = (stale: 'rebuild' | 'keep', over: Partial<SnapshotOptions> = {}) => {
+    const { rebuild: _rebuild, ...rest } = options(over);
+    return { ...rest, stale };
+  };
+
+  it('builds when no snapshot exists, with a first-use progress line', async () => {
+    const b = backendWith();
+    const out = await ensureSnapshot(b, ensureOptions('keep'));
+    expect(out).toMatchObject({ built: true, stale: false });
+    expect(out.failed).toBeUndefined();
+    expect(out.result).toMatchObject({ tag: snapshotTag('app', await expectedHash('origin/main')), reused: false });
+    expect(logs[0]).toBe('Building blueprint snapshot (first use; this runs setup once)…');
+    expect(mocked.startContainer).toHaveBeenCalledTimes(1);
+    expect(b.callsOf('commitContainer')).toHaveLength(1);
+  });
+
+  it('does nothing when the current snapshot exists', async () => {
+    const b = backendWith();
+    const hash = await expectedHash('origin/main');
+    b.images.push(image(snapshotTag('app', hash), hash));
+    await expect(ensureSnapshot(b, ensureOptions('rebuild'))).resolves.toEqual({ result: null, built: false });
+    expect(mocked.startContainer).not.toHaveBeenCalled();
+    expect(logs).toEqual([]);
+  });
+
+  it("rebuilds a stale snapshot with 'rebuild' and keeps it with 'keep'", async () => {
+    const b = backendWith();
+    b.images.push(image('kunj-blueprint-app:old', 'old'));
+    await expect(ensureSnapshot(b, ensureOptions('keep'))).resolves.toEqual({ result: null, built: false, stale: true });
+    expect(mocked.startContainer).not.toHaveBeenCalled();
+
+    const out = await ensureSnapshot(b, ensureOptions('rebuild'));
+    expect(out).toMatchObject({ built: true, stale: true });
+    expect(logs[0]).toBe('Blueprint changed; rebuilding the snapshot…');
+    // The old snapshot is replaced
+    expect(b.callsOf('removeImage')).toEqual([['kunj-blueprint-app:old']]);
+  });
+
+  it('turns a failed build into failed, never a throw', async () => {
+    const b = backendWith();
+    mocked.startContainer.mockRejectedValue(new Error('setup command failed (exit 1): npm ci'));
+    await expect(ensureSnapshot(b, ensureOptions('rebuild'))).resolves.toEqual({
+      result: null,
+      built: false,
+      failed: 'setup command failed (exit 1): npm ci',
+      stale: false,
+    });
+    // A failed rebuild says an older snapshot exists, which the start then uses
+    b.images.push(image('kunj-blueprint-app:old', 'old'));
+    await expect(ensureSnapshot(b, ensureOptions('rebuild'))).resolves.toMatchObject({ failed: 'setup command failed (exit 1): npm ci', stale: true });
+    // Before the plan is made, staleness is unknown
+    mocked.baseImageTag.mockRejectedValue(new Error('no devcontainer'));
+    await expect(ensureSnapshot(b, ensureOptions('rebuild'))).resolves.toEqual({ result: null, built: false, failed: 'no devcontainer' });
   });
 });
 

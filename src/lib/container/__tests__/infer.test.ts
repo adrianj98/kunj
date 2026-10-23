@@ -25,8 +25,9 @@ const hasReason = (i: ReturnType<typeof inferBlueprint>, text: string) =>
 describe('inferBlueprint', () => {
   it('npm with a build script', () => {
     const i = inferBlueprint(repo({ 'package.json': { scripts: { build: 'tsc' } }, 'package-lock.json': '{}' }));
-    expect(core(i)).toEqual({ tools: {}, setup: ['npm ci', 'npm run build'], maintain: ['npm ci'], lockfiles: ['package-lock.json'] });
+    expect(core(i)).toEqual({ tools: {}, setup: ['npm ci', 'npm run build'], maintain: ['npm install'], lockfiles: ['package-lock.json'] });
     hasReason(i, 'npm ci');
+    hasReason(i, 'maintain with `npm install`');
   });
 
   it('yarn berry via corepack with engines >=24.2', () => {
@@ -88,7 +89,7 @@ describe('inferBlueprint', () => {
 
   it('.node-version', () => {
     const i = inferBlueprint(repo({ 'package.json': {}, 'package-lock.json': '', '.node-version': '20.1.0\n' }));
-    expect(core(i)).toEqual({ tools: { node: 'nvmrc' }, setup: ['npm ci'], maintain: ['npm ci'], lockfiles: ['package-lock.json'] });
+    expect(core(i)).toEqual({ tools: { node: 'nvmrc' }, setup: ['npm ci'], maintain: ['npm install'], lockfiles: ['package-lock.json'] });
     hasReason(i, '.node-version → node: nvmrc');
   });
 
@@ -126,7 +127,7 @@ describe('inferBlueprint', () => {
 
   it('.nvmrc wins over engines', () => {
     const i = inferBlueprint(repo({ 'package.json': { engines: { node: '^20' } }, 'package-lock.json': '', '.nvmrc': '20\n' }));
-    expect(core(i)).toEqual({ tools: { node: 'nvmrc' }, setup: ['npm ci'], maintain: ['npm ci'], lockfiles: ['package-lock.json'] });
+    expect(core(i)).toEqual({ tools: { node: 'nvmrc' }, setup: ['npm ci'], maintain: ['npm install'], lockfiles: ['package-lock.json'] });
     hasReason(i, '.nvmrc → node: nvmrc');
   });
 

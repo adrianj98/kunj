@@ -19,7 +19,7 @@ import { forwardPort } from '../forward';
 import { resolveHelperImage } from '../image';
 import { getVersion } from '../../version';
 import { parseBlueprint, resolveBlueprint, snapshotTag, SEED_DIR } from '../blueprint';
-import { planSnapshot, removeSnapshots, snapshotBlueprint } from '../snapshot';
+import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint } from '../snapshot';
 import { KunjConfig } from '../../../types';
 
 let dockerUp = false;
@@ -50,6 +50,8 @@ let daemon: ChildProcess | undefined;
 let port = 0;
 let originUrl = '';
 let repoId = '';
+/** Repository ids other tests label objects with; afterAll cleans these up too. */
+const otherRepoIds: string[] = [];
 const backend = new LocalDockerBackend();
 
 function git(args: string[], cwd: string): string {
@@ -90,9 +92,9 @@ function canConnect(p: number): Promise<boolean> {
   });
 }
 
-/** Everything labelled with this run's repo id, by kind. */
-function labelled(): { containers: string[]; volumes: string[]; networks: string[] } {
-  const filter = `label=${LABEL.repo}=${repoId}`;
+/** Everything labelled with this run's repo id (or `id`), by kind. */
+function labelled(id = repoId): { containers: string[]; volumes: string[]; networks: string[] } {
+  const filter = `label=${LABEL.repo}=${id}`;
   const lines = (s: string) => s.split('\n').filter(Boolean);
   return {
     containers: lines(docker(['ps', '-aq', '--filter', filter])),
@@ -190,15 +192,15 @@ const BRANCH_ALLOW = 'it-allow';
         process.stderr.write(`cleanup: ${what} failed: ${(err as Error).message}\n`);
       }
     };
-    let left = { containers: [] as string[], volumes: [] as string[], networks: [] as string[] };
-    if (repoId) attempt('listing labelled objects', () => (left = labelled()));
-    if (left.containers.length) attempt('removing containers', () => docker(['rm', '-f', ...left.containers]));
-    if (left.volumes.length) attempt('removing volumes', () => docker(['volume', 'rm', '-f', ...left.volumes]));
-    if (left.networks.length) attempt('removing networks', () => docker(['network', 'rm', ...left.networks]));
-    if (repoId) {
+    for (const id of [repoId, ...otherRepoIds].filter(Boolean)) {
+      let left = { containers: [] as string[], volumes: [] as string[], networks: [] as string[] };
+      attempt('listing labelled objects', () => (left = labelled(id)));
+      if (left.containers.length) attempt('removing containers', () => docker(['rm', '-f', ...left.containers]));
+      if (left.volumes.length) attempt('removing volumes', () => docker(['volume', 'rm', '-f', ...left.volumes]));
+      if (left.networks.length) attempt('removing networks', () => docker(['network', 'rm', ...left.networks]));
       attempt('removing snapshot images', () => {
         // -a: a snapshot rebuilt under the same tag leaves the old image dangling, which -q alone hides
-        const images = docker(['images', '-aq', '--filter', `label=${LABEL.repo}=${repoId}`]).split('\n').filter(Boolean);
+        const images = docker(['images', '-aq', '--filter', `label=${LABEL.repo}=${id}`]).split('\n').filter(Boolean);
         if (images.length) docker(['rmi', '-f', ...new Set(images)]);
       });
     }
@@ -430,7 +432,7 @@ const BRANCH_ALLOW = 'it-allow';
       pushToMain(
         { '.kunj/blueprint.json': JSON.stringify(BLUEPRINT, null, 2) + '\n', 'package-lock.json': '{"v":1}\n' },
         'blueprint',
-        ['it-bp-new', 'it-bp-fresh']
+        ['it-bp-new', 'it-bp-fresh', 'it-bp-auto']
       );
       // The snapshot's host-side fetch goes to origin's URL, which only containers can resolve:
       // connect git:// to the daemon on localhost instead, leaving the URL itself unchanged
@@ -533,13 +535,54 @@ const BRANCH_ALLOW = 'it-allow';
       try {
         // The matcher the bundle test relies on does catch a clone from origin
         expect(rec.execs.some(argv => NETWORK_CLONE.test(argv.join(' ')))).toBe(true);
-        expect(started.blueprint).toMatchObject({ snapshot: null, setupRan: true, maintainRan: true });
+        // setup has just run, so maintain is skipped in the same start
+        expect(started.blueprint).toMatchObject({ snapshot: null, setupRan: true, maintainRan: false });
         expect(started.image).not.toBe(tag);
-        const r = await inside(started.containerId, 'test -f installed && test -f maintained && command -v jq');
+        const r = await inside(started.containerId, 'test -f installed && ! test -f maintained && command -v jq');
         expect(r.exitCode).toBe(0);
       } finally {
         await removeContainer(backend, started.names, ctx);
       }
+    });
+
+    it('start with a blueprint and no snapshot builds one and starts from it', async () => {
+      // A repository identity with no snapshot yet; the sequence `kunj ct start` runs
+      const freshName = `${REPO_NAME}-fresh`;
+      const freshId = `${repoId}-fresh`;
+      otherRepoIds.push(freshId);
+      const repo = { root: hostClone, name: freshName, id: freshId, originUrl };
+      expect(await backend.listImages({ [LABEL.repo]: freshId })).toEqual([]);
+
+      const blueprint = await resolveBlueprint({ cwd: hostClone, repoRoot: hostClone, repoKunjDir: path.join(tmp, 'no-kunj-dir'), defaultBranch: 'main' });
+      expect(blueprint).not.toBeNull();
+      const logs: string[] = [];
+      const ensured = await ensureSnapshot(backend, { ...snapshotOptions(blueprint!), repo, log: m => logs.push(m), stale: 'rebuild' });
+      expect(ensured.failed).toBeUndefined();
+      expect(ensured).toMatchObject({ built: true, stale: false });
+      expect(logs[0]).toBe('Building blueprint snapshot (first use; this runs setup once)…');
+      const built = ensured.result!.tag;
+      expect(await backend.imageExists(built)).toBe(true);
+      // maintain is skipped right after setup, also in the snapshot build
+      expect(() => docker(['run', '--rm', '--entrypoint', 'sh', built, '-c', `test -f ${SEED_DIR}/installed && ! test -f ${SEED_DIR}/maintained`])).not.toThrow();
+
+      const warnings: string[] = [];
+      const started = await startContainer(backend, bpStart('it-bp-auto', {
+        repo, blueprint, snapshotHandled: true, worktreeRoot: hostClone, warn: m => warnings.push(m),
+      }));
+      try {
+        expect(started.image).toBe(built);
+        expect(started.blueprint).toMatchObject({ snapshot: built, hash: ensured.result!.hash, stale: false, setupRan: false, maintainRan: true });
+        // No stale or no-snapshot hint: the command has handled the snapshot
+        expect(warnings.filter(w => /snapshot/i.test(w))).toEqual([]);
+        const r = await inside(started.containerId, 'test -f installed && test -f maintained && git rev-parse --abbrev-ref HEAD');
+        expect(r.exitCode).toBe(0);
+        expect(r.stdout.trim()).toBe('it-bp-auto');
+      } finally {
+        await removeContainer(backend, started.names, ctx);
+        await removeSnapshots(backend, freshName, freshId);
+      }
+      expect(labelled(freshId)).toEqual({ containers: [], volumes: [], networks: [] });
+      expect(await backend.listImages({ [LABEL.repo]: freshId })).toEqual([]);
     });
 
     it('snapshot failure leaves nothing', async () => {

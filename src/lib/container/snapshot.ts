@@ -256,6 +256,42 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
   };
 }
 
+export const FIRST_SNAPSHOT_PROGRESS = 'Building blueprint snapshot (first use; this runs setup once)…';
+export const STALE_SNAPSHOT_PROGRESS = 'Blueprint changed; rebuilding the snapshot…';
+
+export interface EnsureSnapshotResult {
+  /** The snapshot built now; null when none was built */
+  result: SnapshotResult | null;
+  built: boolean;
+  /** Why the build failed; the start falls back to the older snapshot, else tools and setup in the container */
+  failed?: string;
+  /** An older snapshot of the repository exists (known once the plan is made) */
+  stale?: boolean;
+}
+
+/**
+ * What `start` runs before a new container: build the snapshot when there is none for the current
+ * hash (or, with `stale: 'rebuild'`, when only an older one exists). Never throws: a failed build
+ * is returned in `failed`, so a start does not fail only because a snapshot could not be made.
+ */
+export async function ensureSnapshot(
+  backend: ContainerBackend,
+  opts: Omit<SnapshotOptions, 'rebuild'> & { stale: 'rebuild' | 'keep' }
+): Promise<EnsureSnapshotResult> {
+  let stale: boolean | undefined;
+  try {
+    const { tag } = await planSnapshot(opts);
+    if (await backend.imageExists(tag)) return { result: null, built: false };
+    stale = snapshotsOf(await backend.listImages({ [LABEL.repo]: opts.repo.id }), opts.repo.name).length > 0;
+    if (stale && opts.stale === 'keep') return { result: null, built: false, stale };
+    opts.log(stale ? STALE_SNAPSHOT_PROGRESS : FIRST_SNAPSHOT_PROGRESS);
+    const result = await snapshotBlueprint(backend, { ...opts, rebuild: false });
+    return { result, built: true, stale };
+  } catch (err) {
+    return { result: null, built: false, failed: message(err), ...(stale !== undefined ? { stale } : {}) };
+  }
+}
+
 export async function snapshotStatus(
   backend: ContainerBackend,
   repoName: string,

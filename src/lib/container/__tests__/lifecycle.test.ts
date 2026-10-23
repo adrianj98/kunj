@@ -1027,7 +1027,42 @@ describe('blueprint start', () => {
     expect(b.methods()).not.toContain('listImages');
     expect(seedScriptOf(b)).toContain('git clone');
     expect(opts.warnings).toEqual([]);
-    expect(result.blueprint).toMatchObject({ hash: hashOf(r), snapshot: null, stale: false, toolsRun: ['apt'], setupRan: true });
+    expect(result.blueprint).toMatchObject({ hash: hashOf(r), snapshot: null, stale: false, toolsRun: ['apt'], setupRan: true, maintainRan: false });
+  });
+
+  it('maintain still runs after presets when there is no setup', async () => {
+    const b = backend();
+    const result = await startContainer(b, bpOptions({ blueprint: blueprint({ setup: [] }), noSnapshot: true }));
+    expect(lcExecs(b).map(a => (a[1] as string[])[2])).toEqual(['yarn install']);
+    expect(result.blueprint).toMatchObject({ toolsRun: ['apt'], setupRan: false, maintainRan: true });
+  });
+
+  it('snapshotHandled: no stale or no-snapshot hint (the command already reported it)', async () => {
+    const stale = backend();
+    stale.images = [snapshot('bbbbbbbbbbbb', '2026-10-21T10:00:00Z')];
+    const o1 = bpOptions({ snapshotHandled: true });
+    await startContainer(stale, o1);
+    expect(runSpecs(stale)[0].image).toBe(snapshotTag(REPO.name, 'bbbbbbbbbbbb'));
+    expect(o1.warnings).toEqual([]);
+
+    const none = backend();
+    none.execResults.set('cat /tmp/kunj-presets/apt.result', { exitCode: 0, stdout: 'apt 1\n' });
+    const o2 = bpOptions({ snapshotHandled: true });
+    const result = await startContainer(none, o2);
+    expect(o2.warnings).toEqual([]);
+    expect(result.blueprint).toMatchObject({ snapshot: null, setupRan: true });
+  });
+
+  it('resolves the working tree blueprint first when worktreeRoot is given', async () => {
+    const wt = path.join(tmp, 'wt');
+    fs.mkdirSync(path.join(wt, '.kunj'), { recursive: true });
+    fs.writeFileSync(path.join(wt, '.kunj', 'blueprint.json'), JSON.stringify({ setup: ['make wt'] }));
+    fs.mkdirSync(path.join(tmp, 'kunj'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'kunj', 'blueprint.json'), JSON.stringify({ setup: ['make host'] }));
+    const b = backend();
+    await startContainer(b, options({ presets: [], worktreeRoot: wt }));
+    expect(execCmds(b)).toContain('sh -lc make wt');
+    expect(execCmds(b)).not.toContain('sh -lc make host');
   });
 
   it('without snapshot runs presets as root then setup as the sandbox user, in order, after keep files', async () => {
@@ -1043,15 +1078,16 @@ describe('blueprint start', () => {
     const seedAt = cmds.findIndex(c => c.startsWith('sh -c set -e'));
     const keepAt = cmds.findIndex(c => c.includes('tar -xf') && c.endsWith(' /workspace'));
     const presetsAt = cmds.findIndex(c => c.includes('/tmp/kunj-presets'));
-    const order = ['sh -lc yarn install --immutable', 'sh -lc yarn build', 'sh -lc yarn install'].map(c => cmds.indexOf(c));
+    const order = ['sh -lc yarn install --immutable', 'sh -lc yarn build'].map(c => cmds.indexOf(c));
     expect(seedAt).toBeGreaterThan(-1);
     expect(keepAt).toBeGreaterThan(seedAt);
     expect(presetsAt).toBeGreaterThan(keepAt);
     expect(order[0]).toBeGreaterThan(presetsAt);
     expect(order[1]).toBeGreaterThan(order[0]);
-    expect(order[2]).toBeGreaterThan(order[1]);
+    // setup just installed the dependencies, so maintain is skipped in the same run
+    expect(cmds).not.toContain('sh -lc yarn install');
     for (const a of presetExecs(b)) expect((a[2] as ExecIO).user).toBe('root');
-    expect(result.blueprint).toEqual({ hash: hashOf(blueprint()), snapshot: null, stale: false, toolsRun: ['apt'], tools: [{ name: 'apt', version: '' }], setupRan: true, maintainRan: true });
+    expect(result.blueprint).toEqual({ hash: hashOf(blueprint()), snapshot: null, stale: false, toolsRun: ['apt'], tools: [{ name: 'apt', version: '' }], setupRan: true, maintainRan: false });
   });
 
   it('a kept workspace volume (seed marker present) still gets presets and setup in a new container', async () => {
@@ -1129,7 +1165,7 @@ describe('blueprint start', () => {
     const b = backend();
     await startContainer(b, bpOptions());
     const lc = lcExecs(b);
-    expect(lc).toHaveLength(3);
+    expect(lc).toHaveLength(2);
     for (const a of lc) expect(a[2]).toMatchObject({ user: 'dev', workdir: '/workspace' });
   });
 

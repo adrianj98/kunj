@@ -43,7 +43,7 @@ import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
 import { stripUserinfo } from '../lib/container/seed';
 import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
-import { planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
+import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
 import { KunjConfig } from '../types';
 
 interface ContainerOptions {
@@ -107,7 +107,7 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--image <img>', description: '[start] Use this image instead of the configured one' },
         { flags: '--publish <ports>', description: '[start] Publish container ports, e.g. 3000,5432' },
         { flags: '--rebuild', description: '[start] Rebuild the image and recreate the container (volumes are kept); [blueprint snapshot] snapshot again even when up to date' },
-        { flags: '--no-snapshot', description: "[start] Start from the base image, ignoring the blueprint's snapshot" },
+        { flags: '--no-snapshot', description: "[start] Neither build nor use the blueprint's snapshot (tools and setup run in the container)" },
         { flags: '--keep-on-error', description: '[start] Keep what a failed start created, for debugging' },
         { flags: '--no-hooks', description: "[start|remove] Skip kunj hooks (see 'kunj hooks --help')" },
         { flags: '--no-status', description: '[list] Skip the per-container status exec (faster listing)' },
@@ -134,12 +134,15 @@ export class ContainerCommand extends BaseCommand {
         '',
         'Blueprint (how a new container is set up: tools, setup and maintain commands):',
         '  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json',
-        '  blueprint snapshot [--base <ref>]    set it up once in a temporary container and save the image',
+        '  blueprint snapshot [--base <ref>]    optional: build the snapshot ahead of time (--rebuild forces it)',
         '  blueprint status                     which blueprint, its hash and snapshot, stale or not',
         '  blueprint remove                     delete this repository\'s snapshot images',
         '',
-        'The blueprint is read from origin/<default branch>:.kunj/blueprint.json, else',
-        '~/.kunj/<repo>/blueprint.json. New containers start from the snapshot (--no-snapshot to skip it).',
+        'The blueprint is read from .kunj/blueprint.json in this working tree, else',
+        'origin/<default branch>:.kunj/blueprint.json, else ~/.kunj/<repo>/blueprint.json. A new',
+        'container starts from its snapshot; start builds the snapshot first when there is none or the',
+        'blueprint changed (the first start runs setup once), and falls back to running setup in the',
+        'container if that fails. --no-snapshot skips the snapshot.',
         '',
         '[branch] defaults to the current branch. `ct` is short for `container`.',
       ].join('\n'),
@@ -343,6 +346,25 @@ export class ContainerCommand extends BaseCommand {
     const willCreate = !!options.rebuild || (await ctx.backend.inspectLabels(names.container)) === null;
     if (willCreate) await runActionHook('pre-container-create', { branch, container: names.container, image: '' }, hookOptions);
 
+    // Asked here (the snapshot) and by startContainer (the hash, a devcontainer build): one git call
+    let defaultBranchAsked: Promise<string | undefined> | undefined;
+    const defaultBranch = () =>
+      (defaultBranchAsked ??= detectDefaultBranch(ctx.repo.root).then(b => b?.replace(/^origin\//, '') || undefined));
+    const worktreeRoot = await getGitRoot().catch(() => undefined);
+
+    // A new container from a blueprint starts from its snapshot, built here when there is none for the
+    // current hash. Resuming never builds; --image never uses a snapshot.
+    let blueprint: ResolvedBlueprint | null | undefined;
+    let snapshotHandled = false;
+    if (willCreate && options.snapshot !== false && !options.image) {
+      try {
+        blueprint = await resolveBlueprint({ cwd: process.cwd(), repoRoot: worktreeRoot, repoKunjDir: getKunjDir(), defaultBranch: await defaultBranch() });
+      } catch {
+        blueprint = undefined; // startContainer resolves it again and reports the error as a failed start
+      }
+      if (blueprint) snapshotHandled = await this.ensureStartSnapshot(ctx, blueprint, await defaultBranch());
+    }
+
     this.progress(chalk.blue(`Starting the container for '${branch}'...`));
     const result: StartResult = await startContainer(ctx.backend, {
       branch,
@@ -361,8 +383,11 @@ export class ContainerCommand extends BaseCommand {
       keepOnError: !!options.keepOnError,
       confirmPush: () => this.confirmPush(branch),
       warn: this.warn,
-      defaultBranch: async () => (await detectDefaultBranch(ctx.repo.root)) || undefined,
+      defaultBranch,
       noSnapshot: options.snapshot === false,
+      snapshotHandled,
+      worktreeRoot,
+      ...(blueprint !== undefined ? { blueprint } : {}),
     });
 
     if (result.created) {
@@ -387,6 +412,27 @@ export class ContainerCommand extends BaseCommand {
     console.log('');
     console.log(`Next: kunj ct agent ${branch}`);
     console.log(`      kunj ct shell ${branch}`);
+  }
+
+  /** Builds a missing or stale snapshot before a start; true when the start's hints are covered. */
+  private async ensureStartSnapshot(ctx: Context, blueprint: ResolvedBlueprint, defaultBranch: string | undefined): Promise<boolean> {
+    if (!defaultBranch) {
+      this.warn('cannot detect the default branch; the blueprint snapshot is not built');
+      return false;
+    }
+    const ensured = await ensureSnapshot(ctx.backend, {
+      ...this.snapshotInput(ctx, defaultBranch, blueprint, this.warn),
+      log: m => this.progress(chalk.gray(m)),
+      stale: 'rebuild',
+    });
+    if (ensured.failed) {
+      this.warn(
+        ensured.stale
+          ? `Blueprint snapshot could not be rebuilt (${ensured.failed}); starting from the stale snapshot`
+          : `Blueprint snapshot could not be built (${ensured.failed}); running tools and setup in the container instead`
+      );
+    }
+    return true;
   }
 
   // Asked by startContainer when the branch is not on origin; it pushes on yes
@@ -605,18 +651,10 @@ export class ContainerCommand extends BaseCommand {
     throw new ContainerError(`Unknown blueprint action '${sub}'. Expected one of: ${BLUEPRINT_ACTIONS.join(', ')}`);
   }
 
-  // Resolved as a start resolves it: origin/<default branch>, then the host copy (or --blueprint)
-  private resolveBlueprint(options: ContainerOptions, defaultBranch: string | undefined): Promise<ResolvedBlueprint | null> {
-    return resolveBlueprint({ cwd: process.cwd(), repoKunjDir: getKunjDir(), defaultBranch, override: options.blueprint });
-  }
-
-  // The usual reason nothing resolves: the file was written but not pushed to the default branch
-  private async unpushedBlueprintHint(defaultBranch: string | undefined): Promise<void> {
-    const root = await getGitRoot().catch(() => null);
-    if (!root || !fs.existsSync(path.join(root, BLUEPRINT_PATH))) return;
-    this.warn(
-      `found ${BLUEPRINT_PATH} in the working tree but not on origin/${defaultBranch || '<default>'}; commit and push it, or pass --blueprint`
-    );
+  // Resolved as a start resolves it: --blueprint, the working tree, origin/<default branch>, the host copy
+  private async resolveBlueprint(options: ContainerOptions, defaultBranch: string | undefined): Promise<ResolvedBlueprint | null> {
+    const repoRoot = await getGitRoot().catch(() => undefined);
+    return resolveBlueprint({ cwd: process.cwd(), repoRoot, repoKunjDir: getKunjDir(), defaultBranch, override: options.blueprint });
   }
 
   private snapshotInput(ctx: Context, branch: string, blueprint: ResolvedBlueprint, warn: (m: string) => void) {
@@ -729,9 +767,12 @@ export class ContainerCommand extends BaseCommand {
       return;
     }
     console.log(chalk.green(`✓ Wrote ${file}`));
-    if (!options.global) console.log(chalk.gray('  Commit and push it: the blueprint is read from origin/<default branch>'));
     console.log('');
-    console.log('Next: kunj ct blueprint snapshot');
+    console.log(
+      options.global
+        ? 'Next: kunj ct start <branch> builds the snapshot on first use'
+        : `Next: commit ${BLUEPRINT_PATH}; kunj ct start <branch> builds the snapshot on first use`
+    );
   }
 
   private async blueprintSnapshot(options: ContainerOptions): Promise<void> {
@@ -742,7 +783,6 @@ export class ContainerCommand extends BaseCommand {
     // The blueprint a start would use, so the snapshot's hash matches the starts that look for it
     const resolved = await this.resolveBlueprint(options, defaultBranch || branch);
     if (!resolved) {
-      await this.unpushedBlueprintHint(defaultBranch || branch);
       throw new ContainerError('No blueprint; run kunj ct blueprint init');
     }
 
@@ -769,7 +809,6 @@ export class ContainerCommand extends BaseCommand {
     const defaultBranch = (await detectDefaultBranch(ctx.repo.root)) || undefined;
     const resolved = await this.resolveBlueprint(options, defaultBranch);
     if (!resolved) {
-      await this.unpushedBlueprintHint(defaultBranch);
       if (this.jsonMode) {
         this.outputJSON({ source: null });
         return;
@@ -804,9 +843,9 @@ export class ContainerCommand extends BaseCommand {
     if (snapshot) {
       console.log(`  snapshot  ${snapshot.tag}  ${chalk.gray(`${snapshot.createdAt}  ${megabytes(snapshot.sizeBytes)} MB`)}`);
     } else if (stale) {
-      console.log(`  snapshot  ${chalk.yellow(`stale (${others.map(i => i.tag).join(', ')})`)}; run kunj ct blueprint snapshot`);
+      console.log(`  snapshot  ${chalk.yellow(`stale (${others.map(i => i.tag).join(', ')})`)}; the next kunj ct start rebuilds it`);
     } else {
-      console.log(`  snapshot  ${chalk.gray('none')}; run kunj ct blueprint snapshot`);
+      console.log(`  snapshot  ${chalk.gray('none')}; the next kunj ct start builds it`);
     }
     if (notes) console.log(`  notes     ${notes}`);
     if (resolved.blueprint.ignoredKeys.length) {

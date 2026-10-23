@@ -43,6 +43,7 @@ jest.mock('../../lib/base-branch', () => ({
 }));
 
 jest.mock('../../lib/container/snapshot', () => ({
+  ensureSnapshot: jest.fn(async () => ({ result: null, built: false })),
   snapshotBlueprint: jest.fn(),
   snapshotStatus: jest.fn(),
   removeSnapshots: jest.fn(),
@@ -447,28 +448,33 @@ describe('ContainerCommand', () => {
       expect(written.notes).toBe('ask Ada about the db');
     });
 
-    it('status and snapshot point at an unpushed .kunj/blueprint.json', async () => {
-      const hint = 'found .kunj/blueprint.json in the working tree but not on origin/main; commit and push it, or pass --blueprint';
-      const warned = () => logSpy.mock.calls.map(c => c.join(' ')).filter(l => l.includes('found .kunj'));
+    it('status and snapshot resolve the working tree first and no longer ask to push', async () => {
       (resolveBlueprint as jest.Mock).mockResolvedValue(null);
-      await new ContainerCommand().execute('blueprint', 'status', [], {});
-      expect(warned()).toEqual([]);
-
       fs.mkdirSync(path.join(mockRoot, '.kunj'));
       fs.writeFileSync(path.join(mockRoot, '.kunj', 'blueprint.json'), '{}');
       await new ContainerCommand().execute('blueprint', 'status', [], {});
       await new ContainerCommand().execute('blueprint', 'snapshot', [], {});
-      expect(warned()).toHaveLength(2);
-      for (const line of warned()) expect(line).toContain(hint);
-      expect(errors).toEqual(['✗ No blueprint; run kunj ct blueprint init', '✗ No blueprint; run kunj ct blueprint init', '✗ No blueprint; run kunj ct blueprint init']);
+      for (const call of (resolveBlueprint as jest.Mock).mock.calls) {
+        expect(call[0]).toEqual({ cwd: process.cwd(), repoRoot: mockRoot, repoKunjDir: mockKunjDir, defaultBranch: 'main', override: undefined });
+      }
+      expect((resolveBlueprint as jest.Mock).mock.calls).toHaveLength(2);
+      expect(logSpy.mock.calls.map(c => c.join(' ')).filter(l => /push/.test(l))).toEqual([]);
+      expect(errors).toEqual(['✗ No blueprint; run kunj ct blueprint init', '✗ No blueprint; run kunj ct blueprint init']);
       expect(snapshot.snapshotBlueprint).not.toHaveBeenCalled();
+    });
+
+    it('blueprint init says start builds the snapshot', async () => {
+      await new ContainerCommand().execute('blueprint', 'init', [], { yes: true });
+      const lines = logSpy.mock.calls.map(c => c.join(' '));
+      expect(lines).toContain('Next: commit .kunj/blueprint.json; kunj ct start <branch> builds the snapshot on first use');
+      expect(lines.filter(l => /push/i.test(l))).toEqual([]);
     });
 
     it('blueprint init --global writes to the kunj dir', async () => {
       await new ContainerCommand().execute('blueprint', 'init', [], { yes: true, global: true });
       expect(fs.existsSync(path.join(mockKunjDir, 'blueprint.json'))).toBe(true);
       expect(fs.existsSync(path.join(mockRoot, '.kunj'))).toBe(false);
-      expect(logSpy.mock.calls.map(c => c.join(' '))).toContain('Next: kunj ct blueprint snapshot');
+      expect(logSpy.mock.calls.map(c => c.join(' '))).toContain('Next: kunj ct start <branch> builds the snapshot on first use');
     });
 
     it('blueprint snapshot calls snapshotBlueprint with the default branch and prints the tag', async () => {
@@ -486,7 +492,7 @@ describe('ContainerCommand', () => {
 
       await new ContainerCommand().execute('blueprint', 'snapshot', [], {});
 
-      expect(resolveBlueprint).toHaveBeenCalledWith({ cwd: process.cwd(), repoKunjDir: mockKunjDir, defaultBranch: 'main', override: undefined });
+      expect(resolveBlueprint).toHaveBeenCalledWith({ cwd: process.cwd(), repoRoot: mockRoot, repoKunjDir: mockKunjDir, defaultBranch: 'main', override: undefined });
       const opts = (snapshot.snapshotBlueprint as jest.Mock).mock.calls[0][1];
       expect(opts).toMatchObject({ branch: 'main', blueprint: r, rebuild: false, jsonMode: false });
       expect(opts.repo).toEqual({ root: '/repo', name: 'app', id: REPO_ID, originUrl: 'https://github.com/acme/app.git' });
@@ -601,6 +607,117 @@ describe('ContainerCommand', () => {
 
       await new ContainerCommand().execute('start', 'feat', {});
       expect((lifecycle.startContainer as jest.Mock).mock.calls[1][1].noSnapshot).toBe(false);
+    });
+
+    const created = (over: object = {}) => ({
+      names: containerNames('app', REPO_ID, 'feat'),
+      containerId: 'cid-9',
+      image: 'kunj-blueprint-app:abc',
+      user: 'dev',
+      created: true,
+      seeded: true,
+      keptFiles: [],
+      copiedFiles: [],
+      publish: [],
+      firewall: 'default',
+      ...over,
+    });
+    const ensure = snapshot.ensureSnapshot as jest.Mock;
+    const start = lifecycle.startContainer as jest.Mock;
+    const lines = () => logSpy.mock.calls.map(c => c.join(' '));
+
+    it('start builds the snapshot when none exists, then starts from it', async () => {
+      const r = resolved();
+      (resolveBlueprint as jest.Mock).mockResolvedValue(r);
+      ensure.mockImplementation(async (_b, o) => {
+        o.log('Building blueprint snapshot (first use; this runs setup once)…');
+        return { result: { tag: 'kunj-blueprint-app:abc' }, built: true };
+      });
+      start.mockResolvedValue(created());
+      await new ContainerCommand().execute('start', 'feat', {});
+
+      expect(resolveBlueprint).toHaveBeenCalledWith({ cwd: process.cwd(), repoRoot: mockRoot, repoKunjDir: mockKunjDir, defaultBranch: 'main' });
+      expect(ensure).toHaveBeenCalledTimes(1);
+      const [b, eo] = ensure.mock.calls[0];
+      expect(b).toBe(backend);
+      expect(eo).toMatchObject({ branch: 'main', blueprint: r, stale: 'rebuild', jsonMode: false });
+      expect(eo.repo).toEqual({ root: '/repo', name: 'app', id: REPO_ID, originUrl: 'https://github.com/acme/app.git' });
+      expect(ensure.mock.invocationCallOrder[0]).toBeLessThan(start.mock.invocationCallOrder[0]);
+      // The same blueprint, and lifecycle prints no hint of its own
+      expect(start.mock.calls[0][1]).toMatchObject({ blueprint: r, snapshotHandled: true, noSnapshot: false, worktreeRoot: mockRoot });
+      expect(lines()).toContain('Building blueprint snapshot (first use; this runs setup once)…');
+      expect(lines()).toContain('✓ Container ' + created().names.container + ' created');
+    });
+
+    it('start rebuilds a stale snapshot', async () => {
+      (resolveBlueprint as jest.Mock).mockResolvedValue(resolved());
+      ensure.mockImplementation(async (_b, o) => {
+        o.log('Blueprint changed; rebuilding the snapshot…');
+        return { result: { tag: 'kunj-blueprint-app:new' }, built: true };
+      });
+      start.mockResolvedValue(created());
+      await new ContainerCommand().execute('start', 'feat', { json: true });
+      expect(ensure.mock.calls[0][1]).toMatchObject({ stale: 'rebuild', jsonMode: true });
+      expect(start.mock.calls[0][1].snapshotHandled).toBe(true);
+      // Progress goes to stderr in --json mode; stdout stays one document
+      expect(errSpy.mock.calls.map(c => String(c[0]))).toContain('Blueprint changed; rebuilding the snapshot…\n');
+      expect(JSON.parse(stdout.join(''))).toMatchObject({ branch: 'feat', created: true });
+    });
+
+    it('start falls back with a warning when the snapshot build fails', async () => {
+      (resolveBlueprint as jest.Mock).mockResolvedValue(resolved());
+      ensure.mockResolvedValue({ result: null, built: false, failed: 'git fetch failed: denied' });
+      start.mockResolvedValue(created({ image: 'kunj-sandbox:1.3.0' }));
+      await new ContainerCommand().execute('start', 'feat', {});
+      expect(lines().some(l =>
+        l.includes('Blueprint snapshot could not be built (git fetch failed: denied); running tools and setup in the container instead'))).toBe(true);
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(start.mock.calls[0][1]).toMatchObject({ snapshotHandled: true, noSnapshot: false });
+      expect(errors).toEqual([]);
+      expect(process.exitCode).toBeUndefined();
+
+      // A failed rebuild of a stale snapshot: lifecycle still starts from the stale one
+      ensure.mockResolvedValue({ result: null, built: false, failed: 'setup failed', stale: true });
+      await new ContainerCommand().execute('start', 'feat', {});
+      expect(lines().some(l => l.includes('Blueprint snapshot could not be rebuilt (setup failed); starting from the stale snapshot'))).toBe(true);
+    });
+
+    it('--no-snapshot, --image and no blueprint skip the build', async () => {
+      (resolveBlueprint as jest.Mock).mockResolvedValue(resolved());
+      start.mockResolvedValue(created());
+      await new ContainerCommand().execute('start', 'feat', { snapshot: false });
+      await new ContainerCommand().execute('start', 'feat', { image: 'node:22' });
+      (resolveBlueprint as jest.Mock).mockResolvedValue(null);
+      await new ContainerCommand().execute('start', 'feat', {});
+      expect(ensure).not.toHaveBeenCalled();
+      expect(start.mock.calls[0][1]).toMatchObject({ noSnapshot: true, snapshotHandled: false });
+      expect(start.mock.calls[2][1]).toMatchObject({ blueprint: null, snapshotHandled: false });
+    });
+
+    it('resuming an existing container never builds a snapshot', async () => {
+      backend.existing = [mainContainer('feat')];
+      (resolveBlueprint as jest.Mock).mockResolvedValue(resolved());
+      start.mockResolvedValue(created({ created: false }));
+      await new ContainerCommand().execute('start', 'feat', {});
+      expect(ensure).not.toHaveBeenCalled();
+      expect(resolveBlueprint).not.toHaveBeenCalled();
+      // Lifecycle resolves the blueprint itself (for maintain), the working tree first
+      expect(start.mock.calls[0][1]).toMatchObject({ snapshotHandled: false, worktreeRoot: mockRoot });
+      expect(start.mock.calls[0][1].blueprint).toBeUndefined();
+    });
+
+    it('start skips the build with a hint when the default branch is unknown', async () => {
+      (detectDefaultBranch as jest.Mock).mockResolvedValue(null);
+      (resolveBlueprint as jest.Mock).mockResolvedValue(resolved('{"setup":["make"]}', 'host'));
+      start.mockResolvedValue(created());
+      try {
+        await new ContainerCommand().execute('start', 'feat', {});
+      } finally {
+        (detectDefaultBranch as jest.Mock).mockResolvedValue('main');
+      }
+      expect(ensure).not.toHaveBeenCalled();
+      expect(lines().some(l => l.includes('cannot detect the default branch; the blueprint snapshot is not built'))).toBe(true);
+      expect(start.mock.calls[0][1]).toMatchObject({ snapshotHandled: false });
     });
 
     it('list json includes image.kind and blueprint', async () => {

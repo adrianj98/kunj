@@ -222,10 +222,12 @@ hooks are `pre/post-container-create` and `pre/post-container-delete` with `bran
 new container is set up. Design: docs/superpowers/specs/2026-10-22-blueprints-design.md. Modules:
 `blueprint.ts` (parse/validate, resolve, hash, tags, labels), `presets.ts` (lookup and order),
 `infer.ts` (`blueprint init`), `provision.ts` (find a snapshot, run presets + `setup` on a new
-container, `maintain` on every start), `snapshot.ts` (build, status, remove). `start` resolves the
+container, `maintain` on every start except one that just ran `setup`), `snapshot.ts` (build,
+`ensureSnapshot()` for start, status, remove). `start` resolves the
 blueprint from the working tree's `.kunj/blueprint.json`, then `origin/<default>`, then
 `~/.kunj/<repo>/blueprint.json`, builds the snapshot itself when there is none for the hash or it
-is stale (falling back to tools + `setup` in the container when the build fails), and starts from
+is stale (falling back to the stale snapshot, else tools + `setup` in the container, when the build
+fails; `StartOptions.snapshotHandled` then silences lifecycle's own hints), and starts from
 it; `kunj ct blueprint snapshot` is only for building ahead of time or forcing a rebuild.
 Presets are `<name>.sh` in `.kunj/presets/`, `~/.kunj/presets/`, then `src/container/presets/`
 (first found wins; copied to dist by the build). They run as root with `sh`, source `_lib.sh`, get

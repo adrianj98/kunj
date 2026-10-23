@@ -2,6 +2,32 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Blueprints: `kunj ct start` builds the snapshot itself (Task 10)
+
+What: before a new container (not on resume, not with `--no-snapshot` or `--image`), `kunj ct start`
+resolves the blueprint and calls `ensureSnapshot()` (src/lib/container/snapshot.ts) for the default
+branch: nothing when the current snapshot exists; otherwise prints `Building blueprint snapshot (first
+use; this runs setup once)…` or `Blueprint changed; rebuilding the snapshot…` and runs
+`snapshotBlueprint`. A failed build never fails the start: it warns and falls back (to the stale
+snapshot when one exists, else tools + `setup` in the container). The command passes the same
+blueprint and `snapshotHandled: true` to `startContainer`, so lifecycle prints no hint of its own.
+`resolveBlueprint` gains `repoRoot`: the working tree's `.kunj/blueprint.json` (`source: 'worktree'`)
+now wins over origin and the host copy, so `start`, `blueprint status`/`snapshot` and `list` work
+before the file is pushed; the "commit and push it" hint is gone, `init` now says
+`Next: commit .kunj/blueprint.json; kunj ct start <branch> builds the snapshot on first use`.
+`maintain` is skipped right after `setup` in the same run (`provisionNew` reports `setupRan`), and
+npm's inferred `maintain` is `npm install` (also in kunj's own blueprint).
+Why: users should not have to know about `kunj ct blueprint snapshot`; the flow is `init` → `start`.
+`npm ci` as maintain wiped node_modules on every start (~16 s), and running maintain right after
+setup repeated the install.
+
+- Tests: blueprint (worktree file wins), snapshot (`ensureSnapshot` build/exists/stale keep vs
+  rebuild/failure), lifecycle (maintain skipped after setup, still after presets-only, hints
+  silenced by `snapshotHandled`, `worktreeRoot`), command (ensure before start with the same
+  blueprint, stale, failure fallback, `--no-snapshot`/`--image`/no blueprint, resume, unknown
+  default branch), infer. Docker: `start with a blueprint and no snapshot builds one and starts from
+  it` under a fresh repo id (cleaned up by afterAll too).
+
 ## 2026-10-22 — Blueprints: snapshots from a host-made bundle (Task 9)
 
 What: `kunj ct blueprint snapshot` no longer clones origin inside the temporary container. The host

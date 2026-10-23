@@ -86,7 +86,8 @@ export function parseBlueprint(text: string, source: string): Blueprint {
 
 export interface ResolvedBlueprint {
   blueprint: Blueprint;
-  source: 'repo' | 'host' | 'file';
+  /** file: --blueprint; worktree: <repoRoot>/.kunj/blueprint.json; repo: origin/<default>; host: ~/.kunj/<repo>/ */
+  source: 'file' | 'worktree' | 'repo' | 'host';
   path: string;
   text: string;
   ref?: string;
@@ -101,8 +102,12 @@ async function gitOut(cwd: string, args: string[]): Promise<string | null> {
   }
 }
 
+/** The override, else the working tree kunj runs in (user-controlled, so safe, and a blueprint works
+ * before it is pushed), else origin/<default branch>, else the host copy. */
 export async function resolveBlueprint(opts: {
   cwd: string;
+  /** The working tree's root; its .kunj/blueprint.json wins over origin's */
+  repoRoot?: string;
   repoKunjDir: string;
   defaultBranch?: string;
   override?: string;
@@ -110,6 +115,13 @@ export async function resolveBlueprint(opts: {
   if (opts.override) {
     const text = fs.readFileSync(opts.override, 'utf8');
     return { blueprint: parseBlueprint(text, opts.override), source: 'file', path: opts.override, text };
+  }
+  if (opts.repoRoot) {
+    const worktreePath = path.join(opts.repoRoot, BLUEPRINT_PATH);
+    if (fs.existsSync(worktreePath)) {
+      const text = fs.readFileSync(worktreePath, 'utf8');
+      return { blueprint: parseBlueprint(text, worktreePath), source: 'worktree', path: worktreePath, text };
+    }
   }
   if (opts.defaultBranch) {
     const ref = `origin/${opts.defaultBranch}`;

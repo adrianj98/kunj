@@ -89,8 +89,12 @@ export interface StartOptions {
   defaultBranch?: () => Promise<string | undefined>;
   /** Start from the base image even when the repository has a blueprint snapshot */
   noSnapshot?: boolean;
-  /** The blueprint (null: none); resolved here, from origin/<default branch> then the host copy, when undefined */
+  /** The caller already built or reported the snapshot (`kunj ct start`): no stale or no-snapshot hint here */
+  snapshotHandled?: boolean;
+  /** The blueprint (null: none); resolved here when undefined: the working tree's file, origin/<default branch>, the host copy */
   blueprint?: ResolvedBlueprint | null;
+  /** The working tree kunj runs in; its .kunj/blueprint.json wins when the blueprint is resolved here */
+  worktreeRoot?: string;
   /** Names and the kunj.branch label come from this instead of `branch` (the snapshot's `<branch>@snapshot`); the clone still checks out `branch` */
   namesFor?: string;
   /** The blueprint's presets, already resolved (tests, and the snapshot command); resolved here when undefined */
@@ -193,7 +197,7 @@ export function noSnapshotHint(bp: Pick<Blueprint, 'tools' | 'setup'>): string {
 async function loadBlueprint(options: StartOptions): Promise<ResolvedBlueprint | null> {
   if (options.blueprint !== undefined) return options.blueprint;
   const defaultBranch = (await options.defaultBranch?.())?.replace(/^origin\//, '');
-  return resolveBlueprint({ cwd: options.cwd, repoKunjDir: getKunjDir(), defaultBranch });
+  return resolveBlueprint({ cwd: options.cwd, repoRoot: options.worktreeRoot, repoKunjDir: getKunjDir(), defaultBranch });
 }
 
 interface BlueprintPlan {
@@ -258,8 +262,10 @@ async function resolveSource(
   // --image is a one-off choice of image, so it is never swapped for a snapshot
   const lookup = !options.noSnapshot && !options.imageOverride;
   const snapshot = lookup ? await findSnapshot(backend, options.repo.name, options.repo.id, hash) : null;
-  if (snapshot?.stale) warn(STALE_SNAPSHOT_HINT);
-  else if (lookup && !snapshot) warn(noSnapshotHint(bp));
+  if (!options.snapshotHandled) {
+    if (snapshot?.stale) warn(STALE_SNAPSHOT_HINT);
+    else if (lookup && !snapshot) warn(noSnapshotHint(bp));
+  }
   const source = snapshot ? resolveImage({ ...input, snapshot }) : base;
   return { source, plan: { resolved, presets, hash, snapshot } };
 }
@@ -829,7 +835,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     // 9. Files
     const files = await step('docker', () => copyFiles(backend, id, user, home, options, vars));
 
-    // 10. Blueprint: presets and setup once (a snapshot already holds them), maintain every start
+    // 10. Blueprint: presets and setup once (a snapshot already holds them), maintain every later start
     let blueprint: StartResult['blueprint'];
     if (plan) {
       const io = commandIO(user, options.jsonMode);
@@ -839,7 +845,8 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       const provisioned = !plan.snapshot
         ? await step('setup', () => provisionNew(backend, id, bp, plan.presets, runAs, io, warn))
         : { toolsRun: [], setupRan: false };
-      const maintainRan = await step('docker', () => maintain(backend, id, bp, io, warn));
+      // setup has just installed the dependencies, so maintain would only repeat it
+      const maintainRan = provisioned.setupRan ? false : await step('docker', () => maintain(backend, id, bp, io, warn));
       blueprint = {
         hash: plan.hash,
         snapshot: plan.snapshot?.tag ?? null,

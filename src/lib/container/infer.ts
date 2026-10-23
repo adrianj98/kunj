@@ -18,6 +18,9 @@ function read(root: string, name: string): string | null {
   }
 }
 
+// `npm ci` deletes node_modules and reinstalls (~16 s per start); `npm install` only applies drift
+const NPM_MAINTAIN = 'npm install';
+
 const has = (root: string, name: string): boolean => fs.existsSync(path.join(root, name));
 
 /**
@@ -99,6 +102,7 @@ export function inferBlueprint(repoRoot: string, imageNodeMajor = 22): Inferred 
       else install = 'npm ci';
       installs.push(install);
       reasons.push(`${pm}: install with \`${install}\``);
+      if (pm === 'npm') reasons.push(`npm: maintain with \`${NPM_MAINTAIN}\` (npm ci reinstalls from scratch on every start)`);
       if (pm === 'yarn' || pm === 'pnpm') {
         tools[pm] = 'corepack';
         reasons.push(`${pm}: provided by corepack`);
@@ -225,5 +229,5 @@ export function inferBlueprint(repoRoot: string, imageNodeMajor = 22): Inferred 
   if (installs.length === 0 && builds.length === 0 && Object.keys(tools).length === 0) {
     return { tools, setup: [], maintain: [], lockfiles, reasons: ['nothing recognised; fill in setup by hand', ...reasons] };
   }
-  return { tools, setup: [...installs, ...builds], maintain: installs, lockfiles, reasons };
+  return { tools, setup: [...installs, ...builds], maintain: installs.map(c => (c === 'npm ci' ? NPM_MAINTAIN : c)), lockfiles, reasons };
 }

@@ -113,6 +113,30 @@ describe('resolution', () => {
     expect(file?.blueprint.setup).toEqual(['file']);
   });
 
+  it('worktree file wins over origin and host; the override still wins over it', async () => {
+    fs.writeFileSync(path.join(kunjDir, 'blueprint.json'), '{"setup":["host"]}');
+    fs.mkdirSync(path.join(clone, '.kunj'));
+    fs.writeFileSync(path.join(clone, '.kunj/blueprint.json'), '{"setup":["repo"]}');
+    git(clone, 'add', '.');
+    git(clone, 'commit', '-m', 'bp');
+    git(clone, 'push', 'origin', 'main');
+    // Edited but neither committed nor pushed
+    fs.writeFileSync(path.join(clone, '.kunj/blueprint.json'), '{"setup":["worktree"]}');
+
+    const wt = await resolveBlueprint({ cwd: clone, repoRoot: clone, repoKunjDir: kunjDir, defaultBranch: 'main' });
+    expect(wt).toMatchObject({ source: 'worktree', path: path.join(clone, '.kunj/blueprint.json'), text: '{"setup":["worktree"]}' });
+    expect(wt?.ref).toBeUndefined();
+    expect(wt?.blueprint.setup).toEqual(['worktree']);
+
+    // Without repoRoot (or without the file there) origin is next
+    expect((await resolveBlueprint({ cwd: clone, repoKunjDir: kunjDir, defaultBranch: 'main' }))?.source).toBe('repo');
+    expect((await resolveBlueprint({ cwd: clone, repoRoot: tmp, repoKunjDir: kunjDir, defaultBranch: 'main' }))?.source).toBe('repo');
+
+    const over = path.join(tmp, 'o.json');
+    fs.writeFileSync(over, '{"setup":["file"]}');
+    expect((await resolveBlueprint({ cwd: clone, repoRoot: clone, repoKunjDir: kunjDir, override: over }))?.source).toBe('file');
+  });
+
   it('lockfileIds skips absent files', async () => {
     fs.writeFileSync(path.join(clone, 'yarn.lock'), 'l');
     fs.writeFileSync(path.join(clone, 'requirements-dev.txt'), 'r');

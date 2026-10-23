@@ -241,7 +241,7 @@ branches start with dependencies installed and the project built.
 {
   "tools":     { "node": "24", "apt": ["jq", "postgresql-client"] }, // installed as root, at snapshot time
   "setup":     ["npm ci", "npm run build"],  // once, in /workspace, as the sandbox user
-  "maintain":  ["npm ci"],                   // on every start, to catch up with the branch
+  "maintain":  ["npm install"],              // on each start not right after setup, to catch up with the branch
   "lockfiles": ["package-lock.json"],        // when these change on origin, the snapshot is stale
                                              // (default: every known lockfile at the root)
   "notes":     "free text for people (and agents) reading the file"
@@ -266,7 +266,9 @@ kunj ct start -c feature/y      # every later branch starts from it in seconds
 `init --global` writes, for repositories you cannot commit to). When there is no snapshot for the
 blueprint yet, or it is stale, the start builds one first; if that build fails it warns and runs
 the tools and `setup` inside the new container instead. A container started from a snapshot gets
-its own branch checked out from origin and runs `maintain`; `setup` is not run again.
+its own branch checked out from origin and runs `maintain`; `setup` is not run again. `maintain`
+is skipped on the start that has just run `setup` itself, and runs on every later start.
+When rebuilding a stale snapshot fails, the start uses the stale one and says so.
 
 The other commands are optional:
 
@@ -283,8 +285,8 @@ The snapshot (`kunj-blueprint-<repo>:<hash>`) holds the installed tools and a co
 checkout of the default branch. It does not hold secrets (the temporary container gets no
 `container.env`, keep files or copied files), the `/workspace` volume or the home volume. Its hash
 covers the blueprint text, the listed lockfiles on origin's default branch, the base image and the
-presets, so changing any of them makes it stale; a stale snapshot is still used, with a hint, until
-a new one is built. One snapshot is kept per repository.
+presets, so changing any of them makes it stale; the next `kunj ct start` of a new container
+rebuilds it (`--no-snapshot` starts without either). One snapshot is kept per repository.
 
 Security notes:
 
@@ -307,7 +309,7 @@ Worked examples. For kunj itself, `init` writes:
 ```json
 {
   "setup": ["npm ci", "npm run build"],
-  "maintain": ["npm ci"],
+  "maintain": ["npm install"],
   "lockfiles": ["package-lock.json"]
 }
 ```
