@@ -51,7 +51,7 @@ Nothing in progress.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Designed 2026-10-23; needs an implementation plan |
+| Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Design approved 2026-10-23; plan `docs/superpowers/plans/2026-10-23-secret-manager.md` waits for your review |
 | Workspace app v1 | [workspace-ide.md](workspace-ide.md) | Runtime decided: native (AppKit + SwiftTerm, Monaco in one WKWebView); the Electron plan needs rewriting in Swift |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
