@@ -12,7 +12,7 @@ import type { KnownRepoInfo } from './repos';
 import type { ContainerStatus } from './container/env';
 import type { ServiceState } from './container/services';
 
-/** What a command prints (as JSON) when it fails in `--json` mode: `kunj agent` and `kunj ct` (errors with a `jsonCode`, or a start/hook error) give { code, message }, the other commands a plain message string. */
+/** What a command prints (as JSON) when it fails in `--json` mode: `kunj ct` always gives { code, message } (code 'error' when the error has none); `kunj agent` gives it for errors with a `jsonCode`; the other commands a plain message string (BaseCommand's generic path is opt-in). */
 export interface ErrorJson {
   error: string | { code: string; message: string };
 }

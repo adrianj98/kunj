@@ -200,9 +200,10 @@ export class ContainerCommand extends BaseCommand {
       const error = await this.explainDockerError(caught);
       const message = error instanceof Error ? error.message : String(error);
       if (this.jsonMode) {
-        // Opt-in like BaseCommand: only errors with a code print { code, message }, the rest a plain message
-        const code = error instanceof StartError ? error.code : error instanceof HookError ? 'hook' : (error as { jsonCode?: unknown } | null)?.jsonCode;
-        process.stdout.write(JSON.stringify(typeof code === 'string' ? { error: { code, message } } : { error: message }) + '\n');
+        // Always an object here (documented for `kunj ct`): the code is the start/hook code, else the error's jsonCode, else 'error'
+        const jsonCode = (error as { jsonCode?: unknown } | null)?.jsonCode;
+        const code = error instanceof StartError ? error.code : error instanceof HookError ? 'hook' : typeof jsonCode === 'string' ? jsonCode : 'error';
+        process.stdout.write(JSON.stringify({ error: { code, message } }) + '\n');
         process.exit(1);
       }
       // Every failure here is an outcome to report, not a crash: one line, no stack trace

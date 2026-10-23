@@ -1136,10 +1136,10 @@ describe('ct file', () => {
     expect(JSON.parse(stdout.join('')).error.code).toBe('not-found');
   });
 
-  it('an uncoded ContainerError keeps the plain message in --json mode', async () => {
+  it('an uncoded ContainerError prints code "error" in --json mode', async () => {
     backend.existing = [mainContainer('feat', { state: 'exited' })];
     await new ContainerCommand().execute('file', 'read', ['feat', 'src/a.ts'], { json: true });
-    expect(JSON.parse(stdout.join(''))).toEqual({ error: 'Container for feat is not running; run kunj ct start feat' });
+    expect(JSON.parse(stdout.join(''))).toEqual({ error: { code: 'error', message: 'Container for feat is not running; run kunj ct start feat' } });
   });
 
   it('rejects an unknown file action and a missing path', async () => {
