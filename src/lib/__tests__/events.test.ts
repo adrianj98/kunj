@@ -259,7 +259,26 @@ describe('watchEvents', () => {
     await prime('agent', () => fs.writeFileSync(path.join(stateDir, 'kunj-app-x-abc123'), 'running'));
     fs.writeFileSync(path.join(stateDir, 'kunj-app-x-abc123'), 'waiting');
     await waitFor(() => ofType('agent').length > 0);
-    expect(ofType('agent')[0]).toEqual({ type: 'agent', session: 'kunj-app-x-abc123', running: true, state: 'waiting', at: expect.any(String) });
+    expect(ofType('agent')[0]).toEqual({ type: 'agent', session: 'kunj-app-x-abc123', running: true, state: 'waiting', repo: { name: 'app', root: repo.root }, at: expect.any(String) });
+  });
+
+  it('agent state events come only on a change, carry the repo, and not for a deleted file', async () => {
+    const stateDir = path.join(kunjDir, 'app', 'agent-state');
+    const file = path.join(stateDir, 'kunj-app-x-abc123');
+    fs.mkdirSync(stateDir, { recursive: true });
+    start();
+    await prime('agent', () => fs.writeFileSync(file, 'running'));
+    fs.writeFileSync(file, 'running');
+    fs.writeFileSync(file, 'running');
+    await settle();
+    expect(ofType('agent')).toEqual([]);
+    fs.writeFileSync(file, 'waiting');
+    await waitFor(() => ofType('agent').length > 0);
+    expect(ofType('agent')).toEqual([{ type: 'agent', session: 'kunj-app-x-abc123', running: true, state: 'waiting', repo: { name: 'app', root: repo.root }, at: expect.any(String) }]);
+    events = [];
+    fs.rmSync(file);
+    await settle();
+    expect(ofType('agent')).toEqual([]);
   });
 
   it('a changed agent state in a container yields a container status event', async () => {

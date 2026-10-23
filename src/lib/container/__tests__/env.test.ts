@@ -13,7 +13,12 @@ describe('parseStatus', () => {
     expect(parseStatus('tmux=0\nstate=bogus\n').agentState).toBeNull();
   });
 
-  it('the status script prints the state file', () => {
+  it('the status script prints the state file only while the agent session exists', () => {
     expect(STATUS_SCRIPT).toContain('/tmp/kunj-agent-state');
+    expect(STATUS_SCRIPT).toMatch(/tmux has-session -t agent[^;]*&&[^;]*kunj-agent-state/);
+  });
+
+  it('parseStatus ignores a leftover state when no agent session runs', () => {
+    expect(parseStatus('tmux=1\nstate=waiting\n').agentState).toBeNull();
   });
 });

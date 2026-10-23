@@ -23,6 +23,7 @@ import { forwardsFile } from './container/autoforward';
 import { WORKTREE_SESSIONS_FILE } from './worktree';
 import { REPOS_FILE } from './repos';
 import { agentStateDir, listTmuxSessions, readAgentState } from './agent-session';
+import type { AgentHookState } from './agent-session';
 
 const execFileAsync = promisify(execFile);
 
@@ -234,11 +235,20 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
   const syncStateWatch = (repo: KnownRepoInfo) => {
     const dir = agentStateDir(path.join(kunjDir, repo.name));
     if (stateWatchers.has(dir) || !fs.existsSync(dir)) return;
+    // Only a change is an event: PreToolUse rewrites the same value on every tool call. A deleted
+    // file (SessionEnd) is not one either; the tmux poll reports the session ending.
+    const last = new Map<string, AgentHookState>();
     const watcher = watch(dir, false, file => {
       if (!file || !file.startsWith('kunj-')) return;
       debounce(`agent-state:${dir}/${file}`, () => {
         const state = readAgentState(path.join(dir, file));
-        emit({ type: 'agent', session: file, running: true, state, at: at() });
+        if (state === null) {
+          last.delete(file);
+          return;
+        }
+        if (last.get(file) === state) return;
+        last.set(file, state);
+        emit({ type: 'agent', session: file, running: true, state, repo: { name: repo.name, root: repo.root }, at: at() });
       });
     }, () => stateWatchers.delete(dir));
     if (watcher) stateWatchers.set(dir, watcher);

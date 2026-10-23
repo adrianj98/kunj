@@ -137,8 +137,11 @@ non-bare worktree on a branch `agent: { running, session, state }` from one `tmu
 PreToolUse) or `waiting` (Stop; Notification for permission, idle and elicitation prompts) into
 `$KUNJ_AGENT_STATE`, and remove it on SessionEnd. On the host the file is
 `~/.kunj/<repo>/agent-state/<session>`, in a container `/tmp/kunj-agent-state`. `worktree list --json`
-and `ct list --json` report it as `agent.state` (`running | waiting | null`); `kunj events` watches the
-host directory (an `agent` event with `state`) and includes it in the container status poll.
+and `ct list --json` report it as `agent.state` (`running | waiting | null`), only while the agent's
+tmux session exists (a crashed agent never fires SessionEnd). `kunj events` watches the host directory
+and emits an `agent` event with `state` and `repo` only when the value changes (PreToolUse rewrites it
+on every tool call), none for a deleted file (the tmux poll reports the end), and includes the state in
+the container status poll.
 
 **`kunj ct file read|write [branch] <path>`** (src/lib/container/files.ts): the path is relative to
 `/workspace` (absolute, `..`-escaping, empty and NUL paths are `bad-path`); it runs as the sandbox user
@@ -220,10 +223,9 @@ whose first word is `claude` (setting `agent.hooks`, default true) with `UserPro
 `~/.kunj/<repo>/agent-state/<session>`; container: `/tmp/kunj-agent-state`). `worktree list --json`
 reports it as `agent.state` (`running | waiting | null`), `ct list --json` reads it in `STATUS_SCRIPT`,
 and `kunj events` watches the host directory and includes `state` in the container status poll
-(`EventJson.agent` gains `state`). No tmux hooks, no polling of panes. `kunj events` emits an `agent`
-state event only when the value changes (PreToolUse rewrites the file on every tool call) and gives it
-the `repo` the directory belongs to; the container status script reports the state only while the
-`agent` tmux session exists. Both fixes are open (see Open questions).
+(`EventJson.agent` gains `state` and `repo`). No tmux hooks, no polling of panes. Events come only on
+a change and carry the repo; the container status script reports the state only while the `agent`
+tmux session exists.
 
 **Terminals.** `TerminalTab` is a `LocalProcessTerminalView` per tab, created from a `TerminalSpec`
 (`shell`: `$SHELL -l` in the worktree, or `kunj ct shell <b>`; `agent`: `kunj agent <b>` or
@@ -340,12 +342,10 @@ All 2026-10-23.
 
 From the architecture review (2026-10-23):
 
-- [ ] `kunj events` emits an `agent` event on every write of a state file, even when the value is
-  unchanged, and without a `repo`, so a busy agent makes the app refresh every repository on each tool
-  call. Emit only on change and include the repo (src/lib/events.ts).
-- [ ] The container `STATUS_SCRIPT` reads `/tmp/kunj-agent-state` even when the `agent` tmux session is
-  gone, so `ct list` can report `state: waiting` with `running: false` after a crash. Report it only
-  while the session exists (src/lib/container/env.ts).
+- [ ] A state file left by a killed session (no SessionEnd) shows its old value when a new session on
+  the same worktree starts, until the first hook fires; `kunj agent start` could clear it first.
+- [ ] `withAgentHooks` appends `--settings` to the end of the whole command, so an `agent.command` with
+  a pipe or `&&` (`claude | tee log`) gets no hooks and passes the flag to the wrong program.
 - [ ] The tmux-less agent flow in Decisions (the "install tmux" hint in the tab, `claude --continue` on
   reopen) has no place in the Architecture or the plan yet.
 - [ ] Two WKWebViews may cost two Monaco web processes (the spike measured 340–420 MB for one);

@@ -78,7 +78,7 @@ export function emptyStatus(status: ContainerStatus['status']): ContainerStatus 
 export const SAFE_GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
 
 /** Run with `sh -c` in a main container (kunj ct list, kunj events); its output is for parseStatus. */
-export const STATUS_SCRIPT = `tmux has-session -t agent 2>/dev/null; echo "tmux=$?"; echo "state=$(cat /tmp/kunj-agent-state 2>/dev/null)"; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
+export const STATUS_SCRIPT = `tmux has-session -t agent 2>/dev/null; echo "tmux=$?"; tmux has-session -t agent 2>/dev/null && echo "state=$(cat /tmp/kunj-agent-state 2>/dev/null)"; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
 
 /** Parse `tmux=<code>` followed by `git status --porcelain=v2 --branch`. */
 export function parseStatus(stdout: string): ContainerStatus {
@@ -88,7 +88,8 @@ export function parseStatus(stdout: string): ContainerStatus {
     const state = /^state=(.*)$/.exec(line);
     if (tmux) {
       result.agentRunning = tmux[1] === '0' ? true : tmux[1] === '1' ? false : null;
-    } else if (state) {
+    } else if (state && result.agentRunning === true) {
+      // a crashed agent never fires SessionEnd: its leftover state means nothing without a session
       const v = state[1].trim();
       result.agentState = v === 'running' || v === 'waiting' ? v : null;
     } else if (line.startsWith('# branch.oid ')) {

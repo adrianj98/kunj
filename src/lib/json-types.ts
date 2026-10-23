@@ -75,7 +75,7 @@ export interface ContainerJson {
   firewall: string;
   dind: DindMode | string;
   ports: ContainerPortJson[];
-  agent: { running: boolean | null };
+  agent: { running: boolean | null; state?: 'running' | 'waiting' | null };
   workspace: { head: string | null; ahead: number | null; dirty: boolean | null };
   status: ContainerStatus['status'] | 'skipped';
   services: ServiceState[];
@@ -136,6 +136,6 @@ export type EventJson = { at: string } & (
   | { type: 'hello'; version: string; repos: number }
   | { type: 'git' | 'sessions' | 'forwards' | 'repos'; repo?: { name: string; root: string } }
   | { type: 'container'; repo: { name: string; root: string } | null; branch: string | null; container: string; action: string }
-  | { type: 'agent'; session: string; running: boolean; state?: 'running' | 'waiting' | null }
+  | { type: 'agent'; session: string; running: boolean; state?: 'running' | 'waiting' | null; repo?: { name: string; root: string } }
   | { type: 'backend'; status: 'available' | 'unavailable'; message?: string }
 );
