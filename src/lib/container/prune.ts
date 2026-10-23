@@ -3,7 +3,7 @@
 // Removes branch containers whose branch is gone from origin (or that have been stopped longer than
 // container.pruneAfterDays) when their remove guard is clean; orphans (helpers, services and
 // networks labelled for a branch that has no main container; such volumes only with --force);
-// snapshot images of another blueprint hash; and kunj-sandbox / kunj-nethelper / kunj-sandbox-dind tags of other
+// leftover snapshot-build containers; snapshot images of another blueprint hash; and kunj-sandbox / kunj-nethelper / kunj-sandbox-dind tags of other
 // versions. Every rule fails safe: origin unreachable -> no branch is gone, a branch the clone never
 // saw on origin -> not gone, hash unknown -> every snapshot is kept, an image in use or a guard that
 // cannot run -> kept. The guard runs again at removal time.
@@ -23,7 +23,7 @@ export interface PrunePlan {
   containers: Array<{
     branch: string;
     names: ContainerNames;
-    reason: 'branch-gone' | 'age';
+    reason: 'branch-gone' | 'age' | 'snapshot-leftover';
     /** The container's image, for the container-delete hooks */
     image: string;
     /** The recorded user the guard runs as */
@@ -87,6 +87,8 @@ export interface ApplyContext {
 
 const LS_REMOTE_TIMEOUT_MS = 15000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** A snapshot build does not take this long; a running temporary container older than it is a leftover */
+const SNAPSHOT_LEFTOVER_MS = 2 * 60 * 60 * 1000;
 const KUNJ_IMAGE_REPOS = ['kunj-sandbox', 'kunj-nethelper', 'kunj-sandbox-dind'];
 
 function message(err: unknown): string {
@@ -175,8 +177,14 @@ export async function planPrune(backend: ContainerBackend, ctx: PruneContext): P
   const days = ctx.pruneAfterDays ?? 0;
   for (const c of mains) {
     const branch = c.labels[LABEL.branch] ?? '';
-    // A snapshot build's temporary container (`<branch>:snapshot`) is not a branch
-    if (branch.endsWith(':snapshot')) continue;
+    // A snapshot build's temporary container (`<branch>:snapshot`) is not a branch. It holds nothing
+    // to protect (no keep files, token or agent), so a leftover of a killed build goes without a guard.
+    if (branch.endsWith(':snapshot')) {
+      if (c.state !== 'running' || now - createdTime(c.createdAt) > SNAPSHOT_LEFTOVER_MS) {
+        plan.containers.push({ branch, names: namesOfContainer(c.name), reason: 'snapshot-leftover', image: c.image, user: recordedUser(c) });
+      }
+      continue;
+    }
     const missing = !!remote && !remote.has(branch);
     const old = days > 0 && c.state !== 'running' && now - createdTime(c.createdAt) > days * DAY_MS;
     if (!missing && !old) continue;
@@ -260,11 +268,12 @@ export async function applyPrune(
     await attempt(c.names.container, async () => {
       // Checked again: the agent may have committed since the plan (or while the prompt waited).
       // Before the pre hook, as `remove` does, so the hook only runs for a container that goes.
-      if (!ctx.force) {
+      const leftover = c.reason === 'snapshot-leftover';
+      if (!ctx.force && !leftover) {
         const problems = describeGuard(await inspectForRemove(backend, c.names, { user: c.user, kunjVersion: ctx.kunjVersion, allowPrivileged: ctx.allowPrivileged }));
         if (problems.length) throw new Error(`kept, it now holds work origin does not have: ${problems.join('; ')}`);
       }
-      await ctx.hook?.('pre-container-delete', values);
+      if (!leftover) await ctx.hook?.('pre-container-delete', values);
       await removeContainer(backend, c.names, {
         user: c.user,
         kunjVersion: ctx.kunjVersion,
@@ -272,7 +281,7 @@ export async function applyPrune(
         keepVolumes: false,
         owner: { repoId: ctx.repoId, branch: c.branch },
       });
-      await ctx.hook?.('post-container-delete', values);
+      if (!leftover) await ctx.hook?.('post-container-delete', values);
     });
   }
   // Containers before their volumes and networks, which are in use until they are gone

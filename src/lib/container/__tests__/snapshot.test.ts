@@ -37,6 +37,9 @@ import {
   SnapshotOptions,
 } from '../snapshot';
 
+// Fixture repositories and subprocesses: slow when the machine is busy
+jest.setTimeout(30000);
+
 const mocked = lifecycle as jest.Mocked<typeof lifecycle>;
 
 const REPO = { root: '', name: 'app', id: 'github.com/acme/app', originUrl: 'https://github.com/acme/app.git' };

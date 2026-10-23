@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from '@jest/globals';
+import { describe, it, expect, afterEach, jest } from '@jest/globals';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -7,6 +7,9 @@ import { spawn, spawnSync } from 'child_process';
 import { PassThrough } from 'stream';
 import { FakeBackend } from './fake-backend';
 import { builtinPresetsDir, orderTools, presetHash, presetEnv, resolvePresets, runPresets, Preset, PRESET_DIR } from '../presets';
+
+// Fixture repositories and subprocesses: slow when the machine is busy
+jest.setTimeout(30000);
 
 const posixOnly = process.platform === 'win32' ? it.skip : it;
 

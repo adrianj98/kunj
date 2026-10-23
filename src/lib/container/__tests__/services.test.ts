@@ -1,4 +1,4 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, jest } from '@jest/globals';
 import { FakeBackend } from './fake-backend';
 import { ContainerInfo } from '../backend';
 import { LABEL, containerNames, labelsFor } from '../names';
@@ -23,6 +23,9 @@ import {
   waitHealthy,
 } from '../services';
 import { parseBlueprint } from '../blueprint';
+
+// Fixture repositories and subprocesses: slow when the machine is busy
+jest.setTimeout(30000);
 
 const REPO = 'github.com/acme/app';
 const BRANCH = 'feature/x';

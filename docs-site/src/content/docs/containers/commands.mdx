@@ -439,6 +439,10 @@ It removes:
   Volumes without a container (a workspace kept by `remove --keep-volumes`, or left by a `docker rm`)
   can hold unpushed work that no check can see, so they are listed as kept and removed only with
   `--force`.
+- **snapshot build leftovers**: the temporary container of a [snapshot](../blueprints/) build that was
+  killed (Ctrl-C, a crash, a reboot), when it is stopped or has run for over two hours, with its helper,
+  services, volumes and network. There is no check for unpushed work: it holds none. In `--json` the
+  entry has `reason: "snapshot-leftover"`.
 - **old snapshot images**: [blueprint snapshots](../blueprints/) whose hash is not the current one.
   When the current hash cannot be worked out, every snapshot is kept.
 - **old kunj images**: `kunj-sandbox`, `kunj-nethelper` and `kunj-sandbox-dind` tags of other kunj versions.

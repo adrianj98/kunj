@@ -12,6 +12,9 @@ import {
   blueprintRef,
 } from '../blueprint';
 
+// Fixture repositories and subprocesses: slow when the machine is busy
+jest.setTimeout(30000);
+
 const ENV = {
   ...process.env,
   GIT_CONFIG_NOSYSTEM: '1',

@@ -141,7 +141,10 @@ and drops the forward when the listener goes away.
   `allowPrivileged`. The guard runs again at removal time, before `pre-container-delete`.
 - A branch whose objects were created less than 10 minutes ago is starting, not orphaned (a start can
   wait minutes on service health checks before its main container exists).
-- Snapshot containers (`<branch>:snapshot`) are never pruned as branches.
+- Snapshot containers (`<branch>:snapshot`) are never pruned as branches. A leftover of a killed snapshot
+  build (stopped, or running over 2 hours) is removed with its helper, services, volumes and network, with
+  no guard (it holds nothing) and reason `snapshot-leftover`. Every seed path leaves
+  `refs/remotes/origin/<branch>` in the clone, which the "gone" check needs.
 - It prints the plan and asks once. `--yes` removes without asking; `--json` or no terminal without
   `--yes` is a dry run; `--force` only skips the guard and adds container-less volumes. The plan sizes
   images only.

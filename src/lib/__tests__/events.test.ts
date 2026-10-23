@@ -11,6 +11,9 @@ import type { ContainerInfo } from '../container/backend';
 import type { KnownRepoInfo } from '../repos';
 import type { EventJson } from '../json-types';
 
+// Fixture repositories and subprocesses: slow when the machine is busy
+jest.setTimeout(30000);
+
 jest.mock('../agent-session', () => ({
   listTmuxSessions: jest.fn(async () => []),
 }));

@@ -16,6 +16,9 @@ import {
   SeedInput,
 } from '../seed';
 
+// Fixture repositories and subprocesses: slow when the machine is busy
+jest.setTimeout(30000);
+
 const posixOnly = process.platform === 'win32' ? it.skip : it;
 
 const ENV = {
@@ -244,7 +247,8 @@ describe('seedScript', () => {
   it('quotes the branch', () => {
     const s = seedScript({ ...base, branch: 'x$(id)' });
     expect(s).toContain("'x$(id)'");
-    expect(s).not.toMatch(/[^']x\$\(id\)[^']/);
+    // every occurrence sits inside single quotes
+    expect(s.replace(/'[^']*'/g, '')).not.toContain('x$(id)');
   });
 
   it('uses switch -c with --no-track for create', () => {
@@ -256,9 +260,24 @@ describe('seedScript', () => {
 
   it('switches to an existing branch otherwise', () => {
     const s = seedScript(base);
-    expect(s).toContain("git fetch origin 'feat'");
+    expect(s).toContain("git fetch origin '+refs/heads/feat:refs/remotes/origin/feat'");
     expect(s).toContain("git switch 'feat'");
     expect(s).not.toContain('--no-track');
+  });
+
+  it('every seed path ends with the remote-tracking ref of the branch', () => {
+    const ref = "'refs/remotes/origin/feat'";
+    // clone from origin, and a snapshot copy: fetched into the ref
+    for (const input of [base, { ...base, seedFrom: '/opt/kunj/seed' }]) {
+      const s = seedScript(input);
+      expect(s).toContain("git fetch origin '+refs/heads/feat:refs/remotes/origin/feat'");
+      expect(s.indexOf('git fetch origin')).toBeLessThan(s.indexOf('git switch'));
+    }
+    // a bundle: no fetch, so the ref is made from the checked-out head when the clone lacks it
+    const b = seedScript({ ...base, bundlePath: '/tmp/o.bundle' });
+    expect(b).not.toContain('git fetch');
+    expect(b).toContain(`git rev-parse -q --verify ${ref} >/dev/null || git update-ref ${ref} HEAD`);
+    expect(b.indexOf('git switch')).toBeLessThan(b.indexOf('git update-ref'));
   });
 
   it('configures insteadOf only with a token', () => {

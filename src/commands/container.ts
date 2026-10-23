@@ -1420,7 +1420,7 @@ export class ContainerCommand extends BaseCommand {
       for (const w of plan.warnings) console.log(chalk.yellow(`  ⚠ ${w}`));
       if (removalCount(plan) === 0 && !plan.containers.length && !plan.orphans.length) console.log(chalk.gray('  nothing to prune'));
       for (const c of plan.containers) {
-        const why = c.reason === 'branch-gone' ? `branch ${c.branch} is gone from origin` : `stopped, created over ${ctx.config.container?.pruneAfterDays} days ago`;
+        const why = c.reason === 'snapshot-leftover' ? 'leftover of a snapshot build' : c.reason === 'branch-gone' ? `branch ${c.branch} is gone from origin` : `stopped, created over ${ctx.config.container?.pruneAfterDays} days ago`;
         if (c.kept) console.log(`  ${chalk.yellow('keep  ')} ${c.names.container}  ${chalk.gray(`${why}, but: ${c.kept}`)}`);
         else console.log(`  ${chalk.red('remove')} ${c.names.container}  ${chalk.gray(why)}`);
       }

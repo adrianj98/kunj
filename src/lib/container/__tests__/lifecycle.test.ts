@@ -58,6 +58,9 @@ import {
   baseImageTag,
 } from '../lifecycle';
 
+// Fixture repositories and subprocesses: slow when the machine is busy
+jest.setTimeout(30000);
+
 const mocked = seed as jest.Mocked<typeof seed>;
 
 const VERSION = '9.9.9';

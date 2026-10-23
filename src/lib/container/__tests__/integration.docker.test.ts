@@ -540,9 +540,10 @@ const BRANCH_ALLOW = 'it-allow';
       expect(result.ref).toBe(originHead);
       const seed = docker([
         'run', '--rm', '--entrypoint', 'sh', tag, '-c',
-        `! test -e /tmp/kunj-origin.bundle && git -c safe.directory='*' -C ${SEED_DIR} rev-parse HEAD && git -c safe.directory='*' -C ${SEED_DIR} remote get-url origin`,
+        `! test -e /tmp/kunj-origin.bundle && git -c safe.directory='*' -C ${SEED_DIR} rev-parse HEAD && git -c safe.directory='*' -C ${SEED_DIR} remote get-url origin && git -c safe.directory='*' -C ${SEED_DIR} rev-parse refs/remotes/origin/main`,
       ]);
-      expect(seed.split('\n')).toEqual([originHead, originUrl]);
+      // prune needs the clone to have seen the branch on origin
+      expect(seed.split('\n')).toEqual([originHead, originUrl, originHead]);
       expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
     });
 
@@ -554,10 +555,10 @@ const BRANCH_ALLOW = 'it-allow';
         expect(started.image).toBe(tag);
         const r = await inside(
           started.containerId,
-          'test -f installed && test -f maintained && git rev-parse --abbrev-ref HEAD && git remote get-url origin'
+          'test -f installed && test -f maintained && git rev-parse --abbrev-ref HEAD && git remote get-url origin && git rev-parse --verify -q refs/remotes/origin/it-bp-new >/dev/null && echo has-remote-ref'
         );
         expect(r.exitCode).toBe(0);
-        expect(r.stdout.trim().split('\n')).toEqual(['it-bp-new', originUrl]);
+        expect(r.stdout.trim().split('\n')).toEqual(['it-bp-new', originUrl, 'has-remote-ref']);
         expect(rec.execs.filter(argv => argv.join(' ').includes('git clone'))).toEqual([]);
       } finally {
         await removeContainer(backend, started.names, ctx);

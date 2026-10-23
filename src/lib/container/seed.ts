@@ -243,10 +243,15 @@ export function seedScript(input: SeedInput): string {
   } else if (bundle) {
     // The bundle is origin's branch as the host just fetched it: no fetch, which could need a token
     lines.push(`git switch ${branch}`);
+    // Prune treats a branch as gone only if the clone has seen it on origin; make sure the clone
+    // from the bundle names it origin's even when the bundle carried it some other way
+    const tracking = q(`refs/remotes/origin/${input.branch}`);
+    lines.push(`git rev-parse -q --verify ${tracking} >/dev/null || git update-ref ${tracking} HEAD`);
     // A clone from origin recurses into submodules; these come from their own URLs
     lines.push('if [ -f .gitmodules ]; then git submodule update --init --recursive; fi');
   } else {
-    lines.push(`git fetch origin ${branch}`);
+    // An explicit destination: a snapshot's clone may not have origin's default fetch refspec
+    lines.push(`git fetch origin ${q(`+refs/heads/${input.branch}:refs/remotes/origin/${input.branch}`)}`);
     if (input.seedFrom) {
       // A fresh copy's branch is at the snapshot's commit: move it to origin's. Any other checkout
       // is the user's and is only switched to.

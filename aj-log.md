@@ -39,6 +39,20 @@ Changes made with Claude, and why.
   suites share one origin setup. Why: asked to share rather than copy; that suite's behaviour is unchanged.
 - CLAUDE.md: a "Functional tests" paragraph under Branch Containers.
 
+## 2026-10-23 — Containers: phase 2 follow-ups (remote-tracking ref in seeds, snapshot leftovers, faster tests)
+
+- seed.ts: the fetch in the clone and snapshot-copy seeds now names its destination
+  (`+refs/heads/<b>:refs/remotes/origin/<b>`); the bundle seed makes `refs/remotes/origin/<b>` from HEAD when
+  the clone lacks it (no network call). Why: prune treats a branch as gone only when the clone has that ref,
+  so containers seeded from a bundle or snapshot were never pruned. Unit tests per path; the Docker bundle and
+  snapshot-start tests assert the ref.
+- prune.ts: a `<branch>:snapshot` container that is stopped or older than 2 hours is planned with reason
+  `snapshot-leftover` and removed without a guard or hooks. Why: a killed snapshot build left it behind for ever.
+  Docs: prune page and phase 2 spec section 4.
+- Tests: `jest.setTimeout(30000)` in the snapshot, seed, blueprint, lifecycle, services, presets and both events
+  test files (fixture repositories and spawned processes hit the 5 s default when the machine is busy).
+  Why: spurious timeouts; tests share nothing between cases, so they were not restructured.
+
 ## 2026-10-23 — MCP bridge landed; specs updated
 
 - Landed the host MCP bridge on main (c4ac53d, cf544d8, 92b14ef, d235d85) after three security review

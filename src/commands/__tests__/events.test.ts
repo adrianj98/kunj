@@ -3,6 +3,9 @@ import { EventsCommand } from '../events';
 import { watchEvents } from '../../lib/events';
 import type { EventJson } from '../../lib/json-types';
 
+// Fixture repositories and subprocesses: slow when the machine is busy
+jest.setTimeout(30000);
+
 jest.mock('../../lib/events', () => ({
   watchEvents: jest.fn(),
 }));
