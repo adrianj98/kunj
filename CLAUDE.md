@@ -198,12 +198,13 @@ worktree. `AgentError` prints without a stack trace (listed in BaseCommand). Rep
 
 `kunj container` (alias `ct`, src/commands/container.ts) runs a branch in a Docker container with its
 own clone, mainly to run an agent with permissions skipped. Origin is the only channel in and out;
-nothing from the host is bind-mounted. Design: docs/superpowers/specs/2026-10-21-branch-containers-design.md.
-Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sidecar services, `open` and
-`forward --auto`, `prune` and Docker-in-Docker (`container.dockerInDocker`). Phase 3 (not started) is the workspace IDE:
-docs/superpowers/specs/2026-10-23-workspace-ide-design.md.
+nothing from the host is bind-mounted. Specs: docs/specs/ (one file per topic; overview in
+docs/specs/container-system.md, phase 1 in docs/specs/branch-containers.md). Phase 2
+(docs/specs/container-phase-2.md) adds sidecar services, `open` and
+`forward --auto`, `prune` and Docker-in-Docker (`container.dockerInDocker`). Phase 3 is the workspace IDE
+(docs/specs/workspace-ide.md): its CLI contract has shipped, the app has not.
 
-**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor,prune,dind,errors}.ts`.
+**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor,prune,dind,errors,files}.ts`.
 `prune.ts` (`planPrune`/`applyPrune`) removes containers of branches gone from origin (missing from one
 `git ls-remote --heads origin` and present as `refs/remotes/origin/<b>` in the clone; unreachable origin
 removes none) only when the remove guard is clean, checked at plan and again at removal, or `--force`;
@@ -289,8 +290,8 @@ with `--folder-uri vscode-remote://attached-container+<hex of {"containerName":"
 attached window forwards host git credentials and the SSH/GPG agents into the container, so `open` always
 prints `EDITOR_CREDENTIALS_WARNING` (editor.ts); kunj does not change the extension's behaviour.
 
-**Blueprints:** `.kunj/blueprint.json` (`tools`, `setup`, `maintain`, `lockfiles`, `notes`) says how a
-new container is set up. Design: docs/superpowers/specs/2026-10-22-blueprints-design.md. Modules:
+**Blueprints:** `.kunj/blueprint.json` (`tools`, `setup`, `maintain`, `lockfiles`, `notes`, `services`) says how a
+new container is set up. Design: docs/specs/blueprints.md. Modules:
 `blueprint.ts` (parse/validate, resolve, hash, tags, labels), `presets.ts` (lookup and order),
 `infer.ts` (`blueprint init`), `provision.ts` (find a snapshot, run presets + `setup` on a new
 container, `maintain` on every start except one that just ran `setup`), `snapshot.ts` (build,

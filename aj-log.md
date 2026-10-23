@@ -686,3 +686,11 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - Documented the published JSON contract in CLAUDE.md ("Workspace app contract") and marked the CLI additions shipped, with commit hashes, in the workspace IDE design spec. Verified from outside the package that `import type ... from "kunj"` resolves and a wrong `EventJson` fails. Why: the macOS app and workspace app depend on these types staying additive.
 
 - Doc fix: events spec item now describes the actual git watch scope and GIT_OPTIONAL_LOCKS=0, worktree list agent shape includes `session`, CLAUDE.md says JSON is built against the types (`satisfies` or annotation). Why: match shipped behaviour.
+
+## 2026-10-23 — Specs consolidated into `docs/specs/`
+
+- Merged each discussion doc in `docs/specs/` with its engineering design from `docs/superpowers/specs/`
+  into one file per topic (container-system, branch-containers, blueprints, container-phase-2,
+  organize-windows, then workspace-ide), checked every behaviour claim against `src/` and `macos-app/`
+  and fixed the specs where the code differs; updated the links in CLAUDE.md and the plans. Why: two
+  folders said the same things twice and had drifted from each other and from the code.

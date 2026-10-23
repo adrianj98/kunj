@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (strict, ES2022, CommonJS), Node 20 `child_process.spawn`, Jest + ts-jest, Docker CLI ≥ 24 (BuildKit), Alpine + iptables for the helper image.
 
-**Spec:** docs/superpowers/specs/2026-10-21-branch-containers-design.md (sections *Decisions* through *Hooks*, *JSON*, *Errors*, *Testing*, phase 1 of *Phases*). Phase 2+ items (services, `open`, `prune`, DinD, `--auto`) are out of scope here even where the spec's tables mention them; settings for them are **not** registered yet.
+**Spec:** docs/specs/branch-containers.md (sections *Decisions* through *Hooks*, *JSON*, *Errors*, *Testing*, phase 1 of *Phases*). Phase 2+ items (services, `open`, `prune`, DinD, `--auto`) are out of scope here even where the spec's tables mention them; settings for them are **not** registered yet.
 
 ## Global Constraints
 

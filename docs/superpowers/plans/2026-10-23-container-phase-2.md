@@ -8,7 +8,7 @@
 
 **Tech stack:** TypeScript strict, Node 20, Jest + `FakeBackend`, Docker CLI, POSIX sh.
 
-**Spec:** docs/superpowers/specs/2026-10-23-container-phase-2-design.md (binding; decisions settled with the user).
+**Spec:** docs/specs/container-phase-2.md (binding; decisions settled with the user).
 
 ## Global constraints
 

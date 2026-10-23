@@ -1,213 +1,278 @@
-<!-- On-disk copy of the Claude Doc "Container Phase 2 Spec" (https://claude.ai/artifact/77f7sDBjgq8ZTZbnfpXPUA), rebuilt on 2026-10-23 from the edits made in Claude Code. Drawings are noted in italics. -->
+# Container phase 2
 
-# Container Phase 2 Spec
+*Designed and decided 2026-10-23; five of six features shipped the same day. Checked against `main`
+on 2026-10-23. Builds on [branch-containers.md](branch-containers.md); plan:
+`docs/superpowers/plans/2026-10-23-container-phase-2.md`.*
 
-2026-10-23 · Adrian Jones
+## Goal and status
 
-## Goal, scope and order
+Phase 2 makes a branch container usable for real projects: their databases run next to it, the editor
+opens inside it, dev servers are reachable without thinking about ports, old containers clean
+themselves up, and repos that run `docker compose` themselves can. Each feature shipped separately to
+`main`, in the table's order.
 
-Phase 2 makes a branch container usable for real projects: their databases run next to them, the editor opens inside them, dev servers are reachable without thinking about ports, and old containers clean themselves up. It builds on what is on `main` (see the [Kunj Container System Spec](https://claude.ai/artifact/TmtL5VdNYr55VaddMSVEwk)).
-
-**Progress** (updated as each feature lands on `main`; plan in `docs/superpowers/plans/2026-10-23-container-phase-2.md`):
-
-| Feature | Status |
-| --- | --- |
-| Sidecar services | Shipped (ed136b3, 6273c61) |
-| Editor attach | Shipped (93b7ed3, f635113) |
-| Auto port forwarding | Shipped (5710902, b88466c) |
-| Prune | Shipped (893dc79, 4f7aa10) |
-| Docker-in-Docker | Shipped (d40b44c, c88430b) |
-| Host MCP bridge | Not started |
-
-| # | Feature | Why it matters | Size |
+| # | Feature | Why | Status |
 | --- | --- | --- | --- |
-| 1 | Sidecar services | alertd-core needs Postgres and Pulsar; driveday needs Supabase's Postgres. Without them the agent cannot run tests. | Large |
-| 2 | Editor attach (`kunj ct open`) | Lets you work in the same container the agent uses. | Small |
-| 3 | Auto port forwarding | Dev servers just appear on localhost; the apps can show them. | Medium |
-| 4 | Prune | Containers, volumes and snapshots pile up (1–2 GB each). | Small |
-| 5 | Docker-in-Docker | For repos whose tests run `docker compose` themselves. Weakens isolation, so it is opt-in and last. | Medium |
+| 1 | Sidecar services | alertd-core needs Postgres and Pulsar, driveday Supabase's Postgres; without them the agent cannot run tests | Shipped (ed136b3, 6273c61) |
+| 2 | Editor attach (`kunj ct open`) | Work in the same container the agent uses | Shipped (93b7ed3, f635113) |
+| 3 | Auto port forwarding (`forward --auto`) | Dev servers just appear on localhost | Shipped (5710902, b88466c) |
+| 4 | Prune (`kunj ct prune`) | Containers, volumes and snapshots pile up (1–2 GB each) | Shipped (893dc79, 4f7aa10) |
+| 5 | Docker-in-Docker | Repos whose tests run `docker compose`; weakens isolation, so opt-in and last | Shipped (d40b44c, c88430b) |
+| 6 | Host MCP bridge (a browser on the Mac for the agent) | Let the agent check the dev server it started | Not started (design below) |
+| — | Cross-feature fixes: forwards through the helper, compose deps, orphan grace | Review of the whole phase | Shipped (a32bc90) |
+| — | Containers in the VS Code extension and the macOS app | Consumers of the JSON added here | Not started |
 
-The proposed order is the table order: services first because they unblock real use, Docker-in-Docker fifth because sidecars cover most of its cases more safely; all five are in this phase, plus a sixth: a bridge to MCP servers on your Mac, so the agent can drive a local browser.
+## Design
 
-## Sidecar services
+### 1. Sidecar services
 
-Each branch gets its own instances of the services the project needs, running as extra containers on the branch's network. The agent reaches them by name (`postgres:5432`); other branches and your Mac cannot, unless you forward a port.
+Each branch gets its own instances of the services the project needs, as extra containers on the
+branch's network. The agent reaches them by name (`postgres:5432`); other branches and the Mac cannot,
+unless a port is forwarded.
 
-**Where services are declared** (first match wins, merged by name):
-
-1. `services` in the blueprint (committed, shared with the team).
-2. `container.services` in your kunj config.
-3. The devcontainer's `docker-compose.yml`, when `devcontainer.json` names one: its `services` are imported, except the one the devcontainer runs in.
+**Declared in** (first source wins, merged by name): the blueprint's `services`, then
+`container.services`, then the services of the devcontainer's `dockerComposeFile` (except its own
+`service`), read through `backend.composeConfig()`: `docker compose config --no-interpolate` on stdin
+in an empty project directory, so nothing on the host is read.
 
 ```jsonc
 "services": {
   "postgres": { "image": "postgres:16", "env": { "POSTGRES_PASSWORD": "dev" }, "port": 5432,
-                "healthcheck": "pg_isready -U postgres" },
+                "healthcheck": "pg_isready -U postgres", "volumes": { "data": "/var/lib/postgresql/data" } },
   "pulsar":   { "image": "apachepulsar/pulsar:3.3.0", "command": ["bin/pulsar", "standalone"], "port": 6650 }
 }
 ```
 
-**Supported keys:** `image`, `env`, `command`, `port` (for the forward and the readiness check), `healthcheck` (a command run inside the service), `volumes` (named paths only, never host paths), `dependsOn`. Compose import maps the same keys and ignores host bind mounts, `privileged`, `cap_add`, `network_mode` and `ports` with a warning.
+**Keys:** `image` (required, a valid image reference), `env`, `command` (string array), `port`
+(forwarding and display), `healthcheck` (a command run with `sh -c` inside the service), `volumes`
+(`{ volumeName: containerPath }`, named volumes only, created per branch), `dependsOn`. Names are
+`[a-z0-9][a-z0-9-]*`; unknown keys are an error. **Compose import** maps `image`, `environment`
+(`${VAR:-default}` takes the default; any other `${…}` drops the variable, never read from the host),
+`command`, `healthcheck.test`, `depends_on`, named volumes and the first port of `ports`/`expose`. It
+drops, with one warning listing them, host bind mounts, published ports, `build`, `privileged`,
+`cap_add`, `network_mode`, `devices`, `pid`, `ipc`, `security_opt`, `volumes_from`, `userns_mode`,
+`cgroup_parent`, `env_file`, `extra_hosts`, `sysctls`, `runtime`, `entrypoint`, `user`, `working_dir`,
+`tmpfs`, and a `depends_on` on a dropped service. A compose file with `include` or `extends.file` is
+refused (they read host files).
 
-**Lifecycle:**
+**Run spec:** `<container>-svc-<name>` on the branch network with `--network-alias <name>`, only the
+env and named volumes it declares (`<container>-svc-<name>-<volume>`), Docker's default capabilities
+(none added; database images need their usual ones), no published ports, no firewall helper, labels
+`kunj.repo`, `kunj.branch`, `kunj.role=service`, `kunj.service=<name>` and `kunj.options` (`port`,
+`healthcheck`, volume names, `dependsOn`; never env). Service containers are found by their labels, not
+a name prefix another branch could extend.
 
-- `start` creates each service before the branch container, waits for its health check (timeout 120 s, then a warning, not a failure), and records it with labels (`kunj.role=service`).
-- Data lives in a per-branch volume per service, so every branch has its own database.
-- `stop` stops services with the container; `remove` deletes them and their volumes (the same unpushed-work guard applies to the branch, not to service data).
-- `list` shows each service's state; `kunj ct logs <branch> <service>` shows its logs.
+**Lifecycle:** `start` validates every definition before creating anything, then starts services in
+`dependsOn` order after the network and before the branch container, polling each health check every
+2 s for up to 120 s (then a warning, and the start continues). They are in the rollback list.
+`--rebuild` recreates them on their kept volumes and removes services no longer declared. Resume starts
+stopped ones, dependencies first; a service that will not start fails the start. `stop` stops them;
+`remove` deletes them and their volumes (`--keep-volumes` keeps them; the unpushed-work guard is about
+the branch, not service data). `list` shows `services: [{ name, state, port }]`;
+`kunj ct logs [branch] [service] [--follow]` shows a service's (or the container's) output;
+`kunj ct forward [branch] <service>:<port>` tunnels into the service container with whichever of
+`socat`, `bash` or `nc` it has.
 
-**Blueprints.** Services are not part of the snapshot (they are separate containers), but a blueprint's `setup` can rely on them: during a snapshot build the services start first. Their data is not kept in the snapshot, so migrations against a service belong in `maintain` and must be idempotent: `setup`'s only reach the snapshot build's throwaway services, never the branch's own database.
+**Snapshots.** Services start next to the snapshot's temporary container, so `setup` can use them, and
+are removed with it; their data is never in the snapshot. Migrations against a service therefore belong
+in `maintain` and must be idempotent: `setup`'s only reach the build's throwaway services.
 
-**Firewall.** Service containers are on the branch network and reachable from the agent. They get no forwarded environment and no host access. Their own outbound traffic is not filtered in this phase (decision below).
+**Firewall.** Service containers are reachable from the agent (the branch subnet is allowed). They get
+no forwarded environment and no host access; their own outbound traffic is not filtered in this phase.
 
-## Editor attach (`kunj ct open`)
+### 2. Editor attach (`kunj ct open`)
 
-`kunj ct open [branch] [--new-window]` opens your editor inside the branch's container, at `/workspace`, as the sandbox user.
+`kunj ct open [branch] [--new-window]` opens the editor inside the branch's container at `/workspace`.
 
-- **How:** launches `worktree.editorCommand` (default `code`; `cursor` works the same) with `--folder-uri vscode-remote://attached-container+<hex>/workspace`, where `<hex>` is the hex-encoded JSON `{"containerName":"/<container>"}`. The exact encoding is checked against current VS Code and Cursor before shipping.
-- **Requires** the Dev Containers extension. Without it, `open` prints how to install it.
-- **User:** VS Code attaches as the image's user; kunj writes the attached-container config (`remoteUser`, `workspaceFolder`) into the editor's per-image config so it opens as `dev` in `/workspace`.
-- **Extensions:** the editor installs its server and extensions inside the container on first attach (needs internet; works in default mode; in allowlist mode the VS Code marketplace domains must be allowed — `open` warns).
-- **Ports:** the editor forwards ports itself, alongside `kunj ct forward`.
-- **Apps:** the VS Code extension and macOS app get an "Open in container" action using the same command.
+- A stopped container is resumed through the same start-or-resume routine (never rebuilt; `start`'s
+  `--rebuild`, `-c`, `--image` and `--publish` never apply). A branch without a container is an error.
+- It writes the Dev Containers extension's per-image attached-container config,
+  `globalStorage/ms-vscode-remote.remote-containers/imageConfigs/<image>.json` (`:`, `/` and `%`
+  escaped as lowercase `%xx`), with `remoteUser` and `workspaceFolder: "/workspace"`, merged into an
+  existing file, for VS Code and Cursor (each when installed, always for the configured one).
+- It launches `worktree.editorCommand` through `buildOpenCommand()` with
+  `--folder-uri vscode-remote://attached-container+<hex of {"containerName":"/<name>"}>/workspace`
+  (encoding checked against Dev Containers 0.470.0).
+- Editors that are not VS Code-like get the equivalent `docker exec -it … sh -lc` line printed (JSON:
+  `uri: null`, `exec`). There is no check that the extension is installed.
+- In allowlist mode it warns that the editor server needs the VS Code update and marketplace domains.
+- With `--context` it warns that the editor uses its own Docker context.
+- It always prints `EDITOR_CREDENTIALS_WARNING` (JSON: `warning`): an attached window may copy the
+  host's gitconfig, install a host-backed git credential helper and forward the SSH and GPG agents into
+  the container. The git ones can be turned off with `dev.containers.copyGitConfig: false` and
+  `dev.containers.gitCredentialHelperConfigLocation: "none"`; SSH and GPG forwarding have no setting.
+  kunj does not change the extension's behaviour.
 
-The container must be running; `open` starts it if stopped.
+### 3. Auto port forwarding
 
-## Prune
+`kunj ct forward [branch] --auto [--detach]` forwards every port that starts listening in the container
+and drops the forward when the listener goes away.
 
-`kunj ct prune [--all] [--dry-run] [--force]` removes what is no longer needed and reports what it freed.
+- **Detection:** one exec every 2 s reading `/proc/net/tcp` and `/proc/net/tcp6` (not `ss`, which most
+  images lack). Only listeners the tunnel can reach count: wildcard or `127.x` (not Docker's DNS
+  `127.0.0.11`); a port bound only to `::1` is left out. Ports below 1024, `container.forward.ignore`
+  and ports already published with `--publish` are skipped.
+- **Through the network helper:** the polls and the tunnels exec in the helper (same network
+  namespace), never in the branch container. A forwarder is bound to one run of the container (its
+  `StartedAt`) and exits when the container stops or is recreated.
+- **Host port:** the same number when free, else the next free one, on `127.0.0.1` only.
+- **Registry:** `~/.kunj/container-forwards.json`, records `{ pid, container, containerId, port,
+  hostPort, kind: "forward", service? }` (port 0 marks a forwarder itself), keyed by container id,
+  dead pids pruned on read, atomic writes. Manual `kunj ct forward` registers its ports too.
+- **Background:** `--detach` spawns a detached `kunj ct forward <branch> --auto`. `kunj ct agent` does
+  this automatically unless `container.forward.auto` is `false` or a forwarder is already registered for
+  the container.
+- **Output:** with `--json`, one line per change; `list --json` shows forwards in `ports` with
+  `kind: "forward"` and `pid`.
+
+### 4. Prune
+
+`kunj ct prune [--all] [--dry-run] [--force] [--yes]` removes what is no longer needed.
 
 | Removed | When |
 | --- | --- |
-| A branch container (with its helper, services, volumes, network) | Its branch no longer exists on origin and the remove guard finds no unpushed work, or `--force` |
-| Orphans: a helper, service, volume or network labelled for this repo with no branch container | Always |
-| Old snapshot images and kunj's own superseded `kunj-sandbox` / `kunj-nethelper` tags | Always (not the current ones) |
-| Stopped containers older than `container.pruneAfterDays` (default off) | When set |
+| A branch container with its helper, services, volumes and network | Its branch is gone from origin (`ls-remote` lacks it **and** the clone has its `refs/remotes/origin/` ref, so a never-pushed `-c` branch is not "gone"), and the remove guard is clean, or `--force` |
+| Stopped containers created more than `container.pruneAfterDays` ago (0 = off, the default) | Same guard |
+| Orphans: helpers, services and networks labelled for a branch with no main container | Always; volumes without a container only with `--force` (a volume can hold unpushed work) |
+| Snapshot images of another blueprint hash; `kunj-sandbox`, `kunj-nethelper`, `kunj-sandbox-dind` tags of other versions | Not in use by any container; snapshots are all kept when the current hash cannot be computed |
 
-- `--dry-run` lists what would go and how much space it frees; it is the default when not in a terminal.
-- `--all` covers every repo kunj knows (`~/.kunj/repos.json`), not just the current one.
-- A merged branch deleted on GitHub with commits that exist only in the container is **kept** and reported, because the guard sees unpushed work; `--force` overrides.
-- `list` also starts showing orphans (helpers or volumes without their container), so they are visible before a prune.
+- Every rule fails safe: origin unreachable (or an empty answer) means no branch is gone; a guard that
+  cannot run keeps the container; a privileged container is not started for its guard without
+  `allowPrivileged`. The guard runs again at removal time, before `pre-container-delete`.
+- A branch whose objects were created less than 10 minutes ago is starting, not orphaned (a start can
+  wait minutes on service health checks before its main container exists).
+- Snapshot containers (`<branch>:snapshot`) are never pruned as branches.
+- It prints the plan and asks once. `--yes` removes without asking; `--json` or no terminal without
+  `--yes` is a dry run; `--force` only skips the guard and adds container-less volumes. The plan sizes
+  images only.
+- `--all` covers every repository in `~/.kunj/repos.json`; kunj's own image tags are checked once.
+- `pre/post-container-delete` run for each removed branch container. `list` shows orphans
+  (`orphans: [{ kind, name }]`).
 
-## Docker-in-Docker
+### 5. Docker-in-Docker
 
-For repos whose own scripts run `docker` or `docker compose`, the branch container can run its own Docker daemon. Every branch then has a separate daemon, so two branches running the same compose file never clash (same project names, ports and volumes are fine).
+`container.dockerInDocker: off | sysbox | privileged` (default `off`) gives the branch container its own
+`dockerd`, so two branches running the same compose file never clash (separate daemons: same project
+names, ports and volumes are fine). The costs are an image cache per branch and the RAM of two stacks.
 
-`container.dockerInDocker: off | sysbox | privileged` (default `off`):
-
-| Mode | How | Isolation | Where it works |
+| Mode | How | Isolation | Where |
 | --- | --- | --- | --- |
 | `off` | No daemon; use sidecar services | Full | Everywhere |
-| `sysbox` | `--runtime sysbox-runc`, `dockerd` inside | Strong | Linux hosts with sysbox installed (checked with `docker info`) |
-| `privileged` | `--privileged`, `dockerd` inside | Weak: the agent can become root on the Docker host's VM | Anywhere, but only allowed with `container.allowPrivileged: true` |
+| `sysbox` | `--runtime sysbox-runc` | Strong: inner containers stay in the sandbox's user namespace | Docker hosts whose `docker info` lists `sysbox-runc` (Linux) |
+| `privileged` | `--privileged` | Weak: the agent (in the `docker` group) can become root on the Docker host or its VM without any vulnerability | Only with `container.allowPrivileged: true`, never on Docker Desktop |
 
-**Rules:**
+- **Image:** `kunj-sandbox-dind:<version>-<hash>`, built FROM the sandbox (src/container/sandbox-dind/:
+  docker-ce, CLI, containerd, compose plugin, iptables; `dev` in the `docker` group). A devcontainer,
+  `container.image` or `--image` is refused.
+- **Refusals before anything is created** (`precheckDind()` in `start`, before the create hook, the
+  snapshot and the push; lifecycle checks again): sysbox without the runtime; privileged without
+  `allowPrivileged`; privileged on Docker Desktop (detected from `docker info`, whatever the context is
+  called, because its VM shares the home directory). OrbStack and a default Colima profile share the
+  home too; the docs recommend a dedicated Colima or Lima profile with file sharing off, selected with
+  `container.dockerContext`.
+- **Resume:** a container created privileged is refused once `allowPrivileged` is no longer true, and a
+  sysbox one when the daemon lost the runtime; the remove and prune guard do not start such a container
+  (`--force` only). A mode changed in settings applies with `--rebuild`.
+- **Run:** capabilities are not dropped (the daemon needs them); `/var/lib/docker` is a per-branch
+  volume `<container>-docker`, removed with the container; `dockerd` is started as root by
+  `kunj-dind-start` only after the firewall is ready, on every start and resume, and never in a
+  snapshot. A daemon that does not come up is a warning (log in `/var/log/kunj-dockerd.log`).
+- **Firewall:** in allowlist mode Docker Hub, its CDN, `ghcr.io` and its blob host are added. kunj's
+  firewall is not a boundary for inner containers in either mode.
+- `list` marks the mode (`dind`). When the working tree has a compose file, DinD is off and no services
+  are declared, `start` suggests services.
 
-- The inner daemon's data lives in a per-branch volume (`/var/lib/docker`), removed with the container. Expect a few GB per branch.
-- Docker Hub, its CDN and `ghcr.io` are added to the allowlist automatically. sysbox keeps inner containers off the host's root; kunj's firewall is not a boundary for inner containers in either mode.
-- `privileged` on Docker Desktop's default VM is refused even with `allowPrivileged`, because that VM shares your home directory. The README documents a dedicated Colima or OrbStack profile with file sharing off, selected with `container.dockerContext`.
-- Capabilities are not dropped in these modes (the daemon needs them); `list` marks such containers clearly.
-- When a repo has a compose file and Docker-in-Docker is off, `start` suggests sidecar services first.
+### 6. Host MCP bridge (not started)
 
-## Auto port forwarding
+Proposed: the agent in the container can use MCP servers that run on the Mac, starting with a browser
+server so it can open and drive Chrome on the user's screen.
 
-`kunj ct forward [branch] --auto` watches the container and forwards every port that starts listening, the way VS Code does.
+- **How:** the container cannot reach the Mac (the firewall blocks the host), so the connection goes the
+  other way over `docker exec`, like forwarding: kunj keeps an exec open that listens on
+  `/run/kunj-mcp/<name>.sock` in the container; Claude Code in the container is configured with an MCP
+  server whose command connects to that socket (`socat - UNIX-CONNECT:…`); per connection kunj starts
+  the real stdio server on the Mac and pipes both ways. No port opens on the Mac and it works with a
+  remote Docker host. The plan picks the concrete mechanism; whether the listening exec runs in the
+  helper or the branch container must follow the forwarding rule above.
+- **Configuration:** `container.mcp: { <name>: { command, args?, env?, allowOrigins? } }`, host config
+  only, never the blueprint; suggested entry `chrome` → `npx -y chrome-devtools-mcp@latest --isolated`.
+  kunj writes the container's Claude Code MCP config at start; `kunj ct agent` keeps the bridge running
+  for the session.
+- **Localhost URLs:** the browser runs on the Mac, so `localhost:3000` is the Mac's port; the bridge's
+  instructions give the container→host port map from the forwards registry.
+- **Safety:** off unless `container.mcp` has entries; an isolated, empty browser profile; `allowOrigins`
+  (default `http://localhost`, `http://127.0.0.1`) enforced by the server's own restriction where it has
+  one, else by rejecting other origins in `navigate_page`/`new_page` calls in the host-side pipe;
+  `list` shows the bridged servers. The Claude in Chrome extension is tied to the local Claude Code and
+  the real profile, so it is not bridged.
 
-- **Detection:** one `docker exec ss -ltnH` every 2 seconds; new listeners get a forward, closed ones are dropped. Ports below 1024 and the agent's own internal ports (a configurable ignore list, `container.forward.ignore`) are skipped.
-- **Host port:** the same number when free, otherwise the next free one. Two branches both serving on 3000 become `localhost:3000` and `localhost:3001`.
-- **Registry:** active forwards are recorded in `~/.kunj/container-forwards.json` with the process id, like editor sessions. Dead processes are pruned on read.
-- **List:** `kunj ct list --json` gains `ports: [{ container, host, kind: "forward" | "publish", pid }]`, so the VS Code extension and macOS app can show "feat-a → localhost:3001" and open it.
-- **Background:** `--auto --detach` runs the forwarder in the background (a small kunj process that exits when the container stops). `kunj ct agent` starts it automatically by default; `container.forward.auto: true` turns that off.
-- **Services:** sidecar ports are not auto-forwarded; `kunj ct forward <branch> postgres:5432` forwards a service port explicitly.
-
-## Settings, commands and JSON added
-
-## Host MCP servers (browser from the container)
-
-The agent in the container can use MCP servers that run on your Mac, starting with a browser server so it can open and drive Chrome on your screen (for example to check the dev server it just started).
-
-**How the bridge works.** The container cannot reach your Mac (the firewall blocks the host), so the connection goes the other way, over `docker exec` like port forwarding:
-
-1. kunj on your Mac keeps a `docker exec` open into the container that listens on a socket, `/run/kunj-mcp/<name>.sock`.
-2. Claude Code in the container is configured with an MCP server whose command connects to that socket.
-3. When Claude Code connects, kunj starts the real MCP server on your Mac (its stdio command) and pipes the two together. Each connection gets its own server process.
-
-No port is opened on your Mac, and it works unchanged with a remote Docker host later.
-
-**Configuration** (`container.mcp`, host config only, never the blueprint):
-
-```jsonc
-"container.mcp": {
-  "chrome": { "command": "npx", "args": ["-y", "chrome-devtools-mcp@latest", "--isolated"] }
-}
-```
-
-kunj writes the matching entry into the container's Claude Code MCP config at start, and `kunj ct agent` keeps the bridge running for as long as the agent session.
-
-**Which browser server.** Chrome DevTools MCP (or Playwright MCP) runs as a normal stdio process on your Mac and opens its own Chrome window, so it bridges cleanly. The Claude in Chrome extension is tied to your local Claude Code and your real browser profile, so it is not bridged.
-
-**Localhost URLs.** The browser runs on your Mac, so `http://localhost:3000` means your Mac's port. With auto forwarding on, the container's port 3000 is forwarded to `localhost:3000` when free; when it had to move (say to 3001), kunj tells the agent through the MCP bridge's instructions which host port maps to which container port.
-
-**Safety.** A browser on your Mac sits outside the sandbox: it can reach your LAN and any site you are logged into. So:
-
-- the bridge is off unless `container.mcp` has entries;
-- the default browser command uses an isolated, empty profile (`--isolated`): no cookies, no logged-in sessions;
-- an optional `allowOrigins` list per server restricts which URLs the bridged browser may open (default: `localhost` only);
-- `list` shows which MCP servers each container is bridged to.
+### Settings and commands added
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `container.services` | (none) | Sidecar services (also `services` in the blueprint) |
+| `container.services` | `{}` | Sidecar services (also blueprint `services`); edit the config file by hand |
+| `container.forward.auto` | `true` | `kunj ct agent` starts a background `forward --auto` |
+| `container.forward.ignore` | `[]` | Ports `--auto` never forwards (below 1024 never are) |
+| `container.pruneAfterDays` | `0` (off) | Prune also removes stopped containers created longer ago |
 | `container.dockerInDocker` | `off` | `off`, `sysbox` or `privileged` |
-| `container.allowPrivileged` | `false` | Required for `privileged` |
-| `container.forward.auto` | `false` | Auto forwarding while `kunj ct agent` runs (default on) |
-| `container.forward.ignore` | (none) | Ports never auto-forwarded |
-| `container.pruneAfterDays` | (off) | Prune stopped containers older than this |
+| `container.allowPrivileged` | `false` | Required for `privileged`; still refused on Docker Desktop |
 
 ```text
 kunj ct open [branch] [--new-window]
 kunj ct forward [branch] --auto [--detach]
 kunj ct forward [branch] <service>:<port>
-kunj ct logs [branch] [service]
-kunj ct prune [--all] [--dry-run] [--force]
+kunj ct logs [branch] [service] [--follow]
+kunj ct prune [--all] [--dry-run] [--force] [--yes]
 ```
 
-`kunj ct list --json` gains, per container: `services: [{ name, state, port }]`, `dockerInDocker`, and forwards in `ports`; at the top level, `orphans: [{ kind, name }]`. All additive, so the extension and app keep working.
+`list --json` gained, per container, `services`, `dind` and forward entries in `ports`, and at the top
+level `orphans`; all additive.
 
-## Security impact of each feature
+### Security impact
 
 | Feature | New risk | Mitigation |
 | --- | --- | --- |
-| Sidecar services | Images named by the branch's blueprint or compose file run on the branch network | Same network as the agent only; no host mounts, no privileged, no added caps, no forwarded env; compose's dangerous keys are dropped |
-| Editor attach | The editor server runs inside the container with your editor's settings | Runs as the sandbox user, behind the firewall; no host paths mounted |
-| Auto forwarding | Any port the agent opens becomes reachable on your Mac's localhost | Bound to 127.0.0.1 only; ignore list; `container.forward.auto: false` to turn it off |
-| Prune | Deleting data | Same guard as `remove`; `--dry-run` default without a terminal; services' data only deleted with their container |
-| Docker-in-Docker | `privileged` gives the container the Docker host's kernel powers | Opt-in twice (`dockerInDocker` + `allowPrivileged`), refused on Docker Desktop's shared VM, `sysbox` preferred. sysbox keeps inner containers off the host's root; kunj's firewall is not a boundary for inner containers in either mode. |
+| Services | Images named by the branch's blueprint or compose file run on the branch network | Same network as the agent only; no host mounts, privileged, added caps, host env or published ports; dangerous compose keys dropped, `include`/`extends.file` refused |
+| Editor attach | The editor server runs inside the container; the extension may forward host credentials and agents | Sandbox user, behind the firewall; the warning names the settings that turn the git ones off |
+| Auto forwarding | Any port the agent opens is reachable on the Mac's localhost | `127.0.0.1` only; ignore list; `forward.auto: false`; exec only in kunj's own helper |
+| Prune | Data loss | Remove guard at plan and removal; dry run without a TTY or with `--json`; volumes only with `--force` |
+| Docker-in-Docker | `privileged` is root on the Docker host's VM | Two opt-ins, refused on Docker Desktop, re-checked on resume, `sysbox` preferred |
+| MCP bridge | A browser on the Mac, outside the sandbox | Off by default; isolated profile; localhost-only origins |
 
-## Testing and delivery plan
+## Decisions
 
-Each feature ships separately to `main`, in the order above, with unit tests against the fake backend and Docker tests for the real behaviour.
+All 2026-10-23.
 
-1. **Sidecar services.** Docker tests: a Postgres service is reachable from the agent by name and not from another branch; `setup` runs a migration against it during a snapshot; compose import of a two-service file; remove deletes the service volume.
-2. **Editor attach.** Unit test of the URI; a manual check with VS Code and Cursor.
-3. **Auto forwarding.** Docker test: a server started after `--auto` becomes reachable on localhost within 3 s and disappears after it stops.
-4. **Prune.** Docker tests: an orphaned helper and volume are removed; a container with unpushed work on a deleted branch is kept; `--dry-run` deletes nothing.
-5. **Docker-in-Docker.** Unit tests of the refusal rules; a Docker test of `privileged` inside a throwaway Colima profile when available, otherwise skipped.
+- **Where services are declared:** blueprint first, then kunj config, then the devcontainer's compose file.
+- **No egress filtering for service containers** in this phase.
+- **Supabase for driveday:** plain services (Postgres first), migrations through the `supabase` preset.
+- **Health-check timeout:** warn after 120 s and continue.
+- **Migrations against services in `maintain`**, idempotent (a32bc90): `setup`'s reach only the
+  snapshot's throwaway services.
+- **Auto forwarding on by default** whenever `kunj ct agent` runs; `container.forward.auto: false` turns it off.
+- **Forwards exec only in the network helper** (a32bc90), never in the branch container.
+- **`/proc/net/tcp` instead of `ss`** (b88466c): most images lack `ss`.
+- **Prune of stale branches:** only branches gone from origin that the clone saw there, only with a
+  clean guard; `--force` skips only the guard; consent through the prompt or `--yes` (4f7aa10).
+- **Docker-in-Docker built in this phase**, fifth, `sysbox` and `privileged`, kunj sandbox image only.
+- **MCP bridge:** Chrome DevTools MCP with `--isolated` by default; `localhost` origins only, widened per
+  server; browser only for now, other stdio servers later through the same bridge.
 
-## Decisions to make together
+## Open questions and roadmap
 
-Decided (2026-10-23):
+- Host MCP bridge: implement (plan to pick the socket mechanism).
+- Containers in the VS Code extension and the macOS app (start, agent in a terminal, open, forward,
+  remove), reading `kunj ct list --json`.
+- Service egress filtering, if a service image turns out to need watching.
 
-- [x] **Where services are declared:** blueprint `services` first, then kunj config, then the devcontainer's compose file.
-- [x] **Firewall for services:** no egress filtering for service containers in this phase.
-- [x] **Supabase for driveday:** plain services (Postgres first), with migrations through the `supabase` CLI preset.
-- [x] **Health-check timeout:** warn after 120 s and continue.
-- [x] **Auto forwarding:** on by default whenever `kunj ct agent` runs; `container.forward.auto: false` turns it off.
-- [x] **Prune of stale branches:** only branches gone from origin, and only when the guard finds no unpushed work.
-- [x] **Docker-in-Docker:** built in this phase, as the fifth feature (`sysbox` and `privileged`, with the safeguards above).
+## Code map
 
-Host MCP bridge:
-
-- [x] **Which browser MCP by default:** Chrome DevTools MCP with `--isolated`.
-- [x] **Allowed origins:** `localhost` only by default, widened per server with `allowOrigins`.
-- [x] **Other host MCP servers:** browser only for now; other stdio servers can be added later through the same bridge.
+| File | Role |
+| --- | --- |
+| `src/lib/container/services.ts` | Parse, compose import, order, run spec, start/resume/stop/remove, health checks |
+| `src/lib/container/editor.ts` | Attached-container URI, image config files, the credentials warning |
+| `src/lib/container/autoforward.ts`, `forward.ts` | `/proc/net/tcp` polling, the registry, detached forwarders; the tunnel |
+| `src/lib/container/prune.ts` | Plan, orphans, apply |
+| `src/lib/container/dind.ts`, `src/container/sandbox-dind/` | Modes, refusals, the DinD image and `kunj-dind-start` |
+| `src/commands/container.ts` | `open`, `forward`, `logs`, `prune`, `list` |
+| `src/settings/container.ts` | The settings above |

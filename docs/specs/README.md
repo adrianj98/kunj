@@ -1,21 +1,16 @@
 # Specs
 
-On-disk copies of the container and workspace specs, so a fresh session can read them without the Claude
-Docs. The design files under `docs/superpowers/specs/` are the engineering designs the plans were written
-from; the files here are the discussion documents (status boards, decisions, drawings described in words).
+Specs live here; one file per topic. When behaviour changes, update the file in the same change. The
+code on `main` is the authority: when a spec and `src/` disagree, fix the spec. Implementation plans are
+in `docs/superpowers/plans/`.
 
-| File | What | Claude Doc |
-| --- | --- | --- |
-| `container-system.md` | Umbrella: what `kunj ct` is, status board, code map, roadmap | https://claude.ai/artifact/TmtL5VdNYr55VaddMSVEwk |
-| `branch-containers.md` | Phase 1 design discussion: isolation, network helper, credentials, commands | https://claude.ai/artifact/8AhUG3mjYg5kDJNRNJW3xP |
-| `blueprints.md` | `.kunj/blueprint.json`, presets, snapshots | https://claude.ai/artifact/FE8AfuYceDbFTguCDfWD86 |
-| `container-phase-2.md` | Services, editor attach, auto forward, prune, Docker-in-Docker, host MCP bridge; decisions and progress | https://claude.ai/artifact/77f7sDBjgq8ZTZbnfpXPUA |
-| `workspace-ide.md` | Phase 3: the Electron workspace app driving the kunj CLI | https://claude.ai/artifact/Ti4R8bsdxtZC5YJ1J21z1y |
+| File | Covers | State | Original discussion |
+| --- | --- | --- | --- |
+| [container-system.md](container-system.md) | Umbrella for `kunj ct`: status of every container feature, invariants, code map, roadmap | — | https://claude.ai/artifact/TmtL5VdNYr55VaddMSVEwk |
+| [branch-containers.md](branch-containers.md) | Phase 1: isolation, names and labels, image, start/resume/remove, network helper and firewall, credentials, forwarding, hooks, `list --json` | Shipped | https://claude.ai/artifact/8AhUG3mjYg5kDJNRNJW3xP |
+| [blueprints.md](blueprints.md) | `.kunj/blueprint.json`, presets, `init`, snapshots built by `start`, host-made bundles | Shipped | https://claude.ai/artifact/FE8AfuYceDbFTguCDfWD86 |
+| [container-phase-2.md](container-phase-2.md) | Sidecar services, `ct open`, `forward --auto`, `ct prune`, Docker-in-Docker, host MCP bridge | Shipped, except the MCP bridge (proposed) | https://claude.ai/artifact/77f7sDBjgq8ZTZbnfpXPUA |
+| [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app driving the kunj CLI; its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | CLI contract shipped; app proposed, runtime pending a spike | https://claude.ai/artifact/Ti4R8bsdxtZC5YJ1J21z1y |
+| [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped | — |
 
-Order of work: phase 1 and blueprints are shipped; phase 2 is in progress (plan
-`docs/superpowers/plans/2026-10-23-container-phase-2.md`, ledger `.superpowers/sdd/2026-10-23-container-phase-2/progress.md`);
-phase 3 (the IDE) starts after phase 2.
-
-The first four files were rebuilt on 2026-10-23 from the edits made through Claude Code, because the Claude
-Docs live in another organization than the one the session was signed into; `workspace-ide.md` is a direct
-export. When a spec changes, edit the file here and the doc together.
+The Claude Docs linked above are where the discussions started; they are no longer kept in step.

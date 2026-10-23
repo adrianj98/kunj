@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 6.4 toolchain under the Command Line Tools (no Xcode, no XCTest: tests use `import Testing`), SwiftPM, SwiftUI `MenuBarExtra`, `ApplicationServices` (AX), `CoreGraphics` events, `dlsym` into SkyLight.
 
-**Spec:** `docs/superpowers/specs/2026-10-14-organize-windows-design.md`
+**Spec:** `docs/specs/organize-windows.md`
 
 ## Global Constraints
 

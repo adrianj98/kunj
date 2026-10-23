@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (strict, CommonJS), Commander, Jest + FakeBackend, `fs.watch`, tmux, `docker events` (docker.ts only).
 
-**Spec:** `docs/superpowers/specs/2026-10-23-workspace-ide-design.md` (sections Decisions, Corrections, CLI additions). Discussion: `docs/specs/workspace-ide.md`.
+**Spec:** `docs/specs/workspace-ide.md` (sections Decisions and CLI contract; written against the earlier engineering design, since merged into it).
 
 ## Global Constraints
 
@@ -386,7 +386,7 @@ git commit -m "kunj events: NDJSON change stream for the workspace app"
 ### Task 5: Contract check and release note
 
 **Files:**
-- Modify: `CLAUDE.md` (a "Workspace app contract" paragraph under Worktrees & VS Code Extension), `docs/superpowers/specs/2026-10-23-workspace-ide-design.md` (CLI additions marked shipped), `aj-log.md`
+- Modify: `CLAUDE.md` (a "Workspace app contract" paragraph under Worktrees & VS Code Extension), `docs/specs/workspace-ide.md` (CLI additions marked shipped), `aj-log.md`
 
 - [ ] **Step 1: Verify the published types resolve from outside the package**
 
@@ -400,6 +400,6 @@ In `CLAUDE.md` add: the JSON types in `src/lib/json-types.ts` are the published 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add CLAUDE.md docs/superpowers/specs/2026-10-23-workspace-ide-design.md aj-log.md
+git add CLAUDE.md docs/specs/workspace-ide.md aj-log.md
 git commit -m "Workspace CLI contract: document the published JSON types"
 ```

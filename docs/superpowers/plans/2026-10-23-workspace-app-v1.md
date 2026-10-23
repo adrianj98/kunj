@@ -8,7 +8,7 @@
 
 **Tech Stack:** Electron (current stable), electron-vite, React 18, TypeScript, `@xterm/xterm` + `@xterm/addon-webgl` + `@xterm/addon-fit`, `node-pty`, `monaco-editor` via `@monaco-editor/react`, `parse-diff`, electron-builder, vitest (+ `@testing-library/react`, jsdom for renderer smoke tests).
 
-**Spec:** `docs/superpowers/specs/2026-10-23-workspace-ide-design.md`. Discussion: `docs/specs/workspace-ide.md`. Requires the CLI additions from `docs/superpowers/plans/2026-10-23-workspace-cli-contract.md` (`kunj agent`, `kunj ct file`, `kunj events`, published types).
+**Spec:** `docs/specs/workspace-ide.md`. Requires the CLI additions from `docs/superpowers/plans/2026-10-23-workspace-cli-contract.md` (`kunj agent`, `kunj ct file`, `kunj events`, published types).
 
 ## Global Constraints
 

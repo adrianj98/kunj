@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript strict, Node 20, Jest + `FakeBackend`, Docker CLI (`docker commit`, `docker image ls/inspect/rm`), POSIX sh presets.
 
-**Spec:** docs/superpowers/specs/2026-10-22-blueprints-design.md (binding). Container phase 1 spec: docs/superpowers/specs/2026-10-21-branch-containers-design.md. Branch: `feature/blueprints` (off `feature/branch-containers`).
+**Spec:** docs/specs/blueprints.md (binding). Container phase 1 spec: docs/specs/branch-containers.md. Branch: `feature/blueprints` (off `feature/branch-containers`).
 
 ## Global Constraints
 
