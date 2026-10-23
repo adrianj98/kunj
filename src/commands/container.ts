@@ -40,7 +40,7 @@ import {
   stopContainer,
 } from '../lib/container/lifecycle';
 import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
-import { parseOrigin, stripUserinfo } from '../lib/container/seed';
+import { stripUserinfo } from '../lib/container/seed';
 import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
 import { planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
@@ -64,6 +64,7 @@ interface ContainerOptions {
   global?: boolean;
   yes?: boolean;
   blueprint?: string;
+  bundle?: boolean;
 }
 
 interface Context {
@@ -115,6 +116,7 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--keep-volumes', description: '[remove] Keep the workspace and home volumes' },
         { flags: '--global', description: '[blueprint init] Write the host copy (~/.kunj/<repo>/blueprint.json) instead of .kunj/blueprint.json' },
         { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file' },
+        { flags: '--no-bundle', description: '[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)' },
         { flags: '--blueprint <path>', description: '[blueprint snapshot|status] Use this blueprint file instead of the resolved one' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
       ],
@@ -734,12 +736,6 @@ export class ContainerCommand extends BaseCommand {
 
   private async blueprintSnapshot(options: ContainerOptions): Promise<void> {
     const ctx = await this.context(options);
-    // Task 9 lifts this with a host-made bundle
-    if (parseOrigin(ctx.repo.originUrl).isSsh) {
-      throw new ContainerError(
-        'snapshots clone from origin without credentials; an SSH origin cannot be snapshotted yet (private origins are coming)'
-      );
-    }
     const defaultBranch = (await detectDefaultBranch(ctx.repo.root)) || undefined;
     const branch = (options.base || defaultBranch)?.replace(/^origin\//, '');
     if (!branch) throw new ContainerError('cannot detect the default branch; pass --base');
@@ -755,13 +751,14 @@ export class ContainerCommand extends BaseCommand {
       ...this.snapshotInput(ctx, branch, resolved, this.warn),
       rebuild: !!options.rebuild,
       log: m => this.progress(chalk.gray(m)),
+      noBundle: options.bundle === false,
     });
 
     if (this.jsonMode) {
       this.outputJSON(result);
       return;
     }
-    const from = result.ref ? ` from ${result.ref.slice(0, 7)}` : '';
+    const from = (result.ref ? ` from ${result.ref.slice(0, 7)}` : '') + (result.viaBundle ? ' (from a host bundle)' : '');
     console.log(chalk.green(`✓ Snapshot ${result.tag} (${megabytes(result.sizeBytes)} MB)${from}`));
     for (const tool of result.tools) console.log(`  installed ${tool.name} ${tool.version}`);
     if (result.reused) console.log(chalk.gray('  reused: already up to date (--rebuild to snapshot again)'));

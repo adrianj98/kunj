@@ -383,6 +383,56 @@ describe('seedScript', () => {
     }
   });
 
+  it('bundlePath clones the bundle without fetching and refuses create', () => {
+    const s = seedScript({ ...base, branch: 'main', bundlePath: '/tmp/kunj-origin.bundle' });
+    expect(s).toContain("if [ ! -d /workspace/.git ]; then git clone --no-checkout -b 'main' '/tmp/kunj-origin.bundle' /workspace; fi");
+    expect(s).toContain("git remote set-url origin 'git@github.com:me/r.git'");
+    expect(s).not.toContain('git fetch');
+    expect(s).not.toContain('credential.helper');
+    expect(() => seedScript({ ...base, create: true, base: 'main', bundlePath: '/b' })).toThrow('existing branch');
+    // A snapshot seed wins over a bundle
+    expect(seedScript({ ...base, seedFrom: '/opt/kunj/seed', bundlePath: '/b' })).not.toContain("'/b'");
+  });
+
+  posixOnly('seedScript with bundlePath clones from the bundle, sets origin and switches', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-seed-bundle-'));
+    try {
+      const origin = path.join(tmp, 'origin.git');
+      const src = path.join(tmp, 'src');
+      git(tmp, 'init', '--bare', '-b', 'main', origin);
+      git(tmp, 'clone', origin, src);
+      git(src, 'checkout', '-b', 'main');
+      commit(src, 'a');
+      git(src, 'push', 'origin', 'main');
+      const bundle = path.join(tmp, 'origin.bundle');
+      git(origin, 'bundle', 'create', bundle, 'refs/heads/main');
+      const originHead = git(origin, 'rev-parse', 'main');
+
+      const home = path.join(tmp, 'home');
+      fs.mkdirSync(home);
+      const ws = path.join(tmp, 'ws');
+      // Unreachable: the clone and switch must not touch the network
+      const originUrl = 'https://unreachable.invalid/me/r.git';
+      const script = seedScript({ ...base, originUrl, originHost: 'unreachable.invalid', branch: 'main', bundlePath: bundle })
+        .split('/workspace')
+        .join(ws);
+      const env = { ...ENV, HOME: home, GIT_CONFIG_NOSYSTEM: '1' };
+      for (let i = 0; i < 2; i++) {
+        const r = spawnSync('sh', ['-c', script], { env, encoding: 'utf8' });
+        expect(r.stderr).not.toMatch(/fatal/);
+        expect(r.status).toBe(0);
+      }
+      expect(git(ws, 'remote', 'get-url', 'origin')).toBe(originUrl);
+      expect(git(ws, 'branch', '--show-current')).toBe('main');
+      expect(git(ws, 'rev-parse', 'HEAD')).toBe(originHead);
+      expect(git(ws, 'rev-parse', '--abbrev-ref', 'main@{upstream}')).toBe('origin/main');
+      expect(fs.readFileSync(path.join(ws, 'a'), 'utf8')).toBe('a');
+      expect(git(ws, 'status', '--porcelain')).toBe('');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   posixOnly('runs end to end against a local origin and is re-runnable', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-seed-run-'));
     try {

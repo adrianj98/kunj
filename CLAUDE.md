@@ -240,13 +240,20 @@ start, snapshot, status and list must all call it. The snapshot is an ordinary `
 (`namesFor: '<branch>:snapshot'`, no env, keep files, files, ports or agent, so no secrets in the
 image) whose `/workspace` is copied to `/opt/kunj/seed` and committed as `kunj-blueprint-<repo>:<hash>`,
 labelled `kunj.blueprint.{hash,ref,base,user,createdAt}`; older snapshots of the repo are deleted.
+The temporary container clones a bundle, not origin: `makeBranchBundle()` fetches the branch on the
+host (its credentials) and bundles it as the one ref `refs/heads/<branch>`; `StartOptions.bundle`
+streams it in as the sandbox user, `seedScript({ bundlePath })` clones it, resets `origin` and skips
+the fetch, and the file is removed before the commit (`/tmp` is in the image). With a bundle, start
+skips the SSH `no-token` refusal and the unpushed gate. Never forward a token into a snapshot;
+`--no-bundle` is the escape hatch (public origins only).
 Seed sentinels in `/workspace`: `.kunj-seeded` (the seed finished; ignored file, never in a snapshot),
 `.kunj-copying` (a copy from the snapshot is in progress: only then may `/workspace` be wiped and
 recopied, never a real checkout), `.kunj-fresh` (a complete copy whose branch must still be moved to
 origin's; removed once it is). All three are in `.git/info/exclude`. Never run presets or `setup` as
 the wrong user: presets as root, `setup`/`maintain` as the sandbox user (`sh -lc` in /workspace).
 `npm run test:docker` covers the snapshot (labels, jq from the apt preset, seed contents, no secret
-ENV), a start from it (no clone, `maintain` ran, origin URL), the stale hint, `--no-snapshot`, a failing
+ENV), a snapshot via the bundle (no `git clone git://` exec, seed HEAD is origin's; the host reaches
+the git daemon through `core.gitProxy`), a start from it (no clone, `maintain` ran, origin URL), the stale hint, `--no-snapshot`, a failing
 `setup` leaving nothing behind, and `removeSnapshots`.
 
 ## Repository Registry & macOS App

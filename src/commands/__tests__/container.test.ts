@@ -506,14 +506,19 @@ describe('ContainerCommand', () => {
       expect(errors).toEqual(['✗ cannot detect the default branch; pass --base']);
     });
 
-    it('blueprint snapshot refuses an ssh origin', async () => {
+    it('blueprint snapshot takes an ssh origin through a host bundle, and --no-bundle opts out', async () => {
       (jest.requireMock('../../lib/config').getOriginUrl as jest.Mock).mockReturnValueOnce('git@github.com:acme/app.git');
       (resolveBlueprint as jest.Mock).mockResolvedValue(resolved());
+      (snapshot.snapshotBlueprint as jest.Mock).mockResolvedValue({
+        tag: 'kunj-blueprint-app:abc123abc123', hash: 'h', ref: '0123456789', base: 'b', sizeBytes: 0, tools: [], reused: false, viaBundle: true,
+      });
       await new ContainerCommand().execute('blueprint', 'snapshot', [], {});
-      expect(snapshot.snapshotBlueprint).not.toHaveBeenCalled();
-      expect(errors).toEqual([
-        '✗ snapshots clone from origin without credentials; an SSH origin cannot be snapshotted yet (private origins are coming)',
-      ]);
+      expect(errors).toEqual([]);
+      expect((snapshot.snapshotBlueprint as jest.Mock).mock.calls[0][1].noBundle).toBe(false);
+      expect(logSpy.mock.calls.map(c => c.join(' '))).toContain('✓ Snapshot kunj-blueprint-app:abc123abc123 (0 MB) from 0123456 (from a host bundle)');
+
+      await new ContainerCommand().execute('blueprint', 'snapshot', [], { bundle: false });
+      expect((snapshot.snapshotBlueprint as jest.Mock).mock.calls[1][1].noBundle).toBe(true);
     });
 
     it('blueprint status json shape', async () => {

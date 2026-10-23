@@ -26,7 +26,7 @@ export interface OriginState {
 const NETWORK_TIMEOUT_MS = 30000;
 
 // Network git calls must never wait on a prompt (terminal, askpass helpers, ssh)
-function nonInteractiveEnv(): NodeJS.ProcessEnv {
+export function nonInteractiveEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
     GIT_TERMINAL_PROMPT: '0',
@@ -184,6 +184,9 @@ export interface SeedInput {
   credentialHelper?: string;
   /** A checkout already in the image (a blueprint snapshot's seed) to copy instead of cloning */
   seedFrom?: string;
+  /** A git bundle of `branch` already in the container (a snapshot: the host fetched it with its
+   * own credentials), cloned instead of origin so nothing needs the network or a token */
+  bundlePath?: string;
 }
 
 // POSIX sh for the container's sandbox user. Safe to re-run after a partial failure.
@@ -192,6 +195,8 @@ export function seedScript(input: SeedInput): string {
     throw new Error('Origin has no host; a container can only clone from a remote origin');
   }
   const q = shellQuote;
+  const bundle = !input.seedFrom && input.bundlePath ? input.bundlePath : undefined;
+  if (bundle && input.create) throw new Error('A bundle seeds an existing branch, not a new one');
   const lines: string[] = ['set -e'];
   if (input.userName) lines.push(`git config --global user.name ${q(input.userName)}`);
   if (input.userEmail) lines.push(`git config --global user.email ${q(input.userEmail)}`);
@@ -221,6 +226,11 @@ export function seedScript(input: SeedInput): string {
     lines.push('cd /workspace');
     // The snapshot may have cloned another URL for the same repository (ssh vs https)
     lines.push(`git remote set-url origin ${q(input.originUrl)}`);
+  } else if (bundle) {
+    lines.push(`if [ ! -d /workspace/.git ]; then git clone --no-checkout -b ${q(input.branch)} ${q(bundle)} /workspace; fi`);
+    lines.push('cd /workspace');
+    // The clone's origin is the bundle file
+    lines.push(`git remote set-url origin ${q(input.originUrl)}`);
   } else {
     lines.push(`if [ ! -d /workspace/.git ]; then git clone --recurse-submodules ${q(input.originUrl)} /workspace; fi`);
     lines.push('cd /workspace');
@@ -230,6 +240,11 @@ export function seedScript(input: SeedInput): string {
     const base = q(input.base ?? '');
     lines.push(`git fetch origin ${base}`);
     lines.push(`git switch ${branch} 2>/dev/null || git switch -c ${branch} --no-track ${q(`origin/${input.base ?? ''}`)}`);
+  } else if (bundle) {
+    // The bundle is origin's branch as the host just fetched it: no fetch, which could need a token
+    lines.push(`git switch ${branch}`);
+    // A clone from origin recurses into submodules; these come from their own URLs
+    lines.push('if [ -f .gitmodules ]; then git submodule update --init --recursive; fi');
   } else {
     lines.push(`git fetch origin ${branch}`);
     if (input.seedFrom) {

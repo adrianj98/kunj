@@ -97,6 +97,9 @@ export interface StartOptions {
   presets?: Preset[];
   /** Publish no devcontainer forwardPorts (the snapshot's temporary container binds no host port) */
   ignoreForwardPorts?: boolean;
+  /** A git bundle of `branch` the host made (a snapshot): streamed in and cloned instead of origin,
+   * so the container needs no token; origin is not checked for the branch or unpushed commits */
+  bundle?: { hostPath: string; containerPath: string };
 }
 
 export interface StartResult {
@@ -465,7 +468,14 @@ async function seedIfNeeded(
     // A volume over a path the image lacks is root-owned; the clone runs as the user
     await backend.exec(id, ['chown', user, WORKSPACE, ...(home ? [home] : [])], { user: 'root' });
   }
-  const credentialHelper = hasToken ? await installCredentialHelper(backend, id, user, home) : undefined;
+  const bundle = fromSnapshot ? undefined : options.bundle;
+  // A bundle needs no credentials, and a snapshot must not hold any
+  const token = hasToken && !bundle;
+  const credentialHelper = token ? await installCredentialHelper(backend, id, user, home) : undefined;
+  if (bundle) {
+    const tar = tarEntries([{ path: path.posix.basename(bundle.containerPath), content: fs.readFileSync(bundle.hostPath), mode: 0o600 }]);
+    await extractInto(backend, id, user, path.posix.dirname(bundle.containerPath), tar);
+  }
   const identity = await hostGitIdentity(options.cwd);
   const script = seedScript({
     originUrl: origin.originUrl,
@@ -475,18 +485,28 @@ async function seedIfNeeded(
     base: options.base,
     userName: identity.name,
     userEmail: identity.email,
-    hasToken,
+    hasToken: token,
     credentialHelper,
     seedFrom: fromSnapshot ? SEED_DIR : undefined,
+    bundlePath: bundle?.containerPath,
   });
   const r = await backend.exec(id, ['sh', '-c', script], { user: user || undefined, ...outputIO(options.jsonMode) });
   if (r.exitCode !== 0) {
-    const what = fromSnapshot ? `Seeding the workspace from the snapshot (origin ${origin.originUrl})` : `Cloning ${origin.originUrl}`;
+    const what = fromSnapshot
+      ? `Seeding the workspace from the snapshot (origin ${origin.originUrl})`
+      : bundle
+        ? `Cloning the host's bundle of ${origin.originUrl}`
+        : `Cloning ${origin.originUrl}`;
     throw new StartError(
       `${what} in the container failed (exit ${r.exitCode}).` +
-        (hasToken ? '' : ' If origin needs authentication, forward a token with container.env (GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN).'),
+        (hasToken || bundle ? '' : ' If origin needs authentication, forward a token with container.env (GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN).'),
       'seed'
     );
+  }
+  if (bundle) {
+    // A snapshot commits the whole filesystem, /tmp included
+    const rm = await backend.exec(id, ['rm', '-f', bundle.containerPath], { user: user || undefined });
+    if (rm.exitCode !== 0) throw new StartError(`Removing ${bundle.containerPath} from the container failed (exit ${rm.exitCode})`, 'seed');
   }
   return true;
 }
@@ -662,7 +682,8 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   }
 
   if (!labels) {
-    if (origin.isSsh && !hasToken) {
+    // A bundle is cloned instead of origin, and the host that made it has just fetched the branch
+    if (origin.isSsh && !hasToken && !options.bundle) {
       throw new StartError(
         `Origin ${origin.originUrl} uses SSH, which the container cannot use without a token; forward GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN with container.env`,
         'no-token'
@@ -677,7 +698,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     }
 
     // Origin must have the work the new clone starts from
-    if (!options.create && (origin.unpushed > 0 || !origin.branchOnOrigin)) {
+    if (!options.create && !options.bundle && (origin.unpushed > 0 || !origin.branchOnOrigin)) {
       const what = origin.branchOnOrigin
         ? `${branch} has ${origin.unpushed} commit${origin.unpushed === 1 ? '' : 's'} origin does not have`
         : `${branch} is not on origin`;

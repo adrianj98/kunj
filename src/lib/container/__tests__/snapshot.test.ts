@@ -25,7 +25,16 @@ jest.mock('../../config', () => ({
 
 import * as lifecycle from '../lifecycle';
 import { StartOptions, StartResult } from '../lifecycle';
-import { SEED_COPY_SCRIPT, SNAPSHOT_READ_SCRIPT, removeSnapshots, snapshotBlueprint, snapshotStatus, SnapshotOptions } from '../snapshot';
+import {
+  BUNDLE_CONTAINER_PATH,
+  SEED_COPY_SCRIPT,
+  SNAPSHOT_READ_SCRIPT,
+  makeBranchBundle,
+  removeSnapshots,
+  snapshotBlueprint,
+  snapshotStatus,
+  SnapshotOptions,
+} from '../snapshot';
 
 const mocked = lifecycle as jest.Mocked<typeof lifecycle>;
 
@@ -119,6 +128,10 @@ beforeAll(() => {
   fs.writeFileSync(path.join(tmp, 'package-lock.json'), '{"v":1}');
   git('add', '.');
   git('commit', '-q', '-m', 'one');
+  // A real origin, which the host-side bundle fetches main from
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', path.join(tmp, 'origin.git')]);
+  git('remote', 'add', 'origin', path.join(tmp, 'origin.git'));
+  git('push', '-q', 'origin', 'HEAD:refs/heads/main');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
   // HEAD moves on, so a hash read at HEAD would differ from one at origin/main
   fs.writeFileSync(path.join(tmp, 'package-lock.json'), '{"v":2}');
@@ -224,7 +237,7 @@ describe('snapshotBlueprint', () => {
     expect(b.callsOf('removeImage')).toEqual([['kunj-blueprint-app:old'], ['kunj-blueprint-app:older']]);
     expect(b.methods().indexOf('removeImage')).toBeGreaterThan(b.methods().indexOf('commitContainer'));
     expect(b.images.map(i => i.tag)).toEqual(['other-repo:x', tag]);
-    expect(result).toEqual({ tag, hash, ref: SHA, base: BASE, sizeBytes: 0, tools: [{ name: 'apt', version: 'jq' }], reused: false });
+    expect(result).toEqual({ tag, hash, ref: SHA, base: BASE, sizeBytes: 0, tools: [{ name: 'apt', version: 'jq' }], reused: false, viaBundle: true });
   });
 
   it('turns /etc/kunj/env into ENV changes', async () => {
@@ -259,7 +272,7 @@ describe('snapshotBlueprint', () => {
     const tag = snapshotTag('app', hash);
     b.images.push(image(tag, hash, { size: 1234, labels: { [LABEL.repo]: REPO.id, [LABEL.blueprintHash]: hash, [LABEL.blueprintRef]: 'f00d' } }));
     const reused = await snapshotBlueprint(b, options());
-    expect(reused).toEqual({ tag, hash, ref: 'f00d', base: BASE, sizeBytes: 1234, tools: [], reused: true });
+    expect(reused).toEqual({ tag, hash, ref: 'f00d', base: BASE, sizeBytes: 1234, tools: [], reused: true, viaBundle: false });
     expect(mocked.startContainer).not.toHaveBeenCalled();
     expect(mocked.removeContainer).not.toHaveBeenCalled();
     expect(b.callsOf('commitContainer')).toEqual([]);
@@ -306,6 +319,50 @@ describe('snapshotBlueprint', () => {
       .mockRejectedValueOnce(new Error('busy'));
     await expect(snapshotBlueprint(b, options())).resolves.toMatchObject({ reused: false });
     expect(warnings).toContain('Could not remove the temporary snapshot container: busy');
+  });
+});
+
+describe('snapshot bundle', () => {
+  it('makeBranchBundle creates a bundle containing only refs/heads/<branch>', async () => {
+    // origin has another branch, which must stay out of the bundle
+    git('push', '-q', 'origin', 'HEAD:refs/heads/other');
+    const originMain = execFileSync('git', ['rev-parse', 'main'], { cwd: path.join(tmp, 'origin.git') }).toString().trim();
+    const bundle = await makeBranchBundle('main', tmp);
+    try {
+      const heads = git('bundle', 'list-heads', bundle.path);
+      expect(heads).toBe(`${originMain} refs/heads/main`);
+      git('bundle', 'verify', '-q', bundle.path);
+    } finally {
+      bundle.cleanup();
+    }
+    expect(fs.existsSync(path.dirname(bundle.path))).toBe(false);
+    await expect(makeBranchBundle('missing', tmp)).rejects.toThrow(/git fetch failed: .*missing/);
+  });
+
+  it('passes a bundle and cleans up on success and failure', async () => {
+    let seen = '';
+    mocked.startContainer.mockImplementation(async (_b, o) => {
+      seen = o.bundle!.hostPath;
+      expect(o.bundle!.containerPath).toBe(BUNDLE_CONTAINER_PATH);
+      expect(fs.existsSync(seen)).toBe(true);
+      return startResult();
+    });
+    const result = await snapshotBlueprint(backendWith(), options());
+    expect(result.viaBundle).toBe(true);
+    expect(fs.existsSync(path.dirname(seen))).toBe(false);
+
+    mocked.startContainer.mockImplementation(async (_b, o) => {
+      seen = o.bundle!.hostPath;
+      throw new Error('setup failed');
+    });
+    await expect(snapshotBlueprint(backendWith(), options())).rejects.toThrow('setup failed');
+    expect(fs.existsSync(path.dirname(seen))).toBe(false);
+  });
+
+  it('noBundle keeps the old path', async () => {
+    const result = await snapshotBlueprint(backendWith(), options({ noBundle: true }));
+    expect(startOptionsPassed().bundle).toBeUndefined();
+    expect(result.viaBundle).toBe(false);
   });
 });
 

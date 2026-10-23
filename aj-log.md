@@ -2,6 +2,33 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-22 — Blueprints: snapshots from a host-made bundle (Task 9)
+
+What: `kunj ct blueprint snapshot` no longer clones origin inside the temporary container. The host
+runs `git fetch origin <branch>` with its own credentials, bundles `origin/<branch>` as the single
+ref `refs/heads/<branch>` (`makeBranchBundle()` in src/lib/container/snapshot.ts; `git bundle
+create` cannot rename refs, so the ref is set in a scratch bare repo that borrows the host's objects
+through `objects/info/alternates`), and `startContainer` streams it to `/tmp/kunj-origin.bundle` as
+the sandbox user (mode 0600). `seedScript({ bundlePath })` clones it with `--no-checkout -b <branch>`,
+sets `origin` back to the real URL, skips the fetch and switches; submodules are then updated from
+their own URLs. The bundle is `rm -f`ed in the container before the commit and the host temp dir is
+removed in `finally`. With a bundle, start skips the SSH `no-token` refusal and the unpushed gate.
+The command's SSH refusal is gone; `--no-bundle` keeps the old in-container clone (public origins).
+`SnapshotResult` gains `viaBundle`; text output says "(from a host bundle)".
+Why: snapshots forward no env, because a token could reach the committed image (older engines keep
+`container_config` Env, and repo-controlled `setup` could write it to disk), so private and SSH
+origins could not be snapshotted. The host already has credentials.
+
+- Tests: seed (script shape; real run from a bundle with an unreachable origin URL, re-runnable),
+  lifecycle (bundle streamed before the seed with the exact bytes, removed after; gates skipped),
+  snapshot (`makeBranchBundle` holds only `refs/heads/<branch>`; cleanup on success and failure;
+  `noBundle`), command (SSH origin accepted, `--no-bundle`). Docker: `snapshot via bundle never
+  clones from the network` (the host reaches the git daemon through a `core.gitProxy` script, since
+  only containers resolve host.docker.internal). The suite's cleanup now lists images with `-a`: a
+  rebuilt snapshot under the same tag leaves the old image dangling, which `docker images -q` hides.
+- Limits: the bundle is read into memory to build the tar (fine for v1, large repos cost RAM); the
+  hash is still computed before the fetch, from the host's existing `origin/<default>`.
+
 ## 2026-10-22 — Blueprints: `kunj ct blueprint` and snapshot-started containers
 
 What: a repository's `.kunj/blueprint.json` (`tools`, `setup`, `maintain`, `lockfiles`, `notes`) is

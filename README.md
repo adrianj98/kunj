@@ -296,8 +296,11 @@ Security notes:
   you did not write.
 - Tool values are validated: words only, no options (`-o...`) and no paths, so a value cannot make
   a built-in preset run something else.
-- Snapshots currently need an origin that can be cloned without credentials (a public HTTPS
-  repository); private and SSH origins fall back to running the tools and `setup` in the container.
+- Private and SSH origins snapshot like public ones: the host fetches the branch with its own
+  credentials and streams a `git bundle` of it into the temporary container, which clones that and
+  then points `origin` back at the real URL. The container never gets a token while a snapshot is
+  built, so none can end up in the image. `kunj ct blueprint snapshot --no-bundle` clones from
+  origin inside the container instead, which needs a public HTTPS origin.
 
 Worked examples. For kunj itself, `init` writes:
 

@@ -197,7 +197,8 @@ const BRANCH_ALLOW = 'it-allow';
     if (left.networks.length) attempt('removing networks', () => docker(['network', 'rm', ...left.networks]));
     if (repoId) {
       attempt('removing snapshot images', () => {
-        const images = docker(['images', '-q', '--filter', `label=${LABEL.repo}=${repoId}`]).split('\n').filter(Boolean);
+        // -a: a snapshot rebuilt under the same tag leaves the old image dangling, which -q alone hides
+        const images = docker(['images', '-aq', '--filter', `label=${LABEL.repo}=${repoId}`]).split('\n').filter(Boolean);
         if (images.length) docker(['rmi', '-f', ...new Set(images)]);
       });
     }
@@ -426,6 +427,16 @@ const BRANCH_ALLOW = 'it-allow';
         'blueprint',
         ['it-bp-new', 'it-bp-fresh']
       );
+      // The snapshot's host-side fetch goes to origin's URL, which only containers can resolve:
+      // connect git:// to the daemon on localhost instead, leaving the URL itself unchanged
+      const proxy = path.join(tmp, 'git-proxy');
+      fs.writeFileSync(
+        proxy,
+        '#!/bin/sh\nexec node -e \'const s = require("net").connect(+process.argv[1], "127.0.0.1"); ' +
+          'process.stdin.pipe(s); s.pipe(process.stdout); s.on("close", () => process.exit(0))\' "$2"\n',
+        { mode: 0o755 }
+      );
+      git(['config', 'core.gitProxy', proxy], hostClone);
     });
 
     it('blueprint snapshot builds an image with jq and the seed', async () => {
@@ -454,6 +465,24 @@ const BRANCH_ALLOW = 'it-allow';
       const env: string[] = JSON.parse(docker(['image', 'inspect', '--format', '{{json .Config.Env}}', tag])) ?? [];
       expect(env.filter(e => /GH_TOKEN|GITHUB_TOKEN|GITLAB_TOKEN|ANTHROPIC/.test(e))).toEqual([]);
       // The temporary container is gone
+      expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
+    });
+
+    it('snapshot via bundle never clones from the network', async () => {
+      const rec = new RecordingBackend();
+      const result = await snapshotBlueprint(rec, { ...snapshotOptions(await resolved()), rebuild: true });
+      expect(result).toMatchObject({ tag, hash, viaBundle: true, reused: false });
+      const scripts = rec.execs.map(argv => argv.join(' '));
+      expect(scripts.filter(s => s.includes('git clone git://'))).toEqual([]);
+      expect(scripts.some(s => s.includes("git clone --no-checkout -b 'main' '/tmp/kunj-origin.bundle' /workspace"))).toBe(true);
+
+      const originHead = git(['rev-parse', 'main'], bare);
+      expect(result.ref).toBe(originHead);
+      const seed = docker([
+        'run', '--rm', '--entrypoint', 'sh', tag, '-c',
+        `! test -e /tmp/kunj-origin.bundle && git -c safe.directory='*' -C ${SEED_DIR} rev-parse HEAD && git -c safe.directory='*' -C ${SEED_DIR} remote get-url origin`,
+      ]);
+      expect(seed.split('\n')).toEqual([originHead, originUrl]);
       expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
     });
 

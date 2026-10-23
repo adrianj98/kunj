@@ -281,6 +281,55 @@ describe('startContainer', () => {
     expect(none.callsOf('exec').some(a => (a[1] as string[]).some(x => x.includes('.kunj/bin')))).toBe(false);
   });
 
+  it('streams the bundle before the seed and removes it after', async () => {
+    const hostPath = path.join(tmp, 'origin.bundle');
+    const bytes = Buffer.from(Array.from({ length: 3000 }, (_, i) => (i * 7) % 256));
+    fs.writeFileSync(hostPath, bytes);
+    const b = backend();
+    await startContainer(b, options({ bundle: { hostPath, containerPath: '/tmp/kunj-origin.bundle' } }));
+    const execs = b.callsOf('exec');
+    const argv = (i: number) => execs[i][1] as string[];
+    const tarAt = execs.findIndex(a => (a[1] as string[])[2]?.includes('tar -xf -') && (a[1] as string[]).includes('/tmp'));
+    const seedAt = execs.findIndex(a => (a[1] as string[])[2]?.startsWith('set -e'));
+    const rmAt = execs.findIndex(a => (a[1] as string[]).join(' ') === 'rm -f /tmp/kunj-origin.bundle');
+    expect(tarAt).toBeGreaterThan(-1);
+    expect(tarAt).toBeLessThan(seedAt);
+    expect(seedAt).toBeLessThan(rmAt);
+    // As the sandbox user, like the clone
+    const user = (execs[seedAt][2] as { user?: string }).user;
+    expect(user).toBeTruthy();
+    expect(execs[tarAt][2]).toMatchObject({ user });
+    expect(execs[rmAt][2]).toMatchObject({ user });
+    const tar = Buffer.from(b.stdinData[tarAt]!, 'latin1');
+    expect(tar.subarray(0, 100).toString().replace(/\0+$/, '')).toBe('kunj-origin.bundle');
+    expect(tar.subarray(100, 107).toString()).toBe('0000600');
+    expect(tar.subarray(512, 512 + bytes.length).equals(bytes)).toBe(true);
+    const script = argv(seedAt)[2];
+    expect(script).toContain("git clone --no-checkout -b 'feature/x' '/tmp/kunj-origin.bundle' /workspace");
+    // The token in hostEnv is not configured for a bundle seed
+    expect(script).not.toContain('credential.helper');
+    expect(execs.some(a => (a[1] as string[]).some(x => x.includes('.kunj/bin')))).toBe(false);
+  });
+
+  it('bundle skips the no-token and unpushed gates', async () => {
+    mocked.inspectOrigin.mockResolvedValue({
+      originUrl: 'git@github.com:acme/app.git',
+      originHost: 'github.com',
+      credentialHost: 'github.com',
+      branchOnOrigin: false,
+      unpushed: 3,
+      isSsh: true,
+    });
+    const hostPath = path.join(tmp, 'origin.bundle');
+    fs.writeFileSync(hostPath, 'bundle');
+    const confirmPush = jest.fn(async () => false);
+    const b = backend();
+    await startContainer(b, options({ hostEnv: {}, jsonMode: true, confirmPush, bundle: { hostPath, containerPath: '/tmp/kunj-origin.bundle' } }));
+    expect(confirmPush).not.toHaveBeenCalled();
+    expect(mocked.pushBranch).not.toHaveBeenCalled();
+    expect(b.methods()).toContain('run');
+  });
+
   it('refuses a name whose labels do not match', async () => {
     const b = backend();
     b.existing = [info({ labels: labelsFor(REPO.id, 'feature-x', { [LABEL.role]: 'main' }) })];

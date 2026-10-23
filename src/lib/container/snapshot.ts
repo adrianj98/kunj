@@ -1,6 +1,12 @@
 // `kunj ct blueprint snapshot`: provision a temporary container from the blueprint, copy its
 // workspace to the seed directory and commit it as kunj-blueprint-<repo>:<hash>. The temporary
 // container is an ordinary start without secrets, keep files or hooks, and is always removed.
+// It clones a git bundle the host made with its own credentials, so it never needs a token.
+import { execFile } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { promisify } from 'util';
 import { ContainerBackend, ImageInfo } from './backend';
 import {
   ResolvedBlueprint,
@@ -13,9 +19,11 @@ import {
 import { StartOptions, StartResult, baseImageTag, removeContainer, startContainer } from './lifecycle';
 import { LABEL, containerNames } from './names';
 import { orderTools, resolvePresets } from './presets';
-import { SEED_COPYING, SEED_FRESH, SEED_MARKER_EXCLUDE } from './seed';
+import { SEED_COPYING, SEED_FRESH, SEED_MARKER_EXCLUDE, nonInteractiveEnv } from './seed';
 import { getGlobalKunjDir } from '../config';
 import { KunjConfig } from '../../types';
+
+const execFileAsync = promisify(execFile);
 
 /** Written by presets through kunj_env (src/container/presets/_lib.sh), one KEY=VALUE per line. */
 export const PRESET_ENV_FILE = '/etc/kunj/env';
@@ -32,6 +40,8 @@ export interface SnapshotOptions {
   rebuild: boolean;
   warn: (m: string) => void;
   log: (m: string) => void;
+  /** Clone from origin inside the container instead of a host-made bundle (origin must then be public) */
+  noBundle?: boolean;
 }
 
 export interface SnapshotResult {
@@ -43,6 +53,8 @@ export interface SnapshotResult {
   sizeBytes: number;
   tools: Array<{ name: string; version: string }>;
   reused: boolean;
+  /** Whether the container cloned a bundle the host made rather than origin */
+  viaBundle: boolean;
 }
 
 /** The copy into the seed directory, without the seed markers (each start writes its own). */
@@ -84,6 +96,49 @@ export function snapshotNamesFor(branch: string): string {
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Where startContainer puts the bundle; removed again once the clone is done. */
+export const BUNDLE_CONTAINER_PATH = '/tmp/kunj-origin.bundle';
+const BUNDLE_FETCH_TIMEOUT_MS = 60000;
+
+async function hostGit(args: string[], cwd: string, timeout = 0): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('git', args, { cwd, env: nonInteractiveEnv(), timeout });
+    return stdout.trim();
+  } catch (err) {
+    const stderr = String((err as { stderr?: unknown }).stderr ?? '').trim();
+    throw new Error(`git ${args[0]} failed: ${stderr || message(err)}`);
+  }
+}
+
+/**
+ * Fetch `branch` from origin with the host's credentials and bundle it as the one ref
+ * refs/heads/<branch>, so the snapshot container clones it without a token. `git bundle create`
+ * cannot rename a ref, so the ref is set in a scratch repository that borrows the host's objects.
+ */
+export async function makeBranchBundle(branch: string, cwd: string): Promise<{ path: string; cleanup: () => void }> {
+  const remoteRef = `refs/remotes/origin/${branch}`;
+  // Only the fetch is timed: bundling a large history may take a while
+  await hostGit(['fetch', 'origin', `+refs/heads/${branch}:${remoteRef}`], cwd, BUNDLE_FETCH_TIMEOUT_MS);
+  const sha = await hostGit(['rev-parse', '--verify', `${remoteRef}^{commit}`], cwd);
+  const objects = path.resolve(cwd, await hostGit(['rev-parse', '--git-path', 'objects'], cwd));
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-bundle-'));
+  const cleanup = () => fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    const scratch = path.join(dir, 'scratch.git');
+    await hostGit(['init', '-q', '--bare', scratch], dir);
+    fs.writeFileSync(path.join(scratch, 'objects', 'info', 'alternates'), `${objects}\n`);
+    await hostGit(['--git-dir', scratch, 'update-ref', `refs/heads/${branch}`, sha], dir);
+    const file = path.join(dir, 'origin.bundle');
+    await hostGit(['--git-dir', scratch, 'bundle', 'create', '-q', file, `refs/heads/${branch}`], dir);
+    fs.rmSync(scratch, { recursive: true, force: true });
+    return { path: file, cleanup };
+  } catch (err) {
+    cleanup();
+    throw err;
+  }
 }
 
 export interface SnapshotPlan {
@@ -139,18 +194,24 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
   if (!opts.rebuild && (await backend.imageExists(tag))) {
     const found = (await backend.listImages({ [LABEL.repo]: opts.repo.id })).find(i => i.tag === tag);
     const ref = found?.labels[LABEL.blueprintRef] ?? '';
-    return { tag, hash, ref, base, sizeBytes: found?.size ?? 0, tools: [], reused: true };
+    return { tag, hash, ref, base, sizeBytes: found?.size ?? 0, tools: [], reused: true, viaBundle: false };
+  }
+
+  let bundle: { path: string; cleanup: () => void } | undefined;
+  if (!opts.noBundle) {
+    opts.log(`Fetching ${opts.branch} from origin for the snapshot…`);
+    bundle = await makeBranchBundle(opts.branch, opts.cwd);
+    startOptions.bundle = { hostPath: bundle.path, containerPath: BUNDLE_CONTAINER_PATH };
   }
 
   // A run killed before its cleanup (Ctrl-C during setup) leaves the temporary container and its
   // volumes; a kept workspace volume would skip the clone and snapshot an old checkout
   const names = containerNames(opts.repo.name, opts.repo.id, snapshotNamesFor(opts.branch));
-  await removeContainer(backend, names, { force: true, keepVolumes: false, user: '', kunjVersion: opts.kunjVersion, warn: opts.warn });
-
   let result: StartResult | undefined;
   let sha = '';
   let tools: SnapshotResult['tools'] = [];
   try {
+    await removeContainer(backend, names, { force: true, keepVolumes: false, user: '', kunjVersion: opts.kunjVersion, warn: opts.warn });
     result = await startContainer(backend, startOptions);
     tools = result.blueprint?.tools ?? [];
     const id = result.containerId;
@@ -165,6 +226,7 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
     opts.log('Committing snapshot…');
     await backend.commitContainer(id, tag, labels, changes);
   } finally {
+    bundle?.cleanup();
     // startContainer rolls itself back when it throws; anything after it is undone here
     if (result) {
       await removeContainer(backend, result.names, {
@@ -190,6 +252,7 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
     sizeBytes: images.find(i => i.tag === tag)?.size ?? 0,
     tools,
     reused: false,
+    viaBundle: !!bundle,
   };
 }
 
