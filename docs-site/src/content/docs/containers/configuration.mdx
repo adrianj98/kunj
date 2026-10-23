@@ -146,7 +146,7 @@ Comments and trailing commas are allowed. kunj supports this part of the spec:
 | `forwardPorts` | Published on `127.0.0.1` like `--publish`. |
 | `postCreateCommand` | Runs once per container, in `/workspace`, as the user. If it fails it runs again on the next start. |
 | `postStartCommand` | Runs on every start of the container. |
-| `dockerComposeFile` | Not supported: kunj warns, and services are not started. |
+| `dockerComposeFile`, `service` | The compose file's other services run as [services](../services/) next to the container; `service` (the devcontainer itself) is skipped. |
 
 Anything else (features, `onCreateCommand`, `customizations`, mounts, `runArgs`, ...) is ignored
 with a warning naming the keys.

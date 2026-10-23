@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { PassThrough, Readable } from 'stream';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
-import { LocalDockerBackend, runArgs, parsePsJson, parseInspect, parseImageLs, parseImageInspect } from '../docker';
+import { LocalDockerBackend, composeConfigArgs, runArgs, parsePsJson, parseInspect, parseImageLs, parseImageInspect } from '../docker';
 import { ContainerSpec, ExecTimeoutError } from '../backend';
 
 jest.mock('child_process');
@@ -103,6 +103,18 @@ describe('docker backend', () => {
       expect(args.filter(a => a === '--network')).toHaveLength(1);
       expect(args).not.toContain('--user');
       expect(args.join(' ')).toContain('--cpus 1 --memory 256m --cap-add NET_ADMIN --cap-add NET_RAW kunj/default:1');
+    });
+
+    it('runArgs passes --network-alias after the network, and no --workdir when it is empty', () => {
+      const args = runArgs({ ...baseSpec, aliases: ['postgres'], workdir: '' }, '/tmp/x/env');
+      expect(args.join(' ')).toContain('--network kunj-app-main-abc123-net --network-alias postgres --user dev');
+      expect(args).not.toContain('--workdir');
+    });
+
+    it('composeConfigArgs reads stdin from an empty project directory without interpolation', () => {
+      expect(composeConfigArgs('/tmp/empty')).toEqual([
+        'compose', '--project-directory', '/tmp/empty', '-p', 'kunj-import', '-f', '-', 'config', '--format', 'json', '--no-interpolate',
+      ]);
     });
 
     it('runArgs passes --add-host entries', () => {

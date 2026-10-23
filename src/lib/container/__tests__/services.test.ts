@@ -1,0 +1,322 @@
+import { describe, it, expect } from '@jest/globals';
+import { FakeBackend } from './fake-backend';
+import { ContainerInfo } from '../backend';
+import { LABEL, containerNames, labelsFor } from '../names';
+import { runArgs } from '../docker';
+import {
+  ServiceSpec,
+  describeServices,
+  mergeServices,
+  parseServices,
+  resolveServices,
+  serviceNames,
+  serviceOrder,
+  serviceRemoval,
+  serviceRunSpec,
+  servicesFromCompose,
+  splitWords,
+  startServices,
+  waitHealthy,
+} from '../services';
+import { parseBlueprint } from '../blueprint';
+
+const REPO = 'github.com/acme/app';
+const BRANCH = 'feature/x';
+const names = containerNames('app', REPO, BRANCH);
+
+function svc(name: string, over: Partial<ServiceSpec> = {}): ServiceSpec {
+  return { name, image: `${name}:1`, env: {}, volumes: {}, dependsOn: [], ...over };
+}
+
+describe('parseServices', () => {
+  it('parses every key', () => {
+    expect(
+      parseServices(
+        {
+          postgres: {
+            image: 'postgres:16-alpine',
+            env: { POSTGRES_PASSWORD: 'dev', PORT: 5432 },
+            command: ['postgres', '-c', 'fsync=off'],
+            port: 5432,
+            healthcheck: 'pg_isready -U postgres',
+            volumes: { data: '/var/lib/postgresql/data' },
+          },
+          app: { image: 'app:1', dependsOn: ['postgres'] },
+        },
+        'blueprint.json'
+      )
+    ).toEqual([
+      {
+        name: 'postgres',
+        image: 'postgres:16-alpine',
+        env: { POSTGRES_PASSWORD: 'dev', PORT: '5432' },
+        command: ['postgres', '-c', 'fsync=off'],
+        port: 5432,
+        healthcheck: 'pg_isready -U postgres',
+        volumes: { data: '/var/lib/postgresql/data' },
+        dependsOn: [],
+      },
+      { name: 'app', image: 'app:1', env: {}, volumes: {}, dependsOn: ['postgres'] },
+    ]);
+    expect(parseServices(undefined, 'x')).toEqual([]);
+  });
+
+  it('rejects a bad name, a missing image, a host path volume and unsupported keys', () => {
+    expect(() => parseServices({ Postgres: { image: 'p' } }, 'f')).toThrow('f: services.Postgres: a service name may only use a-z, 0-9 and -');
+    expect(() => parseServices({ 'pg_1': { image: 'p' } }, 'f')).toThrow(/a service name/);
+    expect(() => parseServices({ pg: {} }, 'f')).toThrow('f: services.pg: image is required');
+    expect(() => parseServices({ pg: { image: '  ' } }, 'f')).toThrow(/image is required/);
+    expect(() => parseServices({ pg: { image: 'p', volumes: { '/var/run/docker.sock': '/x' } } }, 'f')).toThrow(/host paths are not allowed/);
+    expect(() => parseServices({ pg: { image: 'p', volumes: { './data': '/x' } } }, 'f')).toThrow(/host paths are not allowed/);
+    expect(() => parseServices({ pg: { image: 'p', volumes: { '~': '/x' } } }, 'f')).toThrow(/host paths are not allowed/);
+    expect(() => parseServices({ pg: { image: 'p', volumes: { data: 'relative' } } }, 'f')).toThrow(/absolute path/);
+    expect(() => parseServices({ pg: { image: 'p', privileged: true } }, 'f')).toThrow('f: services.pg: unsupported keys privileged');
+    expect(() => parseServices({ pg: { image: 'p', port: 70000 } }, 'f')).toThrow(/port/);
+    expect(() => parseServices({ pg: { image: 'p', command: 'postgres' } }, 'f')).toThrow(/command/);
+    expect(() => parseServices({ pg: { image: 'p', env: { 'A-B': 'x' } } }, 'f')).toThrow(/env.A-B/);
+    expect(() => parseServices({ pg: { image: 'p', dependsOn: 'x' } }, 'f')).toThrow(/dependsOn/);
+    expect(() => parseServices(['pg'], 'f')).toThrow(/services must be an object/);
+  });
+
+  it('is part of the blueprint', () => {
+    const bp = parseBlueprint(JSON.stringify({ services: { redis: { image: 'redis:7' } } }), 'bp');
+    expect(bp.services).toEqual([svc('redis', { image: 'redis:7' })]);
+    expect(bp.ignoredKeys).toEqual([]);
+    expect(parseBlueprint('{}', 'bp').services).toBeUndefined();
+    expect(() => parseBlueprint(JSON.stringify({ services: { redis: {} } }), 'bp')).toThrow('bp: services.redis: image is required');
+  });
+});
+
+describe('servicesFromCompose', () => {
+  // As `docker compose config --format json --no-interpolate` prints it
+  const CONFIG = {
+    name: 'kunj-import',
+    services: {
+      app: { build: { context: '/x' }, volumes: [{ type: 'bind', source: '/repo', target: '/workspace' }] },
+      db: {
+        cap_add: ['NET_ADMIN'],
+        command: 'postgres -c "log_statement=all"',
+        depends_on: { redis: { condition: 'service_started' }, app: { condition: 'service_started' } },
+        env_file: [{ path: '/x/.env' }],
+        environment: { HOSTVAR: null, POSTGRES_PASSWORD: '${PW:-dev}', SECRET: '${SECRET}', PLAIN: 'x' },
+        healthcheck: { test: ['CMD-SHELL', 'pg_isready -U postgres'] },
+        image: 'postgres:16-alpine',
+        ports: [{ mode: 'ingress', protocol: 'tcp', published: '5433', target: 5432 }],
+        privileged: true,
+        network_mode: 'host',
+        volumes: [
+          { source: 'pgdata', target: '/var/lib/postgresql/data', type: 'volume', volume: {} },
+          { source: '/x/data', target: '/x', type: 'bind' },
+        ],
+      },
+      redis: { command: ['redis-server'], expose: ['6379'], image: 'redis:7', healthcheck: { test: ['CMD', 'redis-cli', 'ping'] } },
+      built: { build: { context: '/y' } },
+    },
+  };
+
+  it('maps image, environment, command, healthcheck, depends_on, named volumes and the first port', () => {
+    const { services, dropped } = servicesFromCompose(CONFIG, 'app');
+    expect(services).toEqual([
+      {
+        name: 'db',
+        image: 'postgres:16-alpine',
+        env: { POSTGRES_PASSWORD: 'dev', PLAIN: 'x' },
+        command: ['postgres', '-c', 'log_statement=all'],
+        port: 5432,
+        healthcheck: 'pg_isready -U postgres',
+        volumes: { pgdata: '/var/lib/postgresql/data' },
+        dependsOn: ['redis'],
+      },
+      { name: 'redis', image: 'redis:7', env: {}, command: ['redis-server'], port: 6379, healthcheck: 'redis-cli ping', volumes: {}, dependsOn: [] },
+    ]);
+    // One warning lists everything left out
+    expect(dropped).toEqual([
+      'db.privileged',
+      'db.cap_add',
+      'db.network_mode',
+      'db.env_file',
+      'db.environment.HOSTVAR',
+      'db.environment.SECRET',
+      'db.volumes /x (host bind mount)',
+      'db.ports (published)',
+      'built (no image; build is not supported)',
+    ]);
+  });
+
+  it('keeps the devcontainer service when nothing excludes it, without its bind mount', () => {
+    const { services, dropped } = servicesFromCompose({ services: { app: { image: 'node:22', volumes: [{ type: 'bind', source: '/r', target: '/w' }] } } });
+    expect(services.map(s => s.name)).toEqual(['app']);
+    expect(dropped).toEqual(['app.volumes /w (host bind mount)']);
+    expect(servicesFromCompose(null)).toEqual({ services: [], dropped: [] });
+  });
+
+  it('splits a string command like a shell', () => {
+    expect(splitWords(`sh -c 'echo "a b"' x\\ y ""`)).toEqual(['sh', '-c', 'echo "a b"', 'x y', '']);
+  });
+});
+
+describe('mergeServices / serviceOrder', () => {
+  it('the first layer wins by name', () => {
+    const merged = mergeServices([svc('pg', { image: 'blueprint' })], [svc('pg', { image: 'config' }), svc('redis')], [svc('redis', { image: 'compose' }), svc('mq')]);
+    expect(merged.map(s => `${s.name}=${s.image}`)).toEqual(['pg=blueprint', 'redis=redis:1', 'mq=mq:1']);
+  });
+
+  it('orders dependencies first and rejects cycles and unknown names', () => {
+    const order = serviceOrder([svc('app', { dependsOn: ['db', 'cache'] }), svc('cache'), svc('db', { dependsOn: ['cache'] })]);
+    expect(order.map(s => s.name)).toEqual(['cache', 'db', 'app']);
+    expect(() => serviceOrder([svc('a', { dependsOn: ['b'] }), svc('b', { dependsOn: ['a'] })])).toThrow('Services have a dependency cycle: a -> b -> a');
+    expect(() => serviceOrder([svc('a', { dependsOn: ['nope'] })])).toThrow('Service a depends on unknown service nope');
+  });
+
+  it('resolveServices: blueprint, then container.services, then compose', async () => {
+    const b = new FakeBackend();
+    b.composeConfigs.set('compose-text', { services: { dev: { image: 'dev' }, pg: { image: 'compose-pg' }, mq: { image: 'rabbitmq', privileged: true } } });
+    const warnings: string[] = [];
+    const services = await resolveServices(b, {
+      blueprint: [svc('pg', { image: 'bp-pg' })],
+      config: { pg: { image: 'config-pg' }, redis: { image: 'config-redis' } },
+      compose: [{ path: '.devcontainer/compose.yml', text: 'compose-text' }],
+      devcontainerService: 'dev',
+      warn: m => warnings.push(m),
+    });
+    expect(services.map(s => `${s.name}=${s.image}`)).toEqual(['pg=bp-pg', 'redis=config-redis', 'mq=rabbitmq']);
+    expect(warnings).toEqual(['.devcontainer/compose.yml: ignoring mq.privileged']);
+
+    // An unreadable compose file is a warning; an invalid config entry is an error
+    b.composeConfigs.set('bad', new Error('docker compose failed: yaml: line 1'));
+    const w2: string[] = [];
+    expect(await resolveServices(b, { compose: [{ path: 'c.yml', text: 'bad' }], warn: m => w2.push(m) })).toEqual([]);
+    expect(w2[0]).toMatch(/^c\.yml: could not read the compose file/);
+    await expect(resolveServices(b, { config: { pg: {} }, warn: () => {} })).rejects.toThrow('container.services: services.pg: image is required');
+  });
+});
+
+describe('service run spec', () => {
+  // Review focus 1: a branch-named image gets nothing from the host
+  it('has no env but its own, only named volumes, no capabilities, no published ports, and its name as alias', () => {
+    const spec = serviceRunSpec(names, REPO, BRANCH, svc('postgres', {
+      image: 'postgres:16-alpine',
+      env: { POSTGRES_PASSWORD: 'dev' },
+      port: 5432,
+      healthcheck: 'pg_isready',
+      volumes: { data: '/var/lib/postgresql/data' },
+    }), '9.9.9');
+    expect(spec).toEqual({
+      name: `${names.container}-svc-postgres`,
+      image: 'postgres:16-alpine',
+      labels: {
+        [LABEL.repo]: REPO,
+        [LABEL.branch]: BRANCH,
+        [LABEL.role]: 'service',
+        [LABEL.service]: 'postgres',
+        [LABEL.version]: '9.9.9',
+        [LABEL.options]: JSON.stringify({ port: 5432, healthcheck: 'pg_isready', volumes: [`${names.container}-svc-postgres-data`] }),
+      },
+      env: { POSTGRES_PASSWORD: 'dev' },
+      network: names.network,
+      aliases: ['postgres'],
+      workdir: '',
+      volumes: [{ name: `${names.container}-svc-postgres-data`, path: '/var/lib/postgresql/data' }],
+      publish: [],
+      init: false,
+      command: [],
+    });
+    const args = runArgs(spec, '/tmp/env');
+    expect(args).not.toContain('--privileged');
+    expect(args).not.toContain('--cap-add');
+    expect(args).not.toContain('-p');
+    expect(args).not.toContain('--workdir');
+    expect(args.join(' ')).toContain(`--network ${names.network} --network-alias postgres`);
+    expect(args.filter(a => a === '-v')).toHaveLength(1);
+    expect(serviceNames(names, 'redis').volume('d')).toBe(`${names.container}-svc-redis-d`);
+  });
+});
+
+function svcInfo(name: string, over: Partial<ContainerInfo> = {}, record: object = {}): ContainerInfo {
+  return {
+    id: `${name}-id`,
+    name: `${names.container}-svc-${name}`,
+    state: 'running',
+    image: `${name}:1`,
+    createdAt: '',
+    labels: labelsFor(REPO, BRANCH, { [LABEL.role]: 'service', [LABEL.service]: name, [LABEL.options]: JSON.stringify(record) }),
+    ports: [],
+    ...over,
+  };
+}
+
+describe('startServices', () => {
+  it('creates volumes and containers in dependency order and waits for each health check', async () => {
+    const b = new FakeBackend();
+    const created = { containers: [] as string[], volumes: [] as string[] };
+    const result = await startServices(b, names, REPO, BRANCH, [
+      svc('app', { dependsOn: ['db'] }),
+      svc('db', { healthcheck: 'pg_isready', volumes: { data: '/d' } }),
+    ], { warn: () => {}, created });
+    expect(b.callsOf('run').map(a => (a[0] as { name: string }).name)).toEqual([`${names.container}-svc-db`, `${names.container}-svc-app`]);
+    expect(b.methods()).toEqual(['list', 'volumeExists', 'createVolume', 'run', 'exec', 'run']);
+    expect(b.callsOf('exec')[0].slice(0, 2)).toEqual(['id-1', ['sh', '-c', 'pg_isready']]);
+    expect(result).toEqual({ created: [`${names.container}-svc-db`, `${names.container}-svc-app`], volumes: [`${names.container}-svc-db-data`] });
+    expect(created).toEqual({ containers: result.created, volumes: result.volumes });
+    // Volumes are labelled for the branch so cleanup finds them
+    expect(b.callsOf('createVolume')[0][1]).toMatchObject({ [LABEL.repo]: REPO, [LABEL.branch]: BRANCH, [LABEL.role]: 'service' });
+  });
+
+  it('does nothing without services', async () => {
+    const b = new FakeBackend();
+    expect(await startServices(b, names, REPO, BRANCH, [], { warn: () => {} })).toEqual({ created: [], volumes: [] });
+    expect(b.calls).toEqual([]);
+  });
+
+  it('starts a stopped existing service and reuses a running one; recreate replaces them', async () => {
+    const b = new FakeBackend();
+    b.existing = [svcInfo('db', { state: 'exited' }), svcInfo('cache')];
+    await startServices(b, names, REPO, BRANCH, [svc('db'), svc('cache')], { warn: () => {} });
+    expect(b.callsOf('start')).toEqual([['db-id']]);
+    expect(b.methods()).not.toContain('run');
+
+    const r = new FakeBackend();
+    r.existing = [svcInfo('db')];
+    await startServices(r, names, REPO, BRANCH, [svc('db')], { warn: () => {}, recreate: true });
+    expect(r.callsOf('remove')).toEqual([[{ containers: [`${names.container}-svc-db`] }]]);
+    expect(r.callsOf('run')).toHaveLength(1);
+  });
+
+  it('warns and continues when a health check never passes', async () => {
+    const b = new FakeBackend();
+    b.execResults.set('sh -c pg_isready', { exitCode: 1, stdout: '' });
+    const warnings: string[] = [];
+    const started = Date.now();
+    await startServices(b, names, REPO, BRANCH, [svc('db', { healthcheck: 'pg_isready' }), svc('app', { dependsOn: ['db'] })], {
+      warn: m => warnings.push(m),
+      timeoutMs: 60,
+      intervalMs: 10,
+    });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(b.callsOf('exec').length).toBeGreaterThan(1);
+    expect(warnings).toEqual(['Service db did not pass its health check within 0s; continuing']);
+    // The start goes on
+    expect(b.callsOf('run')).toHaveLength(2);
+  });
+
+  it('a service that is not running is a warning, not a wait', async () => {
+    const b = new FakeBackend();
+    b.execErrors.set('sh -c pg_isready', new Error('docker exec failed: container is not running'));
+    const warnings: string[] = [];
+    expect(await waitHealthy(b, 'x', { name: 'db', healthcheck: 'pg_isready' }, { warn: m => warnings.push(m), timeoutMs: 10_000 })).toBe(false);
+    expect(b.callsOf('exec')).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^Service db is not running/);
+  });
+});
+
+describe('describeServices / serviceRemoval', () => {
+  it('reports name, state and port, and removes containers with their recorded volumes', () => {
+    const found = [svcInfo('redis', { state: 'exited' }), svcInfo('db', {}, { port: 5432, volumes: ['v1', 'v2'] })];
+    expect(describeServices(found)).toEqual([
+      { name: 'db', state: 'running', port: 5432 },
+      { name: 'redis', state: 'exited', port: null },
+    ]);
+    expect(serviceRemoval(found, false)).toEqual({ containers: [found[0].name, found[1].name], volumes: ['v1', 'v2'] });
+    expect(serviceRemoval(found, true).volumes).toEqual([]);
+  });
+});

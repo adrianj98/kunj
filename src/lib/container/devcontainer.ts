@@ -9,6 +9,10 @@ export interface DevcontainerSpec {
   postCreateCommand?: string;
   postStartCommand?: string;
   hasComposeFile: boolean;
+  /** dockerComposeFile, relative to the repository root */
+  composeFiles?: string[];
+  /** The compose service the devcontainer itself is; not started as a sidecar */
+  service?: string;
   ignoredKeys: string[];
 }
 
@@ -23,6 +27,7 @@ const SUPPORTED_KEYS = new Set([
   'postCreateCommand',
   'postStartCommand',
   'dockerComposeFile',
+  'service',
 ]);
 
 /** Remove // and block comments outside strings, then trailing commas, and parse. */
@@ -123,7 +128,7 @@ export function parseDevcontainer(text: string, filePath: string): DevcontainerS
     const resolved = path.posix.normalize(path.posix.join(dir, p));
     const absolute = path.posix.isAbsolute(p) || path.win32.isAbsolute(p);
     if (absolute || resolved === '..' || resolved.startsWith('../')) {
-      throw new Error(`${filePath}: build.${key} must stay inside the repository (got "${p}")`);
+      throw new Error(`${filePath}: ${key} must stay inside the repository (got "${p}")`);
     }
     return resolved;
   };
@@ -143,13 +148,21 @@ export function parseDevcontainer(text: string, filePath: string): DevcontainerS
 
   if (isRecord(doc.build) && typeof doc.build.dockerfile === 'string') {
     spec.build = {
-      dockerfile: rel(doc.build.dockerfile, 'dockerfile'),
-      context: rel(typeof doc.build.context === 'string' ? doc.build.context : '.', 'context'),
+      dockerfile: rel(doc.build.dockerfile, 'build.dockerfile'),
+      context: rel(typeof doc.build.context === 'string' ? doc.build.context : '.', 'build.context'),
       args: stringMap(doc.build.args),
     };
   }
 
   spec.remoteUser = validateRemoteUser(doc.remoteUser);
+
+  const compose = typeof doc.dockerComposeFile === 'string' ? [doc.dockerComposeFile] : doc.dockerComposeFile;
+  if (Array.isArray(compose) && compose.every(f => typeof f === 'string')) {
+    spec.composeFiles = compose.map(f => rel(f, 'dockerComposeFile'));
+  } else if (compose !== undefined) {
+    ignored.add('dockerComposeFile');
+  }
+  if (typeof doc.service === 'string') spec.service = doc.service;
 
   for (const key of ['postCreateCommand', 'postStartCommand'] as const) {
     const { value, ignored: skip } = command(doc[key]);

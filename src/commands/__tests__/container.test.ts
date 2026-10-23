@@ -59,6 +59,11 @@ jest.mock('../../lib/container/blueprint', () => ({
 
 jest.mock('../../lib/repos', () => ({ recordRepo: jest.fn() }));
 
+jest.mock('../../lib/container/forward', () => ({
+  ...jest.requireActual('../../lib/container/forward'),
+  forwardPort: jest.fn(async (_b: unknown, _id: string, spec: { container: number }) => ({ hostPort: spec.container + 10000, close: async () => {} })),
+}));
+
 jest.mock('../../lib/hooks', () => {
   const actual = jest.requireActual('../../lib/hooks');
   return {
@@ -175,7 +180,7 @@ describe('ContainerCommand', () => {
   it('rejects unknown actions', async () => {
     await new ContainerCommand().execute('frobnicate', {});
     expect(errors).toEqual([
-      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, forward, list, stop, remove, blueprint",
+      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, forward, logs, list, stop, remove, blueprint",
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -255,8 +260,74 @@ describe('ContainerCommand', () => {
           agent: { running: true },
           workspace: { head: 'a1b2c3d', ahead: 2, dirty: true },
           status: 'ok',
+          services: [],
         },
       ],
+    });
+  });
+
+  describe('services', () => {
+    const NAMES = containerNames('app', REPO_ID, 'feat-x');
+    function service(name: string, state: ContainerInfo['state'], record: object = {}): ContainerInfo {
+      return {
+        id: `${name}-id`,
+        name: `${NAMES.container}-svc-${name}`,
+        state,
+        image: `${name}:1`,
+        createdAt: '',
+        labels: { 'kunj.repo': REPO_ID, 'kunj.branch': 'feat-x', 'kunj.role': 'service', 'kunj.service': name, 'kunj.options': JSON.stringify(record) },
+        ports: [],
+      };
+    }
+
+    it('list json reports each container\'s services with state and port', async () => {
+      backend.existing = [mainContainer('feat-x'), helperContainer('feat-x'), service('redis', 'exited'), service('postgres', 'running', { port: 5432 })];
+      await new ContainerCommand().execute('list', { json: true, status: false });
+      const out = JSON.parse(stdout.join(''));
+      expect(out.containers).toHaveLength(1);
+      expect(out.containers[0].services).toEqual([
+        { name: 'postgres', state: 'running', port: 5432 },
+        { name: 'redis', state: 'exited', port: null },
+      ]);
+    });
+
+    it('logs streams the container or one service', async () => {
+      backend.existing = [mainContainer('feat-x'), service('postgres', 'running')];
+      await new ContainerCommand().execute('logs', 'feat-x', ['postgres'], { follow: true });
+      await new ContainerCommand().execute('logs', 'feat-x', [], {});
+      expect(backend.callsOf('logs')).toEqual([['postgres-id', { follow: true }], ['cid-1', { follow: false }]]);
+      await new ContainerCommand().execute('logs', 'feat-x', ['nope'], {});
+      expect(errors).toEqual(['✗ feat-x has no service nope; services: postgres']);
+    });
+
+    it('forward <service>:<port> tunnels through the service container with the tool it has', async () => {
+      const forward = jest.requireMock('../../lib/container/forward') as { forwardPort: jest.Mock; TUNNEL_PROBE: string };
+      backend.existing = [mainContainer('feat-x'), service('postgres', 'running')];
+      backend.execResults.set(`sh -c ${forward.TUNNEL_PROBE}`, { exitCode: 0, stdout: 'bash\n' });
+      const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      try {
+        const done = new ContainerCommand().execute('forward', 'feat-x', ['postgres:5432'], { json: true });
+        await new Promise(r => setTimeout(r, 20));
+        process.emit('SIGINT');
+        await done;
+      } finally {
+        exit.mockRestore();
+      }
+      expect(forward.forwardPort).toHaveBeenCalledWith(backend, 'postgres-id', { service: 'postgres', container: 5432 }, { hasSocat: false, tool: 'bash' });
+      // No socat probe in the branch container: only the service's port was asked for
+      expect(backend.callsOf('exec').map(c => c[0])).toEqual(['postgres-id']);
+      expect(JSON.parse(stdout.join(''))).toEqual({ forwards: [{ container: 5432, host: 15432, service: 'postgres' }] });
+    });
+
+    it('forward refuses a service image without socat, bash or nc, and a stopped service', async () => {
+      const forward = jest.requireMock('../../lib/container/forward') as { forwardPort: jest.Mock; TUNNEL_PROBE: string };
+      backend.existing = [mainContainer('feat-x'), service('postgres', 'running'), service('redis', 'exited')];
+      backend.execResults.set(`sh -c ${forward.TUNNEL_PROBE}`, { exitCode: 1, stdout: '' });
+      await new ContainerCommand().execute('forward', 'feat-x', ['postgres:5432'], {});
+      await new ContainerCommand().execute('forward', 'feat-x', ['redis:6379'], {});
+      expect(errors[0]).toMatch(/^✗ The postgres image has none of socat, bash or nc/);
+      expect(errors[1]).toBe('✗ Service redis is not running; run kunj ct start feat-x');
+      expect(forward.forwardPort).not.toHaveBeenCalled();
     });
   });
 

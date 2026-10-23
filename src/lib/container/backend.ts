@@ -27,7 +27,10 @@ export interface ContainerSpec {
   labels: Labels;
   env: Record<string, string>;
   network: string;
+  /** --network-alias entries: names other containers on `network` reach this one by */
+  aliases?: string[];
   user?: string;
+  /** '' keeps the image's WORKDIR */
   workdir: string;
   volumes: Array<{ name: string; path: string }>;
   publish: Array<{ container: number; host: number }>;
@@ -94,4 +97,8 @@ export interface ContainerBackend {
   start(id: string): Promise<void>;
   stop(id: string): Promise<void>;
   remove(ids: { containers?: string[]; volumes?: string[]; networks?: string[] }): Promise<void>;
+  /** `docker compose config --format json` of a compose file's text, without interpolating the host's environment. */
+  composeConfig(yamlText: string): Promise<any>;
+  /** A container's output, streamed to our stdout and stderr; with `follow` until it stops or we are interrupted. */
+  logs(id: string, opts?: { follow?: boolean; tail?: number }): Promise<void>;
 }

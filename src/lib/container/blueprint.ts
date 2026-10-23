@@ -7,6 +7,7 @@ import { Labels } from './backend';
 import { parseJsonc } from './devcontainer';
 import { imageRepoName } from './image';
 import { LABEL } from './names';
+import { ServiceSpec, parseServices } from './services';
 
 const execFileAsync = promisify(execFile);
 
@@ -28,10 +29,12 @@ export interface Blueprint {
   maintain: string[];
   lockfiles: string[];
   notes?: string;
+  /** Sidecar services; first in precedence over container.services and the devcontainer's compose file */
+  services?: ServiceSpec[];
   ignoredKeys: string[];
 }
 
-const KNOWN_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes']);
+const KNOWN_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes', 'services']);
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every(x => typeof x === 'string');
@@ -74,12 +77,15 @@ export function parseBlueprint(text: string, source: string): Blueprint {
   }
   if (obj.notes !== undefined && typeof obj.notes !== 'string') throw new Error(`${source}: notes must be a string`);
 
+  const services = parseServices(obj.services, source);
+
   return {
     tools,
     setup: commandList(obj, 'setup', source),
     maintain: commandList(obj, 'maintain', source),
     lockfiles,
     notes: obj.notes as string | undefined,
+    ...(services.length ? { services } : {}),
     ignoredKeys: Object.keys(obj).filter(k => !KNOWN_KEYS.has(k)).sort(),
   };
 }

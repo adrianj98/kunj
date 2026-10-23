@@ -1260,3 +1260,165 @@ describe('baseImageTag', () => {
     await expect(baseImageTag(options({ config: { container: { image: 'my/img:1' } } as KunjConfig }))).resolves.toBe('my/img:1');
   });
 });
+
+describe('services', () => {
+  const PG = `${names.container}-svc-postgres`;
+  const PG_DATA = `${PG}-data`;
+  const SERVICES = { postgres: { image: 'postgres:16-alpine', env: { POSTGRES_PASSWORD: 'dev' }, healthcheck: 'pg_isready', port: 5432, volumes: { data: '/var/lib/postgresql/data' } } };
+
+  function svcOptions(over: Partial<StartOptions> = {}): StartOptions {
+    return options({ config: { container: { services: SERVICES } } as unknown as KunjConfig, ...over });
+  }
+
+  function svcInfo(state: ContainerInfo['state']): ContainerInfo {
+    return info({
+      id: 'pg-id',
+      name: PG,
+      state,
+      image: 'postgres:16-alpine',
+      labels: labelsFor(REPO.id, BRANCH, {
+        [LABEL.role]: 'service',
+        [LABEL.service]: 'postgres',
+        [LABEL.options]: JSON.stringify({ port: 5432, healthcheck: 'pg_isready', volumes: [PG_DATA] }),
+      }),
+    });
+  }
+
+  it('start: services run (and pass their health check) before the branch container, without host env', async () => {
+    const b = backend();
+    const result = await startContainer(b, svcOptions());
+    const specs = runSpecs(b);
+    expect(specs.map(s => s.name)).toEqual([PG, names.container, names.helper]);
+    const pg = specs[0];
+    expect(pg.env).toEqual({ POSTGRES_PASSWORD: 'dev' });
+    expect(pg.network).toBe(names.network);
+    expect(pg.aliases).toEqual(['postgres']);
+    expect(pg.volumes).toEqual([{ name: PG_DATA, path: '/var/lib/postgresql/data' }]);
+    expect(pg.capabilities).toBeUndefined();
+    expect(pg.publish).toEqual([]);
+    const m = b.methods();
+    expect(m.indexOf('createNetwork')).toBeLessThan(m.indexOf('run'));
+    // The health check ran before the branch container existed
+    const calls = b.calls.map(c => (c.method === 'exec' ? `exec ${(c.args[1] as string[]).join(' ')}` : c.method));
+    expect(calls.indexOf('exec sh -c pg_isready')).toBeLessThan(calls.lastIndexOf('run') - 1);
+    expect(result.services).toEqual(['postgres']);
+  });
+
+  it('a start without services has no services key and lists none', async () => {
+    const b = backend();
+    const result = await startContainer(b, options());
+    expect(result.services).toBeUndefined();
+    expect(b.methods()).not.toContain('composeConfig');
+  });
+
+  it('an invalid service definition fails the start before anything is created', async () => {
+    const b = backend();
+    const bad = options({ config: { container: { services: { pg: { image: 'p', volumes: { '/etc': '/x' } } } } } as unknown as KunjConfig });
+    await expect(startContainer(b, bad)).rejects.toMatchObject({ code: 'setup', message: expect.stringMatching(/host paths are not allowed/) });
+    expect(b.methods()).not.toContain('createNetwork');
+  });
+
+  it('rollback removes the service containers and volumes this run created', async () => {
+    const b = backend();
+    const real = b.exec.bind(b);
+    b.exec = async (id: string, cmd: string[], io?: ExecIO) => {
+      const r = await real(id, cmd, io);
+      return cmd[0] === 'sh' && cmd[1] === '-c' && cmd[2].startsWith('set -e') ? { exitCode: 1, stdout: '' } : r;
+    };
+    await expect(startContainer(b, svcOptions())).rejects.toMatchObject({ code: 'seed' });
+    expect(b.callsOf('remove')).toEqual([[{
+      containers: [names.helper, names.container, PG],
+      volumes: [names.workspaceVolume, names.homeVolume, PG_DATA],
+      networks: [names.network],
+    }]]);
+  });
+
+  it('rollback when a service fails to run removes what was created so far', async () => {
+    const b = backend();
+    b.failOn = 'run';
+    await expect(startContainer(b, svcOptions())).rejects.toMatchObject({ code: 'docker' });
+    expect(b.callsOf('remove')).toEqual([[{
+      containers: [PG],
+      volumes: [names.workspaceVolume, names.homeVolume, PG_DATA],
+      networks: [names.network],
+    }]]);
+  });
+
+  it('resume starts stopped services before the branch container', async () => {
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.existing = [info({ state: 'exited' }), svcInfo('exited')];
+    const result = await startContainer(b, svcOptions());
+    expect(b.callsOf('start')).toEqual([['pg-id'], ['main-id']]);
+    expect(execCmds(b)[0]).toBe('sh -c pg_isready');
+    expect(result.services).toEqual(['postgres']);
+
+    // A running branch container with a stopped service: only the service is started
+    const running = backend();
+    running.existing = [
+      info({}),
+      info({ id: 'helper-id', name: names.helper, labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'helper' }) }),
+      svcInfo('exited'),
+    ];
+    await startContainer(running, svcOptions());
+    expect(running.callsOf('start')).toEqual([['pg-id']]);
+  });
+
+  it('stop stops the services after the branch container', async () => {
+    const b = new FakeBackend();
+    b.existing = [svcInfo('running')];
+    await stopContainer(b, names);
+    expect(b.callsOf('stop')).toEqual([[names.helper], [names.container], ['pg-id']]);
+  });
+
+  it('remove deletes the service containers and their volumes (kept with --keep-volumes)', async () => {
+    const b = new FakeBackend();
+    b.existing = [svcInfo('running')];
+    await removeContainer(b, names, { force: true, keepVolumes: false, user: 'dev', kunjVersion: VERSION });
+    expect(b.callsOf('remove')).toEqual([[{
+      containers: [names.helper, names.container, PG],
+      volumes: [names.workspaceVolume, names.homeVolume, PG_DATA],
+      networks: [names.network],
+    }]]);
+
+    const kept = new FakeBackend();
+    kept.existing = [svcInfo('running')];
+    await removeContainer(kept, names, { force: true, keepVolumes: true, user: 'dev', kunjVersion: VERSION });
+    expect(kept.callsOf('remove')[0][0]).toEqual({ containers: [names.helper, names.container, PG], volumes: [], networks: [names.network] });
+  });
+
+  it("imports the devcontainer's compose services, without its own service", async () => {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: tmp, env: GIT_ENV });
+    git('init', '-q');
+    fs.mkdirSync(path.join(tmp, '.devcontainer'));
+    fs.writeFileSync(path.join(tmp, '.devcontainer', 'devcontainer.json'), JSON.stringify({ dockerComposeFile: 'compose.yml', service: 'dev', remoteUser: 'node' }));
+    fs.writeFileSync(path.join(tmp, '.devcontainer', 'compose.yml'), 'services: {}\n');
+    git('add', '.');
+    git('commit', '-qm', 'dc');
+    git('update-ref', `refs/remotes/origin/${BRANCH}`, 'HEAD');
+
+    const b = backend();
+    b.composeConfigs.set('services: {}\n', { services: { dev: { image: 'node:22' }, redis: { image: 'redis:7', ports: [{ target: 6379, published: '6379' }] } } });
+    const warnings: string[] = [];
+    await startContainer(b, options({ warn: m => warnings.push(m) }));
+    expect(runSpecs(b).map(s => s.name)).toEqual([`${names.container}-svc-redis`, names.container, names.helper]);
+    expect(warnings).toContain('.devcontainer/compose.yml: ignoring redis.ports (published)');
+    expect(warnings.some(w => /dockerComposeFile is not supported/.test(w))).toBe(false);
+  });
+});
+
+describe('services in a snapshot build', () => {
+  it('start the blueprint services under the snapshot names before setup runs', async () => {
+    const text = JSON.stringify({ setup: ['npm run migrate'], services: { postgres: { image: 'postgres:16-alpine', healthcheck: 'pg_isready' } } });
+    const blueprint: ResolvedBlueprint = { blueprint: parseBlueprint(text, 'bp'), source: 'host', path: 'bp', text };
+    const b = backend();
+    await startContainer(b, options({ blueprint, presets: [], namesFor: 'main:snapshot', noSnapshot: true }));
+    const snapNames = containerNames(REPO.name, REPO.id, 'main:snapshot');
+    const svcRun = b.callsOf('run').map(a => a[0] as ContainerSpec).find(s => s.name === `${snapNames.container}-svc-postgres`);
+    expect(svcRun?.labels[LABEL.branch]).toBe('main:snapshot');
+    expect(svcRun?.network).toBe(snapNames.network);
+    const calls = b.calls.map(c => (c.method === 'exec' ? (c.args[1] as string[]).join(' ') : c.method));
+    expect(calls.indexOf('sh -c pg_isready')).toBeGreaterThan(-1);
+    expect(calls.indexOf('sh -c pg_isready')).toBeLessThan(calls.indexOf('sh -lc npm run migrate'));
+  });
+});

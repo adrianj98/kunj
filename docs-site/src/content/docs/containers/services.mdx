@@ -1,0 +1,89 @@
+---
+title: Services
+description: Give each branch container its own Postgres, Redis or broker, reachable by name and gone with the branch.
+sidebar:
+  order: 6
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A branch that needs a database gets its own. Each **service** runs in a container of its own, next
+to the branch container on the branch's private network, and the branch container reaches it by
+name: Postgres is `postgres:5432`. Another branch has its own network and cannot see it.
+
+## Declaring services
+
+In the [blueprint](../blueprints/) (`.kunj/blueprint.json`), or in the `container.services` setting
+with the same shape:
+
+```jsonc
+{
+  "services": {
+    "postgres": {
+      "image": "postgres:16-alpine",
+      "env": { "POSTGRES_PASSWORD": "dev" },
+      "port": 5432,
+      "healthcheck": "pg_isready -h 127.0.0.1 -U postgres",
+      "volumes": { "data": "/var/lib/postgresql/data" }
+    },
+    "redis": { "image": "redis:7", "port": 6379 },
+    "worker": { "image": "ghcr.io/acme/worker:1", "command": ["run", "--dev"], "dependsOn": ["postgres", "redis"] }
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `image` | Required. The image to run. |
+| `env` | Its environment: only these variables, nothing from your shell or `container.env`. |
+| `command` | Arguments that replace the image's command (an array of strings). |
+| `port` | The port it listens on; shown by `kunj ct list`. |
+| `healthcheck` | A command run with `sh -c` inside the service; the start waits until it succeeds. |
+| `volumes` | `{ "name": "/path/in/container" }`. Named volumes only, one per branch; host paths are rejected. |
+| `dependsOn` | Services started (and healthy) before this one. A cycle is an error. |
+
+Names use `a-z`, `0-9` and `-`. When the same name is declared in several places the first wins:
+the blueprint, then `container.services`, then the devcontainer's compose file.
+
+## From a devcontainer compose file
+
+When `.devcontainer/devcontainer.json` has a `dockerComposeFile`, kunj starts the services in it
+except the devcontainer's own `service`. It reads the file with `docker compose config` and takes
+`image`, `environment`, `command`, `healthcheck`, `depends_on`, named volumes and the first port of
+`ports` or `expose`. It leaves out bind mounts, `build`, `privileged`, `cap_add`, `network_mode`,
+`env_file`, published ports and variables that would come from your shell, and prints one warning
+listing them. `${VAR:-default}` becomes the default; nothing is read from your environment.
+
+## Lifecycle
+
+- **start** runs the services before the branch container, in `dependsOn` order, and waits for each
+  health check (every 2 seconds, up to 2 minutes; after that it warns and carries on). They are up
+  before `setup` or `postCreateCommand` runs.
+- **Snapshots** start the services the same way, so a blueprint's `setup` can run migrations. Their
+  data is never in the snapshot, and they are removed with the temporary container.
+- **stop** stops them; **start** on a stopped container starts them again.
+- **remove** deletes them and their volumes (`--keep-volumes` keeps the volumes). The check for
+  unpushed work is about the branch's clone only.
+- A start that fails removes the services and volumes it created.
+
+```bash
+kunj ct list                               # each container's services and their state
+kunj ct logs feature/search postgres       # a service's output; --follow keeps streaming
+kunj ct forward feature/search postgres:5432   # localhost:5432 → the service
+```
+
+`kunj ct list --json` gives each container a `services` array of `{ name, state, port }`.
+
+## What a service gets
+
+The image of a service comes from the branch, so it is treated like the branch's own code:
+
+- no variables from your shell or `container.env`, only its declared `env`;
+- no bind mounts, only its named volumes;
+- no added capabilities, no `--privileged`, no published ports.
+
+<Aside>
+Services are not behind the branch container's firewall: nothing of yours is in them, and only
+containers on the same branch's network can reach them. They can reach the internet, for example to
+download extensions.
+</Aside>

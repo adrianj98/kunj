@@ -178,6 +178,15 @@ describe('snapshotBlueprint', () => {
     expect(mocked.baseImageTag.mock.calls[0][0]).toBe(o);
   });
 
+  it('keeps container.services, so the temporary container starts them before setup', async () => {
+    const b = backendWith();
+    const services = { postgres: { image: 'postgres:16-alpine' } };
+    await snapshotBlueprint(b, options({ config: { container: { services } } as unknown as KunjConfig }));
+    expect(startOptionsPassed().config.container?.services).toEqual(services);
+    // The temporary objects, services included, are removed by removeContainer with the snapshot's names
+    expect(mocked.removeContainer.mock.calls.every(c => c[1].container === NAMES.container)).toBe(true);
+  });
+
   it('removes a leftover temporary container and its volumes before starting', async () => {
     const b = backendWith();
     b.existing.push({

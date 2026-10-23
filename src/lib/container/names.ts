@@ -50,7 +50,8 @@ export const LABEL = {
   base: 'kunj.base',
   version: 'kunj.version',
   options: 'kunj.options',
-  role: 'kunj.role', // 'main' | 'helper'
+  role: 'kunj.role', // 'main' | 'helper' | 'service'
+  service: 'kunj.service', // a service container's name in its blueprint, config or compose file
   blueprintHash: 'kunj.blueprint.hash',
   blueprintRef: 'kunj.blueprint.ref',
   blueprintBase: 'kunj.blueprint.base',

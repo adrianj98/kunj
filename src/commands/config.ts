@@ -315,6 +315,8 @@ export class ConfigCommand extends BaseCommand {
       if (typeof val === "boolean") return formatBoolValue(val);
       if (typeof val === "string") return chalk.cyan(val);
       if (Array.isArray(val)) return chalk.cyan(val.join(', '));
+      // Settings edited by hand in the config file, e.g. container.services
+      if (val && typeof val === "object") return chalk.cyan(JSON.stringify(val));
       return chalk.yellow(val);
     };
 

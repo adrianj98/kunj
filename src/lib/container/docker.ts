@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { Readable } from 'stream';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -39,9 +40,10 @@ export function runArgs(spec: ContainerSpec, envFile: string): string[] {
   args.push('--env-file', envFile);
   // A helper shares the main container's network namespace instead of joining the network
   args.push('--network', spec.networkOf ? `container:${spec.networkOf}` : spec.network);
+  for (const a of spec.aliases ?? []) args.push('--network-alias', a);
   for (const h of spec.extraHosts ?? []) args.push('--add-host', h);
   if (spec.user) args.push('--user', spec.user);
-  args.push('--workdir', spec.workdir);
+  if (spec.workdir) args.push('--workdir', spec.workdir);
   for (const v of spec.volumes) args.push('-v', `${v.name}:${v.path}`);
   // Loopback only: a published port must not be reachable from the LAN
   for (const p of spec.publish) args.push('-p', `127.0.0.1:${p.host}:${p.container}`);
@@ -147,6 +149,22 @@ function subcommand(args: string[]): string {
 // Local docker CLI backend
 // ============================================================================
 
+interface SpawnOpts {
+  input?: NodeJS.ReadableStream;
+  echo?: boolean;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+// What `docker compose config` may see of our environment: enough to find the daemon, nothing a
+// compose file could read into a service (COMPOSE_* would also change which files are read)
+const COMPOSE_ENV_KEYS = ['PATH', 'HOME', 'DOCKER_HOST', 'DOCKER_CONFIG', 'DOCKER_CONTEXT', 'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY'];
+
+/** `docker compose config` arguments: stdin as the file, an empty project directory (no .env), no interpolation. */
+export function composeConfigArgs(projectDir: string): string[] {
+  return ['compose', '--project-directory', projectDir, '-p', 'kunj-import', '-f', '-', 'config', '--format', 'json', '--no-interpolate'];
+}
+
 export class LocalDockerBackend implements ContainerBackend {
   readonly features = { localPorts: true, editorAttach: true, dockerInDocker: [] as Array<'sysbox' | 'privileged'> };
   private readonly context?: string;
@@ -162,9 +180,13 @@ export class LocalDockerBackend implements ContainerBackend {
   }
 
   /** Run docker to completion. `echo` sends both output streams to our stderr (keeps --json stdout clean). */
-  private spawnDocker(args: string[], opts: { input?: NodeJS.ReadableStream; echo?: boolean } = {}): Promise<Output> {
+  private spawnDocker(args: string[], opts: SpawnOpts = {}): Promise<Output> {
     return new Promise((resolve, reject) => {
-      const child = spawn(this.dockerPath, this.argv(args), { stdio: [opts.input ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+      const child = spawn(this.dockerPath, this.argv(args), {
+        stdio: [opts.input ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+        ...(opts.cwd ? { cwd: opts.cwd } : {}),
+        ...(opts.env ? { env: opts.env } : {}),
+      });
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
       child.stdout!.on('data', (d: Buffer) => (opts.echo ? process.stderr.write(d) : stdout.push(d)));
@@ -187,7 +209,7 @@ export class LocalDockerBackend implements ContainerBackend {
     });
   }
 
-  private async checked(args: string[], opts: { input?: NodeJS.ReadableStream; echo?: boolean } = {}): Promise<Output> {
+  private async checked(args: string[], opts: SpawnOpts = {}): Promise<Output> {
     const out = await this.spawnDocker(args, opts);
     if (out.code !== 0) {
       const line = args[0] === 'build' ? buildErrorLine(out) : firstLine(out);
@@ -366,6 +388,30 @@ export class LocalDockerBackend implements ContainerBackend {
 
   async stop(id: string): Promise<void> {
     await this.checked(['stop', id]);
+  }
+
+  async composeConfig(yamlText: string): Promise<any> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-compose-'));
+    try {
+      const env: NodeJS.ProcessEnv = {};
+      for (const k of COMPOSE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k];
+      const out = await this.checked(composeConfigArgs(dir), { input: Readable.from([yamlText]), cwd: dir, env });
+      return JSON.parse(out.stdout);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  logs(id: string, opts: { follow?: boolean; tail?: number } = {}): Promise<void> {
+    const args = ['logs'];
+    if (opts.follow) args.push('--follow');
+    if (opts.tail !== undefined) args.push('--tail', String(opts.tail));
+    args.push(id);
+    return new Promise((resolve, reject) => {
+      const child = spawn(this.dockerPath, this.argv(args), { stdio: ['ignore', 'inherit', 'inherit'] });
+      child.on('error', reject);
+      child.on('close', (code: number | null) => (code === 0 || code === null ? resolve() : reject(new Error(`docker logs failed: exit code ${code}`))));
+    });
   }
 
   // Idempotent: an object that is already gone is not a failure

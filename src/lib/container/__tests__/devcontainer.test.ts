@@ -96,6 +96,14 @@ describe('devcontainer', () => {
       expect(empty.hasComposeFile).toBe(false);
     });
 
+    it('resolves dockerComposeFile next to the file and keeps service', () => {
+      const spec = parseDevcontainer('{"dockerComposeFile":["compose.yml","../docker-compose.dev.yml"],"service":"app"}', FILE);
+      expect(spec.composeFiles).toEqual(['.devcontainer/compose.yml', 'docker-compose.dev.yml']);
+      expect(spec.service).toBe('app');
+      expect(spec.ignoredKeys).toEqual([]);
+      expect(() => parseDevcontainer('{"dockerComposeFile":"../../x.yml"}', FILE)).toThrow(/dockerComposeFile must stay inside the repository/);
+    });
+
     it('rejects a non-object document', () => {
       expect(() => parseDevcontainer('[1]', FILE)).toThrow(`${FILE}: expected a JSON object`);
     });

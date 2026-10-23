@@ -13,6 +13,7 @@ import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devco
 import { Blueprint, ResolvedBlueprint, SEED_DIR, computeBlueprintHash, resolveBlueprint } from './blueprint';
 import { Preset, orderTools, resolvePresets } from './presets';
 import { FoundSnapshot, findSnapshot, maintain, provisionNew } from './provision';
+import { ComposeSource, ServiceSpec, findServices, resolveServices, resumeServices, serviceRemoval, servicesOf, startServices, stopServices } from './services';
 import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
 import {
   CLAUDE_AUTH_KEYS,
@@ -104,6 +105,8 @@ export interface StartOptions {
   /** A git bundle of `branch` the host made (a snapshot): streamed in and cloned instead of origin,
    * so the container needs no token; origin is not checked for the branch or unpushed commits */
   bundle?: { hostPath: string; containerPath: string };
+  /** Service health checks: how long to wait for each, and how often to ask (tests) */
+  serviceHealth?: { timeoutMs?: number; intervalMs?: number };
 }
 
 export interface StartResult {
@@ -131,6 +134,8 @@ export interface StartResult {
     setupRan: boolean;
     maintainRan: boolean;
   };
+  /** The branch's sidecar services, in start order; only when it has any */
+  services?: string[];
 }
 
 function message(err: unknown): string {
@@ -171,18 +176,33 @@ async function readDevcontainer(ref: string, cwd: string): Promise<ResolveDevcon
       continue;
     }
     const spec = parseDevcontainer(text, p);
-    if (!spec.build) return { spec, treeId: '', archive: emptyArchive, dockerfileText: '' };
+    const compose: ComposeSource[] = [];
+    for (const file of spec.composeFiles ?? []) {
+      try {
+        compose.push({ path: file, text: await gitOut(['show', `${ref}:${file}`], cwd) });
+      } catch {
+        compose.push({ path: file, text: '' });
+      }
+    }
+    if (!spec.build) return { spec, treeId: '', archive: emptyArchive, dockerfileText: '', compose };
     const context = spec.build.context === '.' ? '' : spec.build.context;
     const treeId = (await gitOut(['rev-parse', `${ref}:${context}`], cwd)).trim();
     const dockerfileText = await gitOut(['show', `${ref}:${spec.build.dockerfile}`], cwd);
     // The subtree itself, so archive paths are relative to the build context
     const archive = () => spawn('git', ['archive', '--format=tar', `${ref}:${context}`], { cwd, stdio: ['ignore', 'pipe', 'ignore'] }).stdout;
-    return { spec, treeId, archive, dockerfileText };
+    return { spec, treeId, archive, dockerfileText, compose };
   }
   return null;
 }
 
-type ResolveDevcontainer = { spec: DevcontainerSpec; treeId: string; archive: () => NodeJS.ReadableStream; dockerfileText: string };
+type ResolveDevcontainer = {
+  spec: DevcontainerSpec;
+  treeId: string;
+  archive: () => NodeJS.ReadableStream;
+  dockerfileText: string;
+  /** The compose files named by dockerComposeFile at the same ref ('' when missing) */
+  compose: ComposeSource[];
+};
 
 const emptyArchive = () => tarEntries([]);
 
@@ -210,7 +230,7 @@ interface BlueprintPlan {
 async function baseSource(
   options: StartOptions,
   warn: (m: string) => void
-): Promise<{ input: Parameters<typeof resolveImage>[0]; base: ImageSource }> {
+): Promise<{ input: Parameters<typeof resolveImage>[0]; base: ImageSource; devcontainer: ResolveDevcontainer | null }> {
   const setting = options.imageOverride || options.config.container?.image || '';
   let devcontainer: ResolveDevcontainer | null = null;
   if (!setting) {
@@ -227,12 +247,12 @@ async function baseSource(
     if (devcontainer?.spec.ignoredKeys.length) {
       warn(`devcontainer.json: ignoring unsupported keys: ${devcontainer.spec.ignoredKeys.join(', ')}`);
     }
-    if (devcontainer?.spec.hasComposeFile) {
-      warn('devcontainer.json: dockerComposeFile is not supported; services are not started');
+    for (const missing of devcontainer?.compose.filter(c => !c.text) ?? []) {
+      warn(`devcontainer.json: ${missing.path} is not in ${ref}; its services are not started`);
     }
   }
   const input = { setting, devcontainer, repoName: options.repo.name, kunjVersion: options.kunjVersion };
-  return { input, base: resolveImage(input) };
+  return { input, base: resolveImage(input), devcontainer };
 }
 
 /** The image a start would use without a blueprint snapshot; the snapshot hashes the same tag. */
@@ -244,10 +264,19 @@ async function resolveSource(
   backend: ContainerBackend,
   options: StartOptions,
   warn: (m: string) => void
-): Promise<{ source: ImageSource; plan: BlueprintPlan | null }> {
-  const { input, base } = await baseSource(options, warn);
+): Promise<{ source: ImageSource; plan: BlueprintPlan | null; services: ServiceSpec[] }> {
+  const { input, base, devcontainer } = await baseSource(options, warn);
   const resolved = await step('setup', () => loadBlueprint(options));
-  if (!resolved) return { source: base, plan: null };
+  // Checked before anything is created, so a bad definition fails the start cleanly
+  const services = await step('setup', () =>
+    resolveServices(backend, {
+      blueprint: resolved?.blueprint.services,
+      config: options.config.container?.services,
+      compose: devcontainer?.compose.filter(c => c.text),
+      devcontainerService: devcontainer?.spec.service,
+      warn,
+    }));
+  if (!resolved) return { source: base, plan: null, services };
   const bp = resolved.blueprint;
   const presets = options.presets ?? (await step('setup', () =>
     resolvePresets(orderTools(bp.tools), { repoRoot: options.repo.root, globalKunjDir: getGlobalKunjDir() })));
@@ -267,7 +296,7 @@ async function resolveSource(
     else if (lookup && !snapshot) warn(noSnapshotHint(bp));
   }
   const source = snapshot ? resolveImage({ ...input, snapshot }) : base;
-  return { source, plan: { resolved, presets, hash, snapshot } };
+  return { source, plan: { resolved, presets, hash, snapshot }, services };
 }
 
 export const BUILD_NETWORK_WARNING = 'Building a Dockerfile changed on this branch; image builds run with full network access';
@@ -724,7 +753,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   }
 
   // 4. Images
-  const { source, plan } = await step('image', () => resolveSource(backend, options, warn));
+  const { source, plan, services } = await step('image', () => resolveSource(backend, options, warn));
   await step('image', () => warnOnChangedBuild(backend, options, source));
   const image = await step('image', async () => {
     if (options.rebuild && source.build) await backend.buildImage(source.tag, source.build.contextTar(), {
@@ -770,6 +799,17 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       await step('docker', () => backend.createVolume(v.name, objLabels));
       created.volumes.push(v.name);
     }
+
+    // Services before the branch container, so they are up (and healthy) before seed and setup.
+    // --rebuild recreates them on their kept volumes, as it does the branch container.
+    await step('docker', () =>
+      startServices(backend, names, repo.id, labelBranch, services, {
+        warn,
+        kunjVersion: options.kunjVersion,
+        recreate: options.rebuild,
+        created,
+        ...options.serviceHealth,
+      }));
 
     // 6. Main container: all capabilities dropped except MAIN_CAPABILITIES, and the image's ENTRYPOINT (branch-controlled for a
     // devcontainer) replaced by sleep, so nothing of the image's runs before the firewall is up
@@ -865,7 +905,19 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     // 11. Devcontainer commands
     await step('docker', () => postCommands(backend, id, user, source.spec, options));
 
-    return { names, containerId: id, image, user: runAs, created: true, seeded, ...files, publish, firewall, ...(blueprint ? { blueprint } : {}) };
+    return {
+      names,
+      containerId: id,
+      image,
+      user: runAs,
+      created: true,
+      seeded,
+      ...files,
+      publish,
+      firewall,
+      ...(blueprint ? { blueprint } : {}),
+      ...(services.length ? { services: services.map(s => s.name) } : {}),
+    };
   } catch (err) {
     if (options.keepOnError && mainRun && !ready) {
       // Kept for debugging, but never left running without its firewall
@@ -919,6 +971,7 @@ async function resume(
   const main = found.find(c => c.name === names.container);
   if (!main) throw new StartError(`Container ${names.container} disappeared while starting`, 'docker');
   const helper: ContainerInfo | undefined = found.find(c => c.name === names.helper);
+  const services = servicesOf(found, names.container);
   const firewall = firewallMode(options.config.container);
   const recorded = parseOptionsLabel(main.labels);
   const result: StartResult = {
@@ -932,7 +985,10 @@ async function resume(
     copiedFiles: [],
     publish: main.ports.length ? main.ports : recorded.publish ?? [],
     firewall,
+    ...(services.length ? { services: services.map(c => c.labels[LABEL.service] ?? c.name) } : {}),
   };
+  // Before the branch container, as on a new start; a service that will not start fails the start
+  await step('docker', () => resumeServices(backend, services, { warn, ...options.serviceHealth }));
   if (main.state === 'running' && helper?.state === 'running') return result;
 
   const state: UpState = { startedMain: false, helperCreated: false };
@@ -986,7 +1042,7 @@ async function resume(
 // ---------------------------------------------------------------------------------------------
 // stop, remove, status
 
-export async function stopContainer(backend: ContainerBackend, names: ContainerNames): Promise<void> {
+export async function stopContainer(backend: ContainerBackend, names: ContainerNames, warn?: (m: string) => void): Promise<void> {
   // The firewall rules live in the container's network namespace, so the helper can go first
   try {
     await backend.stop(names.helper);
@@ -994,6 +1050,7 @@ export async function stopContainer(backend: ContainerBackend, names: ContainerN
     // no helper (or already stopped)
   }
   await backend.stop(names.container);
+  await stopServices(backend, names, warn);
 }
 
 // The workspace's .git/config is the agent's: git must not run its fsmonitor or hooks for kunj
@@ -1084,9 +1141,11 @@ export async function removeContainer(
     const problems = describeGuard(guard);
     if (problems.length) throw new Error(`Container has unpushed work: ${problems.join('; ')}; use --force`);
   }
+  // Services and their data go with the branch; the guard above is about the branch's work only
+  const services = serviceRemoval(await findServices(backend, names), opts.keepVolumes);
   await backend.remove({
-    containers: [names.helper, names.container],
-    volumes: opts.keepVolumes ? [] : [names.workspaceVolume, names.homeVolume],
+    containers: [names.helper, names.container, ...services.containers],
+    volumes: opts.keepVolumes ? [] : [names.workspaceVolume, names.homeVolume, ...services.volumes],
     networks: [names.network],
   });
   return guard;

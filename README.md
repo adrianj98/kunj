@@ -158,6 +158,7 @@ kunj ct attach feature/x               # come back to it later
 kunj ct shell feature/x                # login shell in /workspace
 kunj ct exec feature/x -- npm test     # run one command
 kunj ct forward feature/x 3000         # localhost:3000 -> container port 3000
+kunj ct logs feature/x postgres        # a sidecar service's output (--follow to keep streaming)
 git fetch origin && git switch feature/x   # the agent's pushes arrive via origin
 kunj ct list                           # containers of this repository (-a for all)
 kunj ct stop feature/x                 # keeps the workspace
@@ -184,6 +185,7 @@ Settings (`kunj config`):
 | `container.dockerContext` | none | Docker context for every call |
 | `container.cpus`, `container.memory` | none | Limits passed to `docker run` (e.g. `2`, `4g`) |
 | `container.publish` | none | Ports always published at start |
+| `container.services` | none | Sidecar services by name (see [Services](#services)) |
 
 Network: by default the internet is open but the Docker host, the LAN and private ranges are
 blocked, except origin itself on its own port (so a self-hosted origin on the LAN still works). Set `container.network.allow` to restrict egress to a list of domains (plus GitHub, npm
@@ -229,6 +231,58 @@ Security notes:
   cannot half-close a connection, so protocols that wait for the client to finish sending may hang.
 - A devcontainer's build context is taken with `git archive`, which leaves out submodule contents
   and Git LFS files (only their pointers are included).
+
+#### Services
+
+A branch that needs a database or a broker gets its own, next to its container: one container per
+service on the branch's network, reachable from the branch container by the service's name.
+
+```jsonc
+// .kunj/blueprint.json, or the container.services setting (same shape)
+{
+  "services": {
+    "postgres": {
+      "image": "postgres:16-alpine",
+      "env": { "POSTGRES_PASSWORD": "dev" },
+      "port": 5432,
+      "healthcheck": "pg_isready -h 127.0.0.1 -U postgres",   // run with sh -c inside the service
+      "volumes": { "data": "/var/lib/postgresql/data" }       // named volumes only, one per branch
+    },
+    "api-mock": { "image": "wiremock/wiremock:3", "command": ["--port", "8080"], "dependsOn": ["postgres"] }
+  }
+}
+```
+
+From the branch container the database is `postgres:5432`. Services are read from the blueprint's
+`services`, then `container.services`, then the services of the devcontainer's `dockerComposeFile`
+(all but the devcontainer's own `service`); the first to name a service wins. The compose import
+takes `image`, `environment`, `command`, `healthcheck`, `depends_on`, named volumes and the first
+port of `ports`/`expose`, and leaves out bind mounts, `build`, `privileged`, `cap_add`,
+`network_mode`, `env_file`, published ports and variables taken from your shell, with one warning
+listing what it dropped. `${VAR:-default}` becomes the default; nothing is read from your
+environment.
+
+`start` runs the services before the branch container, in `dependsOn` order, and waits for each
+health check (every 2 s, up to 2 minutes, then a warning and the start goes on), so they are up
+before `setup` runs. That holds for snapshot builds too: `setup` can run migrations against them.
+Their data is never part of the snapshot, and the temporary services go with the temporary
+container. `stop` stops them, a resumed start starts them again, and `remove` deletes them and their
+volumes (`--keep-volumes` keeps those).
+
+```bash
+kunj ct list                          # each container's services and their state (JSON: services[])
+kunj ct logs feature/x postgres       # --follow to keep streaming
+kunj ct forward feature/x postgres:5432   # localhost:5432 -> the service, through docker exec
+```
+
+`forward` tunnels through the service container with `socat`, `bash` or `nc`, whichever its image
+has, and refuses when it has none.
+
+A service image is chosen by the branch, so it gets nothing from the host: no `container.env` and
+no forwarded variables (only the `env` it declares), no bind mounts, no added capabilities, no
+`--privileged` and no published ports. Services are not behind the firewall (they need no helper:
+nothing of yours is in them), so they can reach the internet; only containers on the same branch's
+network can reach them.
 
 ### Blueprints
 

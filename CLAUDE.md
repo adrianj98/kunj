@@ -137,7 +137,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj prompt-info` - Output PR# for shell prompts
 - `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
-- `kunj container [start|shell|exec|agent|attach|forward|list|stop|remove]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
+- `kunj container [start|shell|exec|agent|attach|forward|logs|list|stop|remove]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
@@ -175,9 +175,10 @@ The VS Code extension in `vscode-extension/` is a separate npm package (own `pac
 `kunj container` (alias `ct`, src/commands/container.ts) runs a branch in a Docker container with its
 own clone, mainly to run an agent with permissions skipped. Origin is the only channel in and out;
 nothing from the host is bind-mounted. Design: docs/superpowers/specs/2026-10-21-branch-containers-design.md.
-Phase 1 only: no services, `open`, `prune`, Docker-in-Docker or `--auto` yet.
+Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sidecar services; no `open`,
+`prune`, Docker-in-Docker or `--auto` yet.
 
-**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward}.ts`.
+**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,services}.ts`.
 The images' build contexts live in `src/container/{sandbox,nethelper}/` and are copied to
 `dist/container` by `scripts/copy-container-assets.js` as part of the build. Their tags are
 `kunj-sandbox:<version>-<hash>` / `kunj-nethelper:<version>-<hash>`, the hash covering the build
@@ -217,6 +218,18 @@ unquoted context even within `"..."`; backtick spans get one more level of escap
 form passes the value literally. The container
 hooks are `pre/post-container-create` and `pre/post-container-delete` with `branch`, `container`,
 `image`; the create hooks are skipped when `start` resumes an existing container.
+
+**Services:** `services.ts` parses and validates services (blueprint `services`, `container.services`, the
+devcontainer's compose file read through `backend.composeConfig()`, i.e. `docker compose config
+--no-interpolate` on stdin in an empty project directory; first source wins by name), orders them by
+`dependsOn` and builds their run spec: `<container>-svc-<name>` on the branch network with
+`--network-alias <name>`, only the env and named volumes it declares, no added capabilities, no
+published ports, no firewall helper, labels `kunj.role=service`, `kunj.service=<name>` and
+`kunj.options` (`port`, `healthcheck`, volume names; never env). `startContainer` starts them after
+the network and before the branch container (health check polled up to 120 s, then a warning), and
+they are in its rollback list; `resume` starts stopped ones, `stopContainer` stops them and
+`removeContainer` deletes them and the volumes in their label. Never give a service host env, a
+bind mount, a capability or `--privileged`: its image is chosen by the branch.
 
 **Blueprints:** `.kunj/blueprint.json` (`tools`, `setup`, `maintain`, `lockfiles`, `notes`) says how a
 new container is set up. Design: docs/superpowers/specs/2026-10-22-blueprints-design.md. Modules:

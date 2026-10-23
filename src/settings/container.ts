@@ -91,5 +91,19 @@ export function registerContainerSettings(): void {
       category: 'container',
       examples: ['3000:3000'],
     },
+    {
+      key: 'container.services',
+      description: 'Sidecar services (Postgres, Redis, ...) started next to each branch container, by name',
+      type: 'string',
+      defaultValue: {},
+      category: 'container',
+      detailedDescription:
+        'An object of name: { image, env?, command?, port?, healthcheck?, volumes?, dependsOn? }; edit the config file by hand. ' +
+        "Each service runs on the branch's own network and is reached by its name (postgres:5432). It gets only the env " +
+        'declared here, only named volumes (created per branch), no added capabilities and no published ports. ' +
+        "The blueprint's services win over these by name, and these over the devcontainer's compose services.",
+      examples: ['{"postgres": {"image": "postgres:16-alpine", "env": {"POSTGRES_PASSWORD": "dev"}, "healthcheck": "pg_isready -U postgres", "volumes": {"data": "/var/lib/postgresql/data"}}}'],
+      validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
+    },
   ]);
 }

@@ -5,7 +5,8 @@
 //   kunj container exec [branch] -- <cmd...>            run a command
 //   kunj container agent [branch] [-- <args>]           the agent in a tmux session
 //   kunj container attach [branch]                      reattach to that session
-//   kunj container forward [branch] <port>|<host>:<port>...
+//   kunj container forward [branch] <port>|<host>:<port>|<service>:<port>...
+//   kunj container logs [branch] [service] [--follow]
 //   kunj container list [--all] [--no-status]
 //   kunj container stop [branch]
 //   kunj container remove [branch] [--force] [--keep-volumes]
@@ -28,7 +29,8 @@ import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
 import { ContainerStatus, describeGuard, emptyStatus } from '../lib/container/env';
-import { Forwarder, forwardPort, parseForwardSpec } from '../lib/container/forward';
+import { Forwarder, TUNNEL_PROBE, forwardPort, parseForwardSpec, parseTunnelProbe } from '../lib/container/forward';
+import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerNames, LABEL, containerNames, repoIdFromUrl } from '../lib/container/names';
 import {
   StartError,
@@ -65,6 +67,7 @@ interface ContainerOptions {
   yes?: boolean;
   blueprint?: string;
   bundle?: boolean;
+  follow?: boolean;
 }
 
 interface Context {
@@ -82,12 +85,15 @@ class ContainerError extends Error {
   }
 }
 
-const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'forward', 'list', 'stop', 'remove', 'blueprint'];
+const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'forward', 'logs', 'list', 'stop', 'remove', 'blueprint'];
 const BLUEPRINT_ACTIONS = ['init', 'snapshot', 'status', 'remove'];
 const WORKSPACE = '/workspace';
 const STATUS_TIMEOUT_MS = 2000;
 const SHELL = 'exec $(command -v zsh || command -v bash || echo sh) -l';
 const PORT_SPEC = /^\d+(:\d+)?$/;
+// `postgres:5432`: a service's port (':' cannot be in a branch name, so this is never a branch)
+const SERVICE_SPEC = /^([a-z0-9][a-z0-9-]*):(\d+)$/;
+const isForwardSpec = (t: string | undefined): t is string => !!t && (PORT_SPEC.test(t) || SERVICE_SPEC.test(t));
 
 // 'skipped' is --no-status on a running container
 type ListStatus = Omit<ContainerStatus, 'status'> & { status: ContainerStatus['status'] | 'skipped' };
@@ -113,7 +119,8 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--no-status', description: '[list] Skip the per-container status exec (faster listing)' },
         { flags: '-a, --all', description: "[list] Show every repository's containers" },
         { flags: '-f, --force', description: '[remove] Remove even when the container holds unpushed work' },
-        { flags: '--keep-volumes', description: '[remove] Keep the workspace and home volumes' },
+        { flags: '--keep-volumes', description: "[remove] Keep the workspace and home volumes (and the services' volumes)" },
+        { flags: '--follow', description: '[logs] Keep streaming new output' },
         { flags: '--global', description: '[blueprint init] Write the host copy (~/.kunj/<repo>/blueprint.json) instead of .kunj/blueprint.json' },
         { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file' },
         { flags: '--no-bundle', description: '[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)' },
@@ -128,6 +135,8 @@ export class ContainerCommand extends BaseCommand {
         '  agent [branch] [-- <args>]           start or reattach the agent\'s tmux session',
         '  attach [branch]                      reattach to the agent\'s tmux session',
         '  forward [branch] <port>|<host>:<port>...  forward localhost ports into the container',
+        '  forward [branch] <service>:<port>    forward a sidecar service\'s port (e.g. postgres:5432)',
+        '  logs [branch] [service] [--follow]   output of the container, or of one of its services',
         '  list                                 containers of this repository (the default)',
         '  stop [branch]                        stop, keeping the workspace',
         '  remove [branch]                      remove, refusing while work is unpushed',
@@ -143,6 +152,10 @@ export class ContainerCommand extends BaseCommand {
         'container starts from its snapshot; start builds the snapshot first when there is none or the',
         'blueprint changed (the first start runs setup once), and falls back to running setup in the',
         'container if that fails. --no-snapshot skips the snapshot.',
+        '',
+        'Services (Postgres, Redis, ...) are declared in the blueprint\'s "services", container.services',
+        'or the devcontainer\'s compose file; each runs next to the branch container on its own network',
+        'and is reached by its name (postgres:5432). They are stopped and removed with the container.',
         '',
         '[branch] defaults to the current branch. `ct` is short for `container`.',
       ].join('\n'),
@@ -214,9 +227,11 @@ export class ContainerCommand extends BaseCommand {
         return this.attach(target, options);
       case 'forward': {
         // `forward 3000` names a port, not a branch
-        const specs = target && PORT_SPEC.test(target) ? [target, ...rest] : rest;
-        return this.forward(target && PORT_SPEC.test(target) ? undefined : target, specs, options);
+        const specs = isForwardSpec(target) ? [target, ...rest] : rest;
+        return this.forward(isForwardSpec(target) ? undefined : target, specs, options);
       }
+      case 'logs':
+        return this.logs(target, rest[0], options);
       case 'stop':
         return this.stop(target, options);
       case 'remove':
@@ -409,6 +424,7 @@ export class ContainerCommand extends BaseCommand {
     for (const file of result.keptFiles) console.log(`  kept      ${file}`);
     for (const file of result.copiedFiles) console.log(`  copied    ${file}`);
     for (const port of result.publish) console.log(`  port      localhost:${port.host} → :${port.container}`);
+    if (result.services?.length) console.log(`  services  ${result.services.join(', ')} (reach them by name from the container)`);
     console.log('');
     console.log(`Next: kunj ct agent ${branch}`);
     console.log(`      kunj ct shell ${branch}`);
@@ -518,28 +534,54 @@ export class ContainerCommand extends BaseCommand {
   // ---------------------------------------------------------------------
 
   private async forward(target: string | undefined, specTexts: string[], options: ContainerOptions): Promise<void> {
-    if (specTexts.length === 0) throw new ContainerError('Usage: kunj ct forward [branch] <port>|<hostPort>:<port>...');
-    const specs = specTexts.map(parseForwardSpec);
+    if (specTexts.length === 0) throw new ContainerError('Usage: kunj ct forward [branch] <port>|<hostPort>:<port>|<service>:<port>...');
+    const specs = specTexts.map(text => {
+      const svc = PORT_SPEC.test(text) ? null : SERVICE_SPEC.exec(text);
+      return svc ? { service: svc[1], ...parseForwardSpec(svc[2]) } : { service: undefined, ...parseForwardSpec(text) };
+    });
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
-    const hasSocat = (await ctx.backend.exec(main.id, ['sh', '-c', 'command -v socat'], { user: this.userOf(main) || undefined })).exitCode === 0;
+    const hasSocat = specs.some(s => !s.service)
+      ? (await ctx.backend.exec(main.id, ['sh', '-c', 'command -v socat'], { user: this.userOf(main) || undefined })).exitCode === 0
+      : false;
 
-    const forwarders: Array<{ container: number; forwarder: Forwarder }> = [];
+    // A service is tunnelled into through its own container, with whichever of socat, bash or nc it has
+    const services = specs.some(s => s.service) ? await findServices(ctx.backend, this.names(ctx, branch)) : [];
+    const tunnels = new Map<string, { id: string; tool: 'socat' | 'bash' | 'nc' }>();
+    for (const name of new Set(specs.map(s => s.service).filter((s): s is string => !!s))) {
+      const svc = services.find(c => c.name === serviceNames(this.names(ctx, branch), name).container);
+      if (!svc) throw new ContainerError(`${branch} has no service ${name}; services: ${describeServices(services).map(s => s.name).join(', ') || 'none'}`);
+      if (svc.state !== 'running') throw new ContainerError(`Service ${name} is not running; run kunj ct start ${branch}`);
+      const tool = parseTunnelProbe((await ctx.backend.exec(svc.id, ['sh', '-c', TUNNEL_PROBE])).stdout);
+      if (!tool) {
+        throw new ContainerError(
+          `The ${name} image has none of socat, bash or nc, so its port cannot be tunnelled; ` +
+            `reach it from the branch container instead (kunj ct exec ${branch} -- ...), or run a forwarder there`
+        );
+      }
+      tunnels.set(name, { id: svc.id, tool });
+    }
+
+    const forwarders: Array<{ container: number; service?: string; forwarder: Forwarder }> = [];
     try {
       for (const spec of specs) {
-        forwarders.push({ container: spec.container, forwarder: await forwardPort(ctx.backend, main.id, spec, { hasSocat }) });
+        const tunnel = spec.service ? tunnels.get(spec.service)! : undefined;
+        const forwarder = tunnel
+          ? await forwardPort(ctx.backend, tunnel.id, spec, { hasSocat: false, tool: tunnel.tool })
+          : await forwardPort(ctx.backend, main.id, spec, { hasSocat });
+        forwarders.push({ container: spec.container, ...(spec.service ? { service: spec.service } : {}), forwarder });
       }
     } catch (error) {
       await Promise.all(forwarders.map(f => f.forwarder.close()));
       throw error;
     }
 
-    const list = forwarders.map(f => ({ container: f.container, host: f.forwarder.hostPort }));
+    const list = forwarders.map(f => ({ container: f.container, host: f.forwarder.hostPort, ...(f.service ? { service: f.service } : {}) }));
     if (this.jsonMode) {
       this.outputJSON({ forwards: list });
     } else {
-      for (const f of list) console.log(`localhost:${f.host} → :${f.container}`);
+      for (const f of list) console.log(`localhost:${f.host} → ${f.service ?? ''}:${f.container}`);
       console.log(chalk.gray('Forwarding; press Ctrl-C to stop'));
     }
 
@@ -553,6 +595,24 @@ export class ContainerCommand extends BaseCommand {
       process.on('SIGTERM', stop);
     });
     process.exit(0);
+  }
+
+  // ---------------------------------------------------------------------
+  // logs
+  // ---------------------------------------------------------------------
+
+  private async logs(target: string | undefined, service: string | undefined, options: ContainerOptions): Promise<void> {
+    const ctx = await this.context(options);
+    const branch = await this.resolveBranch(ctx, target);
+    const main = await this.requireMain(ctx, branch);
+    let id = main.id;
+    if (service) {
+      const services = await findServices(ctx.backend, this.names(ctx, branch));
+      const svc = services.find(c => c.name === serviceNames(this.names(ctx, branch), service).container);
+      if (!svc) throw new ContainerError(`${branch} has no service ${service}; services: ${describeServices(services).map(s => s.name).join(', ') || 'none'}`);
+      id = svc.id;
+    }
+    await ctx.backend.logs(id, { follow: !!options.follow });
   }
 
   // ---------------------------------------------------------------------
@@ -599,6 +659,7 @@ export class ContainerCommand extends BaseCommand {
         agent: { running: s.agentRunning },
         workspace: { head: s.head ? s.head.slice(0, 7) : null, ahead: s.ahead, dirty: s.dirty },
         status: s.status,
+        services: describeServices(servicesOf(all, c.name)),
       };
     });
 
@@ -625,6 +686,9 @@ export class ContainerCommand extends BaseCommand {
       if (c.workspace.dirty) line += chalk.yellow('  dirty');
       if (c.status === 'timeout' || c.status === 'error') line += chalk.red(`  status ${c.status}`);
       if (c.ports.length) line += '  ' + c.ports.map(p => `${p.host}→${p.container}`).join(' ');
+      if (c.services.length) {
+        line += '  ' + c.services.map(svc => (svc.state === 'running' ? chalk.cyan(svc.name) : chalk.yellow(`${svc.name} ${svc.state}`))).join(' ');
+      }
       const helper = helpers.get(`${mains[i].name}-net-helper`);
       if (running && helper?.state !== 'running') line += chalk.red('  [firewall helper down]');
       console.log(line);
@@ -872,7 +936,7 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireMain(ctx, branch);
-    await stopContainer(ctx.backend, this.names(ctx, branch));
+    await stopContainer(ctx.backend, this.names(ctx, branch), this.warn);
     if (this.jsonMode) {
       this.outputJSON({ success: true, branch, name: main.name });
       return;

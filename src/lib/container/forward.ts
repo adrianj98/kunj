@@ -55,13 +55,25 @@ export async function findFreePort(preferred: number): Promise<number> {
   return port;
 }
 
+export type TunnelTool = 'socat' | 'bash' | 'nc';
+
+/** Prints the first of socat, bash and nc the container has (nothing when it has none). */
+export const TUNNEL_PROBE = 'for t in socat bash nc; do command -v $t >/dev/null 2>&1 && { echo $t; exit 0; }; done; exit 1';
+
+export function parseTunnelProbe(stdout: string): TunnelTool | null {
+  const tool = stdout.trim().split('\n')[0];
+  return tool === 'socat' || tool === 'bash' || tool === 'nc' ? tool : null;
+}
+
 /**
  * The command run in the container for one connection: it copies its stdin to 127.0.0.1:<port>
  * and the replies to stdout. The bash fallback (images without socat) cannot half-close: when the
- * client finishes sending it stops reading replies too.
+ * client finishes sending it stops reading replies too. `true` and `false` mean socat and bash.
  */
-export function tunnelCommand(port: number, hasSocat: boolean): string[] {
-  if (hasSocat) return ['socat', '-t', '10', '-', `TCP:127.0.0.1:${port}`];
+export function tunnelCommand(port: number, tool: boolean | TunnelTool): string[] {
+  const t = tool === true ? 'socat' : tool === false ? 'bash' : tool;
+  if (t === 'socat') return ['socat', '-t', '10', '-', `TCP:127.0.0.1:${port}`];
+  if (t === 'nc') return ['nc', '127.0.0.1', String(port)];
   return ['bash', '-c', `exec 3<>/dev/tcp/127.0.0.1/${port}; cat <&3 & cat >&3; kill $! 2>/dev/null`];
 }
 
@@ -69,10 +81,10 @@ export async function forwardPort(
   backend: ContainerBackend,
   containerId: string,
   spec: ForwardSpec,
-  opts: { hasSocat: boolean; onConnection?: () => void },
+  opts: { hasSocat: boolean; tool?: TunnelTool; onConnection?: () => void },
 ): Promise<Forwarder> {
   const sockets = new Set<net.Socket>();
-  const command = tunnelCommand(spec.container, opts.hasSocat);
+  const command = tunnelCommand(spec.container, opts.tool ?? opts.hasSocat);
 
   // allowHalfOpen: a client that finishes sending still gets the container's replies.
   const server = net.createServer({ allowHalfOpen: true }, socket => {

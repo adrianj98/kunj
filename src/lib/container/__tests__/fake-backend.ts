@@ -22,6 +22,8 @@ export class FakeBackend implements ContainerBackend {
   images: ImageInfo[] = [];
   /** Volumes that exist; createVolume adds to it. */
   volumes = new Set<string>();
+  /** composeConfig results keyed by the compose text; unlisted texts give an empty project. */
+  composeConfigs = new Map<string, unknown>();
   /** Pipe io.stdin to io.stdout uppercased. */
   echoUpper = false;
   /** stdin contents captured per exec call, in call order (undefined when no stream was given). */
@@ -140,6 +142,17 @@ export class FakeBackend implements ContainerBackend {
 
   async remove(ids: { containers?: string[]; volumes?: string[]; networks?: string[] }): Promise<void> {
     this.record('remove', [ids]);
+  }
+
+  async composeConfig(yamlText: string): Promise<any> {
+    this.record('composeConfig', [yamlText]);
+    const result = this.composeConfigs.get(yamlText);
+    if (result instanceof Error) throw result;
+    return result ?? { services: {} };
+  }
+
+  async logs(id: string, opts?: { follow?: boolean; tail?: number }): Promise<void> {
+    this.record('logs', [id, opts]);
   }
 }
 

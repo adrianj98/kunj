@@ -139,6 +139,15 @@ and another free port when it is not (the output says which). Each connection is
 nothing set up when the container was created. Each new connection costs a moment to open: fine for
 a browser and hot reload, not for load tests.
 
+A sidecar [service](../services/)'s port is forwarded by naming the service:
+
+```bash
+kunj ct forward feature/search postgres:5432   # localhost:5432 → the postgres service
+```
+
+The tunnel goes through the service's own container, with `socat`, `bash` or `nc`, whichever its
+image has; kunj refuses when it has none.
+
 ### Ports
 
 There are two ways to reach a server in the container:
@@ -179,9 +188,18 @@ it back).
 | `-a, --all` | List the containers of every repository. |
 | `--no-status` | Skip the per-container check, for a faster listing. |
 
+## logs
+
+Prints the output of the container, or of one of its [services](../services/):
+
+```bash
+kunj ct logs feature/search postgres
+kunj ct logs feature/search postgres --follow   # keep streaming until Ctrl-C
+```
+
 ## stop
 
-Stops the container and its network helper. The workspace and home volumes are kept, so nothing is
+Stops the container, its network helper and its services. The workspace and home volumes are kept, so nothing is
 lost; `kunj ct start` resumes it.
 
 ```bash
@@ -190,7 +208,8 @@ kunj ct stop feature/search
 
 ## remove
 
-Deletes the container, its network helper, its network and its volumes.
+Deletes the container, its network helper, its services, its network and its volumes (the services'
+volumes too).
 
 ```bash
 kunj ct remove feature/search

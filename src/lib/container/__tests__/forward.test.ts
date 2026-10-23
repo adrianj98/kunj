@@ -1,5 +1,5 @@
 import * as net from 'net';
-import { findFreePort, forwardPort, parseForwardSpec, tunnelCommand } from '../forward';
+import { findFreePort, forwardPort, parseForwardSpec, parseTunnelProbe, tunnelCommand } from '../forward';
 import { FakeBackend } from './fake-backend';
 
 function listen(port: number): Promise<net.Server> {
@@ -69,6 +69,15 @@ describe('findFreePort', () => {
 });
 
 describe('tunnelCommand', () => {
+  it('uses nc or bash when named, and reads the probe', () => {
+    expect(tunnelCommand(5432, 'nc')).toEqual(['nc', '127.0.0.1', '5432']);
+    expect(tunnelCommand(5432, 'bash')[0]).toBe('bash');
+    expect(tunnelCommand(5432, 'socat')[0]).toBe('socat');
+    expect(parseTunnelProbe('bash\n')).toBe('bash');
+    expect(parseTunnelProbe('')).toBeNull();
+    expect(parseTunnelProbe('zsh')).toBeNull();
+  });
+
   it('uses socat when available', () => {
     expect(tunnelCommand(3000, true)).toEqual(['socat', '-t', '10', '-', 'TCP:127.0.0.1:3000']);
   });

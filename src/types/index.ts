@@ -66,6 +66,8 @@ export interface KunjConfig {
     cpus?: string;
     memory?: string;
     publish?: string[];
+    // Sidecar services by name (validated by parseServices in src/lib/container/services.ts)
+    services?: Record<string, unknown>;
   };
   // Commands run by kunj hooks, keyed by hook name (see src/lib/hook-defs.ts)
   hooks?: Partial<Record<HookName, string | string[]>>;

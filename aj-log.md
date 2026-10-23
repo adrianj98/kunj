@@ -2,6 +2,30 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Containers: sidecar services (phase 2, Task 1)
+
+- New `src/lib/container/services.ts`: services from the blueprint's `services`, `container.services`
+  and the devcontainer's `dockerComposeFile` (first wins by name), validated (names `[a-z0-9-]`, image
+  required, named volumes only), ordered by `dependsOn` (cycles rejected). Why: branches need their own
+  Postgres/Redis, reachable by name, isolated per branch.
+- Each service runs as `<container>-svc-<name>` on the branch network with `--network-alias <name>`,
+  only its declared env and named volumes, no added capabilities, no privileged, no published ports,
+  no firewall helper. Why: the image is chosen by the branch, so it must get nothing from the host.
+- Compose files are parsed by `docker compose config --no-interpolate` on stdin (new backend method
+  `composeConfig`, empty project dir, stripped env), so real YAML works with no new dependency;
+  dangerous keys, bind mounts, published ports and host variables are dropped with one warning.
+- `startContainer` starts services after the network and before the branch container and waits for
+  each health check (2 s / 120 s, then a warning); they are in the rollback list. Resume starts stopped
+  services, stop stops them, remove deletes them and their volumes. Snapshot builds start them too, so
+  `setup` can run migrations; they go with the temporary container.
+- `kunj ct logs [branch] [service] [--follow]` (backend `logs`), `kunj ct forward <branch> <svc>:<port>`
+  (tunnels into the service with socat, bash or nc, refuses without any), `list --json` gains
+  `services: [{ name, state, port }]`, `start` reports `services`. `container.services` is registered;
+  `kunj config` prints object values as JSON.
+- Tests: services unit tests, lifecycle (order, rollback, resume, stop, remove, compose import, snapshot
+  build), command (list JSON, logs, forward), Docker (reachable from its branch only, no host
+  privileges/env, forward, migration during a snapshot, nothing left labelled).
+
 ## 2026-10-23 — User docs site (MDX, Astro Starlight) in `docs-site/`
 
 - Added `docs-site/`: an Astro Starlight site (MDX pages) with 40 pages covering getting started,

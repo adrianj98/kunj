@@ -15,7 +15,10 @@ describe('container settings', () => {
       cpus: '',
       memory: '',
       publish: [],
+      services: {},
     });
+    expect(settingsRegistry.get('container.services')?.validate?.({ pg: { image: 'p' } })).toBe(true);
+    expect(settingsRegistry.get('container.services')?.validate?.('pg')).toBe(false);
     expect(settingsRegistry.get('hooks.pre-container-create')).toBeDefined();
   });
 });

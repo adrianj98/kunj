@@ -604,4 +604,96 @@ const BRANCH_ALLOW = 'it-allow';
       expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
     });
   });
+  describe('services', () => {
+    const SVC_A = 'it-svc-a';
+    const SVC_B = 'it-svc-b';
+    const ctx = { user: USER, kunjVersion: VERSION, force: true, keepVolumes: false };
+    const POSTGRES = {
+      postgres: {
+        image: 'postgres:16-alpine',
+        env: { POSTGRES_PASSWORD: 'dev' },
+        // Over TCP: during initdb Postgres listens on its socket only, then restarts
+        healthcheck: 'pg_isready -h 127.0.0.1 -U postgres',
+        port: 5432,
+        volumes: { data: '/var/lib/postgresql/data' },
+      },
+    };
+    const REACH = `bash -c '</dev/tcp/postgres/5432'`;
+
+    function withServices(services: object | undefined, env: string[] = []): KunjConfig {
+      return { container: { network: { allowHost: true }, keepFiles: false, env, ...(services ? { services } : {}) } } as unknown as KunjConfig;
+    }
+
+    beforeAll(() => {
+      const work = path.join(tmp, 'svc-work');
+      git(['clone', '-q', bare, work], tmp);
+      git(['push', '-q', 'origin', `origin/main:refs/heads/${SVC_A}`, `origin/main:refs/heads/${SVC_B}`], work);
+      git(['fetch', '-q', bare, '+refs/heads/*:refs/remotes/origin/*'], hostClone);
+    });
+
+    it('a service is reachable by name from its branch container only, and gets nothing from the host', async () => {
+      const a = await startContainer(backend, startOptions(SVC_A, withServices(POSTGRES, TOKEN_ENV)));
+      const b = await startContainer(backend, startOptions(SVC_B, withServices(undefined)));
+      try {
+        expect(a.services).toEqual(['postgres']);
+        expect((await inside(a.containerId, REACH)).exitCode).toBe(0);
+
+        // Review focus 2: another branch's container reaches it neither by name nor by address
+        expect((await inside(b.containerId, `timeout 5 ${REACH}`)).exitCode).not.toBe(0);
+        const svcName = `${a.names.container}-svc-postgres`;
+        const ip = docker(['inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', svcName]);
+        expect(ip).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
+        expect((await inside(b.containerId, `timeout 5 bash -c '</dev/tcp/${ip}/5432'`)).exitCode).not.toBe(0);
+
+        // Review focus 1: no privileges, capabilities, binds, published ports or forwarded env
+        const host = JSON.parse(docker(['inspect', '--format', '{{json .HostConfig}}', svcName]));
+        expect(host.Privileged).toBe(false);
+        expect(host.CapAdd ?? []).toEqual([]);
+        // -v lists named volumes under Binds too; the Mounts check below is what shows none is a host path
+        expect(Object.keys(host.PortBindings ?? {})).toEqual([]);
+        const env: string[] = JSON.parse(docker(['inspect', '--format', '{{json .Config.Env}}', svcName]));
+        expect(env).toContain('POSTGRES_PASSWORD=dev');
+        expect(env.filter(e => /GH_TOKEN|KUNJ_/.test(e))).toEqual([]);
+        const mounts: Array<{ Type: string; Name: string }> = JSON.parse(docker(['inspect', '--format', '{{json .Mounts}}', svcName]));
+        expect(mounts.map(m => `${m.Type}:${m.Name}`)).toEqual([`volume:${svcName}-data`]);
+
+        // forward <service>:<port> tunnels through the service container's bash
+        const forwarder = await forwardPort(backend, docker(['inspect', '--format', '{{.Id}}', svcName]), { container: 5432, host: await freePort() }, { hasSocat: false, tool: 'bash' });
+        try {
+          await waitFor(() => canConnect(forwarder.hostPort), 'the forwarded service port', 5000);
+        } finally {
+          await forwarder.close();
+        }
+      } finally {
+        await removeContainer(backend, a.names, ctx);
+        await removeContainer(backend, b.names, ctx);
+      }
+      expect(labelledFor(SVC_A)).toEqual([]);
+      expect(labelledFor(SVC_B)).toEqual([]);
+    });
+
+    it('a snapshot build runs setup against its services and removes them with the temporary container', async () => {
+      const text = JSON.stringify({ setup: [`${REACH} && touch migrated`], services: POSTGRES });
+      const blueprint = { blueprint: parseBlueprint(text, 'svc.json'), source: 'file' as const, path: 'svc.json', text };
+      const result = await snapshotBlueprint(backend, {
+        branch: 'main',
+        blueprint,
+        config: config({ allowHost: true }),
+        repo: { root: hostClone, name: REPO_NAME, id: repoId, originUrl },
+        kunjVersion: VERSION,
+        cwd: hostClone,
+        jsonMode: false,
+        rebuild: true,
+        warn: (m: string) => process.stderr.write(`warn: ${m}\n`),
+        log: () => {},
+      });
+      try {
+        expect(() => docker(['run', '--rm', '--entrypoint', 'sh', result.tag, '-c', `test -f ${SEED_DIR}/migrated`])).not.toThrow();
+        // The service and its volume went with the temporary container
+        expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
+      } finally {
+        await removeSnapshots(backend, REPO_NAME, repoId);
+      }
+    });
+  });
 });
