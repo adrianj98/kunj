@@ -1430,5 +1430,20 @@
     ],
     "relatedSettings": null,
     "sensitive": false
+  },
+  {
+    "key": "agent.command",
+    "type": "string",
+    "category": "agent",
+    "default": "claude",
+    "description": "Command `kunj agent` runs in a host tmux session for a worktree",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "claude",
+      "claude --dangerously-skip-permissions"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
   }
 ]

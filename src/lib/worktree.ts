@@ -14,6 +14,9 @@ import { getGlobalKunjDir, initGlobalKunjDirectory } from './config';
 import { applyKeptFiles } from './keep';
 import { expandVariables, repoVariables } from './config-vars';
 import { DEFAULT_WORKTREE_BASE_DIR } from './worktree-defaults';
+import type { AgentState } from './json-types';
+import { agentRunning, agentSessionName, listTmuxSessions } from './agent-session';
+import { repoIdentity } from './repo-identity';
 
 const execAsync = promisify(exec);
 
@@ -76,6 +79,8 @@ export interface WorktreeInfo {
   pullRequest?: PullRequestInfo | null;
   sessions: WorktreeSession[];
   isCurrent: boolean;
+  // Host tmux session of `kunj agent`; set for existing, non-bare worktrees on a branch when status is included
+  agent?: AgentState;
 }
 
 // ---------------------------------------------------------------------------
@@ -279,18 +284,31 @@ async function getRepoPaths(cwd: string): Promise<{ currentPath: string; repoRoo
   return { currentPath: currentPath || repoRoot, repoRoot, commonDir };
 }
 
+// Name and id for agent session names; the listing must not fail because of them
+function agentRepoIdentity(paths: { repoRoot: string; commonDir: string }): { name: string; id: string } {
+  try {
+    return repoIdentity();
+  } catch {
+    return { name: path.basename(paths.repoRoot), id: paths.commonDir };
+  }
+}
+
 export async function listWorktreesDetailed(options: ListWorktreesOptions = {}): Promise<WorktreeListing> {
   const cwd = options.cwd || process.cwd();
   const includePullRequests = options.includePullRequests === true;
 
   // Independent work runs concurrently: worktree list, repo paths, PR lookup
-  const [porcelain, paths, prResult] = await Promise.all([
+  const includeStatus = options.includeStatus !== false;
+  const [porcelain, paths, prResult, tmuxSessions] = await Promise.all([
     execAsync('git worktree list --porcelain', { cwd, maxBuffer: 10 * 1024 * 1024 }).then(r => r.stdout),
     getRepoPaths(cwd),
     includePullRequests
       ? fetchPullRequestsCached(cwd, options.pullRequestMaxAge)
       : Promise.resolve<PullRequestFetchResult>({ provider: null, pullRequests: null, fromCache: false }),
+    // One tmux call for the whole listing, not one per worktree
+    includeStatus ? listTmuxSessions() : Promise.resolve<string[] | null>(null),
   ]);
+  const agentRepo = includeStatus ? agentRepoIdentity(paths) : null;
 
   const parsed = parseWorktreeList(porcelain);
   const sessions = loadActiveSessions();
@@ -306,6 +324,10 @@ export async function listWorktreesDetailed(options: ListWorktreesOptions = {}):
       };
       if (options.includeStatus !== false && exists && !wt.bare) {
         info.status = await getWorktreeStatus(wt.path);
+      }
+      if (includeStatus && agentRepo && exists && !wt.bare && wt.branch) {
+        const session = agentSessionName(agentRepo.name, agentRepo.id, wt.branch);
+        info.agent = { running: agentRunning(tmuxSessions, session), session };
       }
       if (includePullRequests) {
         info.pullRequest = prResult.pullRequests && wt.branch ? pickPullRequest(prResult.pullRequests, wt.branch) : null;

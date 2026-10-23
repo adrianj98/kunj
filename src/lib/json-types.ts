@@ -76,3 +76,18 @@ export interface ContainerListJson {
   backend: { kind: 'docker'; context: string };
   containers: ContainerJson[];
 }
+
+// ---- kunj agent --json -----------------------------------------------------------------------
+
+export interface AgentStatusJson {
+  branch: string;
+  worktree: string;
+  session: string;
+  running: boolean | null;
+}
+
+export interface AgentStopJson {
+  success: true;
+  branch: string;
+  session: string;
+}

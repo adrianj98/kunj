@@ -55,6 +55,7 @@ export interface KunjConfig {
     baseDir?: string;
     editorCommand?: string;
   };
+  agent?: { command?: string };
   container?: {
     image?: string;
     agentCommand?: string;

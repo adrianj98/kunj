@@ -21,6 +21,7 @@ export { IssueCommand } from './issue';
 export { TeamCommand } from './team';
 export { WorktreeCommand } from './worktree';
 export { ContainerCommand } from './container';
+export { AgentCommand } from './agent';
 export { HooksCommand } from './hooks';
 export { ReposCommand } from './repos';
 export { InstallCommand } from './install';
@@ -51,6 +52,7 @@ import { IssueCommand } from './issue';
 import { TeamCommand } from './team';
 import { WorktreeCommand } from './worktree';
 import { ContainerCommand } from './container';
+import { AgentCommand } from './agent';
 import { HooksCommand } from './hooks';
 import { ReposCommand } from './repos';
 import { InstallCommand } from './install';
@@ -82,6 +84,7 @@ export function getAllCommands(): BaseCommand[] {
     new TeamCommand(),
     new WorktreeCommand(),
     new ContainerCommand(),
+    new AgentCommand(),
     new HooksCommand(),
     new ReposCommand(),
     new InstallCommand(),

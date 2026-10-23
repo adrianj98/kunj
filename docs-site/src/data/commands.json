@@ -1,5 +1,25 @@
 [
   {
+    "name": "agent",
+    "usage": "agent [action] [branch]",
+    "description": "Run or reattach an agent in a worktree (tmux)",
+    "arguments": "[action] [branch]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--command <cmd>",
+        "description": "Command to run (default: the agent.command setting)",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Actions:\n  start [branch]    run the agent in the worktree's tmux session, or reattach to it (default)\n  status [branch]   whether the session exists\n  stop [branch]     kill the session\n\n[branch] defaults to the current branch; `kunj agent my-branch` starts. Needs tmux."
+  },
+  {
     "name": "branch-desc",
     "usage": "branch-desc [branch] [description...]",
     "description": "Set or view description for a branch",

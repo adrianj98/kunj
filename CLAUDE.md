@@ -137,6 +137,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj prompt-info` - Output PR# for shell prompts
 - `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
+- `kunj agent [start|status|stop] [branch]` - Run an agent in a host tmux session for a worktree (see Worktree agents below)
 - `kunj container [start|shell|exec|agent|attach|forward|logs|list|stop|remove]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
@@ -169,6 +170,15 @@ fatals there, so ask git for `--git-common-dir` first. Pull requests are fetched
 **Opening an editor:** `buildOpenCommand()`/`openWorktree()` in src/lib/worktree.ts launch `worktree.editorCommand` (default `code`) detached. VS Code-like editors (code, cursor, codium, windsurf) get `-r` to reuse the window, or `-n` with `--new-window`, unless the configured command already sets a window flag. An empty command disables opening.
 
 The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
+
+**Worktree agents:** `kunj agent` (src/commands/agent.ts, src/lib/agent-session.ts) runs `agent.command`
+(default `claude`) in a host tmux session for a worktree. One tmux server serves the host, so the
+session name is `agentSessionName()`: the container name from `containerNames()` with `.` and `:`
+replaced by `-`. `listWorktreesDetailed()` makes one `tmux list-sessions` call per listing (in the
+same `Promise.all` as the git calls, only with status) and sets `WorktreeInfo.agent`
+(`{ running, session }`); `running` is null when tmux is not installed. Keep it one call, not one per
+worktree. `AgentError` prints without a stack trace (listed in BaseCommand). Repo name and id come from
+`repoIdentity()` (src/lib/repo-identity.ts).
 
 ## Branch Containers
 
