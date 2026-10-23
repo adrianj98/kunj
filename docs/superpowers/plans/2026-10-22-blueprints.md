@@ -237,6 +237,20 @@ resolveBlueprint({ cwd, repoRoot?, repoKunjDir, defaultBranch?, override? }) // 
 
 ---
 
+### Task 11: Default zsh config and `KUNJ_*` env in containers
+
+**Files:**
+- Create: `src/container/sandbox/zshrc` (installed as `/etc/zsh/zshrc`)
+- Modify: `src/container/sandbox/Dockerfile` (`COPY zshrc /etc/zsh/zshrc`; `RUN touch /etc/skel/.zshrc` is NOT enough since the home is a volume — instead the system zshrc sets `skip_global_compinit=1`-style guards and Debian's `zsh-newuser-install` is disabled by creating `/etc/zsh/zshrc` ourselves and adding `unsetopt` … simplest: our `/etc/zsh/zshrc` ends with `zsh-newuser-install() { :; }` so the first-run wizard never appears), `src/lib/container/lifecycle.ts` (main container env gains `KUNJ_CONTAINER=1`, `KUNJ_BRANCH=<branch>`, `KUNJ_REPO=<repo name>` — set beside `KUNJ_CREDENTIAL_HOST`, after forwarded env so they cannot be overridden by devcontainer `containerEnv`)
+- Test: `src/lib/container/__tests__/lifecycle.test.ts` (env assertions), `src/lib/container/__tests__/image.test.ts` (zshrc present in the asset dir, `zsh -n` posixOnly when zsh exists on the host)
+
+The zshrc: sources `/etc/profile.d/*.sh` (presets' env), history (50k, shared, ignore dups/space), `compinit -u` with menu completion, prompt `kunj ▸ <KUNJ_BRANCH> <cwd> ❯` (red `❯` on non-zero exit) with `RPROMPT='sandbox'`, aliases `ls --color`, `ll`, `gs`, `gl`, `bindkey -e`, `cd /workspace` when it exists, and the `zsh-newuser-install` no-op. Users still get their own `~/.zshrc` via `container.files` (it is sourced after the system file, as zsh does).
+
+- [ ] Step 1: Tests — lifecycle: main run env contains `KUNJ_CONTAINER=1`, `KUNJ_BRANCH`, `KUNJ_REPO` and a devcontainer `containerEnv` cannot override them; image: `src/container/sandbox/zshrc` exists and `zsh -n` passes.
+- [ ] Steps 2–5 (Docker check by hand: `docker build` the sandbox, `docker run --rm -e KUNJ_BRANCH=x <img> zsh -ic 'print -P "$PROMPT"'` shows the prompt; no newuser wizard). Commit `Sandbox: default zsh config and KUNJ_* environment`.
+
+---
+
 ## Self-review notes
 
 - Spec coverage: file/resolution/hash → T2; presets + inference → T3/T4; snapshot → T6; start/seed/maintain/stale/`--no-snapshot` → T5; commands/JSON → T7; backend → T1; tests/docs/worked example → T8. Open question (devcontainer `postCreateCommand` during snapshot) is answered by T5's ordering: `startContainer` already runs it on a new container, so the snapshot includes it.
