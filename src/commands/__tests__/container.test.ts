@@ -64,6 +64,20 @@ jest.mock('../../lib/container/forward', () => ({
   forwardPort: jest.fn(async (_b: unknown, _id: string, spec: { container: number }) => ({ hostPort: spec.container + 10000, close: async () => {} })),
 }));
 
+// The forward registry lives in the home directory: an in-memory list here
+const mockForwards: Array<{ pid: number; container: string; port: number; hostPort: number; kind: 'forward' }> = [];
+jest.mock('../../lib/container/autoforward', () => ({
+  ...jest.requireActual('../../lib/container/autoforward'),
+  readForwards: jest.fn(() => mockForwards.slice()),
+  updateForwards: jest.fn((change: (rs: typeof mockForwards) => typeof mockForwards) => {
+    mockForwards.splice(0, mockForwards.length, ...change(mockForwards.slice()));
+    return mockForwards.slice();
+  }),
+  forwarderFor: jest.fn((container: string) => mockForwards.find(r => r.container === container)?.pid),
+  spawnDetached: jest.fn(() => 4242),
+  runAutoForward: jest.fn(async () => {}),
+}));
+
 // The editor config is written under the home directory: a temp dir in the open tests
 let mockHome: string | undefined;
 jest.mock('os', () => {
@@ -107,6 +121,7 @@ import { parseBlueprint, resolveBlueprint } from '../../lib/container/blueprint'
 import { detectDefaultBranch } from '../../lib/base-branch';
 import { loadResolvedConfig } from '../../lib/config';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri } from '../../lib/container/editor';
+import * as autoforward from '../../lib/container/autoforward';
 
 const REPO_ID = repoIdFromUrl('https://github.com/acme/app.git');
 
@@ -154,6 +169,7 @@ beforeEach(() => {
   backend.calls = [];
   backend.existing = [];
   backend.execResults.clear();
+  mockForwards.length = 0;
   stdout = [];
   writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
     stdout.push(String(chunk));
@@ -252,6 +268,108 @@ describe('ContainerCommand', () => {
     backend.execResults.set('sh -c command -v tmux', { exitCode: 1, stdout: '' });
     await new ContainerCommand().execute('agent', 'feat', [], {});
     expect(backend.callsOf('exec')[1][1]).toEqual(['sh', '-lc', agentCommandLine(undefined, [])]);
+  });
+
+  describe('auto forwarding', () => {
+    const NAME = containerNames('app', REPO_ID, 'feat').container;
+    const spawnDetached = autoforward.spawnDetached as jest.Mock;
+    const runAutoForward = autoforward.runAutoForward as jest.Mock;
+
+    it('agent starts a detached auto-forwarder and registers it', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto']);
+      expect(mockForwards).toEqual([{ pid: 4242, container: NAME, port: 0, hostPort: 0, kind: 'forward' }]);
+    });
+
+    it('agent passes the Docker context on to the forwarder', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('agent', 'feat', [], { context: 'colima' });
+      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto', '--context', 'colima']);
+    });
+
+    it('agent starts none when container.forward.auto is false', async () => {
+      backend.existing = [mainContainer('feat')];
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { forward: { auto: false } } });
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(spawnDetached).not.toHaveBeenCalled();
+      expect(mockForwards).toEqual([]);
+    });
+
+    it('agent starts none when one is already registered for the container', async () => {
+      backend.existing = [mainContainer('feat')];
+      mockForwards.push({ pid: 777, container: NAME, port: 3000, hostPort: 3000, kind: 'forward' });
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(spawnDetached).not.toHaveBeenCalled();
+    });
+
+    it('agent still runs when the forwarder cannot be started', async () => {
+      backend.existing = [mainContainer('feat')];
+      spawnDetached.mockImplementationOnce(() => {
+        throw new Error('Could not start the background forwarder');
+      });
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(backend.callsOf('exec').map(c => (c[1] as string[])[0])).toEqual(['sh', 'tmux']);
+    });
+
+    it('forward --auto --detach prints the pid as JSON and registers it', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('forward', 'feat', [], { auto: true, detach: true, json: true });
+      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto']);
+      expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feat', pid: 4242 });
+      expect(mockForwards).toEqual([{ pid: 4242, container: NAME, port: 0, hostPort: 0, kind: 'forward' }]);
+    });
+
+    it('forward --auto refuses port arguments', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('forward', 'feat', ['3000'], { auto: true });
+      expect(errors).toEqual(['✗ forward --auto takes no ports; it forwards whatever listens in the container']);
+      expect(runAutoForward).not.toHaveBeenCalled();
+    });
+
+    it('forward --auto prints one NDJSON object per change and keeps the registry in step', async () => {
+      backend.existing = [mainContainer('feat')];
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { forward: { ignore: ['9229', 5555] } } });
+      const seen: unknown[] = [];
+      runAutoForward.mockImplementationOnce(async (_b: unknown, _id: string, opts: any) => {
+        seen.push(mockForwards.slice());
+        opts.onChange({ event: 'add', port: 3000, hostPort: 3001 });
+        seen.push(mockForwards.slice());
+        opts.onChange({ event: 'remove', port: 3000, hostPort: 3001 });
+        seen.push(mockForwards.slice());
+      });
+      const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      try {
+        await new ContainerCommand().execute('forward', 'feat', [], { auto: true, json: true });
+      } finally {
+        exit.mockRestore();
+      }
+      const [, id, opts] = runAutoForward.mock.calls[0];
+      expect(id).toBe('cid-1');
+      expect(opts).toMatchObject({ ignore: [9229, 5555], user: 'dev' });
+      expect(stdout.join('').trim().split('\n').map(l => JSON.parse(l))).toEqual([
+        { event: 'add', port: 3000, hostPort: 3001 },
+        { event: 'remove', port: 3000, hostPort: 3001 },
+      ]);
+      const marker = { pid: process.pid, container: NAME, port: 0, hostPort: 0, kind: 'forward' };
+      expect(seen).toEqual([[marker], [marker, { ...marker, port: 3000, hostPort: 3001 }], [marker]]);
+      expect(mockForwards).toEqual([]);
+    });
+
+    it('list JSON shows auto forwards with their pid', async () => {
+      backend.existing = [mainContainer('feat')];
+      (lifecycle.containerStatus as jest.Mock).mockResolvedValue({ agentRunning: false, head: null, ahead: 0, dirty: false, status: 'ok' });
+      mockForwards.push(
+        { pid: 4242, container: NAME, port: 0, hostPort: 0, kind: 'forward' },
+        { pid: 4242, container: NAME, port: 5173, hostPort: 5174, kind: 'forward' },
+        { pid: 4242, container: 'kunj-other', port: 8080, hostPort: 8080, kind: 'forward' },
+      );
+      await new ContainerCommand().execute('list', { json: true });
+      expect(JSON.parse(stdout.join('')).containers[0].ports).toEqual([
+        { container: 3000, host: 13000, kind: 'publish' },
+        { container: 5173, host: 5174, kind: 'forward', pid: 4242 },
+      ]);
+    });
   });
 
   it('prints the list json shape', async () => {

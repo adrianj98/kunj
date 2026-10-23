@@ -1392,6 +1392,32 @@
     "sensitive": false
   },
   {
+    "key": "container.forward.auto",
+    "type": "boolean",
+    "category": "container",
+    "default": true,
+    "description": "`kunj container agent` starts a background `forward --auto` that forwards every new port the container listens on to 127.0.0.1",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.forward.ignore",
+    "type": "array",
+    "category": "container",
+    "default": [],
+    "description": "Container ports `forward --auto` never forwards (ports below 1024 are never forwarded)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "9229"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "container.services",
     "type": "string",
     "category": "container",

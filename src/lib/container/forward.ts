@@ -30,8 +30,13 @@ export function parseForwardSpec(text: string): ForwardSpec {
   throw new Error(`Invalid port "${text}": expected <port> or <hostPort>:<port>`);
 }
 
-/** Listens on 127.0.0.1:preferred, or on an OS-assigned port when that one is taken. */
-function listenLocal(server: net.Server, preferred: number): Promise<number> {
+const NEXT_FREE_TRIES = 100;
+
+/**
+ * Listens on 127.0.0.1:preferred, or when that one is taken on the next free port above it
+ * (`nextFree`, up to 100 tries) or an OS-assigned one.
+ */
+function listenLocal(server: net.Server, preferred: number, nextFree = false): Promise<number> {
   const attempt = (port: number) =>
     new Promise<number>((resolve, reject) => {
       const onError = (err: Error) => reject(err);
@@ -41,10 +46,13 @@ function listenLocal(server: net.Server, preferred: number): Promise<number> {
         resolve((server.address() as net.AddressInfo).port);
       });
     });
-  return attempt(preferred).catch((err: NodeJS.ErrnoException) => {
-    if (err.code !== 'EADDRINUSE') throw err;
-    return attempt(0);
-  });
+  const next = (port: number) => (nextFree && port < Math.min(preferred + NEXT_FREE_TRIES, 65535) ? port + 1 : 0);
+  const tryFrom = (port: number): Promise<number> =>
+    attempt(port).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EADDRINUSE' || port === 0) throw err;
+      return tryFrom(next(port));
+    });
+  return tryFrom(preferred);
 }
 
 /** `preferred` when it is free on 127.0.0.1, else a port the OS picks. */
@@ -81,7 +89,8 @@ export async function forwardPort(
   backend: ContainerBackend,
   containerId: string,
   spec: ForwardSpec,
-  opts: { hasSocat: boolean; tool?: TunnelTool; onConnection?: () => void },
+  /** nextFree: when the host port is taken use the next free one above it, not any port */
+  opts: { hasSocat: boolean; tool?: TunnelTool; nextFree?: boolean; onConnection?: () => void },
 ): Promise<Forwarder> {
   const sockets = new Set<net.Socket>();
   const command = tunnelCommand(spec.container, opts.tool ?? opts.hasSocat);
@@ -114,7 +123,7 @@ export async function forwardPort(
     backend.exec(containerId, command, { stdin, stdout: socket, stderr }).then(finish, finish);
   });
 
-  const hostPort = await listenLocal(server, spec.host ?? spec.container);
+  const hostPort = await listenLocal(server, spec.host ?? spec.container, opts.nextFree);
 
   return {
     hostPort,

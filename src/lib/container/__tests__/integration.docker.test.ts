@@ -16,6 +16,7 @@ import { LocalDockerBackend } from '../docker';
 import { LABEL, containerNames, repoIdFromUrl } from '../names';
 import { StartError, StartOptions, containerStatus, removeContainer, startContainer } from '../lifecycle';
 import { forwardPort } from '../forward';
+import { AutoForwardChange, runAutoForward } from '../autoforward';
 import { resolveHelperImage } from '../image';
 import { getVersion } from '../../version';
 import { parseBlueprint, resolveBlueprint, snapshotTag, SEED_DIR } from '../blueprint';
@@ -280,6 +281,41 @@ const BRANCH_ALLOW = 'it-allow';
       expect(await res.text()).toBe('hi');
     } finally {
       await forwarder.close();
+    }
+  });
+
+  it('forward --auto picks up a server started late and drops it when it stops', async () => {
+    // Only this test's port: the server an earlier test left on 8123 is forwarded too
+    const changes: AutoForwardChange[] = [];
+    const controller = new AbortController();
+    const run = runAutoForward(backend, idA, {
+      ignore: [],
+      intervalMs: 200,
+      user: USER,
+      onChange: c => c.port === 18765 && changes.push(c),
+      signal: controller.signal,
+    });
+    try {
+      await new Promise(r => setTimeout(r, 1000));
+      expect(changes).toEqual([]);
+
+      const server = `require('http').createServer((q,s)=>s.end('auto')).listen(18765)`;
+      await backend.exec(idA, ['sh', '-c', `nohup node -e "${server}" >/dev/null 2>&1 & echo $! > /tmp/auto.pid`], { user: USER });
+      const started = Date.now();
+      await waitFor(() => changes.length === 1, 'the forward to appear', 3000);
+      expect(Date.now() - started).toBeLessThan(3000);
+      const [add] = changes;
+      expect(add).toMatchObject({ event: 'add', port: 18765 });
+      const res = await fetch(`http://127.0.0.1:${add.hostPort}/`);
+      expect(await res.text()).toBe('auto');
+
+      await backend.exec(idA, ['sh', '-c', 'kill $(cat /tmp/auto.pid)'], { user: USER });
+      await waitFor(() => changes.length === 2, 'the forward to be dropped', 3000);
+      expect(changes[1]).toEqual({ event: 'remove', port: 18765, hostPort: add.hostPort });
+      expect(await canConnect(add.hostPort)).toBe(false);
+    } finally {
+      controller.abort();
+      await run;
     }
   });
 

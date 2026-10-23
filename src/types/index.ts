@@ -66,6 +66,7 @@ export interface KunjConfig {
     cpus?: string;
     memory?: string;
     publish?: string[];
+    forward?: { auto?: boolean; ignore?: Array<number | string> | number | string };
     // Sidecar services by name (validated by parseServices in src/lib/container/services.ts)
     services?: Record<string, unknown>;
   };

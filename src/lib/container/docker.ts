@@ -311,6 +311,12 @@ export class LocalDockerBackend implements ContainerBackend {
     return JSON.parse(out.stdout.trim() || 'null') ?? {};
   }
 
+  async containerState(id: string): Promise<ContainerInfo['state'] | null> {
+    const out = await this.spawnDocker(['inspect', '--format', '{{.State.Status}}', id]);
+    if (out.code !== 0) return null;
+    return out.stdout.trim() as ContainerInfo['state'];
+  }
+
   exec(id: string, cmd: string[], io: ExecIO = {}): Promise<{ exitCode: number; stdout: string }> {
     const stdinStream = typeof io.stdin === 'object' ? io.stdin : undefined;
     const args = ['exec'];

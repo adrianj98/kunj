@@ -68,6 +68,32 @@ describe('findFreePort', () => {
   });
 });
 
+describe('forwardPort nextFree', () => {
+  it('takes the next port above a taken one', async () => {
+    // A port whose successor is free too
+    let taken: net.Server | undefined;
+    let port = 0;
+    for (let i = 0; i < 20 && !taken; i++) {
+      const probe = await listen(0);
+      port = (probe.address() as net.AddressInfo).port;
+      const successor = await listen(port + 1).catch(() => undefined);
+      if (successor) {
+        await closeServer(successor);
+        taken = probe;
+      } else {
+        await closeServer(probe);
+      }
+    }
+    try {
+      const forwarder = await forwardPort(new FakeBackend(), 'cid', { container: port }, { hasSocat: true, nextFree: true });
+      expect(forwarder.hostPort).toBe(port + 1);
+      await forwarder.close();
+    } finally {
+      if (taken) await closeServer(taken);
+    }
+  });
+});
+
 describe('tunnelCommand', () => {
   it('uses nc or bash when named, and reads the probe', () => {
     expect(tunnelCommand(5432, 'nc')).toEqual(['nc', '127.0.0.1', '5432']);

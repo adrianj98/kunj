@@ -125,6 +125,16 @@ container is created, on `127.0.0.1` only. For ports you need now and then, use
 [`kunj ct forward`](../commands/#forward) instead, which needs no rebuild and reaches servers bound to
 `localhost`.
 
+`kunj ct agent` also starts [`kunj ct forward --auto`](../commands/#automatic-forwarding) in the
+background, which forwards every port of 1024 or above that the container starts listening on, on
+`127.0.0.1` only. Set `container.forward.auto` to `false` to turn that off, or list ports it should
+leave alone in `container.forward.ignore`:
+
+```bash
+kunj config --set container.forward.auto=false
+kunj config --set container.forward.ignore=[9229,5555]
+```
+
 ## Resources and Docker context
 
 `container.cpus` and `container.memory` are passed to `docker run` as `--cpus` and `--memory`.

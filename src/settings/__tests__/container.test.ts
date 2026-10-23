@@ -16,6 +16,7 @@ describe('container settings', () => {
       memory: '',
       publish: [],
       services: {},
+      forward: { auto: true, ignore: [] },
     });
     expect(settingsRegistry.get('container.services')?.validate?.({ pg: { image: 'p' } })).toBe(true);
     expect(settingsRegistry.get('container.services')?.validate?.('pg')).toBe(false);

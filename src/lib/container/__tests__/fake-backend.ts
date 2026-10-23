@@ -24,6 +24,8 @@ export class FakeBackend implements ContainerBackend {
   volumes = new Set<string>();
   /** composeConfig results keyed by the compose text; unlisted texts give an empty project. */
   composeConfigs = new Map<string, unknown>();
+  /** containerState results by id; unlisted ids are 'running'. */
+  states = new Map<string, ContainerInfo['state'] | null>();
   /** Pipe io.stdin to io.stdout uppercased. */
   echoUpper = false;
   /** stdin contents captured per exec call, in call order (undefined when no stream was given). */
@@ -104,6 +106,11 @@ export class FakeBackend implements ContainerBackend {
   async inspectLabels(name: string): Promise<Labels | null> {
     this.record('inspectLabels', [name]);
     return this.existing.find(c => c.name === name)?.labels ?? null;
+  }
+
+  async containerState(id: string): Promise<ContainerInfo['state'] | null> {
+    this.record('containerState', [id]);
+    return this.states.has(id) ? this.states.get(id)! : 'running';
   }
 
   async exec(id: string, cmd: string[], io: ExecIO = {}): Promise<ExecResult> {

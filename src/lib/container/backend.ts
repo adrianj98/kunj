@@ -98,6 +98,8 @@ export interface ContainerBackend {
   list(filter: Labels): Promise<ContainerInfo[]>;
   /** null when the object does not exist */
   inspectLabels(name: string): Promise<Labels | null>;
+  /** The container's state (docker inspect .State.Status); null when it does not exist */
+  containerState(id: string): Promise<ContainerInfo['state'] | null>;
   /** stdout is captured unless io.stdout is given; a non-zero exit is returned, not thrown */
   exec(id: string, cmd: string[], io?: ExecIO): Promise<{ exitCode: number; stdout: string }>;
   copyIn(id: string, dir: string, tar: NodeJS.ReadableStream): Promise<void>;

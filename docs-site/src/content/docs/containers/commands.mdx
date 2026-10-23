@@ -75,6 +75,10 @@ Detach with `Ctrl-b d`. The agent keeps running inside the container until it ex
 container stops. If the image has no `tmux`, kunj warns and runs the agent directly, in which case it
 stops when you leave.
 
+`agent` also starts a background [`kunj ct forward --auto`](#automatic-forwarding) for the container,
+so a dev server the agent starts is reachable on your machine. It is not started when one is already
+running for that container, or when `container.forward.auto` is `false`.
+
 ## attach
 
 Reattaches to the agent's `tmux` session:
@@ -186,6 +190,33 @@ kunj ct forward feature/search postgres:5432   # localhost:5432 → the postgres
 The tunnel goes through the service's own container, with `socat`, `bash` or `nc`, whichever its
 image has; kunj refuses when it has none.
 
+### Automatic forwarding
+
+`--auto` forwards whatever the container listens on, as it appears:
+
+```bash
+kunj ct forward feature/search --auto            # until Ctrl-C
+kunj ct forward feature/search --auto --detach   # in the background, until the container stops
+```
+
+```text
+Forwarding the ports feature/search listens on; press Ctrl-C to stop
++ localhost:5173 → 5173
++ localhost:3001 → 3000
+- localhost:3001 → 3000 (closed)
+```
+
+Every 2 seconds kunj lists the container's TCP listeners (`ss -ltnH`, one `docker exec`). Each new
+one on port 1024 or above, bound to `localhost` or all addresses, is forwarded to the same port on
+`127.0.0.1` when it is free, else to the next free port; when the listener goes away the forward is
+dropped. Ports in `container.forward.ignore` are skipped. With `--json` each change is one line,
+`{"event":"add","port":3000,"hostPort":3001}` (`"remove"` when it is dropped), and
+`--auto --detach --json` prints `{"success":true,"branch":"feature/search","pid":48213}`.
+
+Running auto forwarders and their ports are recorded in `~/.kunj/container-forwards.json`;
+`kunj ct list` shows the ports. A detached forwarder exits on its own when the container stops; to
+stop one sooner, `kill` its pid.
+
 ### Ports
 
 There are two ways to reach a server in the container:
@@ -216,7 +247,9 @@ Containers for shop:
 ```
 
 For each running container it shows whether the agent is running, how many commits the branch is
-ahead of origin and whether the workspace has uncommitted changes. `[blueprint stale]` means the
+ahead of origin, whether the workspace has uncommitted changes, and its published and
+automatically forwarded ports (`host→container`; in `--json`, `ports` entries with `kind` `"publish"`,
+or `"forward"` with the forwarder's `pid`). `[blueprint stale]` means the
 container was started from a snapshot that no longer matches the blueprint, and
 `[firewall helper down]` means the network helper is not running (start the container again to bring
 it back).

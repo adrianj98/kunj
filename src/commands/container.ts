@@ -7,6 +7,7 @@
 //   kunj container attach [branch]                      reattach to that session
 //   kunj container open [branch] [--new-window]         attach the editor (worktree.editorCommand)
 //   kunj container forward [branch] <port>|<host>:<port>|<service>:<port>...
+//   kunj container forward [branch] --auto [--detach]  forward every port the container listens on
 //   kunj container logs [branch] [service] [--follow]
 //   kunj container list [--all] [--no-status]
 //   kunj container stop [branch]
@@ -33,6 +34,7 @@ import { LocalDockerBackend } from '../lib/container/docker';
 import { ContainerStatus, describeGuard, emptyStatus } from '../lib/container/env';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
 import { Forwarder, TUNNEL_PROBE, forwardPort, parseForwardSpec, parseTunnelProbe } from '../lib/container/forward';
+import { ForwardRecord, forwarderFor, ignoredPorts, readForwards, runAutoForward, spawnDetached, updateForwards } from '../lib/container/autoforward';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerNames, LABEL, containerNames, repoIdFromUrl } from '../lib/container/names';
 import {
@@ -72,6 +74,8 @@ interface ContainerOptions {
   bundle?: boolean;
   follow?: boolean;
   newWindow?: boolean;
+  auto?: boolean;
+  detach?: boolean;
 }
 
 interface Context {
@@ -126,6 +130,8 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--keep-volumes', description: "[remove] Keep the workspace and home volumes (and the services' volumes)" },
         { flags: '--follow', description: '[logs] Keep streaming new output' },
         { flags: '-n, --new-window', description: '[open] Open in a new editor window' },
+        { flags: '--auto', description: '[forward] Forward every port the container starts listening on (>= 1024, not in container.forward.ignore)' },
+        { flags: '--detach', description: '[forward --auto] Run the forwarder in the background; it exits when the container stops' },
         { flags: '--global', description: '[blueprint init] Write the host copy (~/.kunj/<repo>/blueprint.json) instead of .kunj/blueprint.json' },
         { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file' },
         { flags: '--no-bundle', description: '[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)' },
@@ -142,6 +148,7 @@ export class ContainerCommand extends BaseCommand {
         '  open [branch] [--new-window]         attach the editor (worktree.editorCommand), starting it if stopped',
         '  forward [branch] <port>|<host>:<port>...  forward localhost ports into the container',
         '  forward [branch] <service>:<port>    forward a sidecar service\'s port (e.g. postgres:5432)',
+        '  forward [branch] --auto [--detach]   forward each port the container listens on, as it appears',
         '  logs [branch] [service] [--follow]   output of the container, or of one of its services',
         '  list                                 containers of this repository (the default)',
         '  stop [branch]                        stop, keeping the workspace',
@@ -162,6 +169,9 @@ export class ContainerCommand extends BaseCommand {
         'Services (Postgres, Redis, ...) are declared in the blueprint\'s "services", container.services',
         'or the devcontainer\'s compose file; each runs next to the branch container on its own network',
         'and is reached by its name (postgres:5432). They are stopped and removed with the container.',
+        '',
+        'agent also starts a background forward --auto for the container (container.forward.auto: false',
+        'turns that off). Forwards only ever listen on 127.0.0.1.',
         '',
         '[branch] defaults to the current branch. `ct` is short for `container`.',
       ].join('\n'),
@@ -234,6 +244,7 @@ export class ContainerCommand extends BaseCommand {
       case 'open':
         return this.open(target, options);
       case 'forward': {
+        if (options.auto) return this.autoForward(target, rest, options);
         // `forward 3000` names a port, not a branch
         const specs = isForwardSpec(target) ? [target, ...rest] : rest;
         return this.forward(isForwardSpec(target) ? undefined : target, specs, options);
@@ -505,6 +516,13 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
+    if (ctx.config.container?.forward?.auto !== false && ctx.backend.features.localPorts && !forwarderFor(main.name)) {
+      try {
+        this.startForwarder(ctx, branch, main.name);
+      } catch (err) {
+        this.warn(`Could not start the port forwarder: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     const user = this.userOf(main) || undefined;
     const command = agentCommandLine(ctx.config.container?.agentCommand, args);
     const probe = await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user });
@@ -685,6 +703,76 @@ export class ContainerCommand extends BaseCommand {
     process.exit(0);
   }
 
+  // `forward --auto --detach` in a background kunj, registered at once (port 0 marks the forwarder)
+  // so a second agent sees it before the child has written anything itself
+  private startForwarder(ctx: Context, branch: string, container: string): number {
+    const pid = spawnDetached(['ct', 'forward', branch, '--auto', ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : [])]);
+    updateForwards(rs => [...rs.filter(r => r.pid !== pid), forwarderRecord(pid, container, 0, 0)]);
+    return pid;
+  }
+
+  private async autoForward(target: string | undefined, rest: string[], options: ContainerOptions): Promise<void> {
+    if (rest.length > 0 || isForwardSpec(target)) {
+      throw new ContainerError('forward --auto takes no ports; it forwards whatever listens in the container');
+    }
+    const ctx = await this.context(options);
+    const branch = await this.resolveBranch(ctx, target);
+    const main = await this.requireRunning(ctx, branch);
+
+    if (options.detach) {
+      const pid = this.startForwarder(ctx, branch, main.name);
+      if (this.jsonMode) {
+        this.outputJSON({ success: true, branch, pid });
+      } else {
+        console.log(chalk.green(`✓ Forwarding ports of ${branch} in the background (pid ${pid})`));
+      }
+      return;
+    }
+
+    const pid = process.pid;
+    const mine = (rs: ForwardRecord[]) => rs.filter(r => r.pid !== pid);
+    const ignore = ignoredPorts(ctx.config.container?.forward?.ignore);
+    updateForwards(rs => [...mine(rs), forwarderRecord(pid, main.name, 0, 0)]);
+    if (!this.jsonMode) console.log(chalk.gray(`Forwarding the ports ${branch} listens on; press Ctrl-C to stop`));
+
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+    try {
+      await runAutoForward(ctx.backend, main.id, {
+        ignore,
+        user: this.userOf(main),
+        signal: controller.signal,
+        onError: this.warn,
+        onChange: change => {
+          try {
+            updateForwards(rs =>
+              change.event === 'add'
+                ? [...rs, forwarderRecord(pid, main.name, change.port, change.hostPort)]
+                : rs.filter(r => !(r.pid === pid && r.port === change.port))
+            );
+          } catch (err) {
+            // the forward itself works; only `list` will not show it
+            this.warn(`Could not record the forward: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          if (this.jsonMode) {
+            process.stdout.write(JSON.stringify(change) + '\n');
+          } else if (change.event === 'add') {
+            console.log(chalk.green(`+ localhost:${change.hostPort} → ${change.port}`));
+          } else {
+            console.log(chalk.gray(`- localhost:${change.hostPort} → ${change.port} (closed)`));
+          }
+        },
+      });
+    } finally {
+      process.off('SIGINT', stop);
+      process.off('SIGTERM', stop);
+      updateForwards(mine);
+    }
+    process.exit(0);
+  }
+
   // ---------------------------------------------------------------------
   // logs
   // ---------------------------------------------------------------------
@@ -729,6 +817,7 @@ export class ContainerCommand extends BaseCommand {
     const blueprintMains = mains.filter(c => this.recordedOptions(c).imageKind === 'blueprint');
     const currentHash = blueprintMains.some(c => c.labels[LABEL.repo] === ctx.repo.id) ? await this.currentHash(ctx) : null;
 
+    const forwards = readForwards().filter(r => r.port > 0);
     const containers = mains.map((c, i) => {
       const s = statuses[i];
       const recorded = this.recordedOptions(c);
@@ -743,7 +832,10 @@ export class ContainerCommand extends BaseCommand {
         ...(recorded.imageKind === 'blueprint' ? { blueprint: { hash: recorded.blueprintHash ?? '', stale } } : {}),
         createdAt: c.createdAt,
         firewall: this.recordedOptions(c).firewall || 'default',
-        ports: c.ports.map(p => ({ container: p.container, host: p.host, kind: 'publish' as const })),
+        ports: [
+          ...c.ports.map(p => ({ container: p.container, host: p.host, kind: 'publish' as const })),
+          ...forwards.filter(r => r.container === c.name).map(r => ({ container: r.port, host: r.hostPort, kind: 'forward' as const, pid: r.pid })),
+        ],
         agent: { running: s.agentRunning },
         workspace: { head: s.head ? s.head.slice(0, 7) : null, ahead: s.ahead, dirty: s.dirty },
         status: s.status,
@@ -1135,4 +1227,8 @@ async function remoteBranches(): Promise<string[]> {
       );
     });
   });
+}
+
+function forwarderRecord(pid: number, container: string, port: number, hostPort: number): ForwardRecord {
+  return { pid, container, port, hostPort, kind: 'forward' };
 }

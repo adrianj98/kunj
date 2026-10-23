@@ -155,7 +155,9 @@ that small.
 - reach the internet (default mode) or the allowlisted sites;
 - install packages in its home directory, such as global npm packages;
 - read every environment variable and file you forwarded into the container;
-- start servers you can reach with `kunj ct forward` or published ports.
+- start servers you can reach with `kunj ct forward` or published ports. While `kunj ct agent` runs, any
+  server it starts on port 1024 or above is forwarded to `127.0.0.1` on your machine (never the LAN)
+  automatically; `container.forward.ignore` and `container.forward.auto: false` limit or stop that.
 
 **It cannot:**
 

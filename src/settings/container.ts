@@ -92,6 +92,21 @@ export function registerContainerSettings(): void {
       examples: ['3000:3000'],
     },
     {
+      key: 'container.forward.auto',
+      description: '`kunj container agent` starts a background `forward --auto` that forwards every new port the container listens on to 127.0.0.1',
+      type: 'boolean',
+      defaultValue: true,
+      category: 'container',
+    },
+    {
+      key: 'container.forward.ignore',
+      description: 'Container ports `forward --auto` never forwards (ports below 1024 are never forwarded)',
+      type: 'array',
+      defaultValue: [],
+      category: 'container',
+      examples: ['9229'],
+    },
+    {
       key: 'container.services',
       description: 'Sidecar services (Postgres, Redis, ...) started next to each branch container, by name',
       type: 'string',

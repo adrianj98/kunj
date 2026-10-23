@@ -2,6 +2,31 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Containers: `kunj ct forward --auto` (phase 2, Task 3)
+
+- New `src/lib/container/autoforward.ts`: `parseSsListen()` reads `ss -ltnH` (IPv4, IPv6, wildcard and
+  loopback listeners; skips Docker's embedded DNS on 127.0.0.11 and addresses the tunnel cannot reach
+  through 127.0.0.1), `diffPorts()` (never < 1024 or `container.forward.ignore`), and `runAutoForward()`,
+  which polls with one exec every 2 s, forwards new listeners with `forwardPort` and drops gone ones, and
+  returns when the container is no longer running (state polled every 5 s through the new
+  `ContainerBackend.containerState()`). Why: phase 2 spec section 3, so a dev server the agent starts is
+  reachable without knowing its port in advance.
+- `forwardPort` takes `nextFree`: when the container's port is taken on the host, the next free one above
+  it is used rather than any port, so the host port stays recognisable. Forwards only listen on 127.0.0.1.
+- Forward registry `~/.kunj/container-forwards.json` (`{ pid, container, port, hostPort, kind: 'forward' }`,
+  port 0 marking a running forwarder): dead pids pruned on every read via `process.kill(pid, 0)`, writes
+  go to a temp file and are renamed, because several forwarders write it at once.
+- `kunj ct forward [branch] --auto [--detach]`: one line per change (`--json`: NDJSON
+  `{ event, port, hostPort }`); `--detach` re-runs kunj in the background (`process.execPath`, detached,
+  stdio ignored, unref'd) and registers its pid (`--json`: `{ success, branch, pid }`).
+- `kunj ct agent` starts a detached auto-forwarder unless `container.forward.auto` is `false` (new
+  setting, default `true`) or one is already registered for the container. Why: spec decision; the
+  agent's servers should just work.
+- `kunj ct list --json`: `ports` gains `kind: 'forward'` entries with `pid` (additive).
+- New settings `container.forward.auto` and `container.forward.ignore` (a list, or the single number
+  `config --set` stores). README, docs-site containers pages (commands, configuration, overview,
+  security), the generated reference JSON and CLAUDE.md updated.
+
 ## 2026-10-23 — Containers: `kunj ct open` (phase 2, Task 2)
 
 - New `src/lib/container/editor.ts`: the attached-container URI (`vscode-remote://attached-container+<hex>/workspace`,

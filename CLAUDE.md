@@ -175,11 +175,14 @@ The VS Code extension in `vscode-extension/` is a separate npm package (own `pac
 `kunj container` (alias `ct`, src/commands/container.ts) runs a branch in a Docker container with its
 own clone, mainly to run an agent with permissions skipped. Origin is the only channel in and out;
 nothing from the host is bind-mounted. Design: docs/superpowers/specs/2026-10-21-branch-containers-design.md.
-Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sidecar services and `open`; no
-`prune`, Docker-in-Docker or `--auto` yet. Phase 3 (not started) is the workspace IDE:
+Phase 2 (docs/superpowers/specs/2026-10-23-container-phase-2-design.md) adds sidecar services, `open` and
+`forward --auto`; no `prune` or Docker-in-Docker yet. Phase 3 (not started) is the workspace IDE:
 docs/superpowers/specs/2026-10-23-workspace-ide-design.md.
 
-**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,services,editor}.ts`.
+**Modules:** `src/lib/container/{backend,docker,names,devcontainer,image,seed,env,lifecycle,forward,autoforward,services,editor}.ts`.
+`autoforward.ts` polls `ss -ltnH` and forwards new listeners (127.0.0.1 only); running forwarders are in
+`~/.kunj/container-forwards.json` (dead pids pruned on read, atomic writes), and `agent` spawns a detached
+one unless `container.forward.auto` is `false` or one is registered for the container.
 The images' build contexts live in `src/container/{sandbox,nethelper}/` and are copied to
 `dist/container` by `scripts/copy-container-assets.js` as part of the build. Their tags are
 `kunj-sandbox:<version>-<hash>` / `kunj-nethelper:<version>-<hash>`, the hash covering the build

@@ -153,12 +153,13 @@ The first start builds the `kunj-sandbox` image, which takes a few minutes and a
 ```bash
 export GH_TOKEN=github_pat_...         # fine-grained, this repo only
 kunj ct start -c feature/x             # new branch from origin/<base>, cloned into a container
-kunj ct agent feature/x                # Claude in tmux; detach with Ctrl-b d
+kunj ct agent feature/x                # Claude in tmux (plus a background forward --auto); detach with Ctrl-b d
 kunj ct attach feature/x               # come back to it later
 kunj ct shell feature/x                # login shell in /workspace
 kunj ct open feature/x                 # VS Code attached to the container (--new-window)
 kunj ct exec feature/x -- npm test     # run one command
 kunj ct forward feature/x 3000         # localhost:3000 -> container port 3000
+kunj ct forward feature/x --auto       # forward every port the container starts listening on
 kunj ct logs feature/x postgres        # a sidecar service's output (--follow to keep streaming)
 git fetch origin && git switch feature/x   # the agent's pushes arrive via origin
 kunj ct list                           # containers of this repository (-a for all)
@@ -190,6 +191,8 @@ Settings (`kunj config`):
 | `container.dockerContext` | none | Docker context for every call |
 | `container.cpus`, `container.memory` | none | Limits passed to `docker run` (e.g. `2`, `4g`) |
 | `container.publish` | none | Ports always published at start |
+| `container.forward.auto` | `true` | `kunj ct agent` starts a background `forward --auto` |
+| `container.forward.ignore` | none | Container ports `forward --auto` never forwards |
 | `container.services` | none | Sidecar services by name (see [Services](#services)) |
 
 Network: by default the internet is open but the Docker host, the LAN and private ranges are
@@ -202,7 +205,15 @@ place.
 
 Ports: `kunj ct forward <branch> 3000` or `8080:3000` forwards a local port into the container
 over `docker exec`, so nothing is published. `--publish` and `container.publish` use Docker's own
-port publishing instead.
+port publishing instead. `kunj ct forward <branch> --auto` watches the container's listeners
+(`ss -ltnH` every 2 s) and forwards each new one on port 1024 or above to the same port on
+127.0.0.1, or the next free one, dropping it when the listener goes away; ports in
+`container.forward.ignore` are skipped. It prints one line per change (`--json`: one
+`{ "event": "add"|"remove", "port", "hostPort" }` object per line). `--detach` runs it in the
+background until the container stops (`--json`: `{ success, branch, pid }`). `kunj ct agent` starts
+one of those unless one is already running for the container or `container.forward.auto` is
+`false`. Running forwarders are recorded in `~/.kunj/container-forwards.json`, and `kunj ct list
+--json` shows their ports as `kind: "forward"` entries with the forwarder's `pid`.
 
 Hooks: `pre-container-create`, `post-container-create`, `pre-container-delete` and
 `post-container-delete` receive `branch`, `container` and `image` (see [Hooks](#hooks)). The create
