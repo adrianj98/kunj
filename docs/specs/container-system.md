@@ -25,7 +25,7 @@ the host).*
 | Blueprints and snapshots, including private origins | Shipped | [blueprints.md](blueprints.md) |
 | Sidecar services, `ct open`, `forward --auto`, `ct prune`, Docker-in-Docker | Shipped | [container-phase-2.md](container-phase-2.md) |
 | `kunj ct file read\|write` (workspace files for the IDE) | Shipped | [workspace-ide.md](workspace-ide.md) |
-| Host MCP bridge (a browser on the Mac for the agent) | Not started | [container-phase-2.md](container-phase-2.md) |
+| Host MCP bridge (a browser on the Mac for the agent) | Built, in security review | [container-phase-2.md](container-phase-2.md) |
 | Workspace IDE (phase 3) | CLI contract shipped; app proposed | [workspace-ide.md](workspace-ide.md) |
 | Containers in the VS Code extension and the macOS app | Not started | — |
 | Remote Docker host (`kunj serve`) | Not started | — |

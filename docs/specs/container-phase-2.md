@@ -18,7 +18,7 @@ themselves up, and repos that run `docker compose` themselves can. Each feature 
 | 3 | Auto port forwarding (`forward --auto`) | Dev servers just appear on localhost | Shipped (5710902, b88466c) |
 | 4 | Prune (`kunj ct prune`) | Containers, volumes and snapshots pile up (1–2 GB each) | Shipped (893dc79, 4f7aa10) |
 | 5 | Docker-in-Docker | Repos whose tests run `docker compose`; weakens isolation, so opt-in and last | Shipped (d40b44c, c88430b) |
-| 6 | Host MCP bridge (a browser on the Mac for the agent) | Let the agent check the dev server it started | Not started (design below) |
+| 6 | Host MCP bridge (a browser on the Mac for the agent) | Let the agent check the dev server it started | Built, in security review (branch `worktree-agent-ad3a524ce9e8fc25b`) |
 | — | Cross-feature fixes: forwards through the helper, compose deps, orphan grace | Review of the whole phase | Shipped (a32bc90) |
 | — | Containers in the VS Code extension and the macOS app | Consumers of the JSON added here | Not started |
 

@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-23 — Specs tracker: phase 2 progress brought up to date
+
+- `docs/specs/README.md`: added the cross-feature fixes (a32bc90) to Done, the missing `forward --auto`
+  commit, the MCP bridge under In progress (built on a worktree branch, first review found a sandbox
+  escape, fixed, final review running), phase 2 review follow-ups and the test-timeout issue under To do,
+  and the sysbox check, a stray test file and a duplicate doc under Waiting on you. Status rows in
+  `container-phase-2.md` and `container-system.md` now say the bridge is built and in review. Why: user
+  asked for an evaluation of what is done and what is left, recorded in the tracker.
+
 ## 2026-10-23 — Containers: phase 2 cross-feature fixes (forward via helper, compose deps, orphan grace, migrations docs)
 
 - Port forwarding (manual `forward <port>`, `--auto`'s listener poll and its tunnels) now execs in the
