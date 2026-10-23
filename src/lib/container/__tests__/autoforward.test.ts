@@ -22,6 +22,7 @@ import {
   ForwardRecord,
   HELPER_NO_SOCAT,
   autoForwardIgnore,
+  detachedLogFile,
   diffPorts,
   forwarderFor,
   ignoredPorts,
@@ -180,6 +181,32 @@ describe('spawnDetached', () => {
     expect(unref).toHaveBeenCalled();
   });
 
+  it('appends the output of the process to the log file, truncating one past 1 MB', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-log-'));
+    try {
+      const log = path.join(dir, 'logs', 'c-forward.log');
+      mockSpawn.mockReturnValue({ pid: 1, unref: jest.fn() });
+      spawnDetached(['ct'], log);
+      const opts = mockSpawn.mock.calls.at(-1)[2];
+      expect(opts.stdio[0]).toBe('ignore');
+      expect(opts.stdio[1]).toBe(opts.stdio[2]);
+      expect(typeof opts.stdio[1]).toBe('number');
+      fs.writeFileSync(log, 'earlier\n');
+      spawnDetached(['ct'], log);
+      expect(fs.readFileSync(log, 'utf8')).toBe('earlier\n');
+      fs.writeFileSync(log, 'x'.repeat(1024 * 1024 + 1));
+      spawnDetached(['ct'], log);
+      expect(fs.statSync(log).size).toBe(0);
+      // an unwritable log does not stop the process
+      fs.writeFileSync(path.join(dir, 'file'), '');
+      spawnDetached(['ct'], path.join(dir, 'file', 'x.log'));
+      expect(mockSpawn.mock.calls.at(-1)[2].stdio).toBe('ignore');
+      expect(detachedLogFile('kunj-app-feat-1', 'mcp')).toBe(path.join(os.homedir(), '.kunj', 'logs', 'kunj-app-feat-1-mcp.log'));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('runs the built dist/index.js when the entry is a TypeScript file (ts-node)', () => {
     const argv = process.argv;
     process.argv = [argv[0], '/x/kunj/src/index.ts'];
@@ -316,6 +343,21 @@ describe('runAutoForward', () => {
     controller.abort();
     await run;
     expect(mockClosed).toEqual([3000]);
+  });
+
+  it('does not warn that the ports cannot be read when the container stopped or restarted meanwhile', async () => {
+    for (const change of [() => backend.states.set('cid', 'exited'), () => backend.startedAt.set('cid', 'restarted')]) {
+      const errors: string[] = [];
+      backend.execHandler = (_id, cmd) => {
+        if (cmd.join(' ') !== PROC) return undefined;
+        change();
+        return Promise.resolve({ exitCode: 1, stdout: '' });
+      };
+      await runAutoForward(backend, T, { ignore: [], intervalMs: 2, signal: new AbortController().signal, onError: m => errors.push(m) });
+      expect(errors).toEqual([]);
+      backend.states.delete('cid');
+      backend.startedAt.delete('cid');
+    }
   });
 
   it('does not retry a port it could not forward until its listener comes back', async () => {

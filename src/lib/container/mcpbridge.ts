@@ -360,7 +360,7 @@ export const BATCH_REFUSAL = 'kunj: JSON-RPC batches are not accepted through th
  * The filter for the container→host direction of the JSON-RPC stream, one line at a time: a request
  * that is refused is answered with a JSON-RPC error carrying its id and not passed on (a batch with one
  * error, id null, whatever it holds); a line that is
- * not a JSON-RPC message is dropped (fail closed). A batch with anything refused is refused whole.
+ * not a JSON-RPC message is dropped (fail closed).
  */
 export function makeRequestFilter(policy: RequestPolicy): (line: string) => Verdict {
   return line => {
@@ -624,6 +624,8 @@ export interface BridgeOptions {
   /** Appended to the instructions of the server's initialize result (the port map) */
   instructions?: () => string | undefined;
   log?: (message: string) => void;
+  /** The clock for the refusal log's rate limit (default Date.now) */
+  now?: () => number;
   restartDelayMs?: number;
   stateIntervalMs?: number;
   /** Output waiting for the container past which the session ends (default MAX_BUFFERED_TO_CONTAINER) */
@@ -661,7 +663,7 @@ export async function runBridge(
   const filter = makeRequestFilter(policy);
   const restartDelayMs = opts.restartDelayMs ?? RESTART_DELAY_MS;
   const stateIntervalMs = opts.stateIntervalMs ?? STATE_POLL_MS;
-  const ctx: SessionContext = { backend, containerId, name, user, cfg, filter, opts, log, warnedMalformed: false };
+  const ctx: SessionContext = { backend, containerId, name, user, cfg, filter, opts, log, warnedMalformed: false, refusedLog: { last: -Infinity, suppressed: 0 } };
   let failedChecks = 0;
   // A listener only ends without a client when something is wrong: retry ever more slowly
   let retryMs = restartDelayMs;
@@ -715,6 +717,8 @@ interface SessionContext {
   opts: BridgeOptions;
   log: (message: string) => void;
   warnedMalformed: boolean;
+  /** The "refused a request" line is logged at most once per REFUSED_LOG_MS; the rest are counted */
+  refusedLog: { last: number; suppressed: number };
 }
 
 /**
@@ -741,6 +745,8 @@ export function makeThrowawayProfile(): { dir: string; profile: string; download
 }
 
 /** A bounded insertion-ordered set of id keys: past `max` the oldest is dropped. */
+const REFUSED_LOG_MS = 1000;
+
 function boundedKeys(max: number) {
   const keys = new Set<string>();
   return {
@@ -778,6 +784,9 @@ async function session(ctx: SessionContext): Promise<boolean> {
   const inFlight = new Map<string, string>();
   // Requests of the server's that the bridge answered itself: the container's replies to them are dropped
   const answered = boundedKeys(MAX_WATCHED);
+  // Ids of every request the server issued: a reply from the container to any other id is dropped, so
+  // a reply cannot be forged ahead of the request (the server may issue an id after the reply arrived)
+  const issued = boundedKeys(MAX_WATCHED);
 
   // The throwaway profile goes on every way out: the session's end, and the process exiting
   let profileDir: string | undefined;
@@ -856,6 +865,7 @@ async function session(ctx: SessionContext): Promise<boolean> {
     } catch {
       return toClient(line); // not JSON: passed on as it is (the host server is trusted)
     }
+    if (msg && typeof msg === 'object' && typeof msg.method === 'string' && msg.id !== undefined) issued.add(idKey(msg.id));
     if (msg && typeof msg === 'object' && msg.method === 'roots/list' && msg.id !== undefined) {
       answered.add(idKey(msg.id));
       return toServer(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { roots: [] } }));
@@ -934,15 +944,24 @@ async function session(ctx: SessionContext): Promise<boolean> {
         if (!ctx.warnedMalformed) log(`MCP ${name}: dropped a line from the container that is not a JSON-RPC message`);
         ctx.warnedMalformed = true;
       } else {
-        log(`MCP ${name}: refused a request`);
+        const now = (opts.now ?? Date.now)();
+        if (now - ctx.refusedLog.last >= REFUSED_LOG_MS) {
+          const more = ctx.refusedLog.suppressed;
+          log(`MCP ${name}: refused a request${more ? ` (${more} more refused since the last line)` : ''}`);
+          ctx.refusedLog = { last: now, suppressed: 0 };
+        } else {
+          ctx.refusedLog.suppressed++;
+        }
       }
       if (verdict.reply) reply(verdict.reply);
       return;
     }
     const msg = verdict.msg;
     if (msg.method === undefined) {
-      // A reply to a request of the server's; never to one the bridge answered itself
-      if (answered.has(idKey(msg.id))) return;
+      // A reply to a request of the server's; never to one the bridge answered itself or one the server never issued
+      const key = idKey(msg.id);
+      if (answered.has(key) || !issued.has(key)) return;
+      issued.delete(key);
     } else if (msg.id !== undefined) {
       const key = idKey(msg.id);
       if (inFlight.has(key)) {

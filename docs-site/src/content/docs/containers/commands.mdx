@@ -87,6 +87,10 @@ stops when you leave.
 `agent` also starts a background [`kunj ct forward --auto`](#automatic-forwarding) for the container,
 so a dev server the agent starts is reachable on your machine. It is not started when one is already
 running for that container, or when `container.forward.auto` is `false`.
+If the network helper is not running or has no `socat`, `agent` says so instead of starting a forwarder that
+would fail. The background forwarder and bridge write their output to
+`~/.kunj/logs/<container>-forward.log` and `<container>-mcp.log` (truncated past 1 MB), which is where to
+look when a port is not forwarded.
 
 With [`container.mcp`](../configuration/#a-browser-for-the-agent) set, `agent` also adds the bridged
 servers to the container's Claude Code config and starts a background [`kunj ct mcp`](#mcp), so the
@@ -360,6 +364,9 @@ Prints the output of the container, or of one of its [services](../services/):
 kunj ct logs feature/search postgres
 kunj ct logs feature/search postgres --follow   # keep streaming until Ctrl-C
 ```
+
+With `--json` every line is printed as one JSON object, `{"service":"postgres","stream":"stderr","line":"..."}`
+(`service` is `null` for the branch container, `stream` is `stdout` or `stderr`).
 
 ## stop
 

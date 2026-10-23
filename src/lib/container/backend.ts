@@ -108,6 +108,12 @@ export interface EngineInfo {
   operatingSystem: string;
 }
 
+export interface LogOptions {
+  follow?: boolean;
+  tail?: number;
+  onLine?: (stream: 'stdout' | 'stderr', line: string) => void;
+}
+
 export interface ContainerBackend {
   readonly features: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
   /** Throws Error('Docker is not available: <stderr>') */
@@ -147,7 +153,8 @@ export interface ContainerBackend {
   /** `docker compose config --format json` of a compose file's text, without interpolating the host's environment. */
   composeConfig(yamlText: string): Promise<any>;
   /** A container's output, streamed to our stdout and stderr; with `follow` until it stops or we are interrupted. */
-  logs(id: string, opts?: { follow?: boolean; tail?: number }): Promise<void>;
+  /** Streams the output to ours; with `onLine`, one call per line instead, tagged with its stream */
+  logs(id: string, opts?: LogOptions): Promise<void>;
   /**
    * Container events carrying `filter`'s labels (a '' value matches any value of that label), until
    * `signal` aborts (then it resolves). Rejects when the engine is unreachable or the stream ends.

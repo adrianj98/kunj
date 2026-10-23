@@ -1,6 +1,6 @@
 // In-memory ContainerBackend for lifecycle and port-forwarding tests. Records every call;
 // exec results are programmed by the joined command.
-import { BackendEvent, ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecTimeoutError, ImageInfo, Labels } from '../backend';
+import { BackendEvent, ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecTimeoutError, ImageInfo, Labels, LogOptions } from '../backend';
 
 export const FAKE_STARTED_AT = '2026-01-01T00:00:00.000000000Z';
 /** Old enough that nothing is inside prune's orphan grace period */
@@ -207,8 +207,12 @@ export class FakeBackend implements ContainerBackend {
     return result ?? { services: {} };
   }
 
-  async logs(id: string, opts?: { follow?: boolean; tail?: number }): Promise<void> {
+  /** What logs() hands to `onLine`, when given */
+  logLines: Array<['stdout' | 'stderr', string]> = [];
+
+  async logs(id: string, opts?: LogOptions): Promise<void> {
     this.record('logs', [id, opts]);
+    if (opts?.onLine) for (const [stream, line] of this.logLines) opts.onLine(stream, line);
   }
 
   private subscribers = new Set<(e: BackendEvent) => void>();

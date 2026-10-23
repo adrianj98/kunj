@@ -15,6 +15,7 @@ import {
   ImageInfo,
   Labels,
   LabelledObject,
+  LogOptions,
   isImageRef,
 } from './backend';
 
@@ -481,13 +482,28 @@ export class LocalDockerBackend implements ContainerBackend {
     }
   }
 
-  logs(id: string, opts: { follow?: boolean; tail?: number } = {}): Promise<void> {
+  logs(id: string, opts: LogOptions = {}): Promise<void> {
     const args = ['logs'];
     if (opts.follow) args.push('--follow');
     if (opts.tail !== undefined) args.push('--tail', String(opts.tail));
     args.push(id);
+    const { onLine } = opts;
     return new Promise((resolve, reject) => {
-      const child = spawn(this.dockerPath, this.argv(args), { stdio: ['ignore', 'inherit', 'inherit'] });
+      const child = spawn(this.dockerPath, this.argv(args), { stdio: ['ignore', onLine ? 'pipe' : 'inherit', onLine ? 'pipe' : 'inherit'] });
+      if (onLine) {
+        for (const stream of ['stdout', 'stderr'] as const) {
+          let pending = '';
+          child[stream]!.setEncoding('utf8');
+          child[stream]!.on('data', (chunk: string) => {
+            const lines = (pending + chunk).split('\n');
+            pending = lines.pop()!;
+            for (const line of lines) onLine(stream, line.replace(/\r$/, ''));
+          });
+          child[stream]!.on('end', () => {
+            if (pending) onLine(stream, pending.replace(/\r$/, ''));
+          });
+        }
+      }
       child.on('error', reject);
       child.on('close', (code: number | null) => (code === 0 || code === null ? resolve() : reject(new Error(`docker logs failed: exit code ${code}`))));
     });

@@ -37,7 +37,7 @@ import { LocalDockerBackend } from '../lib/container/docker';
 import { ContainerStatus, describeGuard, emptyStatus } from '../lib/container/env';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
 import { Forwarder, TUNNEL_PROBE, forwardPort, parseForwardSpec, parseTunnelProbe } from '../lib/container/forward';
-import { ForwardRecord, HELPER_NO_SOCAT, autoForwardIgnore, forwarderFor, readForwards, recordIsFor, runAutoForward, spawnDetached, updateForwards } from '../lib/container/autoforward';
+import { ForwardRecord, HELPER_NO_SOCAT, autoForwardIgnore, detachedLogFile, forwarderFor, readForwards, recordIsFor, runAutoForward, spawnDetached, updateForwards } from '../lib/container/autoforward';
 import { BridgeRecord, bridgeFor, installMcpConfig, mcpServers, portHint, readBridges, runBridge, updateBridges } from '../lib/container/mcpbridge';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerError } from '../lib/container/errors';
@@ -546,10 +546,16 @@ export class ContainerCommand extends BaseCommand {
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
     if (ctx.config.container?.forward?.auto !== false && ctx.backend.features.localPorts && !forwarderFor(main)) {
-      try {
-        this.startForwarder(ctx, branch, main);
-      } catch (err) {
-        this.warn(`Could not start the port forwarder: ${err instanceof Error ? err.message : String(err)}`);
+      // The same checks as the foreground command: a detached forwarder's failure would go unseen
+      const problem = await this.forwarderProblem(ctx, branch);
+      if (problem) {
+        this.warn(`Not forwarding ports: ${problem}`);
+      } else {
+        try {
+          this.startForwarder(ctx, branch, main);
+        } catch (err) {
+          this.warn(`Could not start the port forwarder: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     }
     await this.ensureBridge(ctx, branch, main);
@@ -561,7 +567,10 @@ export class ContainerCommand extends BaseCommand {
     }
     // tmux runs a single command argument through the shell, so the setting keeps its quoting
     // -u: UTF-8 even when the image has no locale, so box-drawing glyphs render
-    const argv = probe.exitCode === 0 ? ['tmux', '-u', 'new-session', '-A', '-s', 'agent', command] : ['sh', '-lc', command];
+    // window-size latest: an IDE terminal and a CLI one attached together follow the one used last, not the smaller
+    const argv = probe.exitCode === 0
+      ? ['tmux', '-u', 'new-session', '-A', '-s', 'agent', command, ';', 'set-option', '-t', 'agent', 'window-size', 'latest']
+      : ['sh', '-lc', command];
     const r = await ctx.backend.exec(main.id, argv, this.interactive(main, true));
     process.exitCode = r.exitCode;
   }
@@ -751,10 +760,21 @@ export class ContainerCommand extends BaseCommand {
     process.exit(0);
   }
 
+  // Why a forwarder could not work, if it could not: the network helper must run and have socat
+  private async forwarderProblem(ctx: Context, branch: string): Promise<string | undefined> {
+    try {
+      const helper = await this.requireHelper(ctx, branch);
+      if ((await ctx.backend.exec(helper.id, ['sh', '-c', 'command -v socat'])).exitCode !== 0) return HELPER_NO_SOCAT;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+    return undefined;
+  }
+
   // `forward --auto --detach` in a background kunj, registered at once (port 0 marks the forwarder)
   // so a second agent sees it before the child has written anything itself
   private startForwarder(ctx: Context, branch: string, main: ContainerInfo): number {
-    const pid = spawnDetached(['ct', 'forward', branch, '--auto', ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : [])]);
+    const pid = spawnDetached(['ct', 'forward', branch, '--auto', ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : [])], detachedLogFile(main.name, 'forward'));
     updateForwards(rs => [...rs.filter(r => r.pid !== pid), forwarderRecord(pid, main, 0, 0)]);
     return pid;
   }
@@ -843,7 +863,7 @@ export class ContainerCommand extends BaseCommand {
     }
     if (bridgeFor(main.name)) return;
     try {
-      const pid = spawnDetached(['ct', 'mcp', branch, ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : [])]);
+      const pid = spawnDetached(['ct', 'mcp', branch, ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : [])], detachedLogFile(main.name, 'mcp'));
       updateBridges(rs => [...rs.filter(r => r.pid !== pid), ...servers.map(s => ({ pid, container: main.name, name: s.name }))]);
     } catch (err) {
       this.warn(`Could not start the MCP bridge: ${err instanceof Error ? err.message : String(err)}`);
@@ -922,6 +942,14 @@ export class ContainerCommand extends BaseCommand {
       const svc = services.find(c => c.name === serviceNames(this.names(ctx, branch), service).container);
       if (!svc) throw new ContainerError(`${branch} has no service ${service}; services: ${describeServices(services).map(s => s.name).join(', ') || 'none'}`);
       id = svc.id;
+    }
+    if (this.jsonMode) {
+      // One NDJSON object per line; service is null for the branch container itself
+      await ctx.backend.logs(id, {
+        follow: !!options.follow,
+        onLine: (stream, line) => process.stdout.write(JSON.stringify({ service: service ?? null, stream, line }) + '\n'),
+      });
+      return;
     }
     await ctx.backend.logs(id, { follow: !!options.follow });
   }

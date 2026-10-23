@@ -418,11 +418,14 @@ rl.on('line', line => {
   const m = JSON.parse(line);
   if (m.method === 'notifications/exit') process.exit(0);
   // the answer to its own roots/list, sent when initialize arrived
+  // the answer to its ask-1 request, passed on by the bridge
+  if (m.id === 'ask-1' && m.method === undefined) return send({ jsonrpc: '2.0', id: 'done', result: { got: m.result } });
   if (m.id === 'roots-1' && m.method === undefined) {
     return send({ jsonrpc: '2.0', id: initId, result: { protocolVersion: '2025-06-18', instructions: 'from the server', roots: m.result.roots, capsSeen } });
   }
   if (m.id === undefined) return;
   if (m.params && m.params.noreply) return;
+  if (m.params && m.params.ask) send({ jsonrpc: '2.0', id: 'ask-1', method: 'sampling/createMessage' });
   if (m.params && m.params.fail) return send({ jsonrpc: '2.0', id: m.id, error: { code: -1, message: 'failed' } });
   if (m.params && m.params.arguments && m.params.arguments.uid === 'huge') {
     return process.stdout.write('{"x":"' + 'a'.repeat(17 * 1024 * 1024) + '"}\\n');
@@ -742,6 +745,57 @@ describe('runBridge', () => {
     expect(replies[0].result.roots).toEqual([]);
     expect(replies[0].result.capsSeen).toEqual({ sampling: {} });
     expect(replies[1]).toMatchObject({ id: 1, result: { echo: 'ping' } });
+  });
+
+  it("drops the container's replies to ids the server never issued, and passes one reply to each request it did", async () => {
+    const b = new FakeBackend();
+    const controller = new AbortController();
+    const replies: any[] = [];
+    scriptedListener(b, [
+      async c => {
+        // a reply sent ahead of any request: forged, however the server might name its next one
+        c.send({ jsonrpc: '2.0', id: 'ask-1', result: { forged: true } });
+        c.send({ jsonrpc: '2.0', id: 99, result: {} });
+        c.send({ jsonrpc: '2.0', id: 1, method: 'ping', params: { ask: true } });
+        replies.push(await c.next(), await c.next());
+        c.send({ jsonrpc: '2.0', id: 'ask-1', result: { ok: 1 } });
+        replies.push(await c.next());
+        // the same reply again: that request was answered already
+        c.send({ jsonrpc: '2.0', id: 'ask-1', result: { again: true } });
+        c.send({ jsonrpc: '2.0', id: 2, method: 'ping' });
+        replies.push(await c.next());
+        controller.abort();
+      },
+    ]);
+    await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn: recordingSpawn().spawn });
+    expect(replies.map(r => r.id)).toEqual(['ask-1', 1, 'done', 2]);
+    expect(replies[2].result).toEqual({ got: { ok: 1 } });
+  });
+
+  it('logs a refused request at most once a second, with a count of the others', async () => {
+    const b = new FakeBackend();
+    const controller = new AbortController();
+    const logs: string[] = [];
+    let now = 10_000;
+    const refuse = (id: number) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'upload_file', arguments: {} } });
+    scriptedListener(b, [
+      async c => {
+        for (const id of [1, 2, 3]) c.send(refuse(id));
+        for (let i = 0; i < 3; i++) await c.next();
+        now += 1500;
+        c.send(refuse(4));
+        await c.next();
+        now += 200;
+        c.send(refuse(5));
+        await c.next();
+        controller.abort();
+      },
+    ]);
+    await runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal, spawn: recordingSpawn().spawn, log: m => logs.push(m), now: () => now });
+    expect(logs.filter(l => /refused a request/.test(l))).toEqual([
+      'MCP chrome: refused a request',
+      'MCP chrome: refused a request (2 more refused since the last line)',
+    ]);
   });
 
   it('ends the session, not the process, when handling a line throws, and removes the profile', async () => {

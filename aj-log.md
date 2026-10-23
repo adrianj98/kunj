@@ -4,6 +4,23 @@ Changes made with Claude, and why.
 
 
 
+## 2026-10-23 — Containers: phase 2 follow-ups (visible forwarder errors, agent window size, logs --json, bridge minors)
+
+- `kunj ct agent` runs the foreground forwarder's checks (network helper running, socat present) before
+  spawning the detached forwarder and prints the problem in the agent's terminal instead. Detached
+  forwarders and bridges now append their output to `~/.kunj/logs/<container>-forward.log` / `-mcp.log`
+  (truncated past 1 MB) instead of `stdio: 'ignore'`. Not done: a `list` hint for a dead forwarder, because
+  dead pids are pruned from the registry on read, so `list` cannot tell one died. Why: a failing detached
+  forwarder (no socat) was invisible.
+- `runAutoForward` checks the container's state before warning that it cannot read the listening ports, so
+  stopping the container no longer prints a cosmetic warning.
+- `kunj ct agent` sets tmux `window-size latest`, like `kunj agent`.
+- `kunj ct logs --json` prints NDJSON `{ service, stream, line }` (`service` null for the branch container);
+  `ContainerBackend.logs` takes an optional `onLine`.
+- MCP bridge: a container reply is dropped unless the server issued that id (not only when the bridge had
+  answered it); the "refused a request" log is limited to one per second with a count of the rest; removed a
+  stale docstring sentence.
+
 ## 2026-10-23 — MCP bridge landed; specs updated
 
 - Landed the host MCP bridge on main (c4ac53d, cf544d8, 92b14ef, d235d85) after three security review

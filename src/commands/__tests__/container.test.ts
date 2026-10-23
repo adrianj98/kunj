@@ -293,7 +293,10 @@ describe('ContainerCommand', () => {
     const cmds = backend.callsOf('exec').map(c => c[1]);
     expect(cmds).toEqual([
       ['sh', '-c', 'command -v tmux'],
-      ['tmux', '-u', 'new-session', '-A', '-s', 'agent', `claude --append-system-prompt "be brief" 'it'\\''s'`],
+      [
+        'tmux', '-u', 'new-session', '-A', '-s', 'agent', `claude --append-system-prompt "be brief" 'it'\\''s'`,
+        ';', 'set-option', '-t', 'agent', 'window-size', 'latest',
+      ],
     ]);
   });
 
@@ -310,16 +313,16 @@ describe('ContainerCommand', () => {
     const runAutoForward = autoforward.runAutoForward as jest.Mock;
 
     it('agent starts a detached auto-forwarder and registers it', async () => {
-      backend.existing = [mainContainer('feat')];
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
       await new ContainerCommand().execute('agent', 'feat', [], {});
-      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto']);
+      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto'], path.join(os.homedir(), '.kunj', 'logs', `${NAME}-forward.log`));
       expect(mockForwards).toEqual([{ pid: 4242, container: NAME, containerId: 'cid-1', port: 0, hostPort: 0, kind: 'forward' }]);
     });
 
     it('agent passes the Docker context on to the forwarder', async () => {
-      backend.existing = [mainContainer('feat')];
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
       await new ContainerCommand().execute('agent', 'feat', [], { context: 'colima' });
-      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto', '--context', 'colima']);
+      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto', '--context', 'colima'], expect.stringMatching(/-forward\.log$/));
     });
 
     it('agent starts none when container.forward.auto is false', async () => {
@@ -338,25 +341,41 @@ describe('ContainerCommand', () => {
     });
 
     it('agent starts one when the registered forwarder is of an earlier container of the same name', async () => {
-      backend.existing = [mainContainer('feat')];
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
       mockForwards.push({ pid: 777, container: NAME, containerId: 'cid-old', port: 0, hostPort: 0, kind: 'forward' });
       await new ContainerCommand().execute('agent', 'feat', [], {});
       expect(spawnDetached).toHaveBeenCalled();
     });
 
-    it('agent still runs when the forwarder cannot be started', async () => {
+    it('agent warns and starts no forwarder when the network helper is not running', async () => {
       backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(spawnDetached).not.toHaveBeenCalled();
+      expect(logSpy.mock.calls.map(c => String(c[0])).join('\n')).toMatch(/Not forwarding ports: The network helper of feat is not running/);
+      expect(backend.callsOf('exec').map(c => (c[1] as string[])[0])).toEqual(['sh', 'tmux']);
+    });
+
+    it('agent warns and starts no forwarder when the network helper has no socat', async () => {
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
+      backend.execResults.set('sh -c command -v socat', { exitCode: 1, stdout: '' });
+      await new ContainerCommand().execute('agent', 'feat', [], {});
+      expect(spawnDetached).not.toHaveBeenCalled();
+      expect(logSpy.mock.calls.map(c => String(c[0])).join('\n')).toMatch(/Not forwarding ports: The network helper of this container predates/);
+    });
+
+    it('agent still runs when the forwarder cannot be started', async () => {
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
       spawnDetached.mockImplementationOnce(() => {
         throw new Error('Could not start the background forwarder');
       });
       await new ContainerCommand().execute('agent', 'feat', [], {});
-      expect(backend.callsOf('exec').map(c => (c[1] as string[])[0])).toEqual(['sh', 'tmux']);
+      expect(backend.callsOf('exec').map(c => (c[1] as string[])[0])).toEqual(['sh', 'sh', 'tmux']);
     });
 
     it('forward --auto --detach prints the pid as JSON and registers it', async () => {
       backend.existing = [mainContainer('feat'), helperContainer('feat')];
       await new ContainerCommand().execute('forward', 'feat', [], { auto: true, detach: true, json: true });
-      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto']);
+      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'forward', 'feat', '--auto'], expect.stringMatching(/-forward\.log$/));
       expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feat', pid: 4242 });
       expect(mockForwards).toEqual([{ pid: 4242, container: NAME, containerId: 'cid-1', port: 0, hostPort: 0, kind: 'forward' }]);
     });
@@ -483,7 +502,7 @@ describe('ContainerCommand', () => {
       withMcp({ chrome: {} });
       await new ContainerCommand().execute('agent', 'feat', [], { context: 'colima' });
       expect(installMcpConfig).toHaveBeenCalledWith(backend, 'cid-1', 'dev', ['chrome']);
-      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'mcp', 'feat', '--context', 'colima']);
+      expect(spawnDetached).toHaveBeenCalledWith(['ct', 'mcp', 'feat', '--context', 'colima'], path.join(os.homedir(), '.kunj', 'logs', `${NAME}-mcp.log`));
       expect(mockBridges).toEqual([{ pid: 4242, container: NAME, name: 'chrome' }]);
       // the agent itself still runs
       expect(backend.callsOf('exec').map(c => (c[1] as string[])[0])).toEqual(['sh', 'tmux']);
@@ -645,6 +664,19 @@ describe('ContainerCommand', () => {
       expect(backend.callsOf('logs')).toEqual([['postgres-id', { follow: true }], ['cid-1', { follow: false }]]);
       await new ContainerCommand().execute('logs', 'feat-x', ['nope'], {});
       expect(errors).toEqual(['✗ feat-x has no service nope; services: postgres']);
+    });
+
+    it('logs --json prints one NDJSON object per line, tagged with the service and stream', async () => {
+      backend.existing = [mainContainer('feat-x'), service('postgres', 'running')];
+      backend.logLines = [['stdout', 'ready'], ['stderr', 'warning: slow']];
+      await new ContainerCommand().execute('logs', 'feat-x', ['postgres'], { json: true });
+      await new ContainerCommand().execute('logs', 'feat-x', [], { json: true });
+      expect(stdout.join('').trim().split('\n').map(l => JSON.parse(l))).toEqual([
+        { service: 'postgres', stream: 'stdout', line: 'ready' },
+        { service: 'postgres', stream: 'stderr', line: 'warning: slow' },
+        { service: null, stream: 'stdout', line: 'ready' },
+        { service: null, stream: 'stderr', line: 'warning: slow' },
+      ]);
     });
 
     it('forward <service>:<port> tunnels through the service container with the tool it has', async () => {

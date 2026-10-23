@@ -7,6 +7,7 @@
 // ~/.kunj/container-forwards.json so that `kunj ct list` can show them and `kunj ct agent` does not
 // start a second forwarder.
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ContainerBackend } from './backend';
@@ -137,12 +138,42 @@ export function forwarderFor(container: { id: string; name: string }, file: stri
  * argv[1] is the CLI entry (dist/index.js, or the npm bin link to it). Under ts-node it is a .ts file
  * that plain node cannot run, so the package's built dist/index.js is used instead.
  */
-export function spawnDetached(args: string[]): number {
+export function spawnDetached(args: string[], logFile?: string): number {
   const entry = /\.ts$/.test(process.argv[1] ?? '') ? path.resolve(__dirname, '../../../dist/index.js') : process.argv[1];
-  const child = spawn(process.execPath, [entry, ...args], { detached: true, stdio: 'ignore', cwd: process.cwd() });
-  child.unref();
-  if (!child.pid) throw new Error(`Could not start kunj ${args.slice(0, 2).join(' ')} in the background`);
-  return child.pid;
+  let fd: number | undefined;
+  try {
+    if (logFile) fd = openLog(logFile);
+  } catch {
+    // an unwritable log must not stop the process itself
+  }
+  try {
+    const stdio: 'ignore' | ['ignore', number, number] = fd === undefined ? 'ignore' : ['ignore', fd, fd];
+    const child = spawn(process.execPath, [entry, ...args], { detached: true, stdio, cwd: process.cwd() });
+    child.unref();
+    if (!child.pid) throw new Error(`Could not start kunj ${args.slice(0, 2).join(' ')} in the background`);
+    return child.pid;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+const MAX_LOG_BYTES = 1024 * 1024;
+
+/** ~/.kunj/logs/<container>-forward.log or -mcp.log: where a detached forwarder or bridge writes its output. */
+export function detachedLogFile(container: string, kind: 'forward' | 'mcp'): string {
+  return path.join(os.homedir(), '.kunj', 'logs', `${container}-${kind}.log`);
+}
+
+/** Opens `file` for appending; a file past 1 MB is truncated first, so the log never grows without bound. */
+export function openLog(file: string): number {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  let flags = 'a';
+  try {
+    if (fs.statSync(file).size > MAX_LOG_BYTES) flags = 'w';
+  } catch {
+    // no log yet
+  }
+  return fs.openSync(file, flags);
 }
 
 // ---------------------------------------------------------------------
@@ -230,6 +261,9 @@ export async function runAutoForward(
         // the container may be going away; the state check ends the loop
       }
       if (!listening && !unreadable && !signal.aborted) {
+        // The read fails while the container goes away: end quietly if it stopped or restarted
+        const now = await backend.containerRun(target.main);
+        if (now && (now.state !== 'running' || now.startedAt !== run.startedAt)) return;
         opts.onError?.("Cannot read the container's listening ports (/proc/net/tcp); nothing new is forwarded until it can be read");
       }
       unreadable = !listening;
