@@ -1,0 +1,52 @@
+{
+  "bench" : "redraw",
+  "loginPathMs" : 1278.1400000000001,
+  "redraw" : {
+    "appCpuPct" : {
+      "max" : 37.200000000000003,
+      "mean" : 32.119999999999997,
+      "n" : 18,
+      "p50" : 32.200000000000003,
+      "p95" : 35.299999999999997
+    },
+    "appFootprintMB" : 385,
+    "appRssMBLast" : 73.015625,
+    "grid" : true,
+    "gridCellSize" : "46x26",
+    "idleTabEchoLatencyMs" : {
+      "max" : 13.42,
+      "mean" : 6.6100000000000003,
+      "n" : 19,
+      "p50" : 5.5599999999999996,
+      "p95" : 10.99
+    },
+    "lastFrameLines" : [
+      " frame 599 ",
+      " frame 598 ",
+      " frame 598 ",
+      " frame 600 ",
+      " frame 598 "
+    ],
+    "mainThreadCpuPct" : 25.850000000000001,
+    "MBpsPerTab" : [
+      0.059999999999999998,
+      0.059999999999999998,
+      0.059999999999999998,
+      0.059999999999999998,
+      0.059999999999999998
+    ],
+    "processCpuPctRusage" : 32.710000000000001,
+    "producerCpuPctSum" : 0.59999999999999998,
+    "runLoopLatencyMs" : {
+      "max" : 72.819999999999993,
+      "mean" : 0.90000000000000002,
+      "n" : 376,
+      "p50" : 0.02,
+      "p95" : 3.8599999999999999
+    },
+    "seconds" : 20.350000000000001
+  },
+  "renderer" : "coregraphics",
+  "screen" : "1512x982@2.0x",
+  "swiftTerm" : "1.20.0"
+}

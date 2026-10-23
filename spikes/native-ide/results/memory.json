@@ -1,0 +1,36 @@
+{
+  "bench" : "memory",
+  "loginPathMs" : 1276.79,
+  "memory" : {
+    "appFootprintMB" : 281,
+    "appPhysFootprintMB" : 36.689999999999998,
+    "appPlusWebkitMB" : 478.97000000000003,
+    "appRssMB" : 87.030000000000001,
+    "shellChildrenRssMB" : 24.309999999999999,
+    "webkitFootprintMBSum" : 422.42000000000002,
+    "webkitProcesses" : [
+      {
+        "footprintMB" : 15,
+        "name" : "com.apple.WebKit.GPU",
+        "pid" : 18212,
+        "rssMB" : 26.379999999999999
+      },
+      {
+        "footprintMB" : 6.4199999999999999,
+        "name" : "com.apple.WebKit.Networking",
+        "pid" : 18224,
+        "rssMB" : 13.23
+      },
+      {
+        "footprintMB" : 402,
+        "name" : "com.apple.WebKit.WebContent",
+        "pid" : 18231,
+        "rssMB" : 352.32999999999998
+      }
+    ],
+    "webkitRssMBSum" : 391.94
+  },
+  "renderer" : "coregraphics",
+  "screen" : "1512x982@2.0x",
+  "swiftTerm" : "1.20.0"
+}

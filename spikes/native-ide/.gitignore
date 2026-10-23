@@ -1,0 +1,6 @@
+.build/
+build/
+web/node_modules/
+Resources/web/vs/
+build.log
+vendor/

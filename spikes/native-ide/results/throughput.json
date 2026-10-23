@@ -1,0 +1,153 @@
+{
+  "bench" : "throughput",
+  "loginPathMs" : 1400.8800000000001,
+  "renderer" : "coregraphics",
+  "screen" : "1512x982@2.0x",
+  "swiftTerm" : "1.20.0",
+  "throughput" : [
+    {
+      "bytesMB" : 20.780000000000001,
+      "case" : "seq 1 2000000",
+      "completed" : true,
+      "lastLines" : [
+        "2e+06",
+        "@@SPIKE_DONE@@"
+      ],
+      "mainThreadCpuPct" : 95.739999999999995,
+      "mainThreadCpuS" : 3.3799999999999999,
+      "MBps" : 5.8799999999999999,
+      "processCpuS" : 6.21,
+      "rep" : 0,
+      "runLoopLatencyMs" : {
+        "max" : 8.8499999999999996,
+        "mean" : 4.4800000000000004,
+        "n" : 61,
+        "p50" : 4.0199999999999996,
+        "p95" : 6.2699999999999996
+      },
+      "spawnToDrawnMs" : 3530.6900000000001,
+      "spawnToExitMs" : 3407.1999999999998,
+      "spawnToLastLineFedMs" : 3506.77
+    },
+    {
+      "bytesMB" : 20.780000000000001,
+      "case" : "seq 1 2000000",
+      "completed" : true,
+      "lastLines" : [
+        "2e+06",
+        "@@SPIKE_DONE@@"
+      ],
+      "mainThreadCpuPct" : 95.980000000000004,
+      "mainThreadCpuS" : 3.52,
+      "MBps" : 5.6600000000000001,
+      "processCpuS" : 6.2699999999999996,
+      "rep" : 1,
+      "runLoopLatencyMs" : {
+        "max" : 22.800000000000001,
+        "mean" : 4.5899999999999999,
+        "n" : 64,
+        "p50" : 4.0199999999999996,
+        "p95" : 6.21
+      },
+      "spawnToDrawnMs" : 3671.6999999999998,
+      "spawnToExitMs" : 3465.02,
+      "spawnToLastLineFedMs" : 3648.0500000000002
+    },
+    {
+      "bytesMB" : 51.270000000000003,
+      "case" : "cat 50 MB text",
+      "completed" : true,
+      "lastLines" : [
+        " ",
+        "@@SPIKE_DONE@@"
+      ],
+      "mainThreadCpuPct" : 93.109999999999999,
+      "mainThreadCpuS" : 1.3999999999999999,
+      "MBps" : 34.109999999999999,
+      "processCpuS" : 1.8400000000000001,
+      "rep" : 0,
+      "runLoopLatencyMs" : {
+        "max" : 40.189999999999998,
+        "mean" : 5.4199999999999999,
+        "n" : 26,
+        "p50" : 4.0199999999999996,
+        "p95" : 4.0899999999999999
+      },
+      "spawnToDrawnMs" : 1502.9300000000001,
+      "spawnToExitMs" : 1405.0799999999999,
+      "spawnToLastLineFedMs" : 1479.8099999999999
+    },
+    {
+      "bytesMB" : 51.270000000000003,
+      "case" : "cat 50 MB text",
+      "completed" : true,
+      "lastLines" : [
+        " ",
+        "@@SPIKE_DONE@@"
+      ],
+      "mainThreadCpuPct" : 93.790000000000006,
+      "mainThreadCpuS" : 1.3700000000000001,
+      "MBps" : 35.18,
+      "processCpuS" : 1.8,
+      "rep" : 1,
+      "runLoopLatencyMs" : {
+        "max" : 20.23,
+        "mean" : 4.6500000000000004,
+        "n" : 26,
+        "p50" : 4.0199999999999996,
+        "p95" : 4.0499999999999998
+      },
+      "spawnToDrawnMs" : 1457.0799999999999,
+      "spawnToExitMs" : 1350.5999999999999,
+      "spawnToLastLineFedMs" : 1433.04
+    },
+    {
+      "bytesMB" : 300.00999999999999,
+      "case" : "yes | head -c 200000000",
+      "completed" : true,
+      "lastLines" : [
+        "y",
+        "@@SPIKE_DONE@@"
+      ],
+      "mainThreadCpuPct" : 89.790000000000006,
+      "mainThreadCpuS" : 241.59999999999999,
+      "MBps" : 1.1100000000000001,
+      "processCpuS" : 354.95999999999998,
+      "rep" : 0,
+      "runLoopLatencyMs" : {
+        "max" : 20.5,
+        "mean" : 3.8700000000000001,
+        "n" : 4713,
+        "p50" : 4.04,
+        "p95" : 5.9100000000000001
+      },
+      "spawnToDrawnMs" : 269076.39000000001,
+      "spawnToExitMs" : 268973.67999999999,
+      "spawnToLastLineFedMs" : 269047.95000000001
+    },
+    {
+      "bytesMB" : 300.00999999999999,
+      "case" : "yes | head -c 200000000",
+      "completed" : true,
+      "lastLines" : [
+        "y",
+        "@@SPIKE_DONE@@"
+      ],
+      "mainThreadCpuPct" : 71.109999999999999,
+      "mainThreadCpuS" : 189.78,
+      "MBps" : 1.1200000000000001,
+      "processCpuS" : 298.38,
+      "rep" : 1,
+      "runLoopLatencyMs" : {
+        "max" : 26.219999999999999,
+        "mean" : 2.6600000000000001,
+        "n" : 4824,
+        "p50" : 4.0199999999999996,
+        "p95" : 5.8899999999999997
+      },
+      "spawnToDrawnMs" : 266872.65000000002,
+      "spawnToExitMs" : 266150.14000000001,
+      "spawnToLastLineFedMs" : 266848.31
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>diff</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1e1e1e; }
+  #c { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div id="c"></div>
+<script>
+  const post = (m) => window.webkit.messageHandlers.spike.postMessage(m);
+  const t0 = performance.now();
+  post({ type: 'boot', t: t0 });
+  window.onerror = (msg, src, line) => post({ type: 'error', msg: String(msg) + ' ' + src + ':' + line });
+  for (const level of ['warn', 'error']) {
+    const orig = console[level];
+    console[level] = (...a) => { post({ type: 'console', level, msg: a.map(String).join(' ').slice(0, 500) }); orig.apply(console, a); };
+  }
+  // Report which keys reach the page (key-routing test).
+  window.addEventListener('keydown', (e) => {
+    if (e.metaKey) post({ type: 'key', key: e.key, code: e.code, shift: e.shiftKey, prevented: e.defaultPrevented });
+  }, true);
+  document.addEventListener('copy', () => post({ type: 'copyEvent' }), true);
+</script>
+<script src="vs/loader.js"></script>
+<script>
+  require.config({ paths: { vs: 'vs' } });
+  require(['vs/editor/editor.main'], function () {
+    const tLoaded = performance.now();
+    // ?diagnostics=0: no TypeScript validation, so the TS language worker has nothing to do
+    if (new URLSearchParams(location.search).get('diagnostics') === '0') {
+      const ts = monaco.languages.typescript;
+      const o = { noSemanticValidation: true, noSyntaxValidation: true, noSuggestionDiagnostics: true };
+      if (ts) { ts.typescriptDefaults.setDiagnosticsOptions(o); ts.javascriptDefaults.setDiagnosticsOptions(o); }
+    }
+    const ed = monaco.editor.createDiffEditor(document.getElementById('c'), {
+      readOnly: true, originalEditable: false, renderSideBySide: true, automaticLayout: true,
+      theme: 'vs-dark', fontSize: 12, minimap: { enabled: false },
+    });
+    window.ed = ed;
+    let models = [];
+    window.showDiff = (original, modified, language) => {
+      const t = performance.now();
+      const old = models;
+      models = [monaco.editor.createModel(original, language), monaco.editor.createModel(modified, language)];
+      return new Promise((resolve) => {
+        const d = ed.onDidUpdateDiff(() => {
+          d.dispose();
+          post({ type: 'diffComputed', changes: (ed.getLineChanges() || []).length, ms: performance.now() - t, sinceBoot: performance.now() - t0 });
+          // the frame after the diff is computed is when it is on screen (rAF does not run
+          // while the window is occluded, so diffComputed is the fallback)
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            const r = { type: 'diffRendered', changes: (ed.getLineChanges() || []).length,
+                        ms: performance.now() - t, sinceBoot: performance.now() - t0 };
+            post(r);
+            resolve(r);
+          }));
+        });
+        ed.setModel({ original: models[0], modified: models[1] });
+        for (const m of old) m.dispose();
+      });
+    };
+    window.selectAllModified = () => {
+      const m = ed.getModifiedEditor();
+      m.focus();
+      m.setSelection(m.getModel().getFullModelRange());
+      return m.getModel().getValueLength();
+    };
+    window.findVisible = () => !!document.querySelector('.find-widget.visible');
+    window.focusModified = () => { ed.getModifiedEditor().focus(); return document.activeElement && document.activeElement.className; };
+    post({ type: 'ready', monacoLoadMs: tLoaded - t0, sinceBoot: performance.now() - t0 });
+  }, (err) => post({ type: 'error', msg: 'require failed: ' + err }));
+</script>
+</body>
+</html>

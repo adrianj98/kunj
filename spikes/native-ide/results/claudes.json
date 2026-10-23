@@ -1,0 +1,27 @@
+{
+  "bench" : "claudes",
+  "claudes" : {
+    "appCpuPct" : {
+      "max" : 14.1,
+      "mean" : 3.73,
+      "n" : 15,
+      "p50" : 0.59999999999999998,
+      "p95" : 13.4
+    },
+    "appRssMB" : 75.546875,
+    "bytesPerTab" : [
+      5899,
+      5865,
+      5875,
+      6012,
+      5893
+    ],
+    "claudeProcsRssMBSum" : 2081.4699999999998,
+    "mainThreadCpuPct" : 2.1299999999999999,
+    "processCpuPctRusage" : 6.0300000000000002
+  },
+  "loginPathMs" : 1362.29,
+  "renderer" : "coregraphics",
+  "screen" : "1512x982@2.0x",
+  "swiftTerm" : "1.20.0"
+}

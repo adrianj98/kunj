@@ -1,0 +1,104 @@
+{
+  "bench" : "monaco",
+  "loginPathMs" : 1563.77,
+  "monaco" : {
+    "creationToDiffComputedMs" : 869.83000000000004,
+    "creationToDiffRenderedMs" : 888.23000000000002,
+    "creationToReadyMs" : 674.38999999999999,
+    "diffBase" : "d235d85e97a415e0f63d29e2eb4fd5a528d88d79~1",
+    "keys" : {
+      "closeTab_fromTerminal" : {
+        "fired" : true,
+        "tabs" : "3->2"
+      },
+      "closeTab_fromWebView" : {
+        "fired" : true,
+        "tabs" : "2->1"
+      },
+      "cmdC_copiedChars" : 76206,
+      "cmdC_selectionChars" : 76206,
+      "cmdF_findWidgetVisible" : true,
+      "firstResponderIsWebView" : "WKWebView",
+      "keyLog" : [
+        "f active=true key=true fr=WKWebView",
+        "\u001b active=true key=true fr=WKWebView",
+        "c active=true key=true fr=WKWebView",
+        "} active=true key=true fr=WKWebView",
+        "} active=true key=true fr=SpikeTerminal",
+        "w active=true key=true fr=SpikeTerminal",
+        "w active=true key=true fr=WKWebView"
+      ],
+      "metaKeysSeenByPage" : [
+        "f",
+        "c",
+        "}",
+        "w"
+      ],
+      "nextTab_fromTerminal" : {
+        "fired" : true,
+        "selectedAfter" : 2
+      },
+      "nextTab_fromWebView" : {
+        "fired" : true,
+        "selectedAfter" : 1
+      },
+      "systemEvents" : {
+        "frontmost" : true,
+        "osascriptError" : "36:68: execution error: System Events got an error: osascript is not allowed to send keystrokes. (1002)",
+        "osascriptExit" : 1
+      },
+      "terminalFirstResponder" : "SpikeTerminal"
+    },
+    "lineChangesAfter1s" : 2,
+    "modifiedLines" : 1411,
+    "originalLines" : 1408,
+    "page" : {
+      "changes" : 2,
+      "ms" : 180,
+      "sinceBoot" : 558,
+      "swiftMs" : 888.20500001311302,
+      "type" : "diffRendered"
+    },
+    "pageComputed" : {
+      "changes" : 2,
+      "ms" : 162,
+      "sinceBoot" : 540,
+      "swiftMs" : 869.80724999308586,
+      "type" : "diffComputed"
+    },
+    "pageMessages" : [
+
+    ],
+    "schemeHandler" : {
+      "failed" : [
+
+      ],
+      "served" : 23
+    },
+    "webContentPid" : 13800,
+    "webkitProcesses" : [
+      {
+        "footprintMB" : 23,
+        "name" : "com.apple.WebKit.GPU",
+        "pid" : 13798,
+        "rssMB" : 32.359999999999999
+      },
+      {
+        "footprintMB" : 6.6900000000000004,
+        "name" : "com.apple.WebKit.Networking",
+        "pid" : 13799,
+        "rssMB" : 13.359999999999999
+      },
+      {
+        "footprintMB" : 421,
+        "name" : "com.apple.WebKit.WebContent",
+        "pid" : 13800,
+        "rssMB" : 412.51999999999998
+      }
+    ],
+    "windowOcclusionVisible" : true
+  },
+  "renderer" : "coregraphics",
+  "screen" : "1512x982@2.0x",
+  "swiftTerm" : "1.20.0"
+}
