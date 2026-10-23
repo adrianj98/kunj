@@ -651,3 +651,5 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - kunj events fix: `git status` in worktree listings runs with `GIT_OPTIONAL_LOCKS=0`, and the git watch covers only the common dir top level plus `refs/` and `worktrees/` (started when they appear). Why: an index rewrite by the listing re-triggered the app refresh in a loop, and a recursive watch of `.git` also watched worktree checkouts in `.git/kunj/worktrees` with their node_modules.
 
 - Documented the published JSON contract in CLAUDE.md ("Workspace app contract") and marked the CLI additions shipped, with commit hashes, in the workspace IDE design spec. Verified from outside the package that `import type ... from "kunj"` resolves and a wrong `EventJson` fails. Why: the macOS app and workspace app depend on these types staying additive.
+
+- Doc fix: events spec item now describes the actual git watch scope and GIT_OPTIONAL_LOCKS=0, worktree list agent shape includes `session`, CLAUDE.md says JSON is built against the types (`satisfies` or annotation). Why: match shipped behaviour.

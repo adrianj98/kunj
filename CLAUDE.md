@@ -179,7 +179,7 @@ The VS Code extension in `vscode-extension/` is a separate npm package (own `pac
 **Workspace app contract:** the types in src/lib/json-types.ts (`WorktreeListJson`, `ContainerListJson`,
 `ReposJson`, `ErrorJson`, `AgentStatusJson`, `AgentStopJson`, `FileReadJson`, `FileWriteJson`, `EventJson`) are the
 published, type-only JSON contract (`types` in package.json; consumers import `from 'kunj'`). Commands build their
-JSON with `satisfies` so the compiler checks it against the type, and fields are only ever added, never renamed or
+JSON against these types (`satisfies` or a type annotation) so the compiler checks it, and fields are only ever added, never renamed or
 removed. Consumers: the VS Code extension, the macOS app and the workspace app. Errors in `--json` mode are
 `{ error: { code, message } }` when the error has a string `jsonCode`, else `{ error: "<message>" }`; `kunj ct`
 always prints the object shape. `kunj events --json` is the NDJSON change stream, `kunj ct file read|write` the
