@@ -32,6 +32,7 @@ page only says where each thing stands.
 | `kunj ct prune` | [container-phase-2.md](container-phase-2.md) | 893dc79, 4f7aa10 |
 | Docker-in-Docker | [container-phase-2.md](container-phase-2.md) | d40b44c, c88430b |
 | Host MCP bridge (Chrome DevTools MCP on the Mac for the agent): deny-by-default tool and argument allowlists, pinned server, throwaway profile without downloads, listener as the sandbox user; plus the legacy `./.kunj` migration copying only untracked files | [container-phase-2.md](container-phase-2.md#6-host-mcp-bridge) | c4ac53d, cf544d8, 92b14ef, d235d85 |
+| Opt-in functional test suite: the real `kunj` CLI against real Docker (lifecycle, exec, blueprint, services, forward, prune, Docker-in-Docker refusals, MCP bridge), `npm run test:functional`, never run by `npm test` or `test:docker` | [container-system.md](container-system.md) | 3ffbe08 (written, not yet run) |
 | Phase 2 cross-feature fixes: forwards and polls through the network helper, forwarder bound to one container run, compose deps on dropped services, 10-minute orphan grace, migrations in `maintain`, manual forwards registered | [container-phase-2.md](container-phase-2.md) | a32bc90 |
 | Published JSON types | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 36e64a5, d0a490a, 22a8444 |
 | `kunj agent` for worktrees, tmux optional | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 2974aef, 75380f3, ce52ad8, 453f241, e5b15a4 |
