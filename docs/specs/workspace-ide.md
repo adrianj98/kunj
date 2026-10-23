@@ -26,8 +26,8 @@ no state beyond UI layout.
 | `kunj ct file read\|write [branch] <path>` | Shipped (47fcefe, 5721f17) |
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
-| The app (`workspace-app/`) | Not started; the Electron plan is being rewritten for the native runtime |
-| Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (decided after the spike, 1c2aaa3, 0e41a24) |
+| The app (`workspace-app/`) | Not started; plan being rewritten for the native runtime |
+| Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Not started (in the app plan) |
 
 ## Design
@@ -147,23 +147,7 @@ container start/stop/remove and worktree add/remove, hand-off to VS Code, ports 
 editing with a file tree, webview previews, the "agent waiting for input" signal, Linux, tearing an
 environment into its own window.
 
-### Runtime options
-
-| Runtime | Terminal and editor | Footprint | Main risk |
-| --- | --- | --- | --- |
-| Electron (44.x) | xterm.js + node-pty + Monaco, VS Code's own stack; TypeScript throughout | Large (bundled Chromium, ~150 MB) | Native-module rebuilds per Electron major; a third Chromium on the machine |
-| Tauri 2 | xterm.js in WebKit; PTY in Rust (`portable-pty`; `tauri-plugin-pty` is 0.x) | Small | Hand-built PTY bridge; WebKit canvas/WebGL quirks, 60 fps cap |
-| Eclipse Theia (1.70) | Full workbench, Monaco, LSP, VS Code extensions through Open VSX | Large | It is an IDE; the environment-first layout fights its shell |
-| Embedded VS Code server per environment | The real VS Code | One server per environment | Web client dislikes iframes; marketplace terms; cost grows with environments |
-| Native shell (AppKit/SwiftUI, extending `macos-app/` ideas) | SwiftTerm terminals; Monaco only inside a web view | Smallest | macOS only; the editor needs a web view anyway |
-
-A VS Code extension cannot host this (one window per workspace; it cannot keep another environment's
-terminals alive or let a sidebar drive the whole window). VS Code's remote protocol is internal to
-Microsoft's VS Code and licensed only for it; VS Code reaches kunj containers on its own through
-`kunj ct open`, and the app through `kunj ct shell|agent|exec`, so the app keeps one contract. The open
-standards in the space are the Dev Container spec (kunj reads `devcontainer.json` but does not run the
-devcontainer CLI, which bind-mounts the workspace and has no firewall), LSP and the Debug Adapter
-Protocol; language features in a container, if ever wanted, are LSP over `kunj ct exec`.
+### Runtime
 
 **Native-shell spike** (`spikes/native-ide/REPORT.md`, 1c2aaa3, 1730cd1, 0e41a24, closed): AppKit with
 SwiftTerm terminals and Monaco in one WKWebView. Five live Claude Code sessions cost 6% CPU and about
@@ -171,17 +155,16 @@ SwiftTerm terminals and Monaco in one WKWebView. Five live Claude Code sessions 
 Terminal.app on `seq` and `cat`, slower on a `yes` flood; Monaco's diff showed in under 1 s (its web
 process 340–420 MB, Monaco's cost in any runtime); menu shortcuts, real key presses and live resize
 worked. Weakness: every tab parses output on the main thread, hidden or not, so five flooding tabs pin
-it at 95% and typing in them lags 0.5–1.2 s (xterm.js has the same design).
+it at 95% and typing in them lags 0.5–1.2 s 
 
 ## Decisions
 
 All 2026-10-23.
 
 - **Runtime: native** in `workspace-app/`, macOS only in v1: AppKit + SwiftTerm terminals, Monaco in
-  one WKWebView. Electron was chosen first, then reopened for the native-shell spike; after its report
-  the user chose native (smallest footprint, no bundled Chromium, terminals as fast as Terminal.app).
-  Parsing hidden tabs' output off the main thread, or throttling it, is an early task. Electron stays
-  the fallback.
+  one WKWebView, chosen after the native-shell spike (small footprint, no bundled Chromium, terminals as
+  fast as Terminal.app). Parsing hidden tabs' output off the main thread, or throttling it, is an early
+  task.
 - **The CLI is the only contract;** the app imports JSON types only.
 - **Worktree agents through `kunj agent`**, sessions named by kunj; the app never names a tmux session.
 - **Container files through `kunj ct file`;** the app never runs `docker`.
@@ -213,7 +196,7 @@ All 2026-10-23.
 
 - `docs/superpowers/plans/2026-10-23-workspace-cli-contract.md`: the CLI contract above. Done.
 - `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`: the app (environment list, terminals, agent
-  attach, diff viewer). Written for Electron; being rewritten in Swift for the native runtime.
+  attach, diff viewer). Being rewritten in Swift for the native runtime.
 
 ## Code map
 
@@ -229,7 +212,5 @@ All 2026-10-23.
 
 ## Sources
 
-- [Electron releases](https://releases.electronjs.org/); [Tauri 2 webview versions](https://v2.tauri.app/reference/webview-versions/), [tauri-plugin-pty](https://docs.rs/tauri-plugin-pty), [WebKit bug 264268](https://bugs.webkit.org/show_bug.cgi?id=264268)
-- [Eclipse Theia 1.70](https://eclipsesource.com/blogs/2026/04/16/eclipse-theia-1-70-release-news-and-noteworthy/); [VS Code web client in an iframe](https://gitlab.com/gitlab-org/gitlab/-/issues/368980)
-- [xterm.js](https://xtermjs.org/), [node-pty](https://github.com/microsoft/node-pty), [Monaco](https://microsoft.github.io/monaco-editor/), [monaco-languageclient](https://github.com/TypeFox/monaco-languageclient)
+- [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm), [Monaco](https://microsoft.github.io/monaco-editor/), [monaco-languageclient](https://github.com/TypeFox/monaco-languageclient)
 - Comparable products: [Conductor](https://www.conductor.build/), [graith](https://github.com/d0ugal/graith)

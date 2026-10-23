@@ -976,3 +976,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - docs/specs/README.md: spike row lists 1730cd1; the runtime decision row says key presses and live resize passed the user's manual check, and what is still unmeasured. Why: the user ran the manual checks in the demo app.
 - docs/specs/README.md: spike closed (0e41a24), remaining checks dropped as not needed. Why: the user closed the spike.
 - docs/specs/workspace-ide.md, docs/specs/README.md: runtime decided as native (AppKit + SwiftTerm, Monaco in one WKWebView); app design, spike results and decisions updated, the open question removed. Why: the user chose native after the spike.
+- docs/specs/workspace-ide.md: removed the runtime options table and the other runtimes' sources; the spec now states only the native choice and the spike results. Why: the user asked to drop the options once decided.
