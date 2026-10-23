@@ -23,7 +23,8 @@ no state beyond UI layout.
 | Published JSON types (`src/lib/json-types.ts`, package `types` entry) | Shipped (36e64a5, d0a490a, 22a8444) |
 | `kunj agent [start\|status\|stop] [branch]` and `agent` in `worktree list --json` | Shipped (2974aef, 75380f3, ce52ad8) |
 | `kunj ct file read\|write [branch] <path>` | Shipped (47fcefe, 5721f17) |
-| `kunj events --json` | Shipped (189d9ba, 3685ef6); status poll and event filtering being fixed (see below) |
+| `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
+| tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | The app (`workspace-app/`) | Not started; plan written for Electron, on hold |
 | Runtime choice | Open: Electron decided, then a native-shell spike started the same day |
 | `kunj install workspace`, release job | Not started (in the app plan) |
@@ -89,7 +90,9 @@ has its own tmux server, the session stays `agent`. `start` runs `tmux -u new-se
 <worktree> -e KUNJ_BRANCH=… -e KUNJ_REPO=… -e KUNJ_WORKTREE=… <command> ; set-option window-size latest`
 (`-e` because a new session's environment comes from the tmux server; `TMUX` is dropped from the
 environment so it works from inside a pane; `window-size latest` so the app and a CLI terminal attached
-together are sized to the last one attached). It needs a terminal (`no-tty`). `status --json` prints
+together are sized to the last one attached). Without tmux, or with `--no-tmux`, `start` runs the
+command directly through `$SHELL -lc` in the worktree with the same `KUNJ_*` environment, after a
+one-line stderr hint that the agent stops when the terminal closes. It needs a terminal (`no-tty`). `status --json` prints
 `AgentStatusJson`, `stop --json` `AgentStopJson`. `kunj worktree list --json` gives each existing,
 non-bare worktree on a branch `agent: { running, session }` from one `tmux list-sessions` per listing;
 `running` is `null` only when tmux is not installed, and the field is absent with `--no-status`.
@@ -186,8 +189,8 @@ All 2026-10-23.
   runs `claude` in its own terminal tab (hidden tabs keep running while the app runs; the tab says
   "install tmux to keep agents running when the app closes"), and on reopen offers `claude --continue`
   in that worktree, since Claude Code saves the conversation itself. `worktree list --json` reports
-  `agent.running: null` when tmux is missing. Containers always use tmux inside the image. *Not yet in the
-  code:* today `kunj agent` fails with `tmux-missing` and has no `--no-tmux`.
+  `agent.running: null` when tmux is missing. Containers always use tmux inside the image. Shipped in
+  e5b15a4; `stop` without tmux still fails with `tmux-missing`, since there is no session to stop.
 
 ## Open questions
 

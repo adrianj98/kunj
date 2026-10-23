@@ -698,3 +698,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
   commits, events and `agent` field described as the code does, Electron decision reopened by the
   native-shell spike, app plan on hold) and deleted `docs/superpowers/specs/`. Why: one spec per topic.
 - Workspace CLI contract final fixes: `kunj agent` passes KUNJ_* with tmux `-e`, drops TMUX and runs without tmux (`--no-tmux`); `kunj events` gains a 10 s worktree/container status poll, origin-based repo ids, `hello` once armed, abort-raced Docker calls and restarted subwatchers; tmux failures are no longer read as "no agents". Why: final review of the contract (app depends on the stream being complete and prompt).
+- docs/specs/workspace-ide.md: tmux-optional and events status poll marked shipped. Why: the fix wave landed both.
