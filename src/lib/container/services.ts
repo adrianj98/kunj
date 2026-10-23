@@ -393,8 +393,12 @@ export interface ServiceStartOptions {
   kunjVersion?: string;
   /** Remove and recreate existing service containers (volumes are kept) */
   recreate?: boolean;
+  /** With recreate: a service no longer declared keeps its data volumes (`--keep-volumes`) */
+  keepVolumes?: boolean;
   /** Filled as objects are created, so a caller can roll back after a failure part way */
   created?: { containers: string[]; volumes: string[] };
+  /** Ids of the service containers this call started or created, so a caller can stop them after a failure */
+  started?: string[];
 }
 
 function svcStub(name: string): ServiceSpec {
@@ -456,16 +460,22 @@ export async function startServices(
   if (services.length === 0 && !opts.recreate) return { created: [], volumes: [] };
   const existing = new Map((await findServices(backend, names, { repoId, branch })).map(c => [c.name, c]));
   if (opts.recreate) {
-    // --rebuild: a service no longer declared goes; its volumes stay, as `remove --keep-volumes` keeps them
+    // --rebuild (the user's explicit rebuild): a service no longer declared goes, with its data
+    // volumes unless --keep-volumes, as `remove` does
     const declared = new Set(ordered.map(svc => serviceNames(names, svc.name).container));
     const undeclared = [...existing.values()].filter(c => !declared.has(c.name));
     if (undeclared.length) {
-      await backend.remove({ containers: undeclared.map(c => c.name) });
+      const volumes = opts.keepVolumes ? [] : undeclared.flatMap(c => serviceRecord(c).volumes);
+      await backend.remove({ containers: undeclared.map(c => c.name), ...(volumes.length ? { volumes } : {}) });
       for (const c of undeclared) {
         existing.delete(c.name);
-        const volumes = serviceRecord(c).volumes;
+        const own = serviceRecord(c).volumes;
         opts.warn(`Removed service ${c.labels[LABEL.service] ?? c.name}: it is no longer declared` +
-          (volumes.length ? `; its volumes are kept (${volumes.join(', ')}; docker volume rm them when you no longer need the data)` : ''));
+          (!own.length
+            ? ''
+            : opts.keepVolumes
+              ? `; its volumes are kept (${own.join(', ')}; docker volume rm them when you no longer need the data)`
+              : `; its volumes were removed too (${own.join(', ')})`));
       }
     }
   }
@@ -481,7 +491,9 @@ export async function startServices(
     let id: string;
     const found = existing.get(spec.name);
     if (found && !opts.recreate) {
-      if (found.state !== 'running') await backend.start(found.id);
+      // Already running (a resume): it passed its health check when it was started
+      if (found.state === 'running') continue;
+      await backend.start(found.id);
       id = found.id;
     } else {
       if (found) await backend.remove({ containers: [found.name] });
@@ -489,6 +501,7 @@ export async function startServices(
       track('containers', spec.name);
       id = await backend.run(spec);
     }
+    opts.started?.push(id);
     await waitHealthy(backend, id, svc, opts);
   }
   return { created: created.containers, volumes: created.volumes };
@@ -498,7 +511,7 @@ export async function startServices(
 export async function resumeServices(
   backend: ContainerBackend,
   found: ContainerInfo[],
-  opts: Pick<ServiceStartOptions, 'warn' | 'timeoutMs' | 'intervalMs'>
+  opts: Pick<ServiceStartOptions, 'warn' | 'timeoutMs' | 'intervalMs' | 'started'>
 ): Promise<void> {
   const byName = new Map(found.map(c => [c.labels[LABEL.service] ?? c.name, c]));
   let ordered = found;
@@ -514,6 +527,7 @@ export async function resumeServices(
   for (const c of ordered) {
     if (c.state === 'running') continue;
     await backend.start(c.id);
+    opts.started?.push(c.id);
     await waitHealthy(backend, c.id, { name: c.labels[LABEL.service] ?? c.name, healthcheck: serviceRecord(c).healthcheck }, opts);
   }
 }
@@ -558,7 +572,38 @@ export function composeRefusal(text: string): string | null {
   if (key('include').test(text)) return 'include is not supported';
   // Conservative: any extends in a file that has a `file:` key anywhere (extends within the file is fine)
   if (key('extends').test(text) && key('file').test(text)) return 'extends with a file is not supported';
+  // A key the text check above cannot read: compose decodes "\x69nclude" to include, and an alias
+  // key (*a :) is whatever its anchor says
+  if (escapedKey(text)) return 'a double-quoted key with a backslash escape is not supported';
+  if (/(^|[\s{,?])\*[^\s,[\]{}]+[ \t]+:/m.test(text)) return 'an alias as a key is not supported';
   return null;
+}
+
+/**
+ * True when a double-quoted scalar in a key position (its closing quote followed by `:`, past any
+ * whitespace and comments) contains a backslash. Each unescaped quote followed by a colon is scanned
+ * back to its opening quote on its own, so a stray quote elsewhere cannot shift the pairing.
+ */
+function escapedKey(text: string): boolean {
+  const unescaped = (i: number) => {
+    let n = 0;
+    while (i - 1 - n >= 0 && text[i - 1 - n] === '\\') n++;
+    return n % 2 === 0;
+  };
+  for (let close = text.indexOf('"'); close !== -1; close = text.indexOf('"', close + 1)) {
+    if (!unescaped(close)) continue;
+    let j = close + 1;
+    for (;;) {
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (text[j] !== '#') break;
+      while (j < text.length && text[j] !== '\n') j++;
+    }
+    if (text[j] !== ':') continue;
+    let open = close - 1;
+    while (open >= 0 && !(text[open] === '"' && unescaped(open))) open--;
+    if (open >= 0 && text.slice(open + 1, close).includes('\\')) return true;
+  }
+  return false;
 }
 
 export async function resolveServices(

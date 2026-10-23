@@ -48,6 +48,7 @@ import {
   StartResult,
   containerStatus,
   inspectForRemove,
+  needsResume,
   removeContainer,
   startContainer,
   stopContainer,
@@ -131,7 +132,7 @@ export class ContainerCommand extends BaseCommand {
         { flags: '-a, --all', description: "[list] Show every repository's containers; [prune] prune every repository in ~/.kunj/repos.json" },
         { flags: '-f, --force', description: '[remove|prune] Remove even when the container holds unpushed work (prune: and volumes without a container)' },
         { flags: '--dry-run', description: '[prune] Only list what would be removed (the default without --yes when stdout is not a terminal, or with --json)' },
-        { flags: '--keep-volumes', description: "[remove] Keep the workspace and home volumes (and the services' volumes)" },
+        { flags: '--keep-volumes', description: "[remove] Keep the workspace and home volumes (and the services' volumes); [start --rebuild] keep the volumes of services no longer declared" },
         { flags: '--follow', description: '[logs] Keep streaming new output' },
         { flags: '-n, --new-window', description: '[open] Open in a new editor window' },
         { flags: '--auto', description: '[forward] Forward every port the container starts listening on (>= 1024, not in container.forward.ignore)' },
@@ -469,6 +470,7 @@ export class ContainerCommand extends BaseCommand {
       jsonMode: this.jsonMode,
       skipHooks: options.hooks === false,
       keepOnError: !!options.keepOnError,
+      keepVolumes: !!options.keepVolumes,
       confirmPush: () => this.confirmPush(branch),
       warn: this.warn,
       defaultBranch,
@@ -590,9 +592,13 @@ export class ContainerCommand extends BaseCommand {
   private async open(target: string | undefined, options: ContainerOptions): Promise<void> {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
-    const main = await this.requireMain(ctx, branch);
-    // Only resumed: start's --rebuild, --create, --image and --publish never apply to open
-    if (main.state !== 'running') {
+    const names = this.names(ctx, branch);
+    const found = await ctx.backend.list({ [LABEL.repo]: ctx.repo.id, [LABEL.branch]: branch });
+    const main = found.find(c => c.name === names.container);
+    if (!main) throw new ContainerError(`No container for ${branch}; run kunj ct start ${branch}`);
+    // Only resumed: start's --rebuild, --create, --image and --publish never apply to open. Also when
+    // just the helper (or an out-of-date one) or a service is down, so the editor finds it all up.
+    if (needsResume(found, names, getVersion())) {
       await this.startOrResume(ctx, branch, { hooks: options.hooks, context: options.context, json: options.json });
     }
 

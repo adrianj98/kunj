@@ -176,7 +176,7 @@ unpushed work, unless `--force`), helpers, services and networks left without th
 (volumes only with `--force`), snapshot and `kunj-sandbox` images that are no longer current, and
 stopped containers older than `container.pruneAfterDays`; it asks first, takes `--dry-run` (the
 default without `--yes` when stdout is not a terminal or with `--json`) and `--all` (every recorded
-repository); `open` starts a stopped container and opens `worktree.editorCommand` attached to it
+repository); `open` starts a stopped container (or brings up its helper and services) and opens `worktree.editorCommand` attached to it
 (VS Code and Cursor, through the Dev Containers extension; other editors get the `docker exec`
 command to run; while attached, the extension forwards your host's git credentials, SSH agent and
 gpg-agent into the container unless `dev.containers.copyGitConfig` is `false` and
@@ -317,7 +317,7 @@ port of `ports`/`expose`, and leaves out bind mounts, `build`, `privileged`, `ca
 `network_mode`, `env_file`, `entrypoint`, `user`, `working_dir`, `tmpfs`, published ports and
 variables taken from your shell, with one warning listing what it dropped. A compose file with
 `include` or an `extends` that names another file is not imported at all (those read files from
-your machine). `${VAR:-default}` becomes the default; nothing is read from your
+your machine), nor is one with an escaped double-quoted key (`"\x69nclude":`) or an alias as a key. `${VAR:-default}` becomes the default; nothing is read from your
 environment.
 
 `start` runs the services before the branch container, in `dependsOn` order, and waits for each
@@ -325,7 +325,8 @@ health check (every 2 s, up to 2 minutes, then a warning and the start goes on),
 before `setup` runs. That holds for snapshot builds too, but their data is never part of the
 snapshot and the temporary services go with the temporary container, so migrations against a
 service belong in `maintain` (which runs on a start from the snapshot) and must be safe to run again:
-`setup`'s migrations only ever reach the snapshot build's throwaway database. `stop` stops them, a resumed start starts them again, and `remove` deletes them and their
+`setup`'s migrations only ever reach the snapshot build's throwaway database. `stop` stops them, a resumed start starts them again (and creates any declared since, never removing one), `--rebuild`
+removes services no longer declared with their volumes (`start --rebuild --keep-volumes` keeps those), and `remove` deletes them and their
 volumes (`--keep-volumes` keeps those).
 
 ```bash

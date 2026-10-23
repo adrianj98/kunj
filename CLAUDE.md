@@ -262,7 +262,8 @@ imports light, load inquirer lazily and do not import the AWS or LangChain modul
 `/tmp/kunj-ready`. The main container runs with all capabilities dropped except CHOWN, DAC_OVERRIDE,
 FOWNER, SETUID and SETGID (`MAIN_CAPABILITIES` in lifecycle.ts); never give it NET_ADMIN or NET_RAW
 (Docker-in-Docker is the one opt-in exception). Nothing may be exec'd in the main container
-before that file exists.
+before that file exists. Resume replaces a running helper whose image is not the current
+`kunj-nethelper` tag the same way (a running main whose helper replacement fails is stopped).
 
 **Secrets:** they travel only in the `docker run` env-file. Never pass them with `docker exec -e`
 (visible in `ps` and `inspect`) and never put them in labels. The git credential helper
@@ -322,11 +323,14 @@ devcontainer's compose file read through `backend.composeConfig()`, i.e. `docker
 published ports, no firewall helper, labels `kunj.role=service`, `kunj.service=<name>` and
 `kunj.options` (`port`, `healthcheck`, volume names; never env). `startContainer` starts them after
 the network and before the branch container (health check polled up to 120 s, then a warning), and
-they are in its rollback list; `resume` starts stopped ones, `stopContainer` stops them and
+they are in its rollback list; `resume` starts stopped ones and creates newly declared ones (never
+removes one; a failed resume stops the ones it started), `--rebuild` removes undeclared ones with their
+volumes unless `--keep-volumes`, `stopContainer` stops them and
 `removeContainer` deletes them and the volumes in their label. Never give a service host env, a
 bind mount, a capability or `--privileged`: its image is chosen by the branch.
 
-**Editor:** `kunj ct open` resumes a stopped container through `startOrResume()` (never rebuilds), writes the
+**Editor:** `kunj ct open` resumes through `startOrResume()` (never rebuilds) when `needsResume()` says the container,
+its helper or a service is down or the helper is out of date, writes the
 Dev Containers extension's per-image config (`imageConfigs/<image>.json`, `:`/`/`/`%` escaped as lowercase
 `%xx`, with `remoteUser` and `workspaceFolder`) and launches `worktree.editorCommand` via `buildOpenCommand`
 with `--folder-uri vscode-remote://attached-container+<hex of {"containerName":"/<name>"}>/workspace`. An

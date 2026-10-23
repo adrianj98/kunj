@@ -53,7 +53,7 @@ drops, with one warning listing them, host bind mounts, published ports, `build`
 `cap_add`, `network_mode`, `devices`, `pid`, `ipc`, `security_opt`, `volumes_from`, `userns_mode`,
 `cgroup_parent`, `env_file`, `extra_hosts`, `sysctls`, `runtime`, `entrypoint`, `user`, `working_dir`,
 `tmpfs`, and a `depends_on` on a dropped service. A compose file with `include` or `extends.file` is
-refused (they read host files).
+refused (they read host files), as is one with a backslash-escaped double-quoted key or an alias key (the text check cannot read them).
 
 **Run spec:** `<container>-svc-<name>` on the branch network with `--network-alias <name>`, only the
 env and named volumes it declares (`<container>-svc-<name>-<volume>`), Docker's default capabilities
@@ -65,8 +65,11 @@ a name prefix another branch could extend.
 **Lifecycle:** `start` validates every definition before creating anything, then starts services in
 `dependsOn` order after the network and before the branch container, polling each health check every
 2 s for up to 120 s (then a warning, and the start continues). They are in the rollback list.
-`--rebuild` recreates them on their kept volumes and removes services no longer declared. Resume starts
-stopped ones, dependencies first; a service that will not start fails the start. `stop` stops them;
+`--rebuild` recreates them on their kept volumes and removes services no longer declared, with their
+volumes unless `--keep-volumes`. Resume starts stopped ones and creates newly declared ones, dependencies
+first, never removing one; a service that will not start fails the start, and a failed resume stops the
+services it started. Resume also replaces a helper not on the current `kunj-nethelper` image, and
+`open` resumes when the helper or a service is down. `stop` stops them;
 `remove` deletes them and their volumes (`--keep-volumes` keeps them; the unpushed-work guard is about
 the branch, not service data). `list` shows `services: [{ name, state, port }]`;
 `kunj ct logs [branch] [service] [--follow]` shows a service's (or the container's) output;

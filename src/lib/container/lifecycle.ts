@@ -13,7 +13,7 @@ import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devco
 import { Blueprint, ResolvedBlueprint, SEED_DIR, computeBlueprintHash, resolveBlueprint } from './blueprint';
 import { Preset, orderTools, resolvePresets } from './presets';
 import { FoundSnapshot, findSnapshot, maintain, provisionNew } from './provision';
-import { ComposeSource, ServiceOwner, ServiceSpec, findServices, resolveServices, resumeServices, serviceRemoval, servicesOf, startServices, stopServices } from './services';
+import { ComposeSource, ServiceOwner, ServiceSpec, findServices, resolveServices, resumeServices, serviceNames, serviceRemoval, servicesOf, startServices, stopServices } from './services';
 import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
 import {
   CLAUDE_AUTH_KEYS,
@@ -93,6 +93,8 @@ export interface StartOptions {
   /** A git bundle of `branch` the host made (a snapshot): streamed in and cloned instead of origin,
    * so the container needs no token; origin is not checked for the branch or unpushed commits */
   bundle?: { hostPath: string; containerPath: string };
+  /** --rebuild: a service no longer declared keeps its data volumes (they are removed with it otherwise) */
+  keepVolumes?: boolean;
   /** Service health checks: how long to wait for each, and how often to ask (tests) */
   serviceHealth?: { timeoutMs?: number; intervalMs?: number };
   /** A snapshot build: the DinD image is still used (the hash covers it), but dockerd never runs and
@@ -834,6 +836,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
         warn,
         kunjVersion: options.kunjVersion,
         recreate: options.rebuild,
+        keepVolumes: options.keepVolumes,
         created,
         ...options.serviceHealth,
       }));
@@ -994,6 +997,45 @@ function parseOptionsLabel(labels: Record<string, string>): {
   return optionsLabel(labels);
 }
 
+/**
+ * The services the branch declares now (blueprint, container.services, the devcontainer's compose
+ * file on origin), so a resume can add the ones declared since the container was made. Null when
+ * they cannot be read: a resume only warns, as it does for a broken blueprint.
+ */
+async function declaredServices(
+  backend: ContainerBackend,
+  options: StartOptions,
+  blueprint: ResolvedBlueprint | null
+): Promise<ServiceSpec[] | null> {
+  try {
+    const setting = options.imageOverride || options.config.container?.image || '';
+    const devcontainer = setting ? null : await readDevcontainer(hostRef(options.branch, false, undefined), options.cwd);
+    return await resolveServices(backend, {
+      blueprint: blueprint?.blueprint.services,
+      config: options.config.container?.services,
+      compose: devcontainer?.compose.filter(c => c.text),
+      devcontainerService: devcontainer?.spec.service,
+      warn: options.warn,
+    });
+  } catch (err) {
+    options.warn(`Services not checked for new ones: ${message(err)}`);
+    return null;
+  }
+}
+
+/**
+ * True when a running container should be resumed before it is used (`kunj ct open`): the branch
+ * container, its network helper or one of its services is not running, or the helper runs an older
+ * kunj-nethelper image (one without socat cannot forward ports).
+ */
+export function needsResume(found: ContainerInfo[], names: ContainerNames, kunjVersion: string): boolean {
+  const main = found.find(c => c.name === names.container);
+  const helper = found.find(c => c.name === names.helper);
+  if (main?.state !== 'running' || helper?.state !== 'running' || helper.image !== NETHELPER_TAG(kunjVersion)) return true;
+  const owner = { repoId: main.labels[LABEL.repo], branch: main.labels[LABEL.branch] };
+  return servicesOf(found, names.container, owner).some(c => c.state !== 'running');
+}
+
 async function resume(
   backend: ContainerBackend,
   options: StartOptions,
@@ -1004,11 +1046,12 @@ async function resume(
   runtimes: string[]
 ): Promise<StartResult> {
   const { repo, warn } = options;
-  const found = await step('docker', () => backend.list(labelsFor(repo.id, options.namesFor ?? options.branch)));
+  const labelBranch = options.namesFor ?? options.branch;
+  const found = await step('docker', () => backend.list(labelsFor(repo.id, labelBranch)));
   const main = found.find(c => c.name === names.container);
   if (!main) throw new StartError(`Container ${names.container} disappeared while starting`, 'docker');
   const helper: ContainerInfo | undefined = found.find(c => c.name === names.helper);
-  const services = servicesOf(found, names.container, { repoId: repo.id, branch: options.namesFor ?? options.branch });
+  const services = servicesOf(found, names.container, { repoId: repo.id, branch: labelBranch });
   const firewall = firewallMode(options.config.container);
   const recorded = parseOptionsLabel(main.labels);
   const dind = recorded.dind ?? 'off';
@@ -1017,6 +1060,19 @@ async function resume(
   if (!options.withoutDind && dind !== dindMode(options.config.container)) {
     warn(`container.dockerInDocker is "${dindMode(options.config.container)}" but this container was created with "${dind}"; kunj ct start --rebuild applies it`);
   }
+  // An existing container is never set up again, but maintain absorbs lockfile drift every start.
+  // A broken blueprint must not keep the container from starting, so it is only a warning here.
+  let resolved: ResolvedBlueprint | null = null;
+  let blueprintError: unknown;
+  try {
+    resolved = await loadBlueprint(options);
+  } catch (err) {
+    blueprintError = err;
+  }
+  // Services declared since the container was made are added; none is removed here (--rebuild does that)
+  const declared = await declaredServices(backend, options, resolved);
+  const declaredNames = new Set((declared ?? []).map(d => serviceNames(names, d.name).container));
+  const serviceList = [...new Set([...services.map(c => c.labels[LABEL.service] ?? c.name), ...(declared ?? []).map(d => d.name)])];
   const result: StartResult = {
     names,
     containerId: main.id,
@@ -1028,18 +1084,31 @@ async function resume(
     copiedFiles: [],
     publish: main.ports.length ? main.ports : recorded.publish ?? [],
     firewall,
-    ...(services.length ? { services: services.map(c => c.labels[LABEL.service] ?? c.name) } : {}),
+    ...(serviceList.length ? { services: serviceList } : {}),
     ...(dind !== 'off' ? { dind } : {}),
   };
-  // Before the branch container, as on a new start; a service that will not start fails the start
-  await step('docker', () => resumeServices(backend, services, { warn, ...options.serviceHealth }));
-  if (main.state === 'running' && helper?.state === 'running') return result;
+  // A helper made by an older kunj may lack what forwards need (socat): replaced like a stopped one
+  const helperCurrent = helper?.state === 'running' && helper.image === NETHELPER_TAG(options.kunjVersion);
+  const mainWasRunning = main.state === 'running';
 
+  // The service containers this call started (or created), stopped again when the resume fails
+  const startedServices: string[] = [];
   const state: UpState = { startedMain: false, helperCreated: false };
   let ready = false;
   try {
+    // Before the branch container, as on a new start; a service that will not start fails the start
+    const health = { warn, ...options.serviceHealth, started: startedServices };
+    await step('docker', () => resumeServices(backend, services.filter(c => !declaredNames.has(c.name)), health));
+    if (declared?.length) {
+      await step('docker', () =>
+        startServices(backend, names, repo.id, labelBranch, declared, { ...health, kunjVersion: options.kunjVersion }));
+    }
+    if (mainWasRunning && helperCurrent) return result;
+
     await bringUp(backend, names, main, helperEnv(options, origin, env, dind !== 'off'), options.kunjVersion, warn, state);
     ready = true;
+    // A running container whose helper was only out of date: nothing else to do
+    if (mainWasRunning && helper?.state === 'running') return result;
     if (dind !== 'off') await startDockerd(backend, main.id, warn);
 
     const user = recorded.user ?? '';
@@ -1053,14 +1122,7 @@ async function resume(
       Object.assign(result, await step('docker', () => copyFiles(backend, main.id, user, home, options, variables(options))));
     }
     await mcpConfig(backend, main.id, user, options);
-    // An existing container is never set up again, but maintain absorbs lockfile drift every start.
-    // A broken blueprint must not keep the container from starting, so it is only a warning here.
-    let resolved: ResolvedBlueprint | null = null;
-    try {
-      resolved = await loadBlueprint(options);
-    } catch (err) {
-      warn(`Blueprint not loaded, maintain skipped: ${message(err)}`);
-    }
+    if (blueprintError !== undefined) warn(`Blueprint not loaded, maintain skipped: ${message(blueprintError)}`);
     if (resolved) {
       const bp = resolved.blueprint;
       const maintainRan = await step('docker', () => maintain(backend, main.id, bp, commandIO(user, options.jsonMode), warn));
@@ -1075,10 +1137,21 @@ async function resume(
     await step('docker', () => postCommands(backend, main.id, user, recorded, options));
     return result;
   } catch (err) {
+    // Never left running without its firewall: a container that was already running is stopped too
+    // once its helper was replaced, since the new one may have failed half way through the rules
+    const unfirewalled = !ready && (state.startedMain || (mainWasRunning && state.helperCreated));
     if (!options.keepOnError) {
-      await undoUp(backend, names, main.id, state, warn);
-    } else if (!ready && state.startedMain) {
-      // Keep the helper to debug, but stop the container this run started without a firewall
+      await undoUp(backend, names, main.id, { ...state, startedMain: unfirewalled }, warn);
+      // Only what this call started: services that were already running stay up
+      for (const id of [...startedServices].reverse()) {
+        try {
+          await backend.stop(id);
+        } catch (stopErr) {
+          warn(`Could not stop a service this start started: ${message(stopErr)}`);
+        }
+      }
+    } else if (unfirewalled) {
+      // Keep the helper and the services to debug, but stop the container without a firewall
       await undoUp(backend, names, main.id, { startedMain: true, helperCreated: false }, warn);
     }
     throw err;

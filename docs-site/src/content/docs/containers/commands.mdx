@@ -42,6 +42,7 @@ terminal) and otherwise stops with `push it first (the container clones from ori
 | `--rebuild` | Rebuild the image and recreate the container on the same volumes. The workspace and home are kept. With Docker-in-Docker it rebuilds the `kunj-sandbox-dind` image but reuses the sandbox image under it. |
 | `--no-snapshot` | Start without the blueprint's snapshot: clone origin and run the blueprint's tools and setup in the container. See [Blueprints](../blueprints/). |
 | `--keep-on-error` | Keep what a failed start created, for debugging. A container whose firewall never came up is stopped, never left running. |
+| `--keep-volumes` | With `--rebuild`: keep the volumes of services no longer declared (they are removed with them otherwise). |
 | `--no-hooks` | Skip the `pre/post-container-create` hooks. |
 
 ```bash
@@ -54,7 +55,8 @@ kunj ct start feature/search --rebuild
 
 Resuming a stopped container starts it behind a fresh network helper, runs the blueprint's
 `maintain` commands and the devcontainer's `postStartCommand`, and leaves the clone as it was.
-Resuming a container that is already running does nothing.
+Resuming a container that is already running does nothing, unless its network helper was made by
+an older kunj (one without what port forwarding needs): then the helper is replaced, firewall first.
 
 With [Docker inside](../configuration/#docker-inside-the-container) (`container.dockerInDocker`),
 `start` first checks that the Docker host may run it and refuses, before creating anything, when it
@@ -109,7 +111,7 @@ It fails with `No agent session` when the agent is not running; start it with `k
 ## open
 
 Opens the container in your editor, attached over Docker. A stopped container is started first, the
-same way `kunj ct start` resumes it.
+same way `kunj ct start` resumes it, and so is a running one whose network helper or a service is down.
 
 ```bash
 kunj ct open feature/search

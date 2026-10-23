@@ -123,6 +123,11 @@ function info(over: Partial<ContainerInfo>): ContainerInfo {
   };
 }
 
+/** A running network helper on the current kunj-nethelper image. */
+function helperInfo(over: Partial<ContainerInfo> = {}): ContainerInfo {
+  return info({ id: 'helper-id', name: names.helper, image: NETHELPER_IMAGE(VERSION), labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'helper' }), ...over });
+}
+
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-lifecycle-'));
   keepDir = path.join(tmp, 'keep');
@@ -633,11 +638,35 @@ describe('startContainer', () => {
     const b = backend();
     b.existing = [
       info({}),
-      info({ id: 'helper-id', name: names.helper, labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'helper' }) }),
+      helperInfo(),
     ];
     const result = await startContainer(b, options());
     expect(result).toMatchObject({ created: false, seeded: false, containerId: 'main-id' });
     expect(b.methods().filter(m => ['run', 'start', 'remove', 'exec'].includes(m))).toEqual([]);
+  });
+
+  it('replaces a running helper on an older kunj-nethelper image before anything else, and keeps the container running', async () => {
+    const b = backend();
+    b.existing = [info({}), helperInfo({ image: 'kunj-nethelper:9.9.8-0ldhash' })];
+    const result = await startContainer(b, options());
+    expect(result.created).toBe(false);
+    expect(b.callsOf('remove')).toEqual([[{ containers: [names.helper] }]]);
+    const specs = runSpecs(b);
+    expect(specs.map(s => [s.name, s.image, s.networkOf])).toEqual([[names.helper, NETHELPER_IMAGE(VERSION), 'main-id']]);
+    expect(specs[0].capabilities).toEqual(['NET_ADMIN', 'NET_RAW']);
+    // Only the ready check: the running container is not set up again (no postStart, no seed check)
+    expect(execCmds(b)).toEqual([READY]);
+    expect(b.callsOf('start')).toEqual([]);
+    expect(b.callsOf('stop')).toEqual([]);
+  });
+
+  it('stops a running container whose helper could not be replaced (never left without a firewall)', async () => {
+    const b = backend();
+    b.existing = [info({}), helperInfo({ image: 'kunj-nethelper:9.9.8-0ldhash' })];
+    b.execErrors.set(READY, new Error('docker exec failed: not running'));
+    await expect(startContainer(b, options())).rejects.toMatchObject({ code: 'firewall' });
+    expect(b.callsOf('stop')).toEqual([['main-id']]);
+    expect(execCmds(b).filter(c => c !== READY)).toEqual([]);
   });
 
   it('streams keep files and container.files in and lists them', async () => {
@@ -1415,11 +1444,88 @@ describe('services', () => {
     const running = backend();
     running.existing = [
       info({}),
-      info({ id: 'helper-id', name: names.helper, labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'helper' }) }),
+      helperInfo(),
       svcInfo('exited'),
     ];
     await startContainer(running, svcOptions());
     expect(running.callsOf('start')).toEqual([['pg-id']]);
+  });
+
+  function otherSvc(name: string, state: ContainerInfo['state'], record: object = {}): ContainerInfo {
+    return info({
+      id: `${name}-id`,
+      name: `${names.container}-svc-${name}`,
+      state,
+      image: `${name}:1`,
+      labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'service', [LABEL.service]: name, [LABEL.options]: JSON.stringify({ volumes: [], ...record }) }),
+    });
+  }
+  const WITH_CACHE = { ...SERVICES, cache: { image: 'redis:7', healthcheck: 'redis-cli ping', dependsOn: ['postgres'] } };
+
+  it('resume adds a service declared since the container was made: dependencies first, health checked, before the branch container', async () => {
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.existing = [info({ state: 'exited' }), helperInfo({ state: 'exited' }), svcInfo('exited')];
+    const result = await startContainer(b, svcOptions({ config: { container: { services: WITH_CACHE } } as unknown as KunjConfig }));
+    expect(b.callsOf('start')).toEqual([['pg-id'], ['main-id']]);
+    const specs = runSpecs(b);
+    expect(specs.map(s => s.name)).toEqual([`${names.container}-svc-cache`, names.helper]);
+    expect(specs[0]).toMatchObject({ image: 'redis:7', network: names.network, aliases: ['cache'], publish: [], env: {} });
+    const cmds = execCmds(b);
+    expect(cmds.indexOf('sh -c pg_isready')).toBeLessThan(cmds.indexOf('sh -c redis-cli ping'));
+    expect(cmds.indexOf('sh -c redis-cli ping')).toBeLessThan(cmds.indexOf(READY));
+    expect(result.services).toEqual(['postgres', 'cache']);
+    // Only the helper is replaced
+    expect(b.callsOf('remove')).toEqual([[{ containers: [names.helper] }]]);
+
+    // A running container with a current helper gets the new service too, and nothing else
+    const running = backend();
+    running.existing = [info({}), helperInfo(), svcInfo('running')];
+    await startContainer(running, svcOptions({ config: { container: { services: WITH_CACHE } } as unknown as KunjConfig }));
+    expect(runSpecs(running).map(s => s.name)).toEqual([`${names.container}-svc-cache`]);
+    expect(running.callsOf('start')).toEqual([]);
+    expect(execCmds(running)).toEqual(['sh -c redis-cli ping']);
+  });
+
+  it('resume never removes a service that is no longer declared; it starts it as before', async () => {
+    const b = backend();
+    b.existing = [info({}), helperInfo(), otherSvc('old', 'exited', { volumes: [`${names.container}-svc-old-data`] })];
+    const result = await startContainer(b, options());
+    expect(b.callsOf('start')).toEqual([['old-id']]);
+    expect(b.methods()).not.toContain('remove');
+    expect(result.services).toEqual(['old']);
+  });
+
+  it('a failed resume stops the services it started, not the ones that were already running', async () => {
+    const b = backend();
+    b.existing = [info({ state: 'exited' }), helperInfo({ state: 'exited' }), svcInfo('exited'), otherSvc('redis', 'running')];
+    b.execErrors.set(READY, new Error('docker exec failed: not running'));
+    const config = { container: { services: { ...WITH_CACHE, redis: { image: 'redis:1' } } } } as unknown as KunjConfig;
+    await expect(startContainer(b, svcOptions({ config }))).rejects.toMatchObject({ code: 'firewall' });
+    // The branch container first, then the services this call started, last started first
+    expect(b.callsOf('stop')).toEqual([['main-id'], ['id-1'], ['pg-id']]);
+    expect(runSpecs(b)[0].name).toBe(`${names.container}-svc-cache`);
+
+    // --keep-on-error keeps them running to debug
+    const kept = backend();
+    kept.existing = [info({ state: 'exited' }), helperInfo({ state: 'exited' }), svcInfo('exited')];
+    kept.execErrors.set(READY, new Error('docker exec failed: not running'));
+    await expect(startContainer(kept, svcOptions({ keepOnError: true }))).rejects.toMatchObject({ code: 'firewall' });
+    expect(kept.callsOf('stop')).toEqual([['main-id']]);
+  });
+
+  it('--rebuild removes the volumes of a service no longer declared, unless keepVolumes', async () => {
+    const OLD_DATA = `${names.container}-svc-old-data`;
+    const b = backend();
+    b.existing = [info({}), otherSvc('old', 'running', { volumes: [OLD_DATA] })];
+    await startContainer(b, options({ rebuild: true }));
+    expect(b.callsOf('remove')).toContainEqual([{ containers: [`${names.container}-svc-old`], volumes: [OLD_DATA] }]);
+
+    const kept = backend();
+    kept.existing = [info({}), otherSvc('old', 'running', { volumes: [OLD_DATA] })];
+    await startContainer(kept, options({ rebuild: true, keepVolumes: true }));
+    expect(kept.callsOf('remove')).toContainEqual([{ containers: [`${names.container}-svc-old`] }]);
+    expect(JSON.stringify(kept.callsOf('remove'))).not.toContain(OLD_DATA);
   });
 
   it('stop stops the services after the branch container', async () => {

@@ -54,7 +54,8 @@ except the devcontainer's own `service`. It reads the file with `docker compose 
 `env_file`, `entrypoint`, `user`, `working_dir`, `tmpfs`, published ports and variables that would
 come from your shell, and prints one warning listing them. A compose file with `include`, or with an
 `extends` that names another file, is skipped with a warning: both make Docker read files from your
-machine. `${VAR:-default}` becomes the default; nothing is read from your environment.
+machine. So is one with a double-quoted key that uses a backslash escape (`"\x69nclude":`) or an alias
+as a key, which that check could not read. `${VAR:-default}` becomes the default; nothing is read from your environment.
 
 ## Lifecycle
 
@@ -69,6 +70,10 @@ machine. `${VAR:-default}` becomes the default; nothing is read from your enviro
   a snapshot runs `setup` instead of `maintain`, so a project that also starts without one lists the
   migration in both.)
 - **stop** stops them; **start** on a stopped container starts them again, dependencies first.
+  It also creates services declared since the container was made, and never removes one; a start
+  that fails then stops the services it started.
+- **start --rebuild** removes services no longer declared together with their volumes
+  (`--keep-volumes` keeps the volumes).
 - **remove** deletes them and their volumes (`--keep-volumes` keeps the volumes). The check for
   unpushed work is about the branch's clone only.
 - A start that fails removes the services and volumes it created.

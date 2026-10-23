@@ -302,14 +302,22 @@ describe('startServices', () => {
     expect(r.callsOf('run')).toHaveLength(1);
   });
 
-  it('recreate (--rebuild) removes a service no longer declared, keeps its volumes and says so', async () => {
+  it('recreate (--rebuild) removes a service no longer declared with its volumes, or keeps them with keepVolumes', async () => {
+    const OLD_DATA = `${names.container}-svc-old-data`;
     const b = new FakeBackend();
-    b.existing = [svcInfo('db'), svcInfo('old', {}, { volumes: [`${names.container}-svc-old-data`] })];
+    b.existing = [svcInfo('db'), svcInfo('old', {}, { volumes: [OLD_DATA] })];
     const warnings: string[] = [];
     await startServices(b, names, REPO, BRANCH, [svc('db')], { warn: m => warnings.push(m), recreate: true });
-    expect(b.callsOf('remove')[0]).toEqual([{ containers: [`${names.container}-svc-old`] }]);
-    expect(JSON.stringify(b.callsOf('remove'))).not.toContain('svc-old-data');
-    expect(warnings).toEqual([expect.stringMatching(/Removed service old: it is no longer declared; its volumes are kept \(.*svc-old-data/)]);
+    expect(b.callsOf('remove')[0]).toEqual([{ containers: [`${names.container}-svc-old`], volumes: [OLD_DATA] }]);
+    expect(warnings).toEqual([`Removed service old: it is no longer declared; its volumes were removed too (${OLD_DATA})`]);
+
+    const kept = new FakeBackend();
+    kept.existing = [svcInfo('db'), svcInfo('old', {}, { volumes: [OLD_DATA] })];
+    const keptWarnings: string[] = [];
+    await startServices(kept, names, REPO, BRANCH, [svc('db')], { warn: m => keptWarnings.push(m), recreate: true, keepVolumes: true });
+    expect(kept.callsOf('remove')[0]).toEqual([{ containers: [`${names.container}-svc-old`] }]);
+    expect(JSON.stringify(kept.callsOf('remove'))).not.toContain('svc-old-data');
+    expect(keptWarnings).toEqual([expect.stringMatching(/Removed service old: it is no longer declared; its volumes are kept \(.*svc-old-data/)]);
 
     // Also when no service is declared any more
     const none = new FakeBackend();
@@ -377,6 +385,21 @@ describe('fix round 1', () => {
     expect(composeRefusal('{"services": {"db": {"extends": {\n  "file": "/x.yml", "service": "db"}}}}')).toBe('extends with a file is not supported');
     // extends within the same file reads nothing from the host
     expect(composeRefusal('services:\n  base:\n    image: redis\n  db:\n    extends:\n      service: base\n    image: redis:7\n')).toBeNull();
+
+    // YAML escapes compose decodes but the text check cannot read
+    const escaped = 'a double-quoted key with a backslash escape is not supported';
+    expect(composeRefusal('"\\x69nclude":\n  - /etc/other/compose.yml\nservices: {}\n')).toBe(escaped);
+    expect(composeRefusal('services:\n  db:\n    extends:\n      "fi\\x6ce": /x.yml\n      service: db\n')).toBe(escaped);
+    expect(composeRefusal('services:\n  db:\n    extends: { "fi\\u006ce" : /x.yml, service: db }\n')).toBe(escaped);
+    expect(composeRefusal('? "\\x69nclude"  # explicit key\n: [/x.yml]\n')).toBe(escaped);
+    // A stray quote earlier on cannot shift the pairing
+    expect(composeRefusal('x: |\n  echo "\n"\\x69nclude": [/x.yml]\n')).toBe(escaped);
+    // An alias as a key is whatever its anchor says
+    expect(composeRefusal('x: &k include\n*k : [/x.yml]\n')).toBe('an alias as a key is not supported');
+    // Escapes in values, and merge keys, are fine
+    expect(composeRefusal('services:\n  db:\n    image: redis\n    command: "sh -c \\"echo a: b\\""\n    "environment": { "A": "x\\ty" }\n')).toBeNull();
+    expect(composeRefusal('x: &d { image: redis }\nservices:\n  db:\n    <<: *d\n')).toBeNull();
+    expect(composeRefusal('{"services": {"db": {"image": "redis", "command": ["sh", "-c", "echo \\"a\\": 1"]}}}')).toBeNull();
 
     const b = new FakeBackend();
     const warnings: string[] = [];

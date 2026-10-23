@@ -15,6 +15,7 @@ jest.mock('../../lib/container/lifecycle', () => {
     startContainer: jest.fn(),
     stopContainer: jest.fn(),
     inspectForRemove: jest.fn(),
+    needsResume: actual.needsResume,
     removeContainer: jest.fn(),
     containerStatus: jest.fn(),
   };
@@ -152,6 +153,8 @@ import * as prune from '../../lib/container/prune';
 import * as config from '../../lib/config';
 import { runActionHook } from '../../lib/hooks';
 import inquirer from 'inquirer';
+import { NETHELPER_IMAGE } from '../../lib/container/image';
+import { getVersion } from '../../lib/version';
 
 const REPO_ID = repoIdFromUrl('https://github.com/acme/app.git');
 
@@ -180,7 +183,7 @@ function helperContainer(branch: string): ContainerInfo {
     id: 'hid-1',
     name: names.helper,
     state: 'running',
-    image: 'kunj-net-helper:1.3.0',
+    image: NETHELPER_IMAGE(getVersion()),
     createdAt: '2026-10-21T10:00:00Z',
     labels: { 'kunj.repo': REPO_ID, 'kunj.branch': branch, 'kunj.role': 'helper' },
     ports: [],
@@ -1268,7 +1271,7 @@ describe('ContainerCommand', () => {
 
     it('writes the image config and launches the editor on the attached-container uri', async () => {
       const main = mainContainer('feat');
-      backend.existing = [main];
+      backend.existing = [main, helperContainer('feat')];
       await new ContainerCommand().execute('open', 'feat', { json: true });
 
       const uri = attachedContainerUri(main.name);
@@ -1280,7 +1283,7 @@ describe('ContainerCommand', () => {
     });
 
     it('warns that the editor may forward host credentials, naming the settings that turn them off', async () => {
-      backend.existing = [mainContainer('feat')];
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
       await new ContainerCommand().execute('open', 'feat', {});
       const printed = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
       expect(printed).toContain(EDITOR_CREDENTIALS_WARNING);
@@ -1291,14 +1294,14 @@ describe('ContainerCommand', () => {
 
     it('opens a new window with --new-window and uses the configured editor', async () => {
       (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: {}, worktree: { editorCommand: 'cursor' } });
-      backend.existing = [mainContainer('feat')];
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
       await new ContainerCommand().execute('open', 'feat', { newWindow: true });
       expect(mockSpawned[0].slice(0, 3)).toEqual(['cursor', '-n', '--folder-uri']);
     });
 
     it('starts a stopped container first, through the start routine', async () => {
       const main = mainContainer('feat', { state: 'exited' });
-      backend.existing = [main];
+      backend.existing = [main, helperContainer('feat')];
       (lifecycle.startContainer as jest.Mock).mockResolvedValueOnce({
         names: containerNames('app', REPO_ID, 'feat'),
         containerId: 'cid-1',
@@ -1318,10 +1321,43 @@ describe('ContainerCommand', () => {
       expect(JSON.parse(stdout.join(''))).toMatchObject({ success: true, branch: 'feat' });
     });
 
+    it('resumes a running container first when its helper or a service is down, or the helper is out of date', async () => {
+      const names = containerNames('app', REPO_ID, 'feat');
+      const svc = (state: ContainerInfo['state']): ContainerInfo => ({
+        id: 'pg-id',
+        name: `${names.container}-svc-postgres`,
+        state,
+        image: 'postgres:16',
+        createdAt: '',
+        labels: { 'kunj.repo': REPO_ID, 'kunj.branch': 'feat', 'kunj.role': 'service', 'kunj.service': 'postgres', 'kunj.options': '{}' },
+        ports: [],
+      });
+      const cases: ContainerInfo[][] = [
+        [mainContainer('feat')],
+        [mainContainer('feat'), { ...helperContainer('feat'), state: 'exited' }],
+        [mainContainer('feat'), { ...helperContainer('feat'), image: 'kunj-nethelper:0.0.1-old' }],
+        [mainContainer('feat'), helperContainer('feat'), svc('exited')],
+      ];
+      for (const existing of cases) {
+        (lifecycle.startContainer as jest.Mock).mockClear();
+        (lifecycle.startContainer as jest.Mock).mockResolvedValueOnce({ names, created: false, image: 'kunj-sandbox:1.3.0' });
+        backend.existing = existing;
+        await new ContainerCommand().execute('open', 'feat', { json: true });
+        expect((lifecycle.startContainer as jest.Mock).mock.calls).toHaveLength(1);
+        expect((lifecycle.startContainer as jest.Mock).mock.calls[0][1]).toMatchObject({ branch: 'feat', rebuild: false });
+      }
+      // Everything up and current: straight to the editor
+      (lifecycle.startContainer as jest.Mock).mockClear();
+      backend.existing = [mainContainer('feat'), helperContainer('feat'), svc('running')];
+      await new ContainerCommand().execute('open', 'feat', { json: true });
+      expect(lifecycle.startContainer).not.toHaveBeenCalled();
+      expect(mockSpawned).toHaveLength(5);
+    });
+
     it('prints the docker exec command for an editor that cannot attach', async () => {
       (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: {}, worktree: { editorCommand: 'subl' } });
       const main = mainContainer('feat');
-      backend.existing = [main];
+      backend.existing = [main, helperContainer('feat')];
       await new ContainerCommand().execute('open', 'feat', {});
       expect(mockSpawned).toEqual([]);
       const printed = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
@@ -1332,7 +1368,7 @@ describe('ContainerCommand', () => {
 
     it('warns in allowlist mode that the editor server needs its domains', async () => {
       (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { network: { allow: ['registry.npmjs.org'] } } });
-      backend.existing = [mainContainer('feat')];
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
       await new ContainerCommand().execute('open', 'feat', {});
       const printed = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
       expect(printed).toMatch(/allowlist.*marketplace/i);

@@ -270,7 +270,7 @@
       },
       {
         "flags": "--keep-volumes",
-        "description": "[remove] Keep the workspace and home volumes (and the services' volumes)",
+        "description": "[remove] Keep the workspace and home volumes (and the services' volumes); [start --rebuild] keep the volumes of services no longer declared",
         "default": null
       },
       {

@@ -4,6 +4,24 @@ Changes made with Claude, and why.
 
 
 
+## 2026-10-23 — Containers: phase 2 follow-ups (helper refresh, services on resume, compose escapes)
+
+- Resume replaces a running network helper whose image is not the current `kunj-nethelper:<ver>-<hash>`
+  (same run spec, READY before anything else); a running container whose helper replacement fails is
+  stopped. Why: helpers made before forwards moved into the helper lack socat, so forwards failed until a
+  manual stop/start. The remove guard's `bringUp` already always made a fresh helper on the current image.
+- Resume reads the declared services (blueprint, `container.services`, the devcontainer's compose file on
+  origin) and creates the ones that do not exist yet, in dependency order with health checks; it never
+  removes one. A failed resume stops the services it started (not ones already running; `--keep-on-error`
+  keeps them). Why: services added after the container was made never started, and a failed resume left
+  services running.
+- `kunj ct open` resumes first when the helper (or an out-of-date one) or a service is down, not only when
+  the container is stopped (`needsResume()` in lifecycle.ts). Why: the editor opened onto a half-up container.
+- Compose import also refuses a double-quoted key with a backslash (`"\x69nclude":`, `"fi\x6ce":`) and an
+  alias used as a key. Why: compose decodes them, the textual include/extends check did not.
+- `start --rebuild` removes the volumes of services no longer declared unless `--keep-volumes`. Why: they
+  were left for `prune --force` only.
+- Docs (services and commands pages, README), the phase 2 spec and CLAUDE.md updated; `npm run gen`.
 ## 2026-10-23 — Containers: phase 2 follow-ups (visible forwarder errors, agent window size, logs --json, bridge minors)
 
 - `kunj ct agent` runs the foreground forwarder's checks (network helper running, socat present) before
