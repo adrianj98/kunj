@@ -273,6 +273,20 @@ that gets a token, whatever the image, and answers only for origin's `host[:port
 (`*.docker.test.ts`) drives a real Docker daemon, builds the images and checks the firewall; it
 skips itself when Docker is unavailable.
 
+**Functional tests:** `npm run test:functional` (`test/functional/*.functional.test.ts`,
+`jest.functional.config.js`) drives the built CLI (`node dist/index.js ct …`) as a user would, in a
+throwaway repository whose origin is a `git daemon` on the host (helpers shared with the Docker suite in
+`src/lib/container/__tests__/git-origin.ts`), with a throwaway `HOME` so `~/.kunj` is never touched, and
+asserts on `--json` output, exit codes and `docker inspect`. They cover start/list/stop/resume/remove,
+exec and shell, secrets, the firewall, the remove guard, blueprint snapshots, services, forward and
+`--auto`, agent/attach, open, prune, Docker-in-Docker refusals, the MCP bridge and the container hooks.
+Opt-in only: without `KUNJ_FUNCTIONAL=1` (which the script sets) every file is skipped, and `npm test` /
+`npm run test:docker` never see them (their roots are `src/`). They take many minutes, need Docker
+(the sandbox image has tmux for the agent test) and `script` on the host, build the CLI first, and remove
+everything labelled with the test repository after each test. `KUNJ_FUNCTIONAL_SLOW=1` adds the
+10-minute orphan-volume prune test; `KUNJ_FUNCTIONAL_PRUNE_IMAGES=1` lets `prune --yes` run even when it
+would also remove kunj images of other versions on the daemon (otherwise only its dry run is checked).
+
 **Hooks:** `${...}` values in `hooks.*` config commands are quoted for the context they sit in
 (`expandVariablesQuoted()` in config-vars.ts): single-quoted when bare, escaped inside `"..."`,
 `'\''`-spliced inside `'...'`, and quoted as bare inside `$(...)` and backticks (which open a fresh

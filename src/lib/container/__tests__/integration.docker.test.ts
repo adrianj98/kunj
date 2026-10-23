@@ -6,10 +6,9 @@
 // URL as origin (which the host cannot resolve), so its remote-tracking refs are set up first
 // through a direct clone and inspectOrigin's fetch fails harmlessly.
 import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
-import { ChildProcess, execFileSync, spawn } from 'child_process';
+import { ChildProcess, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
-import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { LocalDockerBackend } from '../docker';
@@ -25,6 +24,7 @@ import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint } from
 import { KEPT_VOLUME, ORPHAN_GRACE_MS, PruneContext, applyPrune, parseLsRemoteHeads, planPrune } from '../prune';
 import { isDockerDesktop } from '../dind';
 import { KunjConfig } from '../../../types';
+import { canConnect, containerOriginUrl, docker, freePort, git, startGitDaemon, waitFor, writeGitProxy } from './git-origin';
 
 let dockerUp = false;
 // What the daemon may run, known before the tests are defined so a real DinD start that cannot run
@@ -50,13 +50,6 @@ jest.setTimeout(600_000);
 const USER = 'dev';
 const VERSION = getVersion();
 const REPO_NAME = `it-${Math.random().toString(36).slice(2, 8)}`;
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: 'kunj test',
-  GIT_AUTHOR_EMAIL: 'test@kunj.invalid',
-  GIT_COMMITTER_NAME: 'kunj test',
-  GIT_COMMITTER_EMAIL: 'test@kunj.invalid',
-};
 
 let tmp = '';
 let bare = '';
@@ -68,44 +61,6 @@ let repoId = '';
 /** Repository ids other tests label objects with; afterAll cleans these up too. */
 const otherRepoIds: string[] = [];
 const backend = new LocalDockerBackend();
-
-function git(args: string[], cwd: string): string {
-  return execFileSync('git', args, { cwd, env: GIT_ENV, encoding: 'utf8' }).trim();
-}
-
-function docker(args: string[]): string {
-  return execFileSync('docker', args, { encoding: 'utf8' }).trim();
-}
-
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, () => {
-      const p = (server.address() as net.AddressInfo).port;
-      server.close(() => resolve(p));
-    });
-  });
-}
-
-async function waitFor(check: () => Promise<boolean> | boolean, what: string, timeoutMs = 15000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await check())) {
-    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
-    await new Promise(r => setTimeout(r, 200));
-  }
-}
-
-function canConnect(p: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const socket = net.connect(p, '127.0.0.1');
-    socket.once('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once('error', () => resolve(false));
-  });
-}
 
 /** Everything labelled with this run's repo id (or `id`), by kind. */
 function labelled(id = repoId): { containers: string[]; volumes: string[]; networks: string[] } {
@@ -178,15 +133,9 @@ const BRANCH_ALLOW = 'it-allow';
     git(['commit', '-m', 'initial'], work);
     git(['push', 'origin', 'HEAD:main', `HEAD:${BRANCH_A}`, `HEAD:${BRANCH_GW}`, `HEAD:${BRANCH_ALLOW}`], work);
 
-    port = await freePort();
-    daemon = spawn(
-      'git',
-      ['daemon', '--export-all', `--base-path=${tmp}`, `--port=${port}`, '--enable=receive-pack', '--reuseaddr', tmp],
-      { stdio: 'ignore' }
-    );
-    await waitFor(() => canConnect(port), 'git daemon');
+    ({ port, daemon } = await startGitDaemon(tmp));
 
-    originUrl = `git://host.docker.internal:${port}/${REPO_NAME}.git`;
+    originUrl = containerOriginUrl(port, REPO_NAME);
     repoId = repoIdFromUrl(originUrl);
 
     // The cwd for startContainer: a clone whose origin is the URL the container uses
@@ -546,13 +495,7 @@ const BRANCH_ALLOW = 'it-allow';
       );
       // The snapshot's host-side fetch goes to origin's URL, which only containers can resolve:
       // connect git:// to the daemon on localhost instead, leaving the URL itself unchanged
-      const proxy = path.join(tmp, 'git-proxy');
-      fs.writeFileSync(
-        proxy,
-        '#!/bin/sh\nexec node -e \'const s = require("net").connect(+process.argv[1], "127.0.0.1"); ' +
-          'process.stdin.pipe(s); s.pipe(process.stdout); s.on("close", () => process.exit(0))\' "$2"\n',
-        { mode: 0o755 }
-      );
+      const proxy = writeGitProxy(path.join(tmp, 'git-proxy'));
       git(['config', 'core.gitProxy', proxy], hostClone);
     });
 

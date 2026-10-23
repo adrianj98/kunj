@@ -23,6 +23,21 @@ Changes made with Claude, and why.
 - Review fixes: the log directory is created 0700 and the files 0600 (fixed if they exist, `O_NOFOLLOW`);
   the container-supplied listener error text is stripped of control characters and capped before it is
   logged; the `boundedKeys` doc comment is back above it. Why: the logs hold container output.
+## 2026-10-23 — Containers: opt-in functional test suite (real CLI, real Docker)
+
+- Added `test/functional/` (8 `*.functional.test.ts` files, `harness.ts`, `global-setup.js`, its own
+  `tsconfig.json`) and `jest.functional.config.js`, run by `npm run test:functional`. The tests drive
+  `node dist/index.js ct …` in a throwaway repository with a `git daemon` origin and a throwaway `HOME`,
+  against the real Docker daemon, and clean up everything labelled with the test repository after each
+  test. Why: the user asked for end-to-end tests of the CLI as a user runs it; they were written but,
+  as asked, not run.
+- Opt-in: the global setup skips every file unless `KUNJ_FUNCTIONAL=1`, skips them when Docker does not
+  answer, and builds the CLI otherwise. They live outside `src/`, so `npm test`, `npm run test:docker`
+  and `npm run build` never pick them up. `npm run lint` now also type-checks them.
+- Moved the Docker suite's origin helpers (git daemon, git proxy, freePort, waitFor, ...) into
+  `src/lib/container/__tests__/git-origin.ts` and made `integration.docker.test.ts` import them, so both
+  suites share one origin setup. Why: asked to share rather than copy; that suite's behaviour is unchanged.
+- CLAUDE.md: a "Functional tests" paragraph under Branch Containers.
 
 ## 2026-10-23 — MCP bridge landed; specs updated
 

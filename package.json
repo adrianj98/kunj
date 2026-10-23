@@ -20,7 +20,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:docker": "jest --runInBand --testPathIgnorePatterns=/node_modules/ --testMatch='**/__tests__/**/*.docker.test.ts'",
-    "lint": "tsc --noEmit",
+    "test:functional": "KUNJ_FUNCTIONAL=1 jest -c jest.functional.config.js",
+    "lint": "tsc --noEmit && tsc -p test/functional --noEmit",
     "bundle": "esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=.build/bundle.js --format=cjs",
     "compile": "npm run bundle && npx @yao-pkg/pkg .build/bundle.js --targets node20-macos-arm64 --output kunj",
     "prepublishOnly": "npm run build && npm run test"
