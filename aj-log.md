@@ -2,6 +2,43 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-22 — Blueprints: `kunj ct blueprint` and snapshot-started containers
+
+What: a repository's `.kunj/blueprint.json` (`tools`, `setup`, `maintain`, `lockfiles`, `notes`) is
+set up once in a temporary sandbox and committed as `kunj-blueprint-<repo>:<hash>` with the checkout
+at `/opt/kunj/seed`; new branch containers copy the seed and run `maintain` instead of installing.
+Why: Devin-style blueprints, so an agent's container starts with dependencies installed and the
+project built.
+
+- Tasks: 1 backend images (commit/list/remove), 2 blueprint file/resolve/hash, 3 root-run presets
+  (`src/container/presets/`, `_lib.sh`), 4 inference (`blueprint init`), 5 snapshot-aware start/seed/
+  maintain and `--no-snapshot`, 6 snapshot build/status/prune, 7 `kunj ct blueprint init|snapshot|
+  status|remove`, 8 Docker tests, docs and kunj's own blueprint. Task 10 (start builds the snapshot
+  itself, working-tree blueprint first) follows.
+- Review findings that changed the design: tool values reach root-run scripts, so an apt value like
+  `-o APT::...` could run code as root; every word is now validated (`TOOL_WORD`) and re-checked in
+  the preset. Setup was gated on "seeded", so a kept volume skipped it forever; presets and setup now
+  run on every new container without a snapshot. A seed that died mid-copy could be mistaken for a
+  checkout, or a checkout wiped; the `.kunj-copying` / `.kunj-fresh` sentinels decide that now.
+  Snapshots carry no tokens (no `container.env`, keep files or files in the build container), so an
+  SSH or private origin cannot be snapshotted yet.
+- Task 8: the Docker suite gained six blueprint tests (snapshot labels, jq from apt, seed contents,
+  no secret ENV; start from the snapshot with no clone and maintain run; stale hint; `--no-snapshot`;
+  failing setup leaves nothing; `removeSnapshots`). Bug found: Docker 29's CLI appends
+  `exit status 1` to `docker network rm` errors, so removing objects already gone threw (the
+  snapshot's pre-clean failed on every first run); `LocalDockerBackend.remove` ignores that line.
+  Older Docker tests now pass `blueprint: null` so a host copy never leaks into them.
+- Tests: `npm test` 21 suites / 361 tests; `npm run test:docker` 15 tests in ~48 s.
+- Manual run in this repo: the snapshot needs an HTTPS origin (this one is SSH), so it was built from
+  a temporary HTTPS clone of the public repo (same repo id): ~62 s (`npm ci` + `npm run build` +
+  `maintain`), image `kunj-blueprint-kunj:1b93f4cc8070`, 361 MB content (1.57 GB with the base).
+  `kunj ct start bp-smoke -c` from it took 22 s, 16 s of which is `maintain: npm ci` reinstalling
+  `node_modules` from scratch (`npm install` there takes 0.6 s when nothing changed).
+- Docs: README `### Blueprints` (file, presets, flow, what a snapshot holds, security notes, kunj and
+  driveday_planner examples); CLAUDE.md Branch Containers gains a Blueprints paragraph.
+- Deferred: private/SSH origins (Task 9, host-made bundle), lint/test/run commands and `kunj ct test`,
+  agent prompting, devcontainer `customizations.kunj`, sidecar services.
+
 ## 2026-10-22 — Branch containers: final review fix wave
 
 - Added a `supabase` preset (CLI from GitHub releases into /usr/local/bin; smoke-tested: 2.121.0) and

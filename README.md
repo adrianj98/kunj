@@ -163,7 +163,7 @@ kunj ct remove feature/x               # refuses while work is unpushed (-f to o
 ```
 
 The branch defaults to the current one. `start` takes `--base <ref>`, `--image <img>`,
-`--publish <ports>`, `--rebuild` and `--keep-on-error`; `remove` takes `--force` and
+`--publish <ports>`, `--rebuild`, `--no-snapshot` (see [Blueprints](#blueprints)) and `--keep-on-error`; `remove` takes `--force` and
 `--keep-volumes`; `--context <name>` picks a Docker context; `--json` works on every action. The
 image comes from the repository's `.devcontainer/devcontainer.json` (an image or a Dockerfile) if
 there is one, else `kunj-sandbox`.
@@ -227,6 +227,105 @@ Security notes:
   cannot half-close a connection, so protocols that wait for the client to finish sending may hang.
 - A devcontainer's build context is taken with `git archive`, which leaves out submodule contents
   and Git LFS files (only their pointers are included).
+
+### Blueprints
+
+A blueprint tells `kunj ct` how to set up a new container for this repository: which tools to
+install, which commands make the checkout usable, and which keep it up to date. kunj sets the
+blueprint up once in a temporary container and saves the result as a snapshot image, so later
+branches start with dependencies installed and the project built.
+
+`.kunj/blueprint.json` (JSON with comments):
+
+```jsonc
+{
+  "tools":     { "node": "24", "apt": ["jq", "postgresql-client"] }, // installed as root, at snapshot time
+  "setup":     ["npm ci", "npm run build"],  // once, in /workspace, as the sandbox user
+  "maintain":  ["npm ci"],                   // on every start, to catch up with the branch
+  "lockfiles": ["package-lock.json"],        // when these change on origin, the snapshot is stale
+                                             // (default: every known lockfile at the root)
+  "notes":     "free text for people (and agents) reading the file"
+}
+```
+
+`tools` maps a preset name to a version, a list of words or `true`. Presets are shell scripts,
+looked up in this order: the repository's `.kunj/presets/<name>.sh`, then `~/.kunj/presets/<name>.sh`,
+then the built-in ones (`apt`, `node`, `python`, `go`, `rust`, `java`, `yarn`, `pnpm`, `bun`,
+`playwright`, `supabase`). A preset installs outside the user's home (under `/usr/local` or `/opt`),
+because the home directory is a volume and is not part of the snapshot.
+
+```bash
+kunj ct blueprint init          # [--global] [--yes]: infer one from this checkout -> .kunj/blueprint.json (review it)
+git add .kunj/blueprint.json && git commit -m "kunj blueprint"
+kunj ct start -c feature/x      # first start builds the snapshot (as long as setup takes)
+kunj ct start -c feature/y      # every later branch starts from it in seconds
+```
+
+`kunj ct start` reads the blueprint from the working tree's `.kunj/blueprint.json`, then from
+`origin/<default branch>`, then from `~/.kunj/<repo>/blueprint.json` (the host copy that
+`init --global` writes, for repositories you cannot commit to). When there is no snapshot for the
+blueprint yet, or it is stale, the start builds one first; if that build fails it warns and runs
+the tools and `setup` inside the new container instead. A container started from a snapshot gets
+its own branch checked out from origin and runs `maintain`; `setup` is not run again.
+
+The other commands are optional:
+
+```bash
+kunj ct blueprint snapshot      # build it ahead of time; --rebuild forces one, --base <ref> snapshots another branch
+kunj ct blueprint status        # which blueprint, its hash, and whether the snapshot is current
+kunj ct blueprint remove        # delete this repository's snapshot images
+kunj ct start --no-snapshot x   # ignore the snapshot: clone, then tools + setup in the container
+```
+
+`snapshot` and `status` take `--blueprint <path>` to use another file than the resolved one.
+
+The snapshot (`kunj-blueprint-<repo>:<hash>`) holds the installed tools and a copy of the set-up
+checkout of the default branch. It does not hold secrets (the temporary container gets no
+`container.env`, keep files or copied files), the `/workspace` volume or the home volume. Its hash
+covers the blueprint text, the listed lockfiles on origin's default branch, the base image and the
+presets, so changing any of them makes it stale; a stale snapshot is still used, with a hint, until
+a new one is built. One snapshot is kept per repository.
+
+Security notes:
+
+- Presets run as root, and only while a snapshot is built (or in a `--no-snapshot` container);
+  `setup` and `maintain` run as the sandbox user. Everything runs behind the same firewall as any
+  container: internet yes, host and LAN no.
+- Presets come from files on disk. A repository's `.kunj/presets/` overrides the built-in presets
+  and runs as root in the build container, so review it like a Dockerfile, especially on a branch
+  you did not write.
+- Tool values are validated: words only, no options (`-o...`) and no paths, so a value cannot make
+  a built-in preset run something else.
+- Snapshots currently need an origin that can be cloned without credentials (a public HTTPS
+  repository); private and SSH origins fall back to running the tools and `setup` in the container.
+
+Worked examples. For kunj itself, `init` writes:
+
+```json
+{
+  "setup": ["npm ci", "npm run build"],
+  "maintain": ["npm ci"],
+  "lockfiles": ["package-lock.json"]
+}
+```
+
+Node 22 is already in `kunj-sandbox`, so there is no `tools` entry. The snapshot is about 360 MB
+on top of the base image and took about a minute to build.
+
+For driveday_planner (a pnpm workspace with Playwright tests and a Supabase backend), `init` reads
+`packageManager`, the Playwright dependency and `supabase/config.toml`:
+
+```json
+{
+  "tools": { "pnpm": "corepack", "playwright": true, "supabase": "latest" },
+  "setup": ["pnpm install --frozen-lockfile", "pnpm build"],
+  "maintain": ["pnpm install --frozen-lockfile"],
+  "lockfiles": ["pnpm-lock.yaml"]
+}
+```
+
+`engines.node` (`>=18`) is satisfied by the image's Node 22, so `node` is left out. The Supabase
+CLI works against a remote project; `supabase start` needs Docker, which the sandbox does not have.
 
 ### Hooks
 

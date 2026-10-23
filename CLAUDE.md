@@ -138,6 +138,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 - `kunj container [start|shell|exec|agent|attach|forward|list|stop|remove]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
+- `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
 - `kunj install [vscode|macos|all]` - Download the VS Code extension / macOS app from the GitHub release and install them (also offered at the end of `kunj setup`)
@@ -216,6 +217,37 @@ unquoted context even within `"..."`; backtick spans get one more level of escap
 form passes the value literally. The container
 hooks are `pre/post-container-create` and `pre/post-container-delete` with `branch`, `container`,
 `image`; the create hooks are skipped when `start` resumes an existing container.
+
+**Blueprints:** `.kunj/blueprint.json` (`tools`, `setup`, `maintain`, `lockfiles`, `notes`) says how a
+new container is set up. Design: docs/superpowers/specs/2026-10-22-blueprints-design.md. Modules:
+`blueprint.ts` (parse/validate, resolve, hash, tags, labels), `presets.ts` (lookup and order),
+`infer.ts` (`blueprint init`), `provision.ts` (find a snapshot, run presets + `setup` on a new
+container, `maintain` on every start), `snapshot.ts` (build, status, remove). `start` resolves the
+blueprint from the working tree's `.kunj/blueprint.json`, then `origin/<default>`, then
+`~/.kunj/<repo>/blueprint.json`, builds the snapshot itself when there is none for the hash or it
+is stale (falling back to tools + `setup` in the container when the build fails), and starts from
+it; `kunj ct blueprint snapshot` is only for building ahead of time or forcing a rebuild.
+Presets are `<name>.sh` in `.kunj/presets/`, `~/.kunj/presets/`, then `src/container/presets/`
+(first found wins; copied to dist by the build). They run as root with `sh`, source `_lib.sh`, get
+`KUNJ_TOOL_NAME/VERSION/USER`, must install outside the home (it is a volume, not committed), persist
+environment with `kunj_env KEY=VALUE` (→ `/etc/kunj/env`, turned into image `ENV` at commit and into
+`/etc/profile.d/kunj-tools.sh`), and must end with `kunj_done <version>` (kunj reads the result file;
+prints `installed <name> <version>`). Tool values are validated twice (`TOOL_WORD` in blueprint.ts and
+`kunj_check_words` in the preset): never let a value become an option or a path. The hash is
+`computeBlueprintHash()` only: blueprint text, the lockfiles' blob ids at `blueprintRef()` (origin's
+default branch, never the current worktree), the base image tag and the presets' content hashes;
+start, snapshot, status and list must all call it. The snapshot is an ordinary `startContainer`
+(`namesFor: '<branch>:snapshot'`, no env, keep files, files, ports or agent, so no secrets in the
+image) whose `/workspace` is copied to `/opt/kunj/seed` and committed as `kunj-blueprint-<repo>:<hash>`,
+labelled `kunj.blueprint.{hash,ref,base,user,createdAt}`; older snapshots of the repo are deleted.
+Seed sentinels in `/workspace`: `.kunj-seeded` (the seed finished; ignored file, never in a snapshot),
+`.kunj-copying` (a copy from the snapshot is in progress: only then may `/workspace` be wiped and
+recopied, never a real checkout), `.kunj-fresh` (a complete copy whose branch must still be moved to
+origin's; removed once it is). All three are in `.git/info/exclude`. Never run presets or `setup` as
+the wrong user: presets as root, `setup`/`maintain` as the sandbox user (`sh -lc` in /workspace).
+`npm run test:docker` covers the snapshot (labels, jq from the apt preset, seed contents, no secret
+ENV), a start from it (no clone, `maintain` ran, origin URL), the stale hint, `--no-snapshot`, a failing
+`setup` leaving nothing behind, and `removeSnapshots`.
 
 ## Repository Registry & macOS App
 
