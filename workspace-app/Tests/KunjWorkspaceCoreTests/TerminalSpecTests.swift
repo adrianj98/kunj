@@ -126,4 +126,13 @@ private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cw
         #expect(tabDot(kind: .shell, running: true, agent: .waiting) == nil)
         #expect(tabDot(kind: .editor, running: true, agent: .running) == nil)
     }
+
+    /// SwiftTerm reports waitpid's raw status, not the exit code: `exit 1` arrives as 256.
+    @Test func exitCodesFromWaitStatus() {
+        #expect(exitCode(waitStatus: 0) == 0)
+        #expect(exitCode(waitStatus: 1 << 8) == 1)
+        #expect(exitCode(waitStatus: 127 << 8) == 127)
+        #expect(exitCode(waitStatus: SIGKILL) == 128 + SIGKILL)
+        #expect(exitCode(waitStatus: SIGHUP | 0x80) == 128 + SIGHUP) // core dumped
+    }
 }

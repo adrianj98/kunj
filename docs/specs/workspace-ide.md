@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa; terminals, agent tabs and the tab bar (`TerminalTab`, `TabRegistry`, `TabBarView`, `HiddenFeedScheduler`), the store and `kunj events` wired into the app, Environment and Tabs menus in 5158fe4, 45756ae |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -188,8 +188,8 @@ Kunj Workspace.app
 
 | Target | Holds | Depends on |
 | --- | --- | --- |
-| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout`, `DesignTokens` (generated), `RelativeTime` | Foundation only |
-| `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `SidebarRowView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `DemoData` (`--demo`), `TerminalTab` (SwiftTerm), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
+| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec` + `tabDot` + `exitCode(waitStatus:)`, `HiddenFeedScheduler`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout`, `DesignTokens` (generated), `RelativeTime` | Foundation only |
+| `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `SidebarRowView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `DemoData` (`--demo`), `TerminalTab` (SwiftTerm), `TabRegistry`, `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
 | `KunjWorkspaceCoreTests` | `swift test` (Swift Testing), with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) and the helpers in `Support.swift` | Core |
 
 SwiftTerm is vendored at an exact tag by `scripts/prepare-swiftterm.sh` (the spike's one-line
@@ -246,7 +246,15 @@ tmux session exists.
 **Terminals.** `TerminalTab` is a `LocalProcessTerminalView` per tab, created from a `TerminalSpec`
 (`shell`: `$SHELL -l` in the worktree, or `kunj ct shell <b>`; `agent`: `kunj agent <b>` or
 `kunj ct agent <b>`; `action`: `kunj <args…>` with `exec` semantics, the tab closing itself on exit 0,
-except `kunj pr`, whose tab stays open so its PR URL can be read).
+except `kunj pr`, whose tab stays open so its PR URL can be read). A shell that exits 0 closes itself
+too; an agent tab or a failed process stays with `[process exited with code N]` (the code from the
+wait status, 128 + N for a signal). `TabRegistry` keeps the tabs per environment id and the active one;
+closing a tab, or quitting, sends SIGHUP before SwiftTerm's SIGTERM, as closing a terminal window does
+(an interactive zsh ignores SIGTERM; `tmux attach` detaches, so the agent's session stays), and
+signals nothing once the process has exited. Tab titles are the spec's (`zsh`, `agent`, `shell`, the
+action's first two words); a program's OSC title is only the pill's tooltip. The tab bar's dot is green
+for a live agent or action tab, amber for an agent tab while its environment waits; its right side is
+`tmux <session> · <uptime>` when the environment has an agent tab (a container's session is `agent`).
 Every tab's view stays in the window, hidden when not shown, so switching environments never touches a
 process. The spike's bottleneck is parsing on the main thread, not drawing, so batching output alone
 does not help: a hidden tab queues its bytes and feeds them in slices under a time budget per run-loop
@@ -406,8 +414,8 @@ From the environment model (Task 4):
   origin's URL: two clones of one repository registered at once get the same ids. Keying on `root`
   would be unique but would change with the directory.
 - [ ] A worktree in the middle of a rebase is detached and has no branch in `worktree list`, so its row
-  disappears until the rebase ends; Task 5's store and Task 7's tabs must not close that environment's
-  terminals when its row drops out for a refresh or two.
+  disappears until the rebase ends. Task 7's tabs are keyed by environment id and never closed by a
+  listing, so they survive; while the row is gone the window shows "Select an environment".
 - [ ] `ct list` carries no PR for a container and no upstream, so a container row cannot show `PR #N`
   or `↑N from main` as the mockup does; reporting them would be a CLI addition.
 
@@ -455,6 +463,15 @@ From the Changes column (Task 9):
   them. Task 10's `Edit` button needs a place: a header over the diff would hold both.
 - [ ] Any `git` event of the repository reloads the column, also one from another worktree of it;
   `kunj events` could name the worktree so only its environment reloads.
+
+From the terminals (Task 7):
+
+- [ ] SwiftTerm's overlay scroller is hidden while `--screenshot` renders (cacheDisplay draws its
+  track); whether it stays out of the way on screen has not been checked by a person.
+- [ ] `-openTabs "<envId>#<kind>,…"` is a launch argument for checking PTYs without assistive access;
+  Task 8's restore may make it redundant.
+- [ ] A hidden tab's queue is fed whole when its process exits, on the main thread, so a large
+  backlog in a background tab can stall the UI once at exit.
 
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).

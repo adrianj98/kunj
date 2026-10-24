@@ -86,6 +86,14 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
     }
 }
 
+/// The exit code of a waitpid status (SwiftTerm's forkpty path reports the raw status, so `exit 1`
+/// arrives as 256): the code for a normal exit, 128 + the signal for a killed process, as a shell
+/// reports it.
+public func exitCode(waitStatus: Int32) -> Int32 {
+    let signal = waitStatus & 0x7f
+    return signal == 0 ? (waitStatus >> 8) & 0xff : 128 + signal
+}
+
 /// The tab bar's dot for a tab: a live agent tab is amber while its environment waits for input,
 /// green otherwise; a live action tab (a long kunj command) is green; anything else has none.
 public func tabDot(kind: TabKind, running: Bool, agent: AgentActivity) -> DotColor? {

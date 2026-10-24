@@ -77,8 +77,10 @@ final class TerminalTab: LocalProcessTerminalView {
 
     /// Ends the tab's process like closing a terminal window: SIGHUP to the process (a shell passes
     /// it to its jobs; `tmux attach` detaches, leaving the session), then SwiftTerm's SIGTERM and
-    /// close of the PTY.
+    /// close of the PTY. Once the process has exited (and was reaped) nothing is signalled: its pid
+    /// may already belong to another process; the PTY closes when the tab is released.
     func close() {
+        guard exited == nil else { return }
         if let pid = process?.shellPid, pid > 0, process.running { kill(pid, SIGHUP) }
         terminate()
     }
@@ -124,7 +126,8 @@ final class TerminalTab: LocalProcessTerminalView {
     override func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
         super.processTerminated(source, exitCode: exitCode)
         guard exited == nil else { return }
-        exited = exitCode ?? -1
+        // SwiftTerm passes waitpid's raw status (exit 1 arrives as 256)
+        exited = exitCode.map { KunjWorkspaceCore.exitCode(waitStatus: $0) } ?? -1
         queue.drainAll()
         onExit?(self)
     }

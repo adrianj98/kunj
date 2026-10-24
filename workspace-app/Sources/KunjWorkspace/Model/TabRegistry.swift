@@ -33,6 +33,8 @@ final class TabRegistry {
     func open(spec: TerminalSpec, env: Environment, kind: TabKind) -> TerminalTab {
         let tab = makeTab(env: env, kind: kind, title: spec.title, spec: spec)
         tab.start()
+        // after start, so the tab bar sees the process running (its dot)
+        onChange?(env.id)
         return tab
     }
 
@@ -41,6 +43,7 @@ final class TabRegistry {
     func openDemo(env: Environment, kind: TabKind, title: String, text: String) -> TerminalTab {
         let tab = makeTab(env: env, kind: kind, title: title, spec: nil)
         tab.show(text: text)
+        onChange?(env.id)
         return tab
     }
 
@@ -53,7 +56,6 @@ final class TabRegistry {
         tab.onTitle = { [weak self] t in self?.onChange?(t.envId) }
         tabsByEnv[env.id, default: []].append(tab)
         activeByEnv[env.id] = tab.id
-        onChange?(env.id)
         return tab
     }
 
