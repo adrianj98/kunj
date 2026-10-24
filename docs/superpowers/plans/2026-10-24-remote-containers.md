@@ -35,6 +35,8 @@
 
 ### Task 1: Protocol module and server core over `FakeBackend`
 
+**Status: done** in aab2a76 (guards relaxed for reads in fbb95e0).
+
 **Files:**
 - Create: `src/lib/serve/protocol.ts`, `src/lib/serve/guard.ts`, `src/lib/serve/server.ts`, `src/lib/serve/token.ts`
 - Test: `src/lib/serve/__tests__/server.test.ts`, `src/lib/serve/__tests__/guard.test.ts`
@@ -53,6 +55,8 @@
 
 ### Task 2: `RemoteKunjBackend`, unary calls, parametrised lifecycle tests
 
+**Status: done** in 8b4d3e2 and fbb95e0 (`testBackend()` + `KUNJ_TEST_REMOTE=1`, `npm run test:remote`).
+
 **Files:**
 - Create: `src/lib/container/remote.ts`
 - Test: `src/lib/container/__tests__/remote.test.ts`; `src/lib/container/__tests__/remote-harness.ts` (starts the server over a `FakeBackend` on an ephemeral port and returns `{ fake, remote, close }`)
@@ -69,6 +73,8 @@
 
 ### Task 3: Streams: exec (non-TTY), copyIn, buildImage, logs, events
 
+**Status: done** in fbb95e0.
+
 **Files:**
 - Modify: `src/lib/serve/server.ts` (WebSocket upgrade through `ws`, chunked bodies), `src/lib/container/remote.ts`
 - Test: `src/lib/serve/__tests__/streams.test.ts`; `forward.test.ts`, `autoforward.test.ts`, `mcpbridge.test.ts` parametrised
@@ -78,6 +84,8 @@
 - [ ] **Step 3:** `npm test`, `npm run lint`. Commit: "RemoteKunjBackend: exec, copy, build, logs and events over WebSocket and chunked bodies".
 
 ### Task 4: `kunj serve`, `kunj remote`, `--remote`, `ct list --json`
+
+**Status: done** (this commit); `selectBackend()` in src/lib/container/select-backend.ts is the one place that picks the backend, with the tunnel seam for Task 6.
 
 **Files:**
 - Create: `src/commands/serve.ts`, `src/commands/remote.ts`, `src/lib/remotes.ts`

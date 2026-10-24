@@ -1362,6 +1362,22 @@
     "sensitive": false
   },
   {
+    "key": "container.remote",
+    "type": "string",
+    "category": "container",
+    "default": "",
+    "description": "Run this repository's containers on a remote kunj serve (a name from kunj remote add); empty: the laptop's Docker",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "box"
+    ],
+    "relatedSettings": [
+      "container.dockerContext"
+    ],
+    "sensitive": false
+  },
+  {
     "key": "container.cpus",
     "type": "string",
     "category": "container",

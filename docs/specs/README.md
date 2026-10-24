@@ -20,7 +20,7 @@ page only says where each thing stands.
 | [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | Shipped (CLI contract and the native app v1) |
 | [containers-in-apps.md](containers-in-apps.md) | Containers shown and managed like worktrees in the VS Code extension and the macOS app | In progress |
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
-| [remote-containers.md](remote-containers.md) | `kunj serve` on the Docker host, `RemoteKunjBackend`, `kunj remote`, the wire protocol, auth over an SSH tunnel | Spec written |
+| [remote-containers.md](remote-containers.md) | `kunj serve` on the Docker host, `RemoteKunjBackend`, `kunj remote`, the wire protocol, auth over an SSH tunnel | In progress |
 
 ## Done
 
@@ -55,7 +55,7 @@ page only says where each thing stands.
 | Work | Spec | Notes |
 | --- | --- | --- |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
-| Remote containers (`kunj serve`, `RemoteKunjBackend`, `kunj remote`) | [remote-containers.md](remote-containers.md) | Spec written; needs review and an implementation plan. First step: validate `container.dockerContext` over SSH |
+| Remote containers (`kunj serve`, `RemoteKunjBackend`, `kunj remote`) | [remote-containers.md](remote-containers.md) | Plan docs/superpowers/plans/2026-10-24-remote-containers.md. Done: protocol, server and client over the wire (aab2a76, 8b4d3e2, fbb95e0), `kunj serve`, `kunj remote`, `--remote`. Left: TTY exec, the SSH tunnel, `kunj events` per repo, functional test, docs. Still to do by hand: validate `container.dockerContext` over SSH |
 
 ## To do
 

@@ -127,10 +127,40 @@ export interface ContainerJson {
 
 export interface ContainerListJson {
   repo: string;
-  backend: { kind: 'docker'; context: string };
+  /**
+   * 'docker': the laptop's Docker (`context` its Docker context); 'remote': a `kunj serve` (`remote`
+   * its name from kunj remote add, `context` the Docker context on the box). `features` says what
+   * the backend can do (editorAttach is false on a remote, so `ct open` refuses there).
+   */
+  backend: {
+    kind: 'docker' | 'remote';
+    context: string;
+    remote?: string;
+    features?: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
+  };
   containers: ContainerJson[];
   // Helpers, services, volumes and networks whose branch container is gone (kunj ct prune removes them)
   orphans: PruneOrphan[];
+}
+
+// ---- kunj remote --json ----------------------------------------------------------------------
+
+/** `kunj remote list --json`: how each remote is reached; never its token. */
+export interface RemoteListJson {
+  remotes: Array<{ name: string; via: 'ssh' | 'url'; ssh?: string; port?: number; url?: string; addedAt: string }>;
+}
+
+/** `kunj remote ping <name> --json` */
+export interface RemotePingJson {
+  name: string;
+  via: 'ssh' | 'url';
+  /** The server's kunj version */
+  kunj: string;
+  /** The Docker context on the box */
+  context: string;
+  features: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
+  engine: { serverVersion: string; runtimes: string[]; operatingSystem: string };
+  ms: number;
 }
 
 // ---- kunj ct file --json ---------------------------------------------------------------------

@@ -85,6 +85,16 @@ export class RemoteKunjBackend implements ContainerBackend {
     return this.info_?.kunj;
   }
 
+  /** The Docker context on the box, after ready(). */
+  get serverContext(): string | undefined {
+    return this.info_?.context;
+  }
+
+  /** The remote's name, as given to the constructor (its host otherwise). */
+  get remoteName(): string {
+    return this.name;
+  }
+
   // ---- transport ---------------------------------------------------------------------------
 
   private request(method: string, path: string, body?: string): Promise<Reply> {

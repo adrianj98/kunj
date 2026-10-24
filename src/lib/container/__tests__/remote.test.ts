@@ -29,8 +29,9 @@ describe('RemoteKunjBackend: unary calls', () => {
   afterEach(() => h.close());
 
   it('reports the server features after ready()', () => {
-    expect(h.remote.features).toEqual({ ...h.fake.features, dockerInDocker: [] });
+    expect(h.remote.features).toEqual({ ...h.fake.features, editorAttach: false, dockerInDocker: [] });
     expect(h.remote.serverVersion).toBe('test');
+    expect(h.remote.serverContext).toBe('default');
   });
 
   it('info and contextName', async () => {
@@ -111,7 +112,8 @@ describe('RemoteKunjBackend: unary calls', () => {
     expect(err).toMatchObject({ code: 'remote-unauthorized' });
     expect(err.message).toContain('kunj remote token box');
     expect(err.message).not.toContain('wrong');
-    expect(h.fake.calls).toEqual([]);
+    // Only the harness's own ready() reached the fake (the server asks the context once); the bad client never did
+    expect(h.fake.methods()).toEqual(['contextName']);
   });
 
   it('maps an unreachable server to the local "Docker is not available" text', async () => {
@@ -128,7 +130,7 @@ describe('RemoteKunjBackend: unary calls', () => {
     const other = http.createServer((req, res) => {
       if (req.url === '/v1/info') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ kunj: '0', protocol: 99, features: h.fake.features }));
+        res.end(JSON.stringify({ kunj: '0', protocol: 99, features: h.fake.features, context: 'x' }));
       } else {
         res.writeHead(200);
         res.end('<html>');

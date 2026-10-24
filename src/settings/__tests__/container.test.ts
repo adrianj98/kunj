@@ -19,6 +19,7 @@ describe('container settings', () => {
       useGhToken: true,
       forward: { auto: true, ignore: [] },
       pruneAfterDays: 0,
+      remote: '',
       dockerInDocker: 'off',
       allowPrivileged: false,
       mcp: {},

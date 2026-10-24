@@ -79,11 +79,15 @@ export function createServeServer(opts: ServeOptions): ServeServer {
   const route = (method: string, path: string, handler: Handler) =>
     routes.push({ method, pattern: path.split('/').filter(Boolean), handler });
 
+  let context: Promise<string> | undefined;
   route('GET', '/v1/info', async () => {
     // Docker-in-Docker is reported only as the flags allow it, so the client refuses before trying
     const dind = backend.features.dockerInDocker.filter(
       mode => (mode === 'privileged' && flags.allowPrivileged) || (mode === 'sysbox' && flags.allowRuntimes.includes('sysbox-runc')));
-    const info: InfoJson = { kunj: opts.version, protocol: PROTOCOL_VERSION, features: { ...backend.features, dockerInDocker: dind } };
+    // An editor on the laptop cannot attach through the box's Docker; local ports work (the forwarder runs on the laptop)
+    const features = { ...backend.features, editorAttach: false, dockerInDocker: dind };
+    context ??= backend.contextName().catch(() => 'default');
+    const info: InfoJson = { kunj: opts.version, protocol: PROTOCOL_VERSION, features, context: await context };
     return info;
   });
 

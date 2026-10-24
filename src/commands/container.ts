@@ -35,6 +35,7 @@ import { shellQuote } from '../lib/config-vars';
 import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
+import { selectBackend } from '../lib/container/select-backend';
 import { ContainerStatus, describeGuard, emptyStatus, forwardedEnv } from '../lib/container/env';
 import { githubTokenSource } from '../lib/container/tokens';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
@@ -72,6 +73,7 @@ import type { ContainerJson, ContainerListJson, ContainerTokenStatusJson, FileRe
 
 interface ContainerOptions {
   json?: boolean;
+  remote?: string;
   create?: boolean;
   base?: string;
   image?: string;
@@ -103,6 +105,8 @@ interface Context {
   repo: { root: string; name: string; id: string; originUrl: string };
   backend: ContainerBackend;
   dockerContext?: string;
+  /** The remote's name when the backend is a kunj serve (docs/specs/remote-containers.md) */
+  remote?: string;
 }
 
 const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'mcp', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file', 'token'];
@@ -158,6 +162,7 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--session <id>', description: "[shell] Keep the shell in the container's tmux session sh-<id>; [agent|attach] one of several agents, tmux session agent-<id> (letters, digits, _ and -; up to 32)" },
         { flags: '--kill', description: '[shell|agent] End the --session tmux session, or without --session every shell (sh-*) or agent (agent, agent-*) session; exit 0 whether or not one existed or the container runs' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
+        { flags: '--remote <name>', description: 'Run on this kunj serve remote (kunj remote add; default: container.remote); "local" forces this machine\'s Docker' },
       ],
       helpText: [
         'Actions:',
@@ -326,9 +331,15 @@ export class ContainerCommand extends BaseCommand {
     // Credentials in the remote URL stay on the host (seed.ts strips them too)
     const originUrl = stripUserinfo(getOriginUrl() || '');
     const repo = { root, name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root), originUrl };
-    const dockerContext = options.context || config.container?.dockerContext || undefined;
-    this.backend = new LocalDockerBackend({ context: dockerContext });
-    return { config, repo, backend: this.backend, dockerContext };
+    const selection = await selectBackend({ remote: options.remote, context: options.context, config });
+    this.backend = selection.backend;
+    return { config, repo, backend: this.backend, dockerContext: selection.dockerContext, remote: selection.remote };
+  }
+
+  /** The options that make a background kunj use this command's backend */
+  private backendArgs(ctx: Context): string[] {
+    if (ctx.remote) return ['--remote', ctx.remote];
+    return ctx.dockerContext ? ['--context', ctx.dockerContext] : [];
   }
 
   private names(ctx: Context, branch: string): ContainerNames {
@@ -691,6 +702,12 @@ export class ContainerCommand extends BaseCommand {
     const found = await ctx.backend.list({ [LABEL.repo]: ctx.repo.id, [LABEL.branch]: branch });
     const main = found.find(c => c.name === names.container);
     if (!main) throw new ContainerError(`No container for ${branch}; run kunj ct start ${branch}`);
+    if (ctx.remote && !ctx.backend.features.editorAttach) {
+      throw new ContainerError(
+        `kunj ct open cannot attach an editor to a container on remote ${ctx.remote}: open the box through Remote-SSH and run kunj ct open there, or use kunj ct shell ${branch} --remote ${ctx.remote}`,
+        'remote-no-editor',
+      );
+    }
     // Only resumed: start's --rebuild, --create, --image and --publish never apply to open. Also when
     // just the helper or a service is down, so the editor finds it all up; a running helper is never
     // replaced here (an out-of-date one is only replaced by kunj ct start)
@@ -876,7 +893,7 @@ export class ContainerCommand extends BaseCommand {
   // `forward --auto --detach` in a background kunj, registered at once (port 0 marks the forwarder)
   // so a second agent sees it before the child has written anything itself
   private startForwarder(ctx: Context, branch: string, main: ContainerInfo): number {
-    const pid = spawnDetached(['ct', 'forward', branch, '--auto', ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : [])], detachedLogFile(main.name, 'forward'));
+    const pid = spawnDetached(['ct', 'forward', branch, '--auto', ...this.backendArgs(ctx)], detachedLogFile(main.name, 'forward'));
     updateForwards(rs => [...rs.filter(r => r.pid !== pid), forwarderRecord(pid, main, 0, 0)]);
     return pid;
   }
@@ -965,7 +982,7 @@ export class ContainerCommand extends BaseCommand {
     }
     if (bridgeFor(main.name)) return;
     try {
-      const pid = spawnDetached(['ct', 'mcp', branch, ...(ctx.dockerContext ? ['--context', ctx.dockerContext] : [])], detachedLogFile(main.name, 'mcp'));
+      const pid = spawnDetached(['ct', 'mcp', branch, ...this.backendArgs(ctx)], detachedLogFile(main.name, 'mcp'));
       updateBridges(rs => [...rs.filter(r => r.pid !== pid), ...servers.map(s => ({ pid, container: main.name, name: s.name }))]);
     } catch (err) {
       this.warn(`Could not start the MCP bridge: ${err instanceof Error ? err.message : String(err)}`);
@@ -1102,7 +1119,7 @@ export class ContainerCommand extends BaseCommand {
   }
 
   /** `kunj ct list --json` of this repository, for `kunj worktree list --containers` */
-  async listJson(options: { status?: boolean; context?: string } = {}): Promise<ContainerListJson> {
+  async listJson(options: { status?: boolean; context?: string; remote?: string } = {}): Promise<ContainerListJson> {
     // Its caller prints one JSON document: any progress or warning goes to stderr
     this.jsonMode = true;
     return (await this.collectList(options)).json;
@@ -1172,7 +1189,12 @@ export class ContainerCommand extends BaseCommand {
 
     const json: ContainerListJson = {
       repo: ctx.repo.name,
-      backend: { kind: 'docker', context: ctx.dockerContext || 'default' },
+      backend: {
+        kind: ctx.remote ? 'remote' : 'docker',
+        context: ctx.dockerContext || 'default',
+        ...(ctx.remote ? { remote: ctx.remote } : {}),
+        features: ctx.backend.features,
+      },
       containers,
       orphans,
     };

@@ -1,4 +1,5 @@
 import { FakeBackend } from '../../lib/container/__tests__/fake-backend';
+import { HARNESS_TOKEN, Harness, startHarness } from '../../lib/container/__tests__/remote-harness';
 import { ContainerInfo } from '../../lib/container/backend';
 import { containerNames, repoIdFromUrl } from '../../lib/container/names';
 
@@ -58,6 +59,17 @@ jest.mock('../../lib/container/infer', () => ({ inferBlueprint: jest.fn() }));
 jest.mock('../../lib/container/blueprint', () => ({
   ...jest.requireActual('../../lib/container/blueprint'),
   resolveBlueprint: jest.fn(async () => null),
+}));
+
+// A remote whose kunj serve is a real server over a FakeBackend (the remote tests start one)
+let mockRemote: { url: string; token: string } | undefined;
+jest.mock('../../lib/remotes', () => ({
+  ...jest.requireActual('../../lib/remotes'),
+  requireRemote: jest.fn((name: string) => {
+    if (name === 'box' && mockRemote) return { ...mockRemote, addedAt: 't' };
+    const { ContainerError } = jest.requireActual('../../lib/container/errors');
+    throw new ContainerError(`No remote named "${name}"`, 'remote-unknown');
+  }),
 }));
 
 let mockRepos: Array<{ root: string; exists: boolean }> = [];
@@ -846,7 +858,7 @@ describe('ContainerCommand', () => {
     expect(backend.callsOf('list')).toEqual([[{ 'kunj.repo': REPO_ID }]]);
     expect(JSON.parse(stdout.join(''))).toEqual({
       repo: 'app',
-      backend: { kind: 'docker', context: 'default' },
+      backend: { kind: 'docker', context: 'default', features: backend.features },
       containers: [
         {
           branch: 'feat-x',
@@ -1486,6 +1498,64 @@ describe('ContainerCommand', () => {
       (resolveBlueprint as jest.Mock).mockRejectedValueOnce(new Error('bad blueprint'));
       await new ContainerCommand().execute('list', { json: true, status: false });
       expect(JSON.parse(stdout.join('')).containers[0].blueprint).toEqual({ hash: 'h', stale: null });
+    });
+  });
+
+  describe('--remote', () => {
+    let h: Harness;
+    let exit: jest.SpyInstance;
+    beforeEach(async () => {
+      h = await startHarness();
+      mockRemote = { url: `http://127.0.0.1:${h.port}`, token: HARNESS_TOKEN };
+      // In --json mode ct prints { error } and exits the process
+      exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    });
+    afterEach(async () => {
+      exit.mockRestore();
+      mockRemote = undefined;
+      await h.close();
+    });
+    const jsonError = () => JSON.parse(stdout.join('')).error;
+
+    it('lists through the remote and says so in the JSON', async () => {
+      h.fake.existing = [mainContainer('feat')];
+      (lifecycle.containerStatus as jest.Mock).mockResolvedValue({ agentRunning: false, head: null, ahead: 0, dirty: false, status: 'ok' });
+      await new ContainerCommand().execute('list', { json: true, remote: 'box' });
+      const json = JSON.parse(stdout.join(''));
+      expect(json.backend).toEqual({ kind: 'remote', remote: 'box', context: 'default', features: { localPorts: true, editorAttach: false, dockerInDocker: [] } });
+      expect(json.containers.map((c: { branch: string }) => c.branch)).toEqual(['feat']);
+      expect(h.fake.callsOf('list')).toEqual([[{ 'kunj.repo': REPO_ID }]]);
+      expect(backend.callsOf('list')).toEqual([]);
+    });
+
+    it('takes the remote from container.remote, and --remote local overrides it', async () => {
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { remote: 'box' } });
+      await new ContainerCommand().execute('list', { json: true });
+      expect(JSON.parse(stdout.join('')).backend.kind).toBe('remote');
+      stdout.length = 0;
+      (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ container: { remote: 'box' } });
+      await new ContainerCommand().execute('list', { json: true, remote: 'local' });
+      expect(JSON.parse(stdout.join('')).backend.kind).toBe('docker');
+    });
+
+    it('refuses an unknown remote with remote-unknown, and open with remote-no-editor', async () => {
+      await new ContainerCommand().execute('list', { json: true, remote: 'nope' });
+      expect(jsonError()).toMatchObject({ code: 'remote-unknown', message: 'No remote named "nope"' });
+      expect(exit).toHaveBeenCalledWith(1);
+      stdout.length = 0;
+      h.fake.existing = [mainContainer('feat'), helperContainer('feat')];
+      await new ContainerCommand().execute('open', 'feat', { json: true, remote: 'box' });
+      expect(jsonError()).toMatchObject({ code: 'remote-no-editor', message: expect.stringContaining('kunj ct shell feat --remote box') });
+      expect(lifecycle.startContainer).not.toHaveBeenCalled();
+      expect(mockSpawned).toEqual([]);
+    });
+
+    it('hands --remote to the background forwarder it starts for agent', async () => {
+      h.fake.existing = [mainContainer('feat'), helperContainer('feat')];
+      h.fake.execResults.set('sh -c command -v socat', { exitCode: 0, stdout: '/usr/bin/socat\n' });
+      await new ContainerCommand().execute('agent', 'feat', { remote: 'box' });
+      const spawned = (autoforward.spawnDetached as jest.Mock).mock.calls.map(c => c[0] as string[]);
+      expect(spawned.some(args => args[0] === 'ct' && args[1] === 'forward' && args.includes('--remote') && args.includes('box'))).toBe(true);
     });
   });
 

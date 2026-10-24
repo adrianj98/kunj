@@ -13,10 +13,10 @@ later phase.
 | Spec | Written, not reviewed |
 | `container.dockerContext` over SSH validated end to end (prerequisite, no code) | Not started |
 | Protocol and `RemoteKunjBackend` (client) over an in-process server with `FakeBackend` | Shipped: unary calls, exec/copy/build/logs/events streams; `npm run test:remote` runs the container suites over the wire |
-| `kunj serve` (server) | Not started |
-| `kunj remote add\|list\|remove\|ping`, `container.remote`, `--remote` | Not started |
+| `kunj serve` (server) | Shipped: `serve [--listen] [--allow-privileged] [--allow-runtime] [--verbose]`, `serve token [--rotate]` |
+| `kunj remote add\|list\|remove\|ping\|token`, `container.remote`, `--remote`, `backend` in `ct list --json`, `ct open` refusal | Shipped (`--ssh` remotes wait for the tunnel) |
 | TTY exec over the WebSocket (`shell`, `attach`, `agent`): raw-mode client, resize frames, Engine API on the server | Not started |
-| `forward`, `forward --auto`, the MCP bridge and `kunj events` against a remote | Not started (expected to work unchanged; to verify) |
+| `forward`, `forward --auto`, the MCP bridge against a remote | Covered by the suites over the wire; `kunj events` per-repo remotes not started |
 | Functional test against a real daemon | Not started |
 | Editor attach through Remote-SSH | Later |
 | TLS, multi-user | Later, own spec |

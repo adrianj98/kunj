@@ -44,6 +44,8 @@ export interface InfoJson {
   kunj: string;
   protocol: number;
   features: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
+  /** The Docker context the server uses (asked once, at its first request) */
+  context: string;
 }
 
 /** GET /v1/engine (the EngineInfo); GET /v1/engine/context gives { context } */

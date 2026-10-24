@@ -339,6 +339,11 @@
         "default": null
       },
       {
+        "flags": "--remote <name>",
+        "description": "Run on this kunj serve remote (kunj remote add; default: container.remote); \"local\" forces this machine's Docker",
+        "default": null
+      },
+      {
         "flags": "--json",
         "description": "Output result as JSON",
         "default": null
@@ -827,6 +832,46 @@
     "helpText": null
   },
   {
+    "name": "remote",
+    "usage": "remote [action] [name]",
+    "description": "Machines running kunj serve, for remote branch containers",
+    "arguments": "[action] [name]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--ssh <destination>",
+        "description": "[add] Reach the server through an SSH tunnel to user@host (the server listens on its loopback)",
+        "default": null
+      },
+      {
+        "flags": "--port <port>",
+        "description": "[add] The server's port on the box, with --ssh (default 7433)",
+        "default": null
+      },
+      {
+        "flags": "--url <url>",
+        "description": "[add] Reach the server at this URL (https://, or http:// to a loopback address)",
+        "default": null
+      },
+      {
+        "flags": "--token <token>",
+        "description": "[add|token] The server's token (lands in your shell history; prefer --token-stdin or the prompt)",
+        "default": null
+      },
+      {
+        "flags": "--token-stdin",
+        "description": "[add|token] Read the token from stdin",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Actions:\n  add <name> --ssh user@host [--port n]   a server reached through an SSH tunnel kunj opens\n  add <name> --url https://…             a server you put behind TLS yourself\n  list (default)                         the known remotes, without their tokens\n  remove <name>\n  ping <name>                            versions, features and Docker context of the server\n  token <name>                           replace the stored token\n\nThen kunj ct … --remote <name>, or kunj config --set container.remote=<name> in the repository,\nruns that repository's containers there. --remote local forces this machine's Docker.\nRemotes are kept in ~/.kunj/remotes.json (0600)."
+  },
+  {
     "name": "repos",
     "usage": "repos [action] [path]",
     "description": "List the repositories kunj has been used in",
@@ -935,6 +980,56 @@
       }
     ],
     "helpText": "Actions:\n  set NAME           store a value (hidden prompt, or stdin when piped; never an argument)\n  import <file>      import a .env file (default: repo scope, host and container, env plus .env)\n  list               names, scope, targets and delivery; never values\n  get NAME           print one value (refused with --json)\n  rm NAME            remove one (of the scope given by --global / --branch)\n  env                resolved secrets as export lines, for eval (refused with --json)\n  apply [-a]         render file deliveries into this worktree (or every one)\n\nSecrets are stored at repo scope unless --global or --branch is given. Reads (get, env, apply)\nresolve global, then repo, then the branch (the current one unless --branch names another)."
+  },
+  {
+    "name": "serve",
+    "usage": "serve [action]",
+    "description": "Serve this machine's Docker to kunj on other machines (remote containers)",
+    "arguments": "[action]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--listen <host:port>",
+        "description": "Address to listen on (default 127.0.0.1:7433); a non-loopback address needs --allow-remote-listen",
+        "default": null
+      },
+      {
+        "flags": "--allow-remote-listen",
+        "description": "Listen on a non-loopback address (plain HTTP on your network: prefer an SSH tunnel or a TLS proxy)",
+        "default": null
+      },
+      {
+        "flags": "--allow-privileged",
+        "description": "Let clients run privileged containers (container.dockerInDocker \"privileged\")",
+        "default": null
+      },
+      {
+        "flags": "--allow-runtime <name>",
+        "description": "Let clients use this --runtime, e.g. sysbox-runc (repeatable)",
+        "default": []
+      },
+      {
+        "flags": "--context <name>",
+        "description": "Docker context to serve (default: container.dockerContext)",
+        "default": null
+      },
+      {
+        "flags": "--verbose",
+        "description": "Log every request (method, route, status, duration); refusals are always logged",
+        "default": null
+      },
+      {
+        "flags": "--rotate",
+        "description": "[token] Replace the token; every client must be given the new one",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Actions:\n  (default)        run the server until Ctrl-C; prints the token the first time\n  token            print the token (kunj remote add <name> … needs it on the laptop)\n\nThe server listens on this machine's loopback. From the laptop, reach it through an SSH tunnel kunj\nopens (kunj remote add box --ssh user@box) or a URL you have put behind TLS (--url https://…).\nAnyone with the token controls the containers kunj makes here, so keep it like an SSH key.\nThe token is in ~/.kunj/serve/token (0600)."
   },
   {
     "name": "setup",

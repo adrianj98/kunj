@@ -66,6 +66,8 @@ export interface KunjConfig {
     keepFiles?: boolean;
     network?: { allow?: string[]; allowHost?: boolean };
     dockerContext?: string;
+    // The remote (kunj remote add) whose kunj serve runs this repository's containers; '' or unset: the laptop's Docker
+    remote?: string;
     cpus?: string;
     memory?: string;
     publish?: string[];

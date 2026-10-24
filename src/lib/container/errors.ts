@@ -21,7 +21,15 @@ export class StartError extends Error {
   }
 }
 
-export type ContainerErrorCode = 'bad-path' | 'not-found' | 'write-failed';
+export type ContainerErrorCode =
+  | 'bad-path'
+  | 'not-found'
+  | 'write-failed'
+  // remotes (docs/specs/remote-containers.md)
+  | 'bad-remote'
+  | 'remote-unknown'
+  | 'remote-no-editor'
+  | 'remote-no-tty';
 
 // Expected outcomes (not running, nothing to remove, ...): printed without a stack trace.
 // With a code, `--json` prints { error: { code, message } }; without, the plain message.

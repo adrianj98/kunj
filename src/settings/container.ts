@@ -76,6 +76,15 @@ export function registerContainerSettings(): void {
       examples: ['colima', 'desktop-linux'],
     },
     {
+      key: 'container.remote',
+      description: "Run this repository's containers on a remote kunj serve (a name from kunj remote add); empty: the laptop's Docker",
+      type: 'string',
+      defaultValue: '',
+      category: 'container',
+      examples: ['box'],
+      relatedSettings: ['container.dockerContext'],
+    },
+    {
       key: 'container.cpus',
       description: 'CPU limit passed to docker run (e.g. 2)',
       type: 'string',
