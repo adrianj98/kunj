@@ -69,7 +69,7 @@ itself when Docker is unavailable.
 
 *Designed 2026-10-23; in progress.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f); the vault, key providers, commands and delivery are not. Today secrets reach a container only as host environment variables
+(`src/lib/secrets/dotenv.ts`, c2a722f) and the vault (`src/lib/secrets/vault.ts`, `errors.ts`); the key providers, commands and delivery are not. Today secrets reach a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -88,7 +88,10 @@ Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in th
 - `~/.kunj/secrets.enc` holds global secrets; `~/.kunj/<repo>/secrets.enc` holds the repo's, including
   branch-scoped ones. Each is a JSON envelope `{ version: 1, kdf: "keychain" | "passphrase", salt, iv,
   ciphertext, tag }`, AES-256-GCM with Node's `crypto` (no new dependency), written atomically with mode
-  0600. Names are inside the ciphertext, so the file reveals nothing.
+  0600. Names are inside the ciphertext, so the file reveals nothing. `version`, `kdf` and `salt` are
+  bound as GCM additional data (`kunj-secrets:1:<kdf>:<salt>`), so editing them fails like a flipped
+  byte. A write keeps an existing file's salt and kdf, refuses (`secrets-locked`) a key provider of
+  another kdf, and never replaces a file that does not parse (`secrets-corrupt`).
 - A decrypted entry:
 
   ```json
@@ -115,7 +118,8 @@ Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in th
   The vault is only unlocked by commands that deliver or manage secrets, and only when a `secrets.enc`
   exists, never by listings (`worktree list`, `ct list`, `events`), so the fast path does not change.
 - **Stamp.** A container records the label `kunj.secrets`: the first 12 hex chars of the sha256 of the
-  global and repo `secrets.enc` bytes (ciphertext only, `''` when neither exists). `ct list` recomputes it
+  global and repo `secrets.enc` bytes (ciphertext only, `''` when neither exists; each file's bytes are
+  prefixed with its position and length, so the same bytes in the other file give another stamp). `ct list` recomputes it
   from the files without unlocking and compares. Any write to the vault marks every container of the
   repo, which is coarse but reveals nothing.
 
@@ -188,7 +192,7 @@ file it is removed from the keep store too.
   in the container, a host-only one is not and appears nowhere in `docker inspect`, no label holds a
   value, and a snapshot image's `Config.Env` holds neither.
 
-**Code map:** built: `src/lib/secrets/dotenv.ts`. Planned: `src/lib/secrets/{vault,keyprovider,resolve,deliver,errors}.ts`,
+**Code map:** built: `src/lib/secrets/{dotenv,vault,errors}.ts`. Planned: `src/lib/secrets/{keyprovider,resolve,deliver}.ts`,
 `src/commands/secret.ts`, `src/commands/run.ts`, `secrets.*` settings in `src/settings/secrets.ts`,
 `SecretListJson` in `src/lib/json-types.ts`; container delivery hooks into `src/lib/container/env.ts`
 and `lifecycle.ts`.

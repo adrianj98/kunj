@@ -79,6 +79,8 @@
 
 ### Task 2: Vault (envelope crypto and store)
 
+**Status: done** in the commit "Secrets: encrypted vault" (see the ledger for its hash and rulings).
+
 **Files:**
 - Create: `src/lib/secrets/vault.ts`, `src/lib/secrets/errors.ts`
 - Test: `src/lib/secrets/__tests__/vault.test.ts`
@@ -92,9 +94,11 @@
   - `readVault(file: string, unlock: Unlock): Promise<SecretEntry[]>` returns `[]` when the file is missing.
   - `writeVault(file: string, entries: SecretEntry[], unlock: Unlock): Promise<void>` keeps the existing salt and kdf when the file exists.
   - `vaultFiles(kunjDir: string, globalDir: string): { global: string; repo: string }`
-  - `vaultStamp(files: string[]): string` (Ruling 2).
+  - `vaultStamp(files: string[]): string` (Ruling 2). Each existing file's bytes are hashed after a `<index>:<length>:` prefix.
+  - Also exported: `type Kdf = 'keychain'|'passphrase'`, `SecretErrorCode` (errors.ts).
+  - As built: `version`, `kdf` and `salt` are GCM additional data (`kunj-secrets:1:<kdf>:<salt>`). `readVault` and `writeVault` give `secrets-locked` when `unlock.kdf` differs from the file's kdf or `keyFor` returns other than 32 bytes. `writeVault` gives `bad-name` before touching anything, and `secrets-corrupt` (file left byte-identical) when the existing file is not a v1 envelope. `readVault` gives `secrets-corrupt` when the decrypted content is not a list of well-formed entries. Task 3 note: its passphrase retry must catch `secrets-corrupt` from the decrypt step only, not from a malformed envelope.
 
-- [ ] **Step 1: Write the failing tests.** Use a fixed-key `Unlock` and a passphrase `Unlock` built on scrypt.
+- [x] **Step 1: Write the failing tests.** Use a fixed-key `Unlock` and a passphrase `Unlock` built on scrypt.
   - A round trip returns equal entries.
   - The file mode is `0o600`, and the raw file contains neither the name nor the value.
   - Two writes of the same entries give different `iv`.
@@ -102,10 +106,10 @@
   - Truncated JSON gives `secrets-corrupt`.
   - A wrong key gives `secrets-corrupt`.
   - `vaultStamp([])` is `''`, it changes after a write, and it has 12 chars.
-- [ ] **Step 2:** Run the test. Expected: FAIL.
-- [ ] **Step 3: Implement** with `crypto.createCipheriv('aes-256-gcm', key, iv)`. Write the envelope to `file + '.tmp-<pid>'` with mode 0600, then `fs.renameSync`, creating the parent directory with mode 0700.
-- [ ] **Step 4:** Run the test. Expected: PASS.
-- [ ] **Step 5:** Commit: `git commit -m "Secrets: encrypted vault"`.
+- [x] **Step 2:** Run the test. Expected: FAIL.
+- [x] **Step 3: Implement** with `crypto.createCipheriv('aes-256-gcm', key, iv)`. Write the envelope to `file + '.tmp-<pid>'` with mode 0600, then `fs.renameSync`, creating the parent directory with mode 0700.
+- [x] **Step 4:** Run the test. Expected: PASS.
+- [x] **Step 5:** Commit: `git commit -m "Secrets: encrypted vault"`.
 
 ### Task 3: Key providers
 

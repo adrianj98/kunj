@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { BaseCommand } from '../command';
+import { SecretError } from '../secrets/errors';
 
 class Failing extends BaseCommand {
   constructor(private error: unknown) {
@@ -48,8 +49,29 @@ describe('BaseCommand --json errors', () => {
     expect(JSON.parse(out)).toEqual({ error: 'no such file' });
   });
 
+  it('prints a SecretError as { code, message }', async () => {
+    const { out } = await runJson(new SecretError('/x/secrets.enc: cannot decrypt', 'secrets-corrupt'));
+    expect(JSON.parse(out)).toEqual({ error: { code: 'secrets-corrupt', message: '/x/secrets.enc: cannot decrypt' } });
+  });
+
   it('keeps the plain string when jsonCode is not a string', async () => {
     const { out } = await runJson(Object.assign(new Error('boom'), { jsonCode: 42 }));
     expect(JSON.parse(out)).toEqual({ error: 'boom' });
+  });
+});
+
+describe('BaseCommand plain errors', () => {
+  it('prints a SecretError without a stack trace', async () => {
+    const errors: unknown[][] = [];
+    jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args);
+    });
+    jest.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('exit');
+    }) as any);
+    const program = new Command();
+    new Failing(new SecretError('secret FOO not found', 'secret-not-found')).register(program);
+    await program.parseAsync(['fail'], { from: 'user' }).catch(() => undefined);
+    expect(errors).toEqual([['✗ secret FOO not found']]);
   });
 });
