@@ -1,0 +1,131 @@
+import Foundation
+
+/// What the header's buttons, the overflow menu and the port links can do to an environment.
+public enum EnvAction: Equatable, Sendable {
+    case ctStart, ctStop, ctRemove(force: Bool), ctRebuild, ctOpen
+    case worktreeOpen, worktreeRemove(force: Bool)
+    case createPR, prune, copyPath, revealInFinder, openPort(Int)
+}
+
+/// How `ActionRunner` carries out an action: `terminal` runs `kunj <args>` in an action tab (in
+/// `cwd`, else the repository root), `run` runs `kunj <args> --json` and expects `SuccessJson`,
+/// `external` opens a URL, `local` hands a path (or container name) to copy or reveal, and
+/// `disabled` greys the control out with `reason` as its tooltip.
+public enum ActionPlan: Equatable, Sendable {
+    case terminal(args: [String], title: String, cwd: String?)
+    case run(args: [String])
+    case external(url: String)
+    case local(String)
+    case disabled(reason: String)
+}
+
+private func terminal(_ args: [String], cwd: String? = nil) -> ActionPlan {
+    .terminal(args: args, title: args.prefix(2).joined(separator: " "), cwd: cwd)
+}
+
+/// The plan for `action` on `env`. `worktreeOfSameBranch` is the host worktree of a container's
+/// branch, where `kunj pr` runs for a container environment.
+public func actionPlan(_ action: EnvAction, env: Environment, worktreeOfSameBranch: Environment?) -> ActionPlan {
+    let branch = env.branch
+    let isContainer = env.kind == .container
+    let containerOnly = ActionPlan.disabled(reason: "Only for a container")
+    let worktreeOnly = ActionPlan.disabled(reason: "Only for a worktree")
+    let missing = ActionPlan.disabled(reason: "The worktree directory is missing")
+
+    switch action {
+    case .ctStart:
+        guard isContainer else { return containerOnly }
+        if env.state == .running { return .disabled(reason: "The container is running") }
+        return terminal(["ct", "start", branch])
+    case .ctStop:
+        guard isContainer else { return containerOnly }
+        if env.state != .running { return .disabled(reason: "The container is stopped") }
+        return .run(args: ["ct", "stop", branch])
+    case .ctRemove(let force):
+        guard isContainer else { return containerOnly }
+        return terminal(["ct", "remove", branch] + (force ? ["--force"] : []))
+    case .ctRebuild:
+        guard isContainer else { return containerOnly }
+        return terminal(["ct", "start", branch, "--rebuild"])
+    case .ctOpen:
+        // `ct open` resumes a stopped container itself.
+        guard isContainer else { return containerOnly }
+        return .run(args: ["ct", "open", branch])
+    case .worktreeOpen:
+        guard !isContainer, let path = env.path else { return worktreeOnly }
+        guard env.exists else { return missing }
+        return .run(args: ["worktree", "open", path])
+    case .worktreeRemove(let force):
+        guard !isContainer, let path = env.path else { return worktreeOnly }
+        if env.isMain { return .disabled(reason: "The main worktree cannot be removed") }
+        return terminal(["worktree", "remove", path] + (force ? ["--force"] : []))
+    case .createPR:
+        let host = isContainer ? worktreeOfSameBranch : env
+        guard let host, let path = host.path else {
+            return .disabled(reason: "Create PRs from a worktree of this branch")
+        }
+        guard host.exists else { return missing }
+        return terminal(["pr"], cwd: path)
+    case .prune:
+        return terminal(["ct", "prune"])
+    case .copyPath:
+        if isContainer { return env.containerName.map(ActionPlan.local) ?? containerOnly }
+        return env.path.map(ActionPlan.local) ?? worktreeOnly
+    case .revealInFinder:
+        guard !isContainer, let path = env.path else {
+            return .disabled(reason: "A container has no folder on this Mac")
+        }
+        guard env.exists else { return missing }
+        return .local(path)
+    case .openPort(let port):
+        return .external(url: "http://localhost:\(port)")
+    }
+}
+
+/// What the New session sheet asks for.
+public struct NewSessionRequest: Equatable, Sendable {
+    public var repo: RepoRef
+    public var branch: String
+    /// nil or blank: the repository default (`preferences.defaultBaseBranch`, else origin/HEAD)
+    public var base: String?
+    public var kind: EnvironmentKind
+    public var startAgent: Bool
+
+    public init(repo: RepoRef, branch: String, base: String?, kind: EnvironmentKind, startAgent: Bool) {
+        self.repo = repo
+        self.branch = branch
+        self.base = base
+        self.kind = kind
+        self.startAgent = startAgent
+    }
+}
+
+/// `kunj worktree add <branch> -c [--base <b>]` or `kunj ct start <branch> -c [--base <b>]` in an
+/// action tab (run in the repository root). The agent, when asked for, is opened by the runner
+/// once the new environment appears.
+public func newSessionPlan(_ r: NewSessionRequest) -> ActionPlan {
+    let base = r.base?.trimmingCharacters(in: .whitespaces) ?? ""
+    let extra = base.isEmpty ? [] : ["--base", base]
+    switch r.kind {
+    case .worktree: return terminal(["worktree", "add", r.branch, "-c"] + extra)
+    case .container: return terminal(["ct", "start", r.branch, "-c"] + extra)
+    }
+}
+
+/// `git check-ref-format --branch` rules, as the sheet checks them before running kunj: not empty,
+/// no space or control character, none of `~ ^ : ? * [ \`, no `..`, `@{` or `//`, not `@`, not
+/// starting with `-` or `/`, not ending with `/` or `.`, and no component starting with `.` or
+/// ending with `.lock`.
+public func isValidBranchName(_ name: String) -> Bool {
+    if name.isEmpty || name == "@" || name.hasPrefix("-") || name.hasPrefix("/") { return false }
+    if name.hasSuffix("/") || name.hasSuffix(".") { return false }
+    if name.contains("..") || name.contains("@{") || name.contains("//") { return false }
+    for scalar in name.unicodeScalars {
+        if scalar.value < 0x20 || scalar.value == 0x7F || scalar == " " { return false }
+        if "~^:?*[\\".unicodeScalars.contains(scalar) { return false }
+    }
+    for component in name.split(separator: "/") {
+        if component.hasPrefix(".") || component.hasSuffix(".lock") { return false }
+    }
+    return true
+}
