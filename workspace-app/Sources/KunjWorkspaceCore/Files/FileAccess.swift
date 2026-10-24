@@ -24,6 +24,9 @@ public struct FileAccess: Sendable {
         switch env.kind {
         case .worktree:
             let url = try worktreeURL(env, path)
+            // Only a regular file (a symlink to one is followed): a fifo blocks and a device never ends
+            let type = (try? FileManager.default.attributesOfItem(atPath: url.resolvingSymlinksInPath().path))?[.type]
+            guard type as? FileAttributeType == .typeRegular else { throw FileAccessError.notFound }
             let data: Data
             do {
                 data = try Data(contentsOf: url)

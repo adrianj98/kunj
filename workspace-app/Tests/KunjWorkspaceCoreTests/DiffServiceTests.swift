@@ -141,6 +141,24 @@ private final class RecordingRunner: CommandRunner, @unchecked Sendable {
         #expect(uncommitted.files.map(\.path) == ["dir/with space.txt", "keep.txt", "untracked.txt"])
     }
 
+    /// git keeps a symlink as its target text, so the working side must be that text too, never the
+    /// file it points at (a link to /dev/zero or a fifo would block the column)
+    @Test func symlinkWorkingSideIsItsTarget() async throws {
+        let work = try makeRepository()
+        try FileManager.default.createSymbolicLink(atPath: work.appendingPathComponent("link").path,
+                                                   withDestinationPath: "keep.txt")
+        try FileManager.default.createSymbolicLink(atPath: work.appendingPathComponent("zero").path,
+                                                   withDestinationPath: "/dev/zero")
+        let env = diffTestEnvironment(path: work.path)
+        let service = DiffService(cli: cli)
+        let (summary, _) = try await service.summary(env: env, scope: .uncommitted)
+        let byPath = Dictionary(uniqueKeysWithValues: summary.files.map { ($0.path, $0) })
+        let link = try await service.contents(env: env, scope: .uncommitted, file: #require(byPath["link"]))
+        #expect(link.original == "" && link.modified == "keep.txt")
+        let zero = try await service.contents(env: env, scope: .uncommitted, file: #require(byPath["zero"]))
+        #expect(zero.modified == "/dev/zero")
+    }
+
     @Test func prBaseAndOriginHeadWin() async throws {
         let work = try makeRepository()
         _ = try sh(["push", "-q", "origin", "main:develop"], in: work)

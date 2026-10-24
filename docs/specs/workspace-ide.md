@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215 |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -254,16 +254,22 @@ colours (`termMuted` as bright black, `termAccent` as blue).
 
 **Changes column.** `DiffService` lists `ChangedFile`s (`status A/M/D/R`, `added`, `deleted`) for the
 scope: `base` (default: `git diff --numstat -M <merge-base(origin/<base>, HEAD)>` plus untracked files,
-whose line counts come from one command for all of them, never one exec per file in a container),
-`uncommitted` (`HEAD`), `last` (`HEAD~1 HEAD`). `<base>` is the PR's base branch, else
-`refs/remotes/origin/HEAD`, else `main`/`master`, taking the first that exists locally (the app never
-fetches, so a PR base may be missing). Contents are `git show <ref>:<path>` and the working
-file (fs in a worktree, `kunj ct file read` in a container). Monaco's diff editor renders the selected
-file read-only; the Monaco theme is built from the tokens (`bg`, `addBg`, `faintest` line numbers).
+whose line counts come from one `find … -type f -exec wc -l {} +` for all of them, never one exec per
+file in a container; at most 500 are counted), `uncommitted` (`HEAD`, plus untracked), `last`
+(`HEAD~1 HEAD`). `<base>` is `origin/<PR base>` when that was fetched, else `origin/HEAD`, else
+`origin/main`, else `origin/master`, all read from one `for-each-ref refs/remotes/origin/` (the app
+never fetches, so a PR base may be missing); a base that does not exist, or shares no commit with
+HEAD, is an error the column shows, never a fallback to a local branch. Every git call passes
+`--no-optional-locks -c core.quotePath=false`, because a container does not get the host's
+`GIT_OPTIONAL_LOCKS`. Contents are `git show <ref>:<path>` and the working file (fs in a worktree,
+`kunj ct file read` in a container; a worktree symlink reads as its target text, as git stores it).
+Monaco's diff editor renders the selected file read-only; the Monaco theme is built from the tokens
+(`bg`, `addBg`, `faintest` line numbers).
 
 **Editor tabs.** Double-clicking a changed file (or "Edit" in the diff header) opens it as a tab in the
 left column, in the second WKWebView (`?mode=editor`, one Monaco model per open file). ⌘S saves through
-`FileAccess` (`fs` for a worktree, `kunj ct file write` for a container); the tab shows a dot while
+`FileAccess` (`fs` for a worktree, `kunj ct file write` for a container; paths relative, no `..`; a
+worktree read takes regular files only, a write goes through a symlink and keeps the file's mode); the tab shows a dot while
 dirty; a save over a file that changed since it was opened asks before overwriting. Closing a dirty tab
 asks. No language servers. The web views never name a file to Swift: a save message carries only the
 tab id, and Swift holds the path, so content from a container cannot steer a write.
@@ -388,6 +394,21 @@ From the environment model (Task 4):
   terminals when its row drops out for a refresh or two.
 - [ ] `ct list` carries no PR for a container and no upstream, so a container row cannot show `PR #N`
   or `↑N from main` as the mockup does; reporting them would be a CLI addition.
+
+From the diff and file core (Tasks 9–10):
+
+- [ ] The `last` scope on a repository with one commit fails (no `HEAD~1`); diffing against git's
+  empty tree would show the first commit instead of an error.
+- [ ] In a container the working side of a symlink comes from `kunj ct file read`, which follows the
+  link, so a changed symlink diffs its target's content against the link text (and a link to
+  `/dev/zero` never ends); `ct file read` could refuse non-regular files, or the service could
+  `readlink` first.
+- [ ] `wc -l` counts newlines, so an untracked file without a final newline shows one line fewer than
+  git would count once it is added.
+- [ ] A path removed from the index but kept on disk (`git rm --cached`) lists twice: deleted from
+  `git diff` and added as untracked. The column selects rows by path, so they should be merged.
+- [ ] `DiffError.commandFailed` names the command and exit code only (the runner drops stderr), so a
+  failing `git` in a container shows no reason.
 
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).

@@ -184,7 +184,16 @@ public final class DiffService: @unchecked Sendable {
         return result.exit == 0 ? String(decoding: result.stdout, as: UTF8.self) : ""
     }
 
+    /// The working side. git stores a symlink as its target text, so a worktree's link reads as that
+    /// text (never the file it points at, which may be /dev/zero or outside the worktree).
     private func workingFile(_ env: Environment, _ path: String) async throws -> String {
+        if env.kind == .worktree, let root = env.path {
+            let full = URL(fileURLWithPath: root).appendingPathComponent(path).path
+            let type = (try? FileManager.default.attributesOfItem(atPath: full))?[.type] as? FileAttributeType
+            if type == .typeSymbolicLink {
+                return (try? FileManager.default.destinationOfSymbolicLink(atPath: full)) ?? ""
+            }
+        }
         do {
             return try await files.read(env: env, path: path)
         } catch FileAccessError.notFound {

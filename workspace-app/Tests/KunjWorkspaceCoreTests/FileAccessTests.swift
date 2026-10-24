@@ -20,6 +20,20 @@ import Testing
         await #expect(throws: FileAccessError.notFound) { _ = try await files.read(env: env, path: "missing.txt") }
     }
 
+    /// Only regular files are read: a fifo or a device (also behind a symlink) would block or never end
+    @Test func readRefusesWhatIsNotARegularFile() async throws {
+        let dir = try tempDirectory()
+        #expect(mkfifo(dir.appendingPathComponent("fifo").path, 0o644) == 0)
+        try FileManager.default.createSymbolicLink(atPath: dir.appendingPathComponent("zero").path,
+                                                   withDestinationPath: "/dev/zero")
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        let files = FileAccess(cli: fakeKunjCLI())
+        let env = diffTestEnvironment(path: dir.path)
+        for name in ["fifo", "zero", "sub"] {
+            await #expect(throws: FileAccessError.notFound) { _ = try await files.read(env: env, path: name) }
+        }
+    }
+
     @Test func writeKeepsTheFileMode() async throws {
         let dir = try tempDirectory()
         let script = dir.appendingPathComponent("run.sh")
