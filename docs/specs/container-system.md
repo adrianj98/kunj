@@ -69,7 +69,7 @@ itself when Docker is unavailable.
 
 *Designed 2026-10-23; in progress.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f) and the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9); the key providers, commands and delivery are not. Today secrets reach a container only as host environment variables
+(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`); the commands and delivery are not. Today secrets reach a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -113,9 +113,16 @@ Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in th
   `service kunj-secrets`) on Linux. The key never goes in argv when it is stored: `security -i` reads the
   `add-generic-password` command from stdin, and `secret-tool store` reads the secret from stdin.
   Without either: the `passphrase` kdf, `scrypt(passphrase, salt, 32, N=2^15, r=8, p=1)` with a 16-byte
-  random salt per file, prompted once per command. `KUNJ_SECRETS_KEY` (64 hex chars) supplies the raw key
-  for CI and scripts and overrides the keychain; it opens `keychain`-kdf files only. The setting
-  `secrets.keyProvider` (`auto|keychain|libsecret|passphrase`, default `auto`) picks the provider.
+  random salt per file, prompted once per command (a new vault asks twice to confirm; a file that does not
+  decrypt asks again, and after three tries it is `secrets-locked`, the file untouched; an empty passphrase is
+  refused). `KUNJ_SECRETS_KEY` (64 hex chars) supplies the raw key
+  for CI and scripts and overrides the keychain; it opens `keychain`-kdf files only. A new key is
+  made only when no vault file exists yet: a keychain-kdf file whose item is missing stays `secrets-locked`, and a
+  read that fails for any reason other than "not found" (access denied, locked keychain) never makes a new
+  key; the item is added without `-U` and read back before use. The setting
+  `secrets.keyProvider` (`auto|keychain|libsecret|passphrase`, default `auto`) picks the provider
+  for a new vault (`auto`: Keychain on macOS, else libsecret, else the passphrase when `secret-tool` is not
+  installed); an existing file's kdf decides how it is opened.
   The vault is only unlocked by commands that deliver or manage secrets, and only when a `secrets.enc`
   exists, never by listings (`worktree list`, `ct list`, `events`), so the fast path does not change.
 - **Stamp.** A container records the label `kunj.secrets`: the first 12 hex chars of the sha256 of the
@@ -193,8 +200,9 @@ file it is removed from the keep store too.
   in the container, a host-only one is not and appears nowhere in `docker inspect`, no label holds a
   value, and a snapshot image's `Config.Env` holds neither.
 
-**Code map:** built: `src/lib/secrets/{dotenv,vault,errors}.ts`. Planned: `src/lib/secrets/{keyprovider,resolve,deliver}.ts`,
-`src/commands/secret.ts`, `src/commands/run.ts`, `secrets.*` settings in `src/settings/secrets.ts`,
+**Code map:** built: `src/lib/secrets/{dotenv,vault,errors,keyprovider}.ts`, `secrets.*` settings in
+`src/settings/secrets.ts`. Planned: `src/lib/secrets/{resolve,deliver}.ts`,
+`src/commands/secret.ts`, `src/commands/run.ts`,
 `SecretListJson` in `src/lib/json-types.ts`; container delivery hooks into `src/lib/container/env.ts`
 and `lifecycle.ts`.
 

@@ -113,6 +113,8 @@
 
 ### Task 3: Key providers
 
+**Status: done** (commit: "Secrets: keychain, libsecret and passphrase key providers"). Rulings in the ledger.
+
 **Files:**
 - Create: `src/lib/secrets/keyprovider.ts`, `src/settings/secrets.ts` (register in `src/settings/index.ts`)
 - Test: `src/lib/secrets/__tests__/keyprovider.test.ts`
@@ -122,19 +124,20 @@
 - Produces:
   - `type Runner = (cmd: string, args: string[], input?: string) => Promise<{ code: number; stdout: string }>`, which defaults to `child_process.spawn`.
   - `getUnlock(opts: { mode: 'auto'|'keychain'|'libsecret'|'passphrase'; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; run?: Runner; prompt?: (msg: string) => Promise<string>; existingKdf?: 'keychain'|'passphrase'; create: boolean }): Promise<Unlock>`
+  - As built: `getUnlock` also takes `tty?: boolean` (whether a hidden prompt may be shown without `prompt`; default stdin and stderr are TTYs). `Unlock` gained `attempts?: number` and `keyFor(salt, attempt?)`: `readVault`/`writeVault` call `keyFor` with the next attempt number while the GCM check fails (never for a malformed envelope), and give `secrets-locked` once `attempts` (> 1) are used up; the passphrase `Unlock` sets 3, others keep 1 (plain `secrets-corrupt`). An `existingKdf: 'passphrase'` always opens with the passphrase; `KUNJ_SECRETS_KEY` is used only for a keychain-kdf file or a new vault with a mode other than `passphrase`. A new key is made only when `create` and no file exists; a Keychain read failing with anything but exit 44 is `secrets-locked`, never a miss; `add-generic-password` has no `-U` and the key is read back before use. `auto` falls back to the passphrase only when the tool is not installed (exit 127 / ENOENT) and no keychain file exists. A new passphrase is asked twice.
   - The setting is `secrets.keyProvider` (string, default `auto`, values `auto|keychain|libsecret|passphrase`, category `secrets`).
 
-- [ ] **Step 1: Write the failing tests** with a recording `run` fake.
+- [x] **Step 1: Write the failing tests** with a recording `run` fake.
   - A `KUNJ_SECRETS_KEY` of 64 hex chars wins and runs nothing. A malformed one gives `secrets-locked`.
   - darwin auto reads with `security find-generic-password -s kunj-secrets -a kunj -w`.
   - When that misses and `create` is true, it writes a fresh key through `security -i` with the command on **stdin**. Assert that no recorded argv contains the 64-hex key.
   - linux auto runs `secret-tool lookup service kunj-secrets`. A store passes the key on stdin.
   - Passphrase: a `prompt` fake answering wrong three times gives `secrets-locked`. No prompt and no TTY gives `secrets-locked`.
   - An `existingKdf: 'passphrase'` file never touches the keychain.
-- [ ] **Step 2:** Run the test. Expected: FAIL.
-- [ ] **Step 3: Implement.** The passphrase check verifies by decrypting: return an `Unlock` whose `keyFor` re-prompts on a GCM failure, up to 3 tries. Expose the try count through the vault by having `readVault` and `writeVault` call `keyFor` again on a decrypt failure (not a malformed envelope) when `unlock.kdf === 'passphrase'`. Hidden prompt: `readline` with output muted (no inquirer).
-- [ ] **Step 4:** Run the test. Expected: PASS.
-- [ ] **Step 5:** Commit: `git commit -m "Secrets: keychain, libsecret and passphrase key providers"`.
+- [x] **Step 2:** Run the test. Expected: FAIL.
+- [x] **Step 3: Implement.** The passphrase check verifies by decrypting: return an `Unlock` whose `keyFor` re-prompts on a GCM failure, up to 3 tries. Expose the try count through the vault by having `readVault` and `writeVault` call `keyFor` again on a decrypt failure (not a malformed envelope) when `unlock.kdf === 'passphrase'`. Hidden prompt: `readline` with output muted (no inquirer).
+- [x] **Step 4:** Run the test. Expected: PASS.
+- [x] **Step 5:** Commit: `git commit -m "Secrets: keychain, libsecret and passphrase key providers"`.
 
 ### Task 4: Resolution and host file delivery
 

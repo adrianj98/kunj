@@ -21,9 +21,13 @@ export interface SecretEntry {
 export type Kdf = 'keychain' | 'passphrase';
 
 // How a vault file is opened. The keychain kdf ignores the salt; the passphrase kdf derives from it.
+// `attempts` (default 1): when an existing file does not decrypt, keyFor is called again with the next
+// attempt number (a passphrase provider re-prompts); once they are used up it is secrets-locked. A
+// malformed envelope is never retried.
 export interface Unlock {
   kdf: Kdf;
-  keyFor(salt: Buffer): Promise<Buffer>;
+  attempts?: number;
+  keyFor(salt: Buffer, attempt?: number): Promise<Buffer>;
 }
 
 interface Envelope {
@@ -67,8 +71,7 @@ export async function readVault(file: string, unlock: Unlock): Promise<SecretEnt
   const env = readEnvelope(file);
   if (!env) return [];
   checkKdf(file, env, unlock);
-  const key = await keyOf(unlock, Buffer.from(env.salt, 'base64'));
-  const plain = decrypt(file, env, key);
+  const { plain } = await openEnvelope(file, env, unlock);
   let entries: unknown;
   try {
     entries = JSON.parse(plain);
@@ -88,9 +91,8 @@ export async function writeVault(file: string, entries: SecretEntry[], unlock: U
   if (existing) checkKdf(file, existing, unlock);
   const kdf = existing ? existing.kdf : unlock.kdf;
   const salt = existing ? existing.salt : crypto.randomBytes(SALT_BYTES).toString('base64');
-  const key = await keyOf(unlock, Buffer.from(salt, 'base64'));
   // A tampered file, or one under another key, has a valid envelope; replacing it would lose its secrets.
-  if (existing) decrypt(file, existing, key);
+  const key = existing ? (await openEnvelope(file, existing, unlock)).key : await keyOf(unlock, Buffer.from(salt, 'base64'), 1);
   const iv = crypto.randomBytes(IV_BYTES);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   cipher.setAAD(aad(kdf, salt));
@@ -116,14 +118,30 @@ export async function writeVault(file: string, entries: SecretEntry[], unlock: U
   }
 }
 
-function decrypt(file: string, env: Envelope, key: Buffer): string {
+// Decrypts with keyFor's key, asking again (next attempt) while the GCM check fails and attempts remain.
+async function openEnvelope(file: string, env: Envelope, unlock: Unlock): Promise<{ key: Buffer; plain: string }> {
+  const attempts = Math.max(1, unlock.attempts ?? 1);
+  const salt = Buffer.from(env.salt, 'base64');
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const key = await keyOf(unlock, salt, attempt);
+    const plain = decrypt(env, key);
+    if (plain !== null) return { key, plain };
+  }
+  if (attempts > 1) {
+    throw new SecretError(`${file} did not decrypt after ${attempts} tries (wrong passphrase or key, or the file was modified). The file was left untouched.`, 'secrets-locked');
+  }
+  throw corrupt(file, 'it does not decrypt (wrong key, or the file was modified)');
+}
+
+// null when the authentication check fails.
+function decrypt(env: Envelope, key: Buffer): string | null {
   try {
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(env.iv, 'base64'));
     decipher.setAAD(aad(env.kdf, env.salt));
     decipher.setAuthTag(Buffer.from(env.tag, 'base64'));
     return Buffer.concat([decipher.update(Buffer.from(env.ciphertext, 'base64')), decipher.final()]).toString('utf8');
   } catch {
-    throw corrupt(file, 'it does not decrypt (wrong key, or the file was modified)');
+    return null;
   }
 }
 
@@ -135,8 +153,8 @@ function corrupt(file: string, why: string): SecretError {
   return new SecretError(`${file}: ${why}. The file was left untouched.`, 'secrets-corrupt');
 }
 
-async function keyOf(unlock: Unlock, salt: Buffer): Promise<Buffer> {
-  const key = await unlock.keyFor(salt);
+async function keyOf(unlock: Unlock, salt: Buffer, attempt: number): Promise<Buffer> {
+  const key = await unlock.keyFor(salt, attempt);
   if (!Buffer.isBuffer(key) || key.length !== KEY_BYTES) {
     throw new SecretError(`The secrets key must be ${KEY_BYTES} bytes`, 'secrets-locked');
   }

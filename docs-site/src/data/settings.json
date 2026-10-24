@@ -1558,5 +1558,25 @@
     "examples": null,
     "relatedSettings": null,
     "sensitive": false
+  },
+  {
+    "key": "secrets.keyProvider",
+    "type": "string",
+    "category": "secrets",
+    "default": "auto",
+    "description": "Where the secrets vault key comes from: auto (macOS Keychain, else libsecret, else a passphrase), keychain, libsecret or passphrase",
+    "detailedDescription": "Picks the key provider for a new vault. An existing vault keeps its kdf: a passphrase vault always asks for its passphrase, and KUNJ_SECRETS_KEY (64 hex chars) overrides the keychain for keychain vaults.",
+    "options": [
+      "auto",
+      "keychain",
+      "libsecret",
+      "passphrase"
+    ],
+    "examples": [
+      "auto",
+      "passphrase"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
   }
 ]

@@ -11,6 +11,7 @@ import { registerWorktreeSettings } from './worktree';
 import { registerHookSettings } from './hooks';
 import { registerContainerSettings } from './container';
 import { registerAgentSettings } from './agent';
+import { registerSecretsSettings } from './secrets';
 import { settingsRegistry } from '../lib/settings-registry';
 
 let initialized = false;
@@ -33,6 +34,7 @@ export function initializeSettings(): void {
   registerHookSettings();
   registerContainerSettings();
   registerAgentSettings();
+  registerSecretsSettings();
 
   initialized = true;
 }

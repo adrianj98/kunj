@@ -245,6 +245,54 @@ describe('vault', () => {
   });
 });
 
+describe('vault retries (Unlock.attempts)', () => {
+  // keyFor gets the attempt number; a wrong key first, the right one on the second attempt.
+  const flaky = (right: Buffer, attempts: number, seen: number[]): Unlock => ({
+    kdf: 'keychain',
+    attempts,
+    keyFor: async (_salt, attempt = 1) => {
+      seen.push(attempt);
+      return attempt >= 2 ? right : crypto.randomBytes(32);
+    },
+  });
+
+  it('asks again with the next attempt number when the file does not decrypt', async () => {
+    const key = crypto.randomBytes(32);
+    await writeVault(file, entries, fixedKey(key));
+    const seen: number[] = [];
+    expect(await readVault(file, flaky(key, 3, seen))).toEqual(entries);
+    expect(seen).toEqual([1, 2]);
+  });
+
+  it('retries in writeVault before replacing the file', async () => {
+    const key = crypto.randomBytes(32);
+    await writeVault(file, entries, fixedKey(key));
+    const seen: number[] = [];
+    await writeVault(file, entries.slice(1), flaky(key, 2, seen));
+    expect(seen).toEqual([1, 2]);
+    expect(await readVault(file, fixedKey(key))).toEqual(entries.slice(1));
+  });
+
+  it('gives secrets-locked after the last attempt and leaves the file byte-identical', async () => {
+    await writeVault(file, entries, fixedKey());
+    const before = fs.readFileSync(file);
+    const seen: number[] = [];
+    // One attempt (the default) keeps the plain secrets-corrupt; retries exhausted mean a wrong key.
+    await expectCode(readVault(file, flaky(crypto.randomBytes(32), 1, seen)), 'secrets-corrupt');
+    await expectCode(writeVault(file, entries, { kdf: 'keychain', attempts: 3, keyFor: async () => crypto.randomBytes(32) }), 'secrets-locked');
+    await expectCode(readVault(file, { kdf: 'keychain', attempts: 3, keyFor: async () => crypto.randomBytes(32) }), 'secrets-locked');
+    expect(fs.readFileSync(file)).toEqual(before);
+  });
+
+  it('does not retry a malformed envelope', async () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '{"version":1');
+    const seen: number[] = [];
+    await expectCode(readVault(file, flaky(crypto.randomBytes(32), 3, seen)), 'secrets-corrupt');
+    expect(seen).toEqual([]);
+  });
+});
+
 describe('vaultFiles', () => {
   it('puts the global vault in the global dir and the repo vault in the repo dir', () => {
     expect(vaultFiles('/h/.kunj/repo', '/h/.kunj')).toEqual({
