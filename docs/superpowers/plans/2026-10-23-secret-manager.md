@@ -270,7 +270,7 @@
 
 ### Task 8: Migration prompts and docs
 
-**Status: done** (Task 8 commit "Secrets: import hint, setup offer, docs"). Rulings in the ledger. As built: `keptEnvImportCommand(home?)` (exported from secret.ts, `~` for the home directory) is shared by the `list` hint and `SetupCommand.offerSecretImport()`; the hint shows when the repo vault has no entries (global secrets do not hide it), also under `No secrets`; setup asks only when the repo has no `secrets.enc` (no unlock to decide), runs `kunj secret import <keep>/.env --delete` (which asks again with the names), prints the command on no and warns on a failed import. User docs: `docs-site/src/content/docs/configuration/secrets.mdx`, plus links from agent, keep files, setup, files-and-data and container security pages.
+**Status: done** (3bbe9af). Rulings in the ledger. As built: `keptEnvImportCommand(home?)` (exported from secret.ts, `~` for the home directory) is shared by the `list` hint and `SetupCommand.offerSecretImport()`; the hint shows when the repo vault has no entries (global secrets do not hide it), also under `No secrets`; setup asks only when the repo has no `secrets.enc` (no unlock to decide), runs `kunj secret import <keep>/.env --delete` (which asks again with the names), prints the command on no and warns on a failed import. User docs: `docs-site/src/content/docs/configuration/secrets.mdx`, plus links from agent, keep files, setup, files-and-data and container security pages.
 
 **Files:**
 - Modify:
