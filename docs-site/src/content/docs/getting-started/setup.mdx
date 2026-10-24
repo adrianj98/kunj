@@ -1,6 +1,6 @@
 ---
 title: kunj setup
-description: The interactive onboarding - shell aliases, Jira and the companion apps - and exactly what it writes.
+description: The interactive onboarding - shell aliases, Jira, importing a kept .env and the companion apps - and exactly what it writes.
 sidebar:
   order: 3
 ---
@@ -8,12 +8,13 @@ sidebar:
 import { Aside } from '@astrojs/starlight/components';
 import CommandReference from '../../../components/CommandReference.astro';
 
-`kunj setup` is a short interactive wizard you run once after installing. It does three things,
+`kunj setup` is a short interactive wizard you run once after installing. It does four things,
 in this order:
 
 1. Adds a set of short shell aliases for kunj commands to your shell's startup file.
 2. Optionally connects kunj to Jira Cloud.
-3. Optionally installs the VS Code extension and the macOS menu bar app.
+3. Optionally moves a kept `.env` into the encrypted secret store.
+4. Optionally installs the VS Code extension and the macOS menu bar app.
 
 It does not configure AI. For that, see [AWS Bedrock](../../integrations/aws-bedrock/).
 
@@ -103,7 +104,15 @@ plain text. Run `kunj setup` from the repository you use Jira with, or copy the 
 `~/.kunj/config.json` to use it everywhere.
 </Aside>
 
-## 3. Companion apps (optional)
+## 3. Secrets (optional)
+
+When the repository you run it in has a kept `.env` ([keep files](../../worktrees/keep-files/)) and no
+encrypted secrets yet, setup offers to import it into the [secret store](../../configuration/secrets/)
+and delete the plaintext copy. It runs `kunj secret import ~/.kunj/<repo>/keep/.env --delete`, which
+lists the names and asks once more. Answer no and it prints that command for later; a failed import
+(for example a store it cannot open) is a warning and setup carries on.
+
+## 4. Companion apps (optional)
 
 Finally it offers the companion apps as a checklist, the same one `kunj install` shows: the VS Code
 extension and, on macOS, the menu bar app. Apps that are already installed are listed as

@@ -188,6 +188,56 @@ describe('list', () => {
     expect(out()).not.toMatch(/g-value|r-value|b-value/);
   });
 
+  describe('the kept .env import hint', () => {
+    function keepEnv(): string {
+      const kept = path.join(dirs.kunj, 'keep', '.env');
+      fs.mkdirSync(path.dirname(kept), { recursive: true });
+      fs.writeFileSync(kept, 'A=1\n');
+      return kept;
+    }
+
+    test('with no secrets and a kept .env, text output suggests the import', async () => {
+      const kept = keepEnv();
+      await cmd().execute('list', [], {});
+      expect(out()).toContain(`Found a kept .env: kunj secret import ${kept} --delete`);
+    });
+
+    test('a path under the home directory is shown with ~', async () => {
+      keepEnv();
+      await cmd({ home: () => dirs.home }).execute('list', [], {});
+      expect(out()).toContain('Found a kept .env: kunj secret import ~/.kunj/app/keep/.env --delete');
+    });
+
+    test('--json prints only the bare SecretListJson', async () => {
+      keepEnv();
+      await cmd().execute('list', [], { json: true });
+      expect(JSON.parse(out())).toEqual({ secrets: [] });
+      expect(out()).not.toMatch(/kept/);
+    });
+
+    test('no hint once the repo has a secret, without a kept .env, or with --global/--branch', async () => {
+      await cmd().execute('list', [], {});
+      expect(out()).not.toMatch(/kept \.env/);
+      keepEnv();
+      stdout = [];
+      await cmd().execute('list', [], { global: true });
+      await cmd().execute('list', [], { branch: 'feature/x' });
+      expect(out()).not.toMatch(/kept \.env/);
+      await cmd().execute('set', ['R'], {});
+      stdout = [];
+      await cmd().execute('list', [], {});
+      expect(out()).not.toMatch(/kept \.env/);
+    });
+
+    test('a global secret alone does not hide the hint (the repo still has none)', async () => {
+      const kept = keepEnv();
+      await cmd().execute('set', ['G'], { global: true });
+      stdout = [];
+      await cmd().execute('list', [], {});
+      expect(out()).toContain(`kunj secret import ${kept} --delete`);
+    });
+  });
+
   test('with no vault it lists nothing and unlocks nothing', async () => {
     const getUnlock = jest.fn();
     await cmd({ unlock: { mode: 'auto', env: {}, platform: 'darwin', run: keychainRun, prompt: getUnlock } }).execute('list', [], { json: true });

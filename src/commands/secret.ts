@@ -4,6 +4,7 @@
 
 import chalk from 'chalk';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { getGlobalKunjDir, getKunjDir } from '../lib/config';
@@ -32,6 +33,15 @@ interface SecretOptions {
   force?: boolean;
 }
 
+// The import that moves this repository's kept .env into the vault (`~` for the home directory),
+// or undefined when there is no kept .env. Shared with `kunj setup`.
+export function keptEnvImportCommand(home: string = os.homedir()): string | undefined {
+  if (!hasKeptFile('.env')) return undefined;
+  const kept = path.join(getKeepDir(), '.env');
+  const shown = kept.startsWith(home + path.sep) ? '~' + kept.slice(home.length) : kept;
+  return `kunj secret import ${shown} --delete`;
+}
+
 type Scope = { global: true } | { global: false; branch?: string };
 type ScopeName = SecretListJson['secrets'][number]['scope'];
 
@@ -46,6 +56,7 @@ export interface SecretCommandDeps {
   worktreeRoot?: () => Promise<string>;
   worktrees?: () => Promise<Array<{ path: string; branch: string | null }>>;
   cwd?: () => string;
+  home?: () => string;
 }
 
 const ACTIONS = ['set', 'import', 'list', 'get', 'rm', 'env', 'apply'];
@@ -192,10 +203,11 @@ export class SecretCommand extends BaseCommand {
       this.outputJSON({ secrets: rows } satisfies SecretListJson);
       return;
     }
-    if (rows.length === 0) {
-      this.log(chalk.gray('No secrets'));
-      return;
-    }
+    // Migration: a repo with no secrets of its own but a plaintext keep .env is told how to move it.
+    const hint = branch === undefined && !opts.global && repo.length === 0 ? keptEnvImportCommand(this.deps.home ? this.deps.home() : undefined) : undefined;
+    if (rows.length === 0) this.log(chalk.gray('No secrets'));
+    if (hint) this.log(chalk.yellow(`Found a kept .env: ${hint}`));
+    if (rows.length === 0) return;
     const width = Math.max(...rows.map((r) => r.name.length));
     for (const r of rows) {
       const where = r.scope === 'branch' ? `branch ${r.branch}` : r.scope;

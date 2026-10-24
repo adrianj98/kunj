@@ -48,7 +48,9 @@ Restored 2 keep file(s): .env, config/credentials/development.key
 
 <Aside type="caution">
 Keep files are plain copies in your home directory. They are not encrypted and are not shared with
-anyone; treat `~/.kunj` with the same care as the files themselves.
+anyone; treat `~/.kunj` with the same care as the files themselves. For a `.env` of credentials, the
+[secret store](../../configuration/secrets/) keeps the values encrypted and still writes `.env` into
+new worktrees: `kunj secret import .env --delete`.
 </Aside>
 
 ## Commands

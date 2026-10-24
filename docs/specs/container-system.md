@@ -29,7 +29,7 @@ the host).*
 | Workspace IDE (phase 3) | CLI contract shipped; app proposed | [workspace-ide.md](workspace-ide.md) |
 | Containers in the VS Code extension and the macOS app | In progress | [containers-in-apps.md](containers-in-apps.md) |
 | Remote Docker host (`kunj serve`) | Not started | — |
-| Secret manager (`kunj secret`, `kunj run`, delivery to containers and worktrees) | Designed, not started | [Secrets](#secrets) below |
+| Secret manager (`kunj secret`, `kunj run`, delivery to containers and worktrees) | Shipped | [Secrets](#secrets) below |
 
 ## Rules every part follows
 
@@ -67,11 +67,11 @@ itself when Docker is unavailable.
 
 ## Secrets
 
-*Designed 2026-10-23; in progress.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
+*Designed 2026-10-23; shipped 2026-10-24.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, 6c08cd1 and its review fix) and host delivery (`kunj run`, `kunj agent` and `kunj worktree shell` under `kunj run`, file deliveries on `worktree add`; `src/commands/run.ts`, `src/lib/secrets/host.ts`, 4a15833 and its review fix) and container delivery (`StartOptions.secrets` in `src/lib/container/lifecycle.ts`, the `kunj.secrets` label, `secretsChanged` in `kunj ct list --json`, 8fd3733 and its review fix in 20c95f9); the migration hint and user docs (Task 8) are not. Today secrets reach a container only as host environment variables
-named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
-plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
+(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, 6c08cd1 and its review fix) and host delivery (`kunj run`, `kunj agent` and `kunj worktree shell` under `kunj run`, file deliveries on `worktree add`; `src/commands/run.ts`, `src/lib/secrets/host.ts`, 4a15833 and its review fix) and container delivery (`StartOptions.secrets` in `src/lib/container/lifecycle.ts`, the `kunj.secrets` label, `secretsChanged` in `kunj ct list --json`, 8fd3733 and its review fix in 20c95f9) and the migration hint, the `kunj setup` offer and the user docs (`docs-site/src/content/docs/configuration/secrets.mdx`, Task 8). Before it, secrets reached a container only as host environment variables
+named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travelled as
+plaintext keep files in `~/.kunj/<repo>/keep/`. That meant exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
 manager stores secrets once, encrypted, and kunj delivers each one only where it was told to.
 
@@ -211,8 +211,12 @@ or links to, a keep file it is removed from the keep store too, as is the keep c
   `secret-not-found`, `bad-name` (names must match `[A-Za-z_][A-Za-z0-9_]*`), `not-ignored`,
   `bad-dotenv` (a malformed line in an imported `.env`). A wrong
   passphrase is `secrets-locked` after three tries.
-- **Migration:** nothing changes for existing users. `container.env` and keep files keep working; when a
-  repo has a keep `.env` and no secrets, `kunj secret import` suggests it, and `kunj setup` offers it.
+- **Migration:** nothing changes for existing users. `container.env` and keep files keep working. When a
+  repo has a keep `.env` and no secrets of its own (none at repo or branch scope; global ones do not
+  count), `kunj secret list` (text output, not narrowed by `--global`/`--branch`) prints
+  `Found a kept .env: kunj secret import ~/.kunj/<repo>/keep/.env --delete`; `--json` stays a bare
+  `SecretListJson`. `kunj setup` offers the same import when the repo has no `secrets.enc` (decided
+  without unlocking); declining prints the command, and a failed import is a warning.
 - **Tests:** crypto round trip and tamper detection; dotenv parser table (quotes, `export`, multi-line,
   comments, `${X}` literal); resolution order; target filtering (a host-only secret never reaches the
   container env file); rendering, mode 0600, `.git/info/exclude`; the not-ignored refusal; a fake key
@@ -226,7 +230,9 @@ shapes) in `src/lib/json-types.ts`, `src/commands/run.ts` with `src/lib/secrets/
 `runAttached`), `kunjSelf`/`hostRunArgv`/`hostSecretEnv` in `src/lib/agent-session.ts` and `kunjEntry` in
 `src/lib/self.ts`, container delivery in `src/lib/container/lifecycle.ts` (`StartOptions.secrets`,
 `checkSecrets`, `secretFilePath`, `renderSecretFiles`, `secretsRebuildHint`), `LABEL.secrets` in `names.ts` and
-`containerSecrets()`/`secretsChanged` in `src/commands/container.ts`.
+`containerSecrets()`/`secretsChanged` in `src/commands/container.ts`, the migration hint
+(`keptEnvImportCommand()`) in `src/commands/secret.ts` and `offerSecretImport()` in `src/commands/setup.ts`.
+User docs: `docs-site/src/content/docs/configuration/secrets.mdx`.
 
 ## Roadmap
 

@@ -6,6 +6,10 @@ import * as path from 'path';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { InstallCommand } from './install';
+import { keptEnvImportCommand, SecretCommand } from './secret';
+import { getGlobalKunjDir, getKunjDir } from '../lib/config';
+import { getKeepDir } from '../lib/keep';
+import { vaultFiles } from '../lib/secrets/vault';
 
 export class SetupCommand extends BaseCommand {
   constructor() {
@@ -130,9 +134,40 @@ export class SetupCommand extends BaseCommand {
     // Ask about Jira integration
     await this.setupJiraIntegration();
 
+    await this.offerSecretImport();
+
     await this.offerCompanionApps();
 
     console.log(chalk.blue('\n🎉 Setup complete! Happy coding with kunj!'));
+  }
+
+  // Migration: a repository with a plaintext keep .env and no vault of its own is offered the import
+  // into the encrypted store. Deciding needs no unlock: only whether the repo's secrets.enc exists.
+  async offerSecretImport(deps: {
+    confirm?: (message: string) => Promise<boolean>;
+    runImport?: (file: string) => Promise<void>;
+    home?: () => string;
+  } = {}): Promise<void> {
+    const command = keptEnvImportCommand(deps.home ? deps.home() : undefined);
+    if (!command || fs.existsSync(vaultFiles(getKunjDir(), getGlobalKunjDir()).repo)) return;
+    const kept = path.join(getKeepDir(), '.env');
+    console.log(chalk.blue('\n\n🔐 Secrets (Optional)'));
+    console.log(chalk.gray(`This repository keeps a plaintext .env (${kept}); the secret store keeps it encrypted and still writes .env into new worktrees\n`));
+    const confirm = deps.confirm ?? (async (message: string) => {
+      const { answer } = await inquirer.prompt([{ type: 'confirm', name: 'answer', message, default: true }]);
+      return answer as boolean;
+    });
+    if (!(await confirm('Import the kept .env into the secret store and delete the plaintext copy?'))) {
+      console.log(chalk.gray(`  Later: ${command}`));
+      return;
+    }
+    const runImport = deps.runImport ?? ((file: string) => new SecretCommand().execute('import', [file], { delete: true }));
+    try {
+      await runImport(kept);
+    } catch (error) {
+      console.log(chalk.yellow(`⚠ ${error instanceof Error ? error.message : String(error)}`));
+      console.log(chalk.gray(`  Try again later with: ${command}`));
+    }
   }
 
   private async offerCompanionApps(): Promise<void> {

@@ -270,6 +270,8 @@
 
 ### Task 8: Migration prompts and docs
 
+**Status: done** (Task 8 commit "Secrets: import hint, setup offer, docs"). Rulings in the ledger. As built: `keptEnvImportCommand(home?)` (exported from secret.ts, `~` for the home directory) is shared by the `list` hint and `SetupCommand.offerSecretImport()`; the hint shows when the repo vault has no entries (global secrets do not hide it), also under `No secrets`; setup asks only when the repo has no `secrets.enc` (no unlock to decide), runs `kunj secret import <keep>/.env --delete` (which asks again with the names), prints the command on no and warns on a failed import. User docs: `docs-site/src/content/docs/configuration/secrets.mdx`, plus links from agent, keep files, setup, files-and-data and container security pages.
+
 **Files:**
 - Modify:
   - `src/commands/secret.ts`: `list` (no `--global`/`--branch` narrowing, text mode only; `--json` stays a bare `SecretListJson`) with no secrets and a keep `.env` (`hasKeptFile('.env')`) prints `Found a kept .env: kunj secret import ~/.kunj/<repo>/keep/.env --delete`.
@@ -282,7 +284,7 @@
   - `aj-log.md`
 - Test: `src/commands/__tests__/secret.test.ts` (the hint)
 
-- [ ] **Step 1:** Failing test: `list` with an empty vault and a keep `.env` prints the import hint, and prints nothing extra with `--json`.
-- [ ] **Step 2:** Implement the hint and the setup offer. Run `npm test`. Expected: PASS.
-- [ ] **Step 3:** Update the docs listed above and run `cd docs-site && npm run gen`.
-- [ ] **Step 4:** Commit and push: `git commit -m "Secrets: import hint, setup offer, docs"`.
+- [x] **Step 1:** Failing test: `list` with an empty vault and a keep `.env` prints the import hint, and prints nothing extra with `--json`.
+- [x] **Step 2:** Implement the hint and the setup offer. Run `npm test`. Expected: PASS.
+- [x] **Step 3:** Update the docs listed above and run `cd docs-site && npm run gen`.
+- [x] **Step 4:** Commit and push: `git commit -m "Secrets: import hint, setup offer, docs"`.

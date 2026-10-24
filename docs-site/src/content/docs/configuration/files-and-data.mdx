@@ -18,6 +18,7 @@ each repository gets a directory of its own.
   - repos.json repositories kunj has been used in
   - worktree-sessions.json editor windows and the worktrees they have open
   - pr-cache.json pull requests, cached for 60 seconds
+  - secrets.enc global secrets, encrypted
   - hooks/ global hook scripts
     - pre-commit
   - presets/ your own container blueprint presets
@@ -26,6 +27,7 @@ each repository gets a directory of its own.
     - config.json settings for this repository
     - branches.json branch descriptions, tags, notes and stash history
     - blueprint.json host copy of the container blueprint (optional)
+    - secrets.enc repo and branch secrets, encrypted
     - hooks/ hook scripts for this repository
       - post-worktree-create
       - post-worktree-create.d/
@@ -62,6 +64,7 @@ the first time (see [Configuration](../overview/#coming-from-an-older-version)).
 | `worktree-sessions.json` | Editor windows that registered a worktree: path, process id, host, editor, label | `kunj worktree session`, used by the [VS Code extension](../../worktrees/vscode-extension/) |
 | `pr-cache.json` | Each repository's pull requests from `gh`/`glab`, with the time they were fetched | `kunj worktree` (list and `pr`) |
 | `hooks/` | Hook scripts that run in every repository | `kunj hooks add --global`, you |
+| `secrets.enc` | Global [secrets](../secrets/), encrypted | `kunj secret --global` |
 | `presets/` | `<name>.sh` presets for [container blueprints](../../containers/overview/), used before the built-in ones | you |
 
 `repos.json` is what the [macOS app](../../worktrees/macos-app/) shows. A repository removed with
@@ -79,6 +82,7 @@ a day.
 | `config.json` | This repository's settings, merged over the global ones | `kunj config`, you |
 | `branches.json` | Per-branch metadata: description, tags, notes, related issues, stash history, when you last switched to it, its pull request URL, Jira issue and git-flow details | `kunj create`, `switch`, `stash`, `pr` and the other branch commands |
 | `blueprint.json` | A container blueprint used when the repository has none committed | `kunj ct blueprint init --global`, you |
+| `secrets.enc` | This repository's and its branches' [secrets](../secrets/), encrypted | `kunj secret` |
 | `hooks/` | Hook scripts for this repository | `kunj hooks add`, you |
 | `keep/` | [Keep files](../../worktrees/keep-files/), stored under their path in the worktree | `kunj worktree keep` |
 | `work-logs/` | One Markdown file per day, `YYYY-MM-DD.md`, with your commits and standup notes | `kunj commit`, `kunj pr`, `kunj log` |
@@ -119,6 +123,7 @@ What deleting each one costs you:
 
 <Aside type="caution">
 `keep/` and `config.json` can hold secrets: `.env` files, and API tokens such as `jira.apiToken` or
-`slack.token`. kunj stores them in plain text, readable by your user account. Keep `~/.kunj` out of
+`slack.token`. kunj stores them in plain text, readable by your user account. `secrets.enc` (global, and one per
+repository) is the exception: it is encrypted, see [Secrets](../secrets/). Keep `~/.kunj` out of
 dotfile repositories and backups you share.
 </Aside>

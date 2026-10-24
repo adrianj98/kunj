@@ -160,6 +160,10 @@ Secrets travel one way only: in the environment of `docker run`, written to a te
 only you can read and deleted as soon as the container exists. They never appear on a command line
 (so not in `ps`), in a `docker exec -e`, or in the container's labels.
 
+Secrets from the [secret store](../../configuration/secrets/) whose targets include `container`
+join the same environment (and their file deliveries are written into `/workspace` and excluded from
+git); host-only ones never reach a container.
+
 Only the variables `container.env` names are forwarded, and only when they are set on your machine.
 The defaults are the model credentials and a GitHub token:
 

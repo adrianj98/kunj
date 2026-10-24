@@ -47,12 +47,12 @@ page only says where each thing stands.
 | Workspace app v1 (native): `workspace-app/` (AppKit, SwiftTerm, Monaco): environments of every repo, terminals and agent tabs kept per environment, Changes column, editor tabs, actions and New session, layout restore, settings and themes; `kunj install workspace` and the release job; user docs | [workspace-ide.md](workspace-ide.md#architecture) | ace71b1, 0e8ab41, e6feedc, 53fdf6b, 8f49f54, 831d215, 95410df, d7b79fa, f3c01a5, a4ec693, 5158fe4, 45756ae, 062d22d, 2d972db, 54a0685, fb62af9, 7d497a6, f44b785; reviews 29be7f1, 3c0627d, 5e4a829, 7808f6f and c09bbd7; final review fixes 22336bb; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` |
 | Specs merged into one folder and checked against the code | this folder | f3a5e35, d1eea00 |
 | Native IDE spike: SwiftTerm handles five live Claude TUIs (6% CPU idle), Monaco diff in one WKWebView in under 1 s, menu shortcuts work with the webview focused; caveat: hidden tabs still parse on the main thread | [spikes/native-ide/REPORT.md](../../spikes/native-ide/REPORT.md) | 1c2aaa3, 1730cd1, 0e41a24 |
+| Secret manager: `kunj secret` (encrypted global, repo and branch secrets; `.env` import), `kunj run`, delivery to host commands, agents, new worktrees and branch containers, the kept `.env` import hint and `kunj setup` offer, user docs; plan `docs/superpowers/plans/2026-10-23-secret-manager.md` | [container-system.md](container-system.md#secrets) | c2a722f, d2c82e4, 1429ed9, bc006de, 8901b6b, 6b63a50, 009958c, a10f544, 6c08cd1, 70b398d, 4a15833, 8fd3733, 20c95f9, 45a9e6b, Task 8 ("Secrets: import hint, setup offer, docs") |
 
 ## In progress
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Plan `docs/superpowers/plans/2026-10-23-secret-manager.md`. Task 1 (dotenv parser, rulings in the spec), Task 2 (encrypted vault), Task 3 (key providers) and Task 4 (resolution, host file rendering; 009958c + review fix) and Task 5 (`kunj secret`; 6c08cd1 + review fix) and Task 6 (`kunj run`, host delivery for `agent`, `worktree shell` and `worktree add`; 4a15833) and Task 7 (container delivery: env file, rendered files, `kunj.secrets`, `secretsChanged`; 8fd3733 + review fix 20c95f9) done; Task 8 left |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
 
 ## To do

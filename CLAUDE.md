@@ -149,6 +149,8 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj container [start|shell|exec|agent|attach|open|forward|logs|list|stop|remove|prune|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj ct token status [--json]` - Where a new container's GitHub token comes from (`ContainerTokenStatusJson`; never prints the token)
+- `kunj secret [set|import|list|get|rm|env|apply]` - Encrypted secrets (global, repo, branch) and where they go: host commands, worktree files, branch containers (see Secrets under Branch Containers)
+- `kunj run [--branch b] [--hold] -- <cmd…>` - Run a host command with the branch's host secrets in its environment
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
 - `kunj events [--json] [--repo <path>...]` - Stream changes to worktrees, containers and agents as NDJSON (see Events below)
@@ -405,6 +407,37 @@ the wrong user: presets as root, `setup`/`maintain` as the sandbox user (`sh -lc
 ENV), a snapshot via the bundle (no `git clone git://` exec, seed HEAD is origin's; the host reaches
 the git daemon through `core.gitProxy`), a start from it (no clone, `maintain` ran, origin URL), the stale hint, `--no-snapshot`, a failing
 `setup` leaving nothing behind, and `removeSnapshots`.
+
+**Secrets:** `kunj secret` (src/commands/secret.ts) and `kunj run` (src/commands/run.ts), both on the
+fast path, over `src/lib/secrets/{dotenv,vault,errors,keyprovider,resolve,deliver,host}.ts`. Design:
+docs/specs/container-system.md#secrets. Global secrets in `~/.kunj/secrets.enc` (env only), repo and
+branch ones in `~/.kunj/<repo>/secrets.enc`: a JSON envelope, AES-256-GCM with `version`/`kdf`/`salt` as
+AAD, atomic 0600 writes; a file that does not parse or decrypt is `secrets-corrupt` and never
+replaced. The key: Keychain item `kunj-secrets`/`kunj` (written through `security -i` on stdin, added
+without `-U` and read back), `secret-tool` on Linux, else the scrypt `passphrase` kdf;
+`KUNJ_SECRETS_KEY` opens keychain-kdf files; `secrets.keyProvider` picks the provider for a new vault,
+an existing file's kdf decides how it opens, and a new key is made only when no vault file exists.
+Resolution is global → repo → branch (most specific wins), then filtered by target (`host`,
+`container`). A value is never in argv, `docker exec -e`, a label, `--json` (`get`/`env` refuse it) or a
+snapshot. Only commands that deliver or manage secrets unlock, and only when a `secrets.enc` exists;
+listings (`worktree list`, `ct list`, `events`) never do. Tests use a fixed `KUNJ_SECRETS_KEY` or a
+fake `Runner`/prompt, never the real Keychain. Error codes (`SecretError`, no stack trace):
+`secrets-locked`, `secrets-corrupt`, `secret-not-found`, `bad-name`, `not-ignored`, `bad-dotenv`.
+Host: `kunj agent` and `kunj worktree shell` run their tmux command as the argv array
+`hostRunArgv()` = `<node> <kunj> run --hold --branch <b> -- <shell> -lc <cmd>` (the vault is unlocked
+inside the session; without tmux, in-process); `worktree add` renders file deliveries after keep files
+(failures are warnings). Rendered host files that git does not ignore are refused (`not-ignored`)
+unless `--force`; paths outside the worktree, through a symlinked directory or inside `.git` are
+refused always. Containers: container-targeted env secrets join the `docker run` env file only on
+create (a multi-line value or a bad file path is refused by `checkSecrets()` before the create hook and
+the snapshot), so a changed env secret needs `ct start --rebuild` (the start output hints;
+`secretsChanged` in `ct list --json` only, from the `kunj.secrets` label vs. a stamp of the
+`secrets.enc` bytes, computed without unlocking); file deliveries are re-rendered as the sandbox user
+(mode 0600, anchored line in `.git/info/exclude`) on every `ct start` and on an `open` that resumes;
+`kunj ct agent` loads none, snapshots get none, and `kunj ct token status` does not know about a stored
+`GH_TOKEN` (it would have to unlock). Migration: `kunj secret list` (text, no `--global`/`--branch`)
+prints the `kunj secret import ~/.kunj/<repo>/keep/.env --delete` hint when the repo has no secrets and
+a keep `.env`; `kunj setup` offers that import when the repo has no `secrets.enc`.
 
 ## Repository Registry & macOS App
 
