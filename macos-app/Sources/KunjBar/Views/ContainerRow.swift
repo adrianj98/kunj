@@ -149,7 +149,7 @@ struct ContainerRow: View {
             Button("Forward Ports Automatically") { store.autoForward(container, in: repo) }
             if !container.ports.isEmpty {
                 Menu("Ports") {
-                    ForEach(container.ports, id: \.host) { port in
+                    ForEach(container.ports, id: \.self) { port in
                         Button(port.label) { Launcher.openURL("http://localhost:\(port.host)") }
                     }
                 }

@@ -110,7 +110,7 @@ export interface BranchListResult {
   branches: Array<{ name: string; current: boolean; lastActivity: string | null; description: string | null }>;
 }
 
-function resolveCommand(): { command: string; leadingArgs: string[] } {
+export function resolveCommand(): { command: string; leadingArgs: string[] } {
   const configured = (vscode.workspace.getConfiguration('kunj').get<string>('cliPath') || 'kunj').trim();
   // Allow "node /path/to/kunj/dist/index.js" style values
   const parts = configured.match(/(?:[^\s"]+|"[^"]*")+/g) || [configured];

@@ -159,6 +159,21 @@ struct WorktreeListResult: Codable {
     let worktrees: [Worktree]
     // Only with --containers
     let containers: ContainerListing?
+
+    enum CodingKeys: String, CodingKey {
+        case repoRoot, currentPath, pullRequestLookup, pullRequestsFromCache, worktrees, containers
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        repoRoot = try c.decode(String.self, forKey: .repoRoot)
+        currentPath = try c.decodeIfPresent(String.self, forKey: .currentPath)
+        pullRequestLookup = try c.decodeIfPresent(String.self, forKey: .pullRequestLookup)
+        pullRequestsFromCache = try c.decodeIfPresent(Bool.self, forKey: .pullRequestsFromCache)
+        worktrees = try c.decode([Worktree].self, forKey: .worktrees)
+        // Containers never cost the worktrees: a shape this app cannot read just hides them
+        containers = try? c.decodeIfPresent(ContainerListing.self, forKey: .containers)
+    }
 }
 
 struct ContainerOpenResult: Codable {

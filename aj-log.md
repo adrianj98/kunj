@@ -2,6 +2,12 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-24 — Review fixes for the container rows
+
+- macOS: a container listing the app cannot decode no longer drops the repository's worktrees; port rows are
+  identified by the whole port, not the host port (published and forwarded can share it). VS Code: terminal command
+  lines quote `kunj.cliPath` split like the CLI wrapper (paths with spaces, `node …/index.js`). Why: adversary review.
+
 ## 2026-10-24 — macOS menu bar app: containers as rows
 
 - Container rows (`ContainerRow`) next to the worktrees, ordered by `interleavePlaces()` in KunjBarCore (tested): a

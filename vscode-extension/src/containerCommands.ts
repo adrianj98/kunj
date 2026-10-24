@@ -4,7 +4,7 @@
 // (stop, open, auto-forward) through the CLI's JSON.
 
 import * as vscode from 'vscode';
-import { BranchContainer, KunjCli, KunjCliError } from './kunjCli';
+import { BranchContainer, KunjCli, KunjCliError, resolveCommand } from './kunjCli';
 import { ContainerNode, PortNode, WorktreeProvider, prBadge } from './worktreeProvider';
 
 export interface ContainerCommandDeps {
@@ -19,9 +19,11 @@ export function shellArg(value: string): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+// kunj.cliPath split the way the CLI wrapper splits it ("node /path/index.js", or a quoted path
+// with spaces), every part quoted for the shell
 export function kunjCommandLine(args: string[]): string {
-  const cliPath = (vscode.workspace.getConfiguration('kunj').get<string>('cliPath') || 'kunj').trim();
-  return [cliPath, ...args.map(shellArg)].join(' ');
+  const { command, leadingArgs } = resolveCommand();
+  return [command, ...leadingArgs, ...args].map(shellArg).join(' ');
 }
 
 // An interactive terminal: the user stays in it (shell, agent, a foreground forward)
