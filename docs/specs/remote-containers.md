@@ -12,7 +12,7 @@ later phase.
 | --- | --- |
 | Spec | Written, not reviewed |
 | `container.dockerContext` over SSH validated end to end (prerequisite, no code) | Not started |
-| Protocol and `RemoteKunjBackend` (client) over an in-process server with `FakeBackend` | Not started |
+| Protocol and `RemoteKunjBackend` (client) over an in-process server with `FakeBackend` | Shipped: unary calls, exec/copy/build/logs/events streams; `npm run test:remote` runs the container suites over the wire |
 | `kunj serve` (server) | Not started |
 | `kunj remote add\|list\|remove\|ping`, `container.remote`, `--remote` | Not started |
 | TTY exec over the WebSocket (`shell`, `attach`, `agent`): raw-mode client, resize frames, Engine API on the server | Not started |
@@ -141,15 +141,15 @@ Errors are `{ error: { code, message } }` with the HTTP status; the client rethr
 | `ContainerBackend` | Route |
 | --- | --- |
 | `info()` | `GET /v1/engine` |
-| `contextName()` | `GET /v1/engine` (`context`) |
+| `contextName()` | `GET /v1/engine/context` |
 | `features` | `GET /v1/info` (`features`), fetched once per process, lazily |
 | `imageExists`, `listImages`, `removeImage` | `GET /v1/images/:tag`, `GET /v1/images?label=…&reference=…`, `DELETE /v1/images/:tag` |
-| `buildImage(tag, context, opts)` | `POST /v1/images/:tag/build` (chunked tar body; `X-Kunj-Build: <json opts>`; response streams build output lines) |
+| `buildImage(tag, context, opts)` | `POST /v1/images/:tag/build` (chunked tar body; `X-Kunj-Build: <json opts>`; the build's output goes to the server's log, the reply is the result) |
 | `commitContainer` | `POST /v1/containers/:id/commit` |
 | `createNetwork`, `listNetworks` | `POST /v1/networks`, `GET /v1/networks?label=…` |
 | `createVolume`, `volumeExists`, `listVolumes` | `POST /v1/volumes`, `GET /v1/volumes/:name`, `GET /v1/volumes?label=…` |
 | `run(spec)` | `POST /v1/containers` (body: the spec, env included) → `{ id }` |
-| `list`, `inspectLabels`, `containerState`, `containerRun` | `GET /v1/containers?label=…`, `GET /v1/containers/:id/labels`, `GET /v1/containers/:id/state` |
+| `list`, `inspectLabels`, `containerState`, `containerRun` | `GET /v1/containers?label=…`, `GET /v1/containers/:id/labels`, `GET /v1/containers/:id/state` (`containerState` is `containerRun` without `startedAt`) |
 | `start`, `stop` | `POST /v1/containers/:id/start`, `POST /v1/containers/:id/stop` |
 | `remove(ids)` | `POST /v1/remove` (body: the id lists) |
 | `copyIn(id, dir, tar)` | `POST /v1/containers/:id/copy?dir=…` (chunked tar body) |
@@ -203,21 +203,28 @@ logged.
 
 ## What the server refuses
 
-The server is not a Docker proxy. Every id it is given must be an object kunj made:
+The server is not a Docker proxy: it may *act* only on objects kunj made, while reading is open to the
+token holder (who is root-equivalent on kunj's containers anyway, and whose `prune` needs to see every
+container to know which images are in use).
 
-- `exec`, `start`, `stop`, `remove`, `copyIn`, `commit`, `logs`, `inspectLabels`, `containerState`:
-  the container must carry the label `kunj.repo` (one `inspect`, cached 5 s per id). Volumes and
-  networks in `remove` must carry `kunj.repo` too.
-- `run`: the spec's labels must include `kunj.repo`; `privileged` and `runtime` are refused unless the
-  server was started with `--allow-privileged` / `--allow-runtime sysbox-runc`, and `features.dockerInDocker`
-  reports only what is allowed, so the client's `checkDind()` refuses before it tries.
-- `buildImage`, `commitContainer`, `removeImage`: the tag must start with `kunj-`.
-- `list`, `listImages`, `listVolumes`, `listNetworks`, `events`: the filter must include a `kunj.*`
-  label (`kunj.repo`, or `kunj.managed` for prune's orphan scan).
-- Bodies above 1 MB (except the streaming tar bodies), label keys outside `kunj.*` on create, and
-  `spec.publish` entries whose host port is not loopback-bound are refused. Published ports bind to the
-  box's loopback and are useless from the laptop; `forward` is the way to reach them, so the server
-  says so.
+- `exec`, `start`, `stop`, `remove`, `copyIn`, `commit`, `logs`, `containerState`/`containerRun`: the
+  container must carry the label `kunj.repo`, or not exist (the backend then answers as it does
+  locally: null, or `docker exec`'s own error). A kunj container's labels are cached 5 s per id; a
+  missing one is never cached, because it may be created a moment later. Volumes and networks in
+  `remove` must carry `kunj.repo` too.
+- `run`: the spec's labels must include `kunj.repo` and only `kunj.*` keys; `privileged` and `runtime`
+  are refused unless the server was started with `--allow-privileged` / `--allow-runtime sysbox-runc`,
+  and `features.dockerInDocker` reports only what is allowed, so the client's `checkDind()` refuses
+  before it tries. `spec.image` is whatever the branch chose (a devcontainer, `container.image`).
+  `spec.publish` is allowed: docker.ts binds published ports to the box's loopback, where they are
+  useless from the laptop but harmless; `forward` is the way to reach a port.
+- `buildImage`, `commitContainer`, `removeImage`: the tag must start with `kunj-`. `imageExists` is
+  open (lifecycle asks about the branch's image, whatever it is).
+- `inspectLabels` is open: lifecycle reads a foreign container's labels to report a name collision.
+- `events`: the filter must include a `kunj.*` label. Listings (`list`, `listImages`, `listVolumes`,
+  `listNetworks`) are open, scoped or not.
+- JSON bodies above 1 MB (the streaming tar bodies are not limited), and label keys outside `kunj.*`
+  on `createVolume`/`createNetwork`, are refused.
 
 ## Client side
 
@@ -288,9 +295,14 @@ v1; if a listing turns out slow, the first batch is a `GET /v1/containers?label=
 ## Testing
 
 - **Unit:** `src/lib/serve/__tests__/` starts the server in-process on an ephemeral loopback port with
-  `FakeBackend` behind it and runs `RemoteKunjBackend` against it; the existing lifecycle, forward,
-  services, snapshot and prune tests are parametrised to run against both `FakeBackend` and
-  `RemoteKunjBackend`-over-`FakeBackend`, so every stream and every error text crosses the wire once.
+  `FakeBackend` behind it and runs `RemoteKunjBackend` against it. The fake-based suites (lifecycle,
+  services, snapshot, prune, forward, autoforward, files, dind, presets, MCP bridge) build their backend
+  with `testBackend()` (`remote-harness.ts`): the plain fake, or with `KUNJ_TEST_REMOTE=1`
+  (`npm run test:remote`) a proxy whose backend methods cross the wire to one server per test file while
+  its fake fields (`existing`, `calls`, `execResults`, …) stay the test's. The server's guard reads the
+  fake's labels directly so `calls` stays what the test expects, a method a test replaced on the
+  instance runs on the client side, and the few tests that compare stream objects or assert the moment
+  a call returns are `itLocal` (skipped over the wire).
   The TTY channel is tested with a fake terminal (a duplex pair standing in for `process.stdin/stdout`,
   `setRawMode` recorded) against `FakeBackend`'s `execTty`: raw mode on and off on every exit path,
   the first `resize`, `SIGWINCH` → `resize`, `0x03` passed through, exit code, refused env names. Auth:

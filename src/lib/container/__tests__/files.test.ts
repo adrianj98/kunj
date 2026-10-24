@@ -1,5 +1,6 @@
 import { Readable } from 'stream';
 import { FakeBackend } from './fake-backend';
+import { testBackend } from './remote-harness';
 import { readWorkspaceFile, validateWorkspacePath, writeWorkspaceFile } from '../files';
 
 describe('validateWorkspacePath', () => {
@@ -15,7 +16,7 @@ describe('workspace files', () => {
   const READ = 'sh -c cat -- "$1" sh src/a.ts';
 
   test('read runs cat as the sandbox user in /workspace', async () => {
-    const backend = new FakeBackend();
+    const backend = testBackend();
     backend.execResults.set(READ, { exitCode: 0, stdout: 'hello' });
     expect(await readWorkspaceFile(backend, 'c1', 'src/a.ts', 'dev')).toBe('hello');
     const [id, cmd, io] = backend.callsOf('exec')[0] as [string, string[], { user?: string; workdir?: string }];
@@ -25,13 +26,13 @@ describe('workspace files', () => {
   });
 
   test('read of a missing file is not-found', async () => {
-    const backend = new FakeBackend();
+    const backend = testBackend();
     backend.execResults.set(READ, { exitCode: 1, stdout: '' });
     await expect(readWorkspaceFile(backend, 'c1', 'src/a.ts')).rejects.toMatchObject({ code: 'not-found', jsonCode: 'not-found' });
   });
 
   test('write pipes stdin and creates the directory', async () => {
-    const backend = new FakeBackend();
+    const backend = testBackend();
     await writeWorkspaceFile(backend, 'c1', 'src/a.ts', Readable.from(['new']), 'dev');
     const [, cmd, io] = backend.callsOf('exec')[0] as [string, string[], { user?: string; workdir?: string }];
     expect(cmd[2]).toContain('mkdir -p');
@@ -42,7 +43,7 @@ describe('workspace files', () => {
   });
 
   test('a failing write is write-failed', async () => {
-    const backend = new FakeBackend();
+    const backend = testBackend();
     backend.execResults.set('sh -c mkdir -p -- "$(dirname -- "$1")" && cat > "$1" sh x', { exitCode: 1, stdout: '' });
     await expect(writeWorkspaceFile(backend, 'c1', 'x', Readable.from([]))).rejects.toMatchObject({ code: 'write-failed' });
   });

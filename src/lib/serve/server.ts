@@ -7,8 +7,10 @@ import * as http from 'http';
 import { AddressInfo } from 'net';
 import { URL } from 'url';
 import { ContainerBackend, ContainerSpec, Labels, isImageRef } from '../container/backend';
-import { Guard, GuardFlags } from './guard';
-import { EngineJson, ErrorBody, InfoJson, MAX_JSON_BODY, PROTOCOL_VERSION, ServeError, parseLabelQuery } from './protocol';
+import { Guard, GuardFlags, GuardLookup, backendLookup } from './guard';
+import { EngineJson, ErrorBody, InfoJson, PROTOCOL_VERSION, ServeError, parseLabelQuery } from './protocol';
+import { bearerOf, readJsonBody } from './http';
+import { StreamOptions, attachWebSockets, serveBuild, serveCopyIn } from './streams';
 import { tokenMatches } from './token';
 
 export interface ServeOptions {
@@ -20,6 +22,8 @@ export interface ServeOptions {
   allowRuntimes?: string[];
   /** One line per request (method, route, status, ms) and per refusal; never a body or a token. */
   log?: (line: string) => void;
+  /** How the guard reads labels (default: the backend); tests look the fake up directly */
+  guardLookup?: GuardLookup;
 }
 
 export interface ServeServer {
@@ -55,35 +59,6 @@ function matchRoute(pattern: string[], segments: string[]): Params | null {
   return params;
 }
 
-/** The JSON body, limited; an empty body is {}. */
-export function readJsonBody(req: http.IncomingMessage, limit = MAX_JSON_BODY): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on('data', (d: Buffer) => {
-      size += d.length;
-      if (size > limit) {
-        // Not destroyed: the 413 must still reach the client. Node closes the connection after
-        // the response and drops the rest of the body.
-        chunks.length = 0;
-        reject(new ServeError(413, 'too-large', `request body over ${limit} bytes`));
-        return;
-      }
-      chunks.push(d);
-    });
-    req.on('end', () => {
-      const text = Buffer.concat(chunks).toString();
-      if (!text.trim()) return resolve({});
-      try {
-        resolve(JSON.parse(text));
-      } catch {
-        reject(new ServeError(400, 'bad-request', 'body is not JSON'));
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
 function expect<T>(value: unknown, check: (v: unknown) => boolean, what: string): T {
   if (!check(value)) throw new ServeError(400, 'bad-request', `expected ${what}`);
   return value as T;
@@ -94,18 +69,10 @@ const isStringArray = (v: unknown): boolean => Array.isArray(v) && v.every(isStr
 const isLabels = (v: unknown): boolean =>
   !!v && typeof v === 'object' && !Array.isArray(v) && Object.values(v as object).every(isString);
 
-/** Picks the authorization header's bearer token, if any. */
-export function bearerOf(req: http.IncomingMessage): string | undefined {
-  const header = req.headers.authorization;
-  if (!header) return undefined;
-  const m = /^Bearer\s+(\S+)$/i.exec(header);
-  return m ? m[1] : undefined;
-}
-
 export function createServeServer(opts: ServeOptions): ServeServer {
   const { backend } = opts;
   const flags: GuardFlags = { allowPrivileged: !!opts.allowPrivileged, allowRuntimes: opts.allowRuntimes ?? [] };
-  const guard = new Guard(backend, flags);
+  const guard = new Guard(opts.guardLookup ?? backendLookup(backend), flags);
   const log = opts.log ?? (() => {});
 
   const routes: Route[] = [];
@@ -121,20 +88,19 @@ export function createServeServer(opts: ServeOptions): ServeServer {
   });
 
   route('GET', '/v1/engine', async () => {
-    const [engine, context] = await Promise.all([backend.info(), backend.contextName()]);
-    const out: EngineJson = { ...engine, context };
+    const out: EngineJson = await backend.info();
     return out;
   });
+  route('GET', '/v1/engine/context', async () => ({ context: await backend.contextName() }));
 
   // ---- images ----
   route('GET', '/v1/images', async (_req, _p, url) => {
     const filter = parseLabelQuery(url.searchParams);
-    guard.filter(filter);
     const references = url.searchParams.getAll('reference');
     return backend.listImages(filter, references.length ? { references } : undefined);
   });
   route('GET', '/v1/images/:tag', async (_req, p) => {
-    guard.image(p.tag);
+    if (!isImageRef(p.tag)) throw new ServeError(400, 'bad-request', 'expected an image reference');
     return { exists: await backend.imageExists(p.tag) };
   });
   route('DELETE', '/v1/images/:tag', async (_req, p) => {
@@ -153,9 +119,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     return {};
   });
   route('GET', '/v1/networks', async (_req, _p, url) => {
-    const filter = parseLabelQuery(url.searchParams);
-    guard.filter(filter);
-    return backend.listNetworks(filter);
+    return backend.listNetworks(parseLabelQuery(url.searchParams));
   });
   route('POST', '/v1/volumes', async req => {
     const body = await readJsonBody(req);
@@ -166,9 +130,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     return {};
   });
   route('GET', '/v1/volumes', async (_req, _p, url) => {
-    const filter = parseLabelQuery(url.searchParams);
-    guard.filter(filter);
-    return backend.listVolumes(filter);
+    return backend.listVolumes(parseLabelQuery(url.searchParams));
   });
   route('GET', '/v1/volumes/:name', async (_req, p) => ({ exists: await backend.volumeExists(p.name) }));
 
@@ -186,11 +148,10 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     return { id: await backend.run(spec) };
   });
   route('GET', '/v1/containers', async (_req, _p, url) => {
-    const filter = parseLabelQuery(url.searchParams);
-    guard.filter(filter);
-    return backend.list(filter);
+    return backend.list(parseLabelQuery(url.searchParams));
   });
-  route('GET', '/v1/containers/:id/labels', async (_req, p) => ({ labels: await guard.container(p.id) }));
+  // Unguarded: reading a foreign container's labels is how lifecycle reports a name collision
+  route('GET', '/v1/containers/:id/labels', async (_req, p) => ({ labels: await backend.inspectLabels(p.id) }));
   route('GET', '/v1/containers/:id/state', async (_req, p) => {
     await guard.container(p.id);
     const run = await backend.containerRun(p.id);
@@ -227,6 +188,11 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     for (const id of ids.containers ?? []) guard.forget(id);
     return {};
   });
+
+  // ---- streaming bodies ----
+  const streamOpts: StreamOptions = { backend, guard, token: opts.token, log };
+  route('POST', '/v1/containers/:id/copy', (req, p, url) => serveCopyIn(req, p.id, url, streamOpts));
+  route('POST', '/v1/images/:tag/build', (req, p) => serveBuild(req, p.tag, streamOpts));
 
   // ---- compose ----
   route('POST', '/v1/compose/config', async req => {
@@ -281,6 +247,8 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     sendError(res, new ServeError(404, 'not-found', `no route ${req.method} ${url.pathname}`));
   });
 
+  const sockets = attachWebSockets(server, streamOpts);
+
   return {
     http: server,
     guard,
@@ -294,6 +262,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
       }),
     close: () =>
       new Promise((resolve, reject) => {
+        sockets.close();
         server.closeAllConnections?.();
         server.close(err => (err ? reject(err) : resolve()));
       }),

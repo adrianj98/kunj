@@ -1,6 +1,7 @@
 import * as net from 'net';
 import { findFreePort, forwardPort, parseForwardSpec, parseTunnelProbe, tunnelCommand } from '../forward';
 import { FakeBackend } from './fake-backend';
+import { testBackend } from './remote-harness';
 
 function listen(port: number): Promise<net.Server> {
   return new Promise((resolve, reject) => {
@@ -76,7 +77,7 @@ describe('forwardPort nextFree', () => {
     const taken = await listen(0);
     const port = (taken.address() as net.AddressInfo).port;
     try {
-      const forwarder = await forwardPort(new FakeBackend(), 'cid', { container: port }, { hasSocat: true, nextFree: true });
+      const forwarder = await forwardPort(testBackend(), 'cid', { container: port }, { hasSocat: true, nextFree: true });
       try {
         expect(forwarder.hostPort).toBeGreaterThan(port);
         // an OS-assigned port would land anywhere in the ephemeral range
@@ -115,7 +116,7 @@ describe('tunnelCommand', () => {
 
 describe('forwardPort', () => {
   it('forwardPort pipes bytes through the backend exec', async () => {
-    const backend = new FakeBackend();
+    const backend = testBackend();
     backend.echoUpper = true;
     let connections = 0;
     const forwarder = await forwardPort(backend, 'ctr-1', { container: 3000, host: 0 }, {
@@ -135,14 +136,14 @@ describe('forwardPort', () => {
   });
 
   it('close() stops accepting', async () => {
-    const backend = new FakeBackend();
+    const backend = testBackend();
     const forwarder = await forwardPort(backend, 'ctr-1', { container: 3000, host: 0 }, { hasSocat: true });
     await forwarder.close();
     await expect(roundTrip(forwarder.hostPort, 'x')).rejects.toMatchObject({ code: 'ECONNREFUSED' });
   });
 
   it('close() ends connections that are still open', async () => {
-    const backend = new FakeBackend();
+    const backend = testBackend();
     const forwarder = await forwardPort(backend, 'ctr-1', { container: 3000, host: 0 }, { hasSocat: true });
     const closed = new Promise<void>((resolve, reject) => {
       const socket = net.connect(forwarder.hostPort, '127.0.0.1', async () => {
@@ -158,7 +159,7 @@ describe('forwardPort', () => {
   });
 
   it("a reset connection ends the exec's stdin", async () => {
-    const backend = new FakeBackend();
+    const backend = testBackend();
     const forwarder = await forwardPort(backend, 'ctr-1', { container: 3000, host: 0 }, { hasSocat: true });
     try {
       const socket = net.connect(forwarder.hostPort, '127.0.0.1', () => socket.write('partial'));
@@ -173,7 +174,7 @@ describe('forwardPort', () => {
   });
 
   it('a socket error does not crash the process', async () => {
-    const backend = new FakeBackend();
+    const backend = testBackend();
     backend.echoUpper = true;
     const forwarder = await forwardPort(backend, 'ctr-1', { container: 3000, host: 0 }, { hasSocat: true });
     try {

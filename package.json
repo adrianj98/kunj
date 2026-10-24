@@ -19,6 +19,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "test:remote": "KUNJ_TEST_REMOTE=1 jest src/lib/container --testTimeout=20000 --forceExit",
     "test:docker": "jest --runInBand --testPathIgnorePatterns=/node_modules/ --testMatch='**/__tests__/**/*.docker.test.ts'",
     "test:functional": "KUNJ_FUNCTIONAL=1 jest -c jest.functional.config.js",
     "lint": "tsc --noEmit && tsc -p test/functional --noEmit",

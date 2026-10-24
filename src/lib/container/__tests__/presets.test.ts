@@ -6,12 +6,13 @@ import * as path from 'path';
 import { spawn, spawnSync } from 'child_process';
 import { PassThrough } from 'stream';
 import { FakeBackend } from './fake-backend';
+import { itLocal, testBackend } from './remote-harness';
 import { builtinPresetsDir, orderTools, presetHash, presetEnv, resolvePresets, runPresets, Preset, PRESET_DIR } from '../presets';
 
 // Fixture repositories and subprocesses: slow when the machine is busy
 jest.setTimeout(30000);
 
-const posixOnly = process.platform === 'win32' ? it.skip : it;
+const posixOnly = process.platform === 'win32' ? it.skip : itLocal;
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -104,7 +105,7 @@ describe('presets', () => {
     const preset = (name: string, text: string): Preset => ({ name, path: `/x/${name}.sh`, source: 'builtin', text, hash: 'h' });
     const presets = [preset('apt', 'echo apt\n'), preset('node', 'echo node\n')];
     const tools = { node: '22', apt: ['jq', "it's"] };
-    const backend = new FakeBackend();
+    const backend = testBackend();
     backend.execResults.set(`cat ${PRESET_DIR}/apt.result`, { exitCode: 0, stdout: "apt jq it's\n" });
     backend.execResults.set(`cat ${PRESET_DIR}/node.result`, { exitCode: 0, stdout: 'node 22.12.0\n' });
     const out = new PassThrough();
@@ -142,7 +143,7 @@ describe('presets', () => {
     expect(r.stdout).toBe("apt|jq it's|dev\n");
 
     // A failing preset stops the run with its exit code
-    const failing = new FakeBackend();
+    const failing = testBackend();
     failing.execResults.set(runs[1][1].join(' '), { exitCode: 3, stdout: '' });
     const noResult: string[] = [];
     await expect(runPresets(failing, 'c1', presets, tools, 'dev', {}, m => noResult.push(m))).rejects.toThrow('preset node failed (exit 3)');

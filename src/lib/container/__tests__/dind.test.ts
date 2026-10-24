@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 import { FakeBackend } from './fake-backend';
+import { testBackend } from './remote-harness';
 import { StartError } from '../errors';
 import { DIND_DOMAINS, DIND_IMAGE, checkDind, dindHostInfo, dindMode, isDockerDesktop } from '../dind';
 import { SANDBOX_IMAGE, assetHash } from '../image';
@@ -18,7 +19,7 @@ async function refusal(p: Promise<void>): Promise<StartError> {
 }
 
 describe('checkDind', () => {
-  const b = new FakeBackend();
+  const b = testBackend();
 
   it('allows off anywhere', async () => {
     await expect(checkDind(b, 'off', { allowPrivileged: false }, DESKTOP)).resolves.toBeUndefined();
@@ -52,7 +53,7 @@ describe('checkDind', () => {
   });
 
   it('refuses a mode the backend does not support', async () => {
-    const remote = new FakeBackend();
+    const remote = testBackend();
     (remote.features as { dockerInDocker: string[] }).dockerInDocker = [];
     const err = await refusal(checkDind(remote, 'sysbox', { allowPrivileged: false }, SYSBOX));
     expect(err.code).toBe('dind');
@@ -74,7 +75,7 @@ describe('dind helpers', () => {
   });
 
   it('dindHostInfo asks the backend for runtimes and the context', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.infoResult = { serverVersion: '27', runtimes: ['runc', 'sysbox-runc'], operatingSystem: 'Docker Desktop' };
     b.context = 'desktop-linux';
     expect(await dindHostInfo(b)).toEqual({ runtimes: ['runc', 'sysbox-runc'], context: 'desktop-linux', isDockerDesktop: true });

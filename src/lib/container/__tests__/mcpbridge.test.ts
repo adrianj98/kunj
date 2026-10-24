@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as childProcess from 'child_process';
 import { FakeBackend } from './fake-backend';
+import { itLocal, testBackend } from './remote-harness';
 import { ExecIO } from '../backend';
 import {
   BROWSER_TOOLS,
@@ -313,7 +314,7 @@ describe('installMcpConfig', () => {
   const READ = 'sh -c f="$HOME/.claude.json"; [ -e "$f" ] || exit 3; cat "$f"';
 
   it('writes the merged config as the user, keeping existing servers', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.execResults.set(READ, { exitCode: 0, stdout: JSON.stringify({ mcpServers: { other: { command: 'x' } } }) });
     await installMcpConfig(b, 'cid', 'sandbox', ['chrome']);
     const execs = b.callsOf('exec');
@@ -324,7 +325,7 @@ describe('installMcpConfig', () => {
   });
 
   it('creates the file when it is missing', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.execResults.set(READ, { exitCode: 3, stdout: '' });
     await installMcpConfig(b, 'cid', '', ['chrome']);
     expect((b.callsOf('exec')[0][2] as ExecIO).user).toBeUndefined();
@@ -332,14 +333,14 @@ describe('installMcpConfig', () => {
   });
 
   it('writes nothing when the entry is already there', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.execResults.set(READ, { exitCode: 0, stdout: mergeClaudeConfig(null, ['chrome'])! });
     await installMcpConfig(b, 'cid', 'sandbox', ['chrome']);
     expect(b.callsOf('exec')).toHaveLength(1);
   });
 
   it('throws when the file cannot be read', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.execResults.set(READ, { exitCode: 1, stdout: '' });
     await expect(installMcpConfig(b, 'cid', 'sandbox', ['chrome'])).rejects.toThrow(/Could not read/);
   });
@@ -508,7 +509,7 @@ const execsMatching = (b: FakeBackend, text: string) => b.callsOf('exec').filter
 
 describe('runBridge', () => {
   it('prepares /run/kunj-mcp as root and checks for socat', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.execHandler = (_id, cmd) => (cmd.join(' ').includes('mkdir') ? Promise.resolve({ exitCode: 3, stdout: '' }) : undefined);
     const controller = new AbortController();
     await expect(runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: controller.signal })).rejects.toThrow(/socat is not installed/);
@@ -516,7 +517,7 @@ describe('runBridge', () => {
   });
 
   it('runs only mkdir/chown/chmod as root; the listener and the stop run as the user, socat without user=', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     scriptedListener(b, [
       async c => {
@@ -551,7 +552,7 @@ describe('runBridge', () => {
   });
 
   it('round-trips JSON-RPC between the container and a server it starts on the first message', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const { calls, spawn } = recordingSpawn();
     const controller = new AbortController();
     const replies: any[] = [];
@@ -575,7 +576,7 @@ describe('runBridge', () => {
   });
 
   it('answers a refused call itself; the server never sees it', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const { spawn } = recordingSpawn();
     const controller = new AbortController();
     const replies: any[] = [];
@@ -597,7 +598,7 @@ describe('runBridge', () => {
   });
 
   it('by default allows only the forwarded ports, read when the call arrives', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     let ports: number[] = [];
     const replies: any[] = [];
@@ -619,7 +620,7 @@ describe('runBridge', () => {
   });
 
   it('rewrites tools/list and adds the port hint to the initialize result', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     let init: any;
     let list: any;
@@ -640,7 +641,7 @@ describe('runBridge', () => {
   });
 
   it('drops malformed lines (logged once) and starts no server for them or for a partial line', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const { calls, spawn } = recordingSpawn();
     const controller = new AbortController();
     const logs: string[] = [];
@@ -658,7 +659,7 @@ describe('runBridge', () => {
   });
 
   it('ends the session on a line longer than 4 MB, without starting the server', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const { calls, spawn } = recordingSpawn();
     const controller = new AbortController();
     const logs: string[] = [];
@@ -675,7 +676,7 @@ describe('runBridge', () => {
   });
 
   it('gives the default browser a throwaway profile and TMPDIR per session, removed afterwards', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     let result: any;
     let dirDuring = '';
@@ -697,7 +698,7 @@ describe('runBridge', () => {
   });
 
   it('filters every tool list by shape, ends a request on any reply, refuses duplicate ids in flight, keeps at most 1024', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     const replies: any[] = [];
     scriptedListener(b, [
@@ -727,7 +728,7 @@ describe('runBridge', () => {
   });
 
   it('strips the container\'s roots capability and drops its replies to requests the bridge answered', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     const replies: any[] = [];
     scriptedListener(b, [
@@ -748,7 +749,7 @@ describe('runBridge', () => {
   });
 
   it("drops the container's replies to ids the server never issued, and passes one reply to each request it did", async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     const replies: any[] = [];
     scriptedListener(b, [
@@ -773,7 +774,7 @@ describe('runBridge', () => {
   });
 
   it('logs a refused request at most once a second, with a count of the others', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     const logs: string[] = [];
     let now = 10_000;
@@ -799,7 +800,7 @@ describe('runBridge', () => {
   });
 
   it('ends the session, not the process, when handling a line throws, and removes the profile', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     const logs: string[] = [];
     let exitListenersDuring = 0;
@@ -827,7 +828,7 @@ describe('runBridge', () => {
   });
 
   it('ends the session on a server line over 16 MB', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const controller = new AbortController();
     const logs: string[] = [];
     scriptedListener(b, [
@@ -841,9 +842,9 @@ describe('runBridge', () => {
     expect(logs.join('\n')).toMatch(/a line from the server is longer than 16777216 bytes; session ended/);
   });
 
-  it('stops reading a container that does not read its replies, and ends the session past the cap', async () => {
+  itLocal('stops reading a container that does not read its replies, and ends the session past the cap', async () => {
     const run = async (maxBufferedToContainer?: number) => {
-      const b = new FakeBackend();
+      const b = testBackend();
       const controller = new AbortController();
       const logs: string[] = [];
       let fromContainer: any;
@@ -877,7 +878,7 @@ describe('runBridge', () => {
   });
 
   it('stops reading the container while the server is not keeping up', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const { EventEmitter } = jest.requireActual('events');
     const { Writable, PassThrough: Pass } = jest.requireActual('stream');
     const held: Array<() => void> = [];
@@ -923,7 +924,7 @@ describe('runBridge', () => {
   });
 
   it('restarts the listener after the client disconnects and after the server exits', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const { calls, spawn } = recordingSpawn();
     const controller = new AbortController();
     const replies: any[] = [];
@@ -952,14 +953,14 @@ describe('runBridge', () => {
   });
 
   it('refuses to start on a stopped container', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.states.set('cid', 'exited');
     await expect(runBridge(b, 'cid', 'chrome', CFG, { user: 'sandbox', signal: new AbortController().signal })).rejects.toThrow(/not running/);
     expect(b.callsOf('exec')).toHaveLength(0);
   });
 
   it('ends at once when the container restarted (StartedAt changed), before exec-ing into the new run', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     scriptedListener(b, [
       async () => {
         b.startedAt.set('cid', '2026-10-23T12:00:00Z');
@@ -971,7 +972,7 @@ describe('runBridge', () => {
   });
 
   it('ends at once when one check sees it stopped; needs two failed inspects', async () => {
-    const stopped = new FakeBackend();
+    const stopped = testBackend();
     stopped.execHandler = (_id, cmd) => {
       if (!cmd.join(' ').includes('exec socat UNIX-LISTEN')) return undefined;
       stopped.states.set('cid', 'exited');
@@ -981,7 +982,7 @@ describe('runBridge', () => {
     // at start, before the first listener, after it: stopped
     expect(stopped.callsOf('containerRun')).toHaveLength(3);
 
-    const gone = new FakeBackend();
+    const gone = testBackend();
     gone.execHandler = (_id, cmd) => {
       if (!cmd.join(' ').includes('exec socat UNIX-LISTEN')) return undefined;
       gone.states.set('cid', null);
@@ -993,7 +994,7 @@ describe('runBridge', () => {
   });
 
   it('logs a listener that fails, and retries more slowly each time', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const started: number[] = [];
     b.execHandler = (_id, cmd, io) => {
       if (!cmd.join(' ').includes('exec socat UNIX-LISTEN')) return undefined;
@@ -1011,8 +1012,8 @@ describe('runBridge', () => {
     expect(started.length).toBeLessThanOrEqual(5);
   });
 
-  it('resolves the user with id -un when none is recorded, and runs the listener as that user', async () => {
-    const b = new FakeBackend();
+  itLocal('resolves the user with id -un when none is recorded, and runs the listener as that user', async () => {
+    const b = testBackend();
     b.execResults.set('id -un', { exitCode: 0, stdout: 'node\n' });
     const controller = new AbortController();
     scriptedListener(b, []);
@@ -1024,7 +1025,7 @@ describe('runBridge', () => {
   });
 
   it('refuses a user or name that could change the socat address', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const signal = new AbortController().signal;
     await expect(runBridge(b, 'cid', 'chrome', CFG, { user: 'a,fork', signal })).rejects.toThrow(/user/);
     await expect(runBridge(b, 'cid', 'x:y', CFG, { user: 'a', signal })).rejects.toThrow(/name/);

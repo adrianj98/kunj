@@ -16,6 +16,7 @@ jest.mock('../forward', () => ({
 }));
 
 import { FakeBackend } from './fake-backend';
+import { testBackend } from './remote-harness';
 import { forwardPort } from '../forward';
 import {
   AutoForwardChange,
@@ -263,7 +264,7 @@ describe('runAutoForward', () => {
   let backend: FakeBackend;
 
   beforeEach(() => {
-    backend = new FakeBackend();
+    backend = testBackend();
     mockClosed.length = 0;
     (forwardPort as jest.Mock).mockClear();
   });
@@ -408,7 +409,7 @@ describe('runAutoForward', () => {
 
   it('returns when its network helper is replaced, restarted or stopped', async () => {
     for (const change of ['gone', 'restarted', 'exited'] as const) {
-      const b = new FakeBackend();
+      const b = testBackend();
       b.execResults.set(PROC, { exitCode: 0, stdout: procNet() });
       const run = runAutoForward(b, T, { ignore: [], intervalMs: 2, stateIntervalMs: 1, signal: new AbortController().signal });
       await until(() => b.callsOf('exec').length >= 2);

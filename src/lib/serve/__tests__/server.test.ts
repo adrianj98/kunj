@@ -73,7 +73,8 @@ describe('kunj serve: unary routes', () => {
     const r = await request(port, 'GET', '/v1/info');
     expect(r).toEqual({ status: 200, body: { kunj: '9.9.9', protocol: PROTOCOL_VERSION, features: { ...fake.features, dockerInDocker: [] } } });
     const e = await request(port, 'GET', '/v1/engine');
-    expect(e.body).toEqual({ ...fake.infoResult, context: 'default' });
+    expect(e.body).toEqual(fake.infoResult);
+    expect((await request(port, 'GET', '/v1/engine/context')).body).toEqual({ context: 'default' });
   });
 
   it('404s an unknown route with the error shape', async () => {
@@ -89,13 +90,12 @@ describe('kunj serve: unary routes', () => {
     expect(fake.callsOf('run')).toEqual([[s]]);
   });
 
-  it('refuses a run without kunj.repo, with a foreign label, privileged, a runtime or published ports', async () => {
+  it('refuses a run without kunj.repo, with a foreign label, privileged or a runtime', async () => {
     const cases: Array<[Partial<ContainerSpec>, RegExp]> = [
       [{ labels: { 'kunj.branch': 'b' } }, /kunj.repo/],
       [{ labels: { 'kunj.repo': 'r', 'com.example': 'x' } }, /only kunj\.\* labels/],
       [{ privileged: true }, /--allow-privileged/],
       [{ runtime: 'sysbox-runc' }, /--allow-runtime sysbox-runc/],
-      [{ publish: [{ container: 3000, host: 3000 }] }, /kunj ct forward/],
     ];
     for (const [over, message] of cases) {
       const r = await request(port, 'POST', '/v1/containers', spec(over));
@@ -127,7 +127,7 @@ describe('kunj serve: unary routes', () => {
     expect(fake.calls).toEqual([]);
   });
 
-  it('lists containers, volumes, networks and images by a kunj label, and refuses an unscoped listing', async () => {
+  it('lists containers, volumes, networks and images by a label, or all of them', async () => {
     fake.existing.push({ id: 'c1', name: 'kunj-r-b-1', state: 'running', image: 'i', createdAt: 't', labels: { 'kunj.repo': 'r' }, ports: [] });
     fake.volumes.add('v1');
     fake.volumeLabels.set('v1', { 'kunj.repo': 'r' });
@@ -139,12 +139,11 @@ describe('kunj serve: unary routes', () => {
     expect((await request(port, 'GET', `/v1/networks${q}`)).body).toEqual(await fake.listNetworks({ 'kunj.repo': 'r' }));
     expect((await request(port, 'GET', `/v1/images${q}&reference=kunj-blueprint-r`)).body).toEqual(fake.images);
     expect(fake.callsOf('listImages').pop()).toEqual([{ 'kunj.repo': 'r' }, { references: ['kunj-blueprint-r'] }]);
-    const unscoped = await request(port, 'GET', '/v1/containers?label=com.example%3Dx');
-    expect(unscoped.status).toBe(403);
-    expect((await request(port, 'GET', '/v1/containers')).status).toBe(403);
+    expect((await request(port, 'GET', '/v1/containers')).body).toEqual(fake.existing);
+    expect((await request(port, 'GET', '/v1/containers?label=com.example%3Dx')).body).toEqual([]);
   });
 
-  it('answers labels and state for a kunj container, null for a missing one, and refuses a foreign one', async () => {
+  it('answers labels for any container, state for a kunj one, null for a missing one, and refuses acting on a foreign one', async () => {
     fake.existing.push(
       { id: 'c1', name: 'kunj-r-b-1', state: 'running', image: 'i', createdAt: 't', labels: { 'kunj.repo': 'r' }, ports: [] },
       { id: 'c2', name: 'other', state: 'running', image: 'i', createdAt: 't', labels: { app: 'db' }, ports: [] },
@@ -154,6 +153,8 @@ describe('kunj serve: unary routes', () => {
     expect((await request(port, 'GET', '/v1/containers/kunj-r-b-1/state')).body).toEqual({ state: 'running', startedAt: expect.any(String) });
     expect((await request(port, 'GET', '/v1/containers/gone/labels')).body).toEqual({ labels: null });
     expect((await request(port, 'GET', '/v1/containers/gone/state')).body).toEqual({ state: null });
+    // Labels of a foreign container are readable (a name collision is reported from them); nothing else is
+    expect((await request(port, 'GET', '/v1/containers/other/labels')).body).toEqual({ labels: { app: 'db' } });
     const foreign = await request(port, 'GET', '/v1/containers/other/state');
     expect(foreign.status).toBe(403);
     expect(fake.callsOf('containerRun')).toEqual([['kunj-r-b-1'], ['gone']]);
@@ -163,11 +164,17 @@ describe('kunj serve: unary routes', () => {
     expect(fake.callsOf('stop')).toEqual([['kunj-r-b-1']]);
   });
 
-  it('caches the guard inspect for a few seconds', async () => {
+  it('caches the guard inspect of a kunj container for a few seconds, never a missing one', async () => {
     fake.existing.push({ id: 'c1', name: 'kunj-r-b-1', state: 'running', image: 'i', createdAt: 't', labels: { 'kunj.repo': 'r' }, ports: [] });
     await request(port, 'GET', '/v1/containers/kunj-r-b-1/state');
     await request(port, 'GET', '/v1/containers/kunj-r-b-1/state');
     expect(fake.callsOf('inspectLabels')).toEqual([['kunj-r-b-1']]);
+    fake.states.set('new', null);
+    expect((await request(port, 'GET', '/v1/containers/new/state')).body).toEqual({ state: null });
+    fake.existing.push({ id: 'c3', name: 'new', state: 'created', image: 'i', createdAt: 't', labels: { 'kunj.repo': 'r' }, ports: [] });
+    fake.states.set('new', 'created');
+    expect((await request(port, 'GET', '/v1/containers/new/state')).body).toMatchObject({ state: 'created' });
+    expect(fake.callsOf('inspectLabels')).toEqual([['kunj-r-b-1'], ['new'], ['new']]);
   });
 
   it('creates volumes and networks with kunj labels only', async () => {
@@ -197,7 +204,10 @@ describe('kunj serve: unary routes', () => {
     fake.existing.push({ id: 'c1', name: 'kunj-r-b-1', state: 'running', image: 'i', createdAt: 't', labels: { 'kunj.repo': 'r' }, ports: [] });
     const tag = encodeURIComponent('kunj-sandbox:1-a');
     expect((await request(port, 'GET', `/v1/images/${tag}`)).body).toEqual({ exists: true });
-    expect((await request(port, 'GET', `/v1/images/${encodeURIComponent('node:22')}`)).status).toBe(403);
+    // Any image the branch chose may be asked about; only kunj's may be built, committed or removed
+    expect((await request(port, 'GET', `/v1/images/${encodeURIComponent('node:22')}`)).body).toEqual({ exists: false });
+    expect((await request(port, 'GET', `/v1/images/${encodeURIComponent('-rm')}`)).status).toBe(400);
+    expect((await request(port, 'DELETE', `/v1/images/${encodeURIComponent('node:22')}`)).status).toBe(403);
     expect((await request(port, 'DELETE', `/v1/images/${tag}`)).status).toBe(200);
     expect(fake.callsOf('removeImage')).toEqual([['kunj-sandbox:1-a']]);
     const commit = await request(port, 'POST', '/v1/containers/kunj-r-b-1/commit', { tag: 'kunj-blueprint-r:h', labels: { 'kunj.blueprint.hash': 'h' }, changes: ['ENV A=1'] });

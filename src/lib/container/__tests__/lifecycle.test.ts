@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { FakeBackend } from './fake-backend';
+import { testBackend } from './remote-harness';
 import { ContainerInfo, ContainerSpec, ExecIO, ImageInfo } from '../backend';
 import { containerNames, labelsFor, LABEL } from '../names';
 import { SANDBOX_IMAGE, NETHELPER_IMAGE } from '../image';
@@ -103,7 +104,7 @@ function noTokens(token: string | null = null): TokenLookup & { gh: jest.Mock } 
 }
 
 function backend(): FakeBackend {
-  const b = new FakeBackend();
+  const b = testBackend();
   b.existingImages.add(SANDBOX_IMAGE(VERSION));
   b.existingImages.add(NETHELPER_IMAGE(VERSION));
   // No seed marker yet, and no postCreate marker
@@ -988,7 +989,7 @@ describe('remove', () => {
   const GUARD_KEY_PREFIX = 'sh -c ';
 
   function guardBackend(stdout: string, opts: { state?: ContainerInfo['state']; origin?: number } = {}): FakeBackend {
-    const b = new FakeBackend();
+    const b = testBackend();
     const fw = { KUNJ_FW_MODE: 'default', KUNJ_FW_ORIGIN_HOST: 'github.com' };
     b.existing = [info({
       state: opts.state ?? 'running',
@@ -1123,7 +1124,7 @@ describe('remove', () => {
 
 describe('stopContainer', () => {
   it('stops the helper and the container', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     await stopContainer(b, names);
     expect(b.callsOf('stop')).toEqual([[names.helper], [names.container]]);
   });
@@ -1133,7 +1134,7 @@ describe('containerStatus', () => {
   const STATUS_CMD = (b: FakeBackend) => (b.callsOf('exec')[0][1] as string[]).join(' ');
 
   it('status times out per container', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.hangOn.add('__hang__');
     const status = await containerStatus(b, 'id', 'dev');
     expect(status).toEqual({ agentRunning: null, agentState: null, head: null, ahead: null, dirty: null, status: 'timeout' });
@@ -1141,7 +1142,7 @@ describe('containerStatus', () => {
   });
 
   it('status distinguishes no tmux session from exec failure', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     await containerStatus(b, 'id', 'dev');
     const key = STATUS_CMD(b);
 
@@ -1461,7 +1462,7 @@ describe('findSnapshot', () => {
   });
 
   it('findSnapshot picks exact hash, else newest as stale', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     expect(await findSnapshot(b, 'app', REPO.id, 'h1')).toBeNull();
     b.images = [
       img('kunj-blueprint-app:h1', 'h1', '2026-10-01T00:00:00Z'),
@@ -1664,14 +1665,14 @@ describe('services', () => {
   });
 
   it('stop stops the services after the branch container', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.existing = [info({}), svcInfo('running')];
     await stopContainer(b, names);
     expect(b.callsOf('stop')).toEqual([[names.helper], [names.container], ['pg-id']]);
   });
 
   it('remove deletes the service containers and their volumes (kept with --keep-volumes)', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.existing = [info({}), svcInfo('running')];
     await removeContainer(b, names, { force: true, keepVolumes: false, user: 'dev', kunjVersion: VERSION });
     expect(b.callsOf('remove')).toEqual([[{
@@ -1680,7 +1681,7 @@ describe('services', () => {
       networks: [names.network],
     }]]);
 
-    const kept = new FakeBackend();
+    const kept = testBackend();
     kept.existing = [info({}), svcInfo('running')];
     await removeContainer(kept, names, { force: true, keepVolumes: true, user: 'dev', kunjVersion: VERSION });
     expect(kept.callsOf('remove')[0][0]).toEqual({ containers: [names.helper, names.container, PG], volumes: [], networks: [names.network] });
@@ -1931,7 +1932,7 @@ describe('docker in docker', () => {
   });
 
   it('remove deletes the docker volume with the others', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.existing = [info({})];
     await removeContainer(b, names, { force: true, keepVolumes: false, user: 'dev', kunjVersion: VERSION });
     expect((b.callsOf('remove')[0][0] as { volumes: string[] }).volumes).toContain(names.dockerVolume);

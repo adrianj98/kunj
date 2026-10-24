@@ -6,6 +6,7 @@
 import * as http from 'http';
 import * as https from 'https';
 import { URL } from 'url';
+import WebSocket, { RawData } from 'ws';
 import {
   BackendEvent,
   BuildOptions,
@@ -14,12 +15,13 @@ import {
   ContainerSpec,
   EngineInfo,
   ExecIO,
+  ExecTimeoutError,
   ImageInfo,
   Labels,
   LabelledObject,
   LogOptions,
 } from './backend';
-import { ErrorBody, InfoJson, PROTOCOL_VERSION, labelQuery } from '../serve/protocol';
+import { CHANNEL, ErrorBody, ExecControl, ExecRequest, HIGH_WATER, InfoJson, PROTOCOL_VERSION, decodeFrame, encodeFrame, labelQuery, parseControl } from '../serve/protocol';
 
 export type RemoteErrorCode = 'remote-unreachable' | 'remote-unauthorized' | 'remote-protocol' | 'remote-refused';
 
@@ -136,20 +138,19 @@ export class RemoteKunjBackend implements ContainerBackend {
   // ---- ContainerBackend --------------------------------------------------------------------
 
   async info(): Promise<EngineInfo> {
-    const { context: _context, ...engine } = await this.json('GET', '/v1/engine');
-    return engine;
+    return this.json('GET', '/v1/engine');
   }
 
   async contextName(): Promise<string> {
-    return (await this.json('GET', '/v1/engine')).context;
+    return (await this.json('GET', '/v1/engine/context')).context;
   }
 
   async imageExists(tag: string): Promise<boolean> {
     return (await this.json('GET', `/v1/images/${encodeURIComponent(tag)}`)).exists;
   }
 
-  async buildImage(_tag: string, _context: NodeJS.ReadableStream, _opts?: BuildOptions): Promise<void> {
-    throw new Error('remote buildImage: not implemented yet');
+  async buildImage(tag: string, context: NodeJS.ReadableStream, opts: BuildOptions = {}): Promise<void> {
+    await this.upload('POST', `/v1/images/${encodeURIComponent(tag)}/build`, context, { 'x-kunj-build': JSON.stringify(opts) });
   }
 
   async commitContainer(id: string, tag: string, labels: Labels, changes?: string[]): Promise<void> {
@@ -207,12 +208,14 @@ export class RemoteKunjBackend implements ContainerBackend {
     return body.state === null ? null : { state: body.state, startedAt: body.startedAt };
   }
 
-  async exec(_id: string, _cmd: string[], _io?: ExecIO): Promise<{ exitCode: number; stdout: string }> {
-    throw new Error('remote exec: not implemented yet');
+  exec(id: string, cmd: string[], io: ExecIO = {}): Promise<{ exitCode: number; stdout: string }> {
+    if (io.tty) return Promise.reject(new Error('remote TTY exec: not implemented yet'));
+    return this.execStream(id, cmd, io);
   }
 
-  async copyIn(_id: string, _dir: string, _tar: NodeJS.ReadableStream): Promise<void> {
-    throw new Error('remote copyIn: not implemented yet');
+  async copyIn(id: string, dir: string, tar: NodeJS.ReadableStream): Promise<void> {
+    const params = new URLSearchParams({ dir });
+    await this.upload('POST', `/v1/containers/${encodeURIComponent(id)}/copy?${params}`, tar);
   }
 
   async start(id: string): Promise<void> {
@@ -231,11 +234,215 @@ export class RemoteKunjBackend implements ContainerBackend {
     return (await this.json('POST', '/v1/compose/config', { yaml: yamlText })).config;
   }
 
-  async logs(_id: string, _opts?: LogOptions): Promise<void> {
-    throw new Error('remote logs: not implemented yet');
+  logs(id: string, opts: LogOptions = {}): Promise<void> {
+    const params = new URLSearchParams();
+    if (opts.follow) params.set('follow', '1');
+    if (opts.tail !== undefined) params.set('tail', String(opts.tail));
+    const onLine = opts.onLine ?? ((stream: 'stdout' | 'stderr', line: string) => process[stream].write(line + '\n'));
+    return new Promise((resolve, reject) => {
+      const ws = this.socket(`/v1/containers/${encodeURIComponent(id)}/logs?${params}`);
+      let failed: Error | undefined;
+      ws.on('message', (data: RawData, binary: boolean) => {
+        if (binary) return;
+        const text = rawToString(data);
+        const control = tryControl(text);
+        if (control && 'error' in control) {
+          failed = new Error(control.error);
+          return;
+        }
+        const line = JSON.parse(text) as { stream: 'stdout' | 'stderr'; line: string };
+        onLine(line.stream, line.line);
+      });
+      ws.on('error', err => reject(this.wsError(err)));
+      ws.on('close', () => (failed ? reject(failed) : resolve()));
+    });
   }
 
-  async events(_filter: Labels, _onEvent: (e: BackendEvent) => void, _signal: AbortSignal): Promise<void> {
-    throw new Error('remote events: not implemented yet');
+  events(filter: Labels, onEvent: (e: BackendEvent) => void, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) return resolve();
+      const ws = this.socket(`/v1/events?${labelQuery(filter)}`);
+      const onAbort = () => ws.close();
+      signal.addEventListener('abort', onAbort, { once: true });
+      let failed: Error | undefined;
+      ws.on('message', (data: RawData, binary: boolean) => {
+        if (binary) return;
+        const text = rawToString(data);
+        const control = tryControl(text);
+        if (control && 'error' in control) {
+          failed = new Error(`docker events failed: ${control.error}`);
+          return;
+        }
+        onEvent(JSON.parse(text) as BackendEvent);
+      });
+      ws.on('error', err => {
+        signal.removeEventListener('abort', onAbort);
+        reject(this.wsError(err));
+      });
+      ws.on('close', () => {
+        signal.removeEventListener('abort', onAbort);
+        if (signal.aborted) return resolve();
+        reject(failed ?? new Error('docker events failed: the remote closed the event stream'));
+      });
+    });
+  }
+
+  // ---- streams -----------------------------------------------------------------------------
+
+  private socket(path: string): WebSocket {
+    const target = new URL(path, this.url);
+    target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:';
+    return new WebSocket(target, { headers: { authorization: `Bearer ${this.opts.token}` }, maxPayload: 16 * 1024 * 1024 });
+  }
+
+  private wsError(err: Error & { code?: string }): Error {
+    // ws reports a refused upgrade as "Unexpected server response: 401"
+    const m = /Unexpected server response: (\d+)/.exec(err.message);
+    if (m?.[1] === '401') return new RemoteError(`remote ${this.name} refused the token (kunj remote token ${this.name} to replace it)`, 'remote-unauthorized');
+    if (m) return new RemoteError(`remote ${this.name}: HTTP ${m[1]} on a stream`, 'remote-protocol');
+    return new RemoteError(`Docker is not available: remote ${this.name} is unreachable (${err.code ?? err.message})`, 'remote-unreachable');
+  }
+
+  /** A request whose body is a stream (a tar); the reply is JSON like a unary call. */
+  private upload(method: string, path: string, body: NodeJS.ReadableStream, extraHeaders: Record<string, string> = {}): Promise<any> {
+    const target = new URL(path, this.url);
+    const lib = target.protocol === 'https:' ? https : http;
+    return new Promise((resolve, reject) => {
+      const headers = { authorization: `Bearer ${this.opts.token}`, 'content-type': 'application/octet-stream', ...extraHeaders };
+      const req = lib.request(target, { method, headers }, res => {
+        const chunks: Buffer[] = [];
+        res.on('data', (d: Buffer) => chunks.push(d));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString();
+          let parsed: any;
+          try {
+            parsed = text ? JSON.parse(text) : {};
+          } catch {
+            return reject(new RemoteError(`remote ${this.name} answered ${res.statusCode} with something that is not kunj serve`, 'remote-protocol'));
+          }
+          if (res.statusCode === 200) resolve(parsed);
+          else reject(this.errorOf({ status: res.statusCode ?? 0, body: parsed }));
+        });
+      });
+      req.on('error', (err: NodeJS.ErrnoException) =>
+        reject(new RemoteError(`Docker is not available: remote ${this.name} is unreachable (${err.code ?? err.message})`, 'remote-unreachable')));
+      body.on('error', err => req.destroy(err as Error));
+      body.pipe(req);
+    });
+  }
+
+  /**
+   * A non-TTY exec: the request as the first text frame, stdin as channel-0 frames (EOF as an empty
+   * one), stdout and stderr back as frames, `exit` or `error` to finish. Without io.stdout the output
+   * is collected and returned, as the local backend does.
+   */
+  private execStream(id: string, cmd: string[], io: ExecIO): Promise<{ exitCode: number; stdout: string }> {
+    const stdinStream: NodeJS.ReadableStream | undefined =
+      typeof io.stdin === 'object' ? io.stdin : io.stdin === 'inherit' ? process.stdin : undefined;
+    const stdout: NodeJS.WritableStream | undefined = io.stdout === 'inherit' ? process.stdout : io.stdout;
+    const stderr: NodeJS.WritableStream | undefined = io.stderr === 'inherit' ? process.stderr : io.stderr;
+    const request: ExecRequest = {
+      cmd,
+      user: io.user,
+      workdir: io.workdir,
+      env: io.env,
+      tty: false,
+      stdin: !!stdinStream,
+      timeoutMs: io.timeoutMs,
+    };
+    return new Promise((resolve, reject) => {
+      const ws = this.socket(`/v1/containers/${encodeURIComponent(id)}/exec`);
+      const collected: Buffer[] = [];
+      let settled = false;
+      let exitCode: number | undefined;
+      let failure: Error | undefined;
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        if (stdinStream) {
+          stdinStream.off('data', onStdinData);
+          stdinStream.off('end', onStdinEnd);
+          stdinStream.off('error', onStdinEnd);
+        }
+        fn();
+      };
+
+      // stdin → frames; the source waits for each frame to reach the socket (send's callback)
+      const onStdinData = (chunk: Buffer | string) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        if (ws.bufferedAmount > HIGH_WATER) stdinStream!.pause();
+        ws.send(encodeFrame(CHANNEL.stdin, bytes), { binary: true }, () => {
+          if (ws.bufferedAmount <= HIGH_WATER && !settled) stdinStream!.resume();
+        });
+      };
+      const onStdinEnd = () => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(encodeFrame(CHANNEL.stdin, ''), { binary: true });
+      };
+
+      // frames → io streams; the socket waits while a stream is behind
+      const deliver = (target: NodeJS.WritableStream | undefined, bytes: Buffer, collect: boolean) => {
+        if (!target) {
+          if (collect) collected.push(bytes);
+          return;
+        }
+        if (!target.write(bytes)) {
+          ws.pause();
+          target.once('drain', () => ws.resume());
+        }
+      };
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify(request));
+        if (stdinStream) {
+          stdinStream.on('data', onStdinData);
+          stdinStream.once('end', onStdinEnd);
+          stdinStream.once('error', onStdinEnd);
+          stdinStream.resume();
+        }
+      });
+      ws.on('message', (data: RawData, binary: boolean) => {
+        if (binary) {
+          const { channel, data: bytes } = decodeFrame(rawToBuffer(data));
+          if (channel === CHANNEL.stdout) deliver(stdout, bytes, true);
+          else if (channel === CHANNEL.stderr) deliver(stderr, bytes, false);
+          return;
+        }
+        const control = parseControl(rawToString(data));
+        if ('exit' in control) exitCode = control.exit;
+        else if ('error' in control) {
+          failure = control.error === 'timeout'
+            ? new ExecTimeoutError(`docker exec timed out after ${io.timeoutMs} ms`)
+            : new Error(control.error);
+        }
+      });
+      ws.on('error', err => finish(() => reject(this.wsError(err))));
+      ws.on('close', () =>
+        finish(() => {
+          if (failure) return reject(failure);
+          if (exitCode === undefined) return reject(new Error('exec ended: connection closed'));
+          resolve({ exitCode, stdout: Buffer.concat(collected).toString() });
+        }));
+    });
   }
 }
+
+function rawToBuffer(data: RawData): Buffer {
+  if (Buffer.isBuffer(data)) return data;
+  if (Array.isArray(data)) return Buffer.concat(data);
+  return Buffer.from(data);
+}
+
+function rawToString(data: RawData): string {
+  return rawToBuffer(data).toString();
+}
+
+/** A control message, or undefined when the text is some other JSON (a log line, an event). */
+function tryControl(text: string): ExecControl | undefined {
+  try {
+    return parseControl(text);
+  } catch {
+    return undefined;
+  }
+}
+

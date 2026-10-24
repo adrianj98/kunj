@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { FakeBackend } from './fake-backend';
+import { itLocal, testBackend } from './remote-harness';
 import { ImageInfo } from '../backend';
 import { ResolvedBlueprint, blueprintHash, lockfileIds, parseBlueprint, snapshotTag } from '../blueprint';
 import { LABEL, containerNames } from '../names';
@@ -116,7 +117,7 @@ function image(tag: string, hash: string, over: Partial<ImageInfo> = {}): ImageI
 
 // The container's HEAD, then the presets' env file
 function backendWith(env = ''): FakeBackend {
-  const b = new FakeBackend();
+  const b = testBackend();
   b.execResults.set(READ.join(' '), { exitCode: 0, stdout: `${SHA}\n${env}` });
   return b;
 }
@@ -213,7 +214,7 @@ describe('snapshotBlueprint', () => {
     expect(mocked.removeContainer.mock.calls[0][2]).toMatchObject({ force: true, keepVolumes: false });
   });
 
-  it('copies the seed as root, commits with labels, removes temp objects and older snapshots', async () => {
+  itLocal('copies the seed as root, commits with labels, removes temp objects and older snapshots', async () => {
     const b = backendWith();
     const hash = await expectedHash('origin/main');
     const tag = snapshotTag('app', hash);
@@ -264,7 +265,7 @@ describe('snapshotBlueprint', () => {
   });
 
   it('refuses to commit when the container commit cannot be read', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.execResults.set(READ.join(' '), { exitCode: 0, stdout: '\nA=1\n' });
     await expect(snapshotBlueprint(b, options())).rejects.toThrow('Could not read the commit checked out in the snapshot container');
     expect(b.callsOf('commitContainer')).toEqual([]);
@@ -440,7 +441,7 @@ describe('ensureSnapshot', () => {
 
 describe('snapshotStatus', () => {
   it('status reports current vs others', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const cur = image('kunj-blueprint-app:aaa', 'aaa');
     const old = image('kunj-blueprint-app:bbb', 'bbb');
     b.images.push(cur, old, image('unrelated:aaa', 'aaa'));
@@ -452,7 +453,7 @@ describe('snapshotStatus', () => {
 
 describe('removeSnapshots', () => {
   it('removeSnapshots removes all tags for the repo', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.images.push(image('kunj-blueprint-app:aaa', 'aaa'), image('kunj-blueprint-app:bbb', 'bbb'), image('unrelated:aaa', 'aaa'));
     b.images.push(image('kunj-blueprint-app:ccc', 'ccc', { labels: { [LABEL.repo]: 'github.com/other/app' } }));
     await expect(removeSnapshots(b, 'app', REPO.id)).resolves.toEqual(['kunj-blueprint-app:aaa', 'kunj-blueprint-app:bbb']);
@@ -460,7 +461,7 @@ describe('removeSnapshots', () => {
   });
 
   it('keeps going past a tag that cannot be removed and warns', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.images.push(image('kunj-blueprint-app:aaa', 'aaa'), image('kunj-blueprint-app:bbb', 'bbb'));
     const real = b.removeImage.bind(b);
     jest.spyOn(b, 'removeImage').mockImplementation(async tag => {

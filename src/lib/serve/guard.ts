@@ -12,6 +12,21 @@ export interface GuardFlags {
   allowRuntimes: string[];
 }
 
+/** How the guard reads labels; the backend's own calls by default (tests give a direct lookup). */
+export interface GuardLookup {
+  container(id: string): Promise<Labels | null>;
+  volumes(): Promise<Array<{ name: string; labels: Labels }>>;
+  networks(): Promise<Array<{ name: string; labels: Labels }>>;
+}
+
+export function backendLookup(backend: ContainerBackend): GuardLookup {
+  return {
+    container: id => backend.inspectLabels(id),
+    volumes: () => backend.listVolumes({}),
+    networks: () => backend.listNetworks({}),
+  };
+}
+
 const REPO_LABEL = 'kunj.repo';
 const CACHE_MS = 5000;
 
@@ -27,22 +42,28 @@ export class Guard {
   private cache = new Map<string, { labels: Labels | null; at: number }>();
 
   constructor(
-    private readonly backend: ContainerBackend,
+    private readonly lookup: GuardLookup,
     private readonly flags: GuardFlags,
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** The container's labels (null when it does not exist); throws when it exists and is not kunj's. */
-  async container(id: string): Promise<Labels | null> {
-    if (!id || id.startsWith('-')) throw new ServeError(400, 'bad-request', 'bad container id');
+  /**
+   * Lets a container through when it is kunj's or does not exist (the backend then answers as it
+   * does locally); throws when it exists and is someone else's. Only a kunj container is cached:
+   * a missing one may be created a moment later.
+   */
+  async container(id: string): Promise<void> {
     const hit = this.cache.get(id);
-    let labels: Labels | null;
-    if (hit && this.now() - hit.at < CACHE_MS) labels = hit.labels;
-    else {
-      labels = await this.backend.inspectLabels(id);
-      this.cache.set(id, { labels, at: this.now() });
-    }
+    if (hit && this.now() - hit.at < CACHE_MS) return;
+    await this.inspect(id);
+  }
+
+  /** The container's labels as the backend reports them now; throws when it is not kunj's. */
+  async inspect(id: string): Promise<Labels | null> {
+    if (!id || id.startsWith('-')) throw new ServeError(400, 'bad-request', 'bad container id');
+    const labels = await this.lookup.container(id);
     if (labels !== null && !isKunjLabels(labels)) throw refused(`${id} is not a kunj container`);
+    if (labels) this.cache.set(id, { labels, at: this.now() });
     return labels;
   }
 
@@ -65,29 +86,27 @@ export class Guard {
     if (spec.runtime && !this.flags.allowRuntimes.includes(spec.runtime)) {
       throw refused(`runtime ${spec.runtime} is not allowed on this server (kunj serve --allow-runtime ${spec.runtime})`);
     }
-    if (spec.publish.length > 0) {
-      throw refused('published ports bind to the server\'s loopback, which the laptop cannot reach; use kunj ct forward instead of container.publish');
-    }
-    // spec.image is any image the branch chose (a devcontainer, container.image): not restricted
+    // spec.image is any image the branch chose (a devcontainer, container.image): not restricted.
+    // Published ports bind to the server's loopback (docker.ts), useless from the laptop but harmless.
   }
 
-  /** A listing must be scoped by a kunj.* label (kunj.repo, or kunj.managed for prune's orphan scan). */
+  /** An event stream must be scoped by a kunj.* label; listings are not (prune reads every container for the images in use). */
   filter(labels: Labels): void {
-    if (!Object.keys(labels).some(k => k.startsWith('kunj.'))) throw refused('a listing must filter on a kunj.* label');
+    if (!Object.keys(labels).some(k => k.startsWith('kunj.'))) throw refused('an event stream must filter on a kunj.* label');
   }
 
   /** Every id in a remove must be kunj's; ids that do not exist are left to the backend. */
   async removeIds(ids: { containers?: string[]; volumes?: string[]; networks?: string[] }): Promise<void> {
     for (const id of ids.containers ?? []) await this.container(id);
     if (ids.volumes?.length) {
-      const known = new Map((await this.backend.listVolumes({})).map(v => [v.name, v.labels]));
+      const known = new Map((await this.lookup.volumes()).map(v => [v.name, v.labels]));
       for (const name of ids.volumes) {
         const labels = known.get(name);
         if (labels && !isKunjLabels(labels)) throw refused(`volume ${name} is not kunj's`);
       }
     }
     if (ids.networks?.length) {
-      const known = new Map((await this.backend.listNetworks({})).map(n => [n.name, n.labels]));
+      const known = new Map((await this.lookup.networks()).map(n => [n.name, n.labels]));
       for (const name of ids.networks) {
         const labels = known.get(name);
         if (labels && !isKunjLabels(labels)) throw refused(`network ${name} is not kunj's`);

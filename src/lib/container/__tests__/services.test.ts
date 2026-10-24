@@ -1,5 +1,6 @@
 import { describe, it, expect, jest } from '@jest/globals';
 import { FakeBackend } from './fake-backend';
+import { testBackend } from './remote-harness';
 import { ContainerInfo } from '../backend';
 import { LABEL, containerNames, labelsFor } from '../names';
 import { runArgs } from '../docker';
@@ -189,7 +190,7 @@ describe('mergeServices / serviceOrder', () => {
   });
 
   it('resolveServices: blueprint, then container.services, then compose', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.composeConfigs.set('compose-text', { services: { dev: { image: 'dev' }, pg: { image: 'compose-pg' }, mq: { image: 'rabbitmq', privileged: true } } });
     const warnings: string[] = [];
     const services = await resolveServices(b, {
@@ -267,7 +268,7 @@ function svcInfo(name: string, over: Partial<ContainerInfo> = {}, record: object
 
 describe('startServices', () => {
   it('creates volumes and containers in dependency order and waits for each health check', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const created = { containers: [] as string[], volumes: [] as string[] };
     const result = await startServices(b, names, REPO, BRANCH, [
       svc('app', { dependsOn: ['db'] }),
@@ -283,19 +284,19 @@ describe('startServices', () => {
   });
 
   it('does nothing without services', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     expect(await startServices(b, names, REPO, BRANCH, [], { warn: () => {} })).toEqual({ created: [], volumes: [] });
     expect(b.calls).toEqual([]);
   });
 
   it('starts a stopped existing service and reuses a running one; recreate replaces them', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.existing = [svcInfo('db', { state: 'exited' }), svcInfo('cache')];
     await startServices(b, names, REPO, BRANCH, [svc('db'), svc('cache')], { warn: () => {} });
     expect(b.callsOf('start')).toEqual([['db-id']]);
     expect(b.methods()).not.toContain('run');
 
-    const r = new FakeBackend();
+    const r = testBackend();
     r.existing = [svcInfo('db')];
     await startServices(r, names, REPO, BRANCH, [svc('db')], { warn: () => {}, recreate: true });
     expect(r.callsOf('remove')).toEqual([[{ containers: [`${names.container}-svc-db`] }]]);
@@ -304,14 +305,14 @@ describe('startServices', () => {
 
   it('recreate (--rebuild) removes a service no longer declared with its volumes, or keeps them with keepVolumes', async () => {
     const OLD_DATA = `${names.container}-svc-old-data`;
-    const b = new FakeBackend();
+    const b = testBackend();
     b.existing = [svcInfo('db'), svcInfo('old', {}, { volumes: [OLD_DATA] })];
     const warnings: string[] = [];
     await startServices(b, names, REPO, BRANCH, [svc('db')], { warn: m => warnings.push(m), recreate: true });
     expect(b.callsOf('remove')[0]).toEqual([{ containers: [`${names.container}-svc-old`], volumes: [OLD_DATA] }]);
     expect(warnings).toEqual([`Removed service old: it is no longer declared; its volumes were removed too (${OLD_DATA})`]);
 
-    const kept = new FakeBackend();
+    const kept = testBackend();
     kept.existing = [svcInfo('db'), svcInfo('old', {}, { volumes: [OLD_DATA] })];
     const keptWarnings: string[] = [];
     await startServices(kept, names, REPO, BRANCH, [svc('db')], { warn: m => keptWarnings.push(m), recreate: true, keepVolumes: true });
@@ -320,14 +321,14 @@ describe('startServices', () => {
     expect(keptWarnings).toEqual([expect.stringMatching(/Removed service old: it is no longer declared; its volumes are kept \(.*svc-old-data/)]);
 
     // Also when no service is declared any more
-    const none = new FakeBackend();
+    const none = testBackend();
     none.existing = [svcInfo('old')];
     await startServices(none, names, REPO, BRANCH, [], { warn: () => {}, recreate: true });
     expect(none.callsOf('remove')).toEqual([[{ containers: [`${names.container}-svc-old`] }]]);
   });
 
   it('warns and continues when a health check never passes', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.execResults.set('sh -c pg_isready', { exitCode: 1, stdout: '' });
     const warnings: string[] = [];
     const started = Date.now();
@@ -344,7 +345,7 @@ describe('startServices', () => {
   });
 
   it('a service that is not running is a warning, not a wait', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     b.execErrors.set('sh -c pg_isready', new Error('docker exec failed: container is not running'));
     const warnings: string[] = [];
     expect(await waitHealthy(b, 'x', { name: 'db', healthcheck: 'pg_isready' }, { warn: m => warnings.push(m), timeoutMs: 10_000 })).toBe(false);
@@ -408,7 +409,7 @@ describe('fix round 1', () => {
     expect(composeRefusal('x: &d { image: redis }\nservices:\n  db:\n    <<: *d\n')).toBeNull();
     expect(composeRefusal('{"services": {"db": {"image": "redis", "command": ["sh", "-c", "echo \\"a\\": 1"]}}}')).toBeNull();
 
-    const b = new FakeBackend();
+    const b = testBackend();
     const warnings: string[] = [];
     expect(await resolveServices(b, { compose: [{ path: 'c.yml', text: 'include:\n  - /x.yml\n' }], warn: m => warnings.push(m) })).toEqual([]);
     expect(warnings).toEqual(["c.yml: include is not supported by kunj's compose import; its services are not started"]);
@@ -459,7 +460,7 @@ describe('fix round 1', () => {
     // Branch "x" and a branch named so its container name starts with x's: "<x container>-svc-..."
     const other = { ...svcInfo('db'), id: 'other-id', labels: labelsFor(REPO, 'evil', { [LABEL.role]: 'service', [LABEL.service]: 'db' }) };
     const mine = svcInfo('cache');
-    const b = new FakeBackend();
+    const b = testBackend();
     b.existing = [other, mine];
     expect((await findServices(b, names, { repoId: REPO, branch: BRANCH })).map(c => c.id)).toEqual(['cache-id']);
     await stopServices(b, names, { repoId: REPO, branch: BRANCH });
@@ -467,7 +468,7 @@ describe('fix round 1', () => {
   });
 
   it('resume starts services dependencies first, as recorded in their labels', async () => {
-    const b = new FakeBackend();
+    const b = testBackend();
     const app = svcInfo('app', { state: 'exited' }, { dependsOn: ['db'] });
     const db = svcInfo('db', { state: 'exited' }, {});
     await resumeServices(b, [app, db], { warn: () => {} });

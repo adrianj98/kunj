@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { FakeBackend } from './fake-backend';
+import { testBackend } from './remote-harness';
 import { ContainerInfo, ExecIO, ImageInfo, Labels } from '../backend';
 import { LABEL, containerNames, labelsFor } from '../names';
 import { readForwards, writeForwards } from '../autoforward';
@@ -42,7 +43,7 @@ function image(tag: string, size: number, labels: Labels = {}, id = `img-${tag}`
 /** The guard script prints `guard[id]` (default: clean, and the clone has seen its branch on origin);
  * ls-remote inside the container succeeds. */
 function backendWith(containers: ContainerInfo[], guard: Record<string, string> = {}): FakeBackend {
-  const b = new FakeBackend();
+  const b = testBackend();
   b.existing = containers;
   const real = b.exec.bind(b);
   b.exec = async (id: string, cmd: string[], io?: ExecIO) => {

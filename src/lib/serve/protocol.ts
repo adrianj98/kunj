@@ -46,12 +46,11 @@ export interface InfoJson {
   features: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
 }
 
-/** GET /v1/engine */
+/** GET /v1/engine (the EngineInfo); GET /v1/engine/context gives { context } */
 export interface EngineJson {
   serverVersion: string;
   runtimes: string[];
   operatingSystem: string;
-  context: string;
 }
 
 // ---- exec channel ----------------------------------------------------------------------------
