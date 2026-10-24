@@ -1,0 +1,121 @@
+---
+title: Remote containers
+description: Run your branch containers on another machine with kunj serve, driven from your laptop by the same kunj ct commands and apps.
+sidebar:
+  order: 7
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Branch containers normally run on the Docker of the machine you type on. With `kunj serve` they can
+run on another machine instead: a Linux box in the office, a cloud VM, a Mac in another room. You
+keep using `kunj ct start`, `shell`, `agent`, `forward`, `list` and the apps exactly as before; only
+the Docker calls cross the network.
+
+Your laptop stays in charge. `~/.kunj` on the laptop keeps the secrets vault, keep files, blueprints
+and hooks, and kunj on the laptop runs the lifecycle; the box runs `kunj serve`, a small server in
+front of its Docker that does only what kunj asks. Code still moves through origin only: the box
+clones from it and the agent pushes to it, as a local container would.
+
+## Setting up
+
+<Steps>
+
+1. **On the box**, install kunj and start the server. It listens on the box's loopback and prints
+   its token the first time:
+
+   ```bash
+   kunj serve
+   ```
+
+   Keep it running (a `tmux` window, or a systemd user unit that runs `kunj serve`). `kunj serve
+   token` prints the token again; `kunj serve token --rotate` replaces it.
+
+2. **On the laptop**, add the box as a remote. With SSH access, kunj opens the tunnel itself:
+
+   ```bash
+   kunj remote add box --ssh me@box
+   ```
+
+   It asks for the token (or reads it from `--token-stdin`). Then connect once from a terminal, so
+   `ssh` records the host key before any app uses the remote:
+
+   ```bash
+   kunj remote ping box
+   ```
+
+3. **Use it.** For one command:
+
+   ```bash
+   kunj ct start feature/search --remote box
+   kunj ct shell feature/search --remote box
+   ```
+
+   Or for a whole repository, so the apps use it too:
+
+   ```bash
+   kunj config --set container.remote=box
+   ```
+
+   `--remote local` forces your own Docker for one command whatever the setting says.
+
+</Steps>
+
+## What works, and what differs
+
+Everything in [Container commands](../commands/) works against a remote: `start` with blueprints and
+snapshots, `shell`, `exec`, `agent` and `attach` (your terminal drives the pty on the box, with
+resize), `forward` and `forward --auto` (the forwarder listens on your laptop and tunnels each
+connection), the MCP bridge, `logs`, `stop`, `remove`, `prune`, and `kunj ct list --json`, whose
+`backend` says `kind: "remote"` and names the remote. `kunj events` watches each repository on the
+backend its `container.remote` names.
+
+Two things differ:
+
+- **`kunj ct open` refuses** on a remote: the Dev Containers extension attaches through your laptop's
+  own Docker, which cannot see the box. Open the box through Remote-SSH and run `kunj ct open`
+  there, or use `kunj ct shell`.
+- **Published ports** (`container.publish`) bind to the box's loopback, where you cannot reach them.
+  Use `kunj ct forward` instead; `forward --auto` and the agent's own forwarding work as they do
+  locally.
+
+Every Docker call is a round trip, so a listing or a start takes a little longer over a LAN and
+noticeably longer over the internet.
+
+## Reaching the box
+
+`kunj serve` listens on `127.0.0.1:7433` by default and refuses to listen elsewhere unless you pass
+`--allow-remote-listen`, because the connection is plain HTTP. Two ways reach it safely:
+
+- **An SSH tunnel kunj opens** (`kunj remote add <name> --ssh user@host [--port 7433]`). kunj runs
+  `ssh -N -L … user@host` for the life of each command and talks to the server through it. SSH does
+  the encryption and the host identity, with your usual keys, agent and `~/.ssh/config`.
+- **A URL you put behind TLS** (`kunj remote add <name> --url https://box.example/kunj`), for a box
+  behind your own reverse proxy or a mesh network. Plain `http://` is accepted only to a loopback
+  address.
+
+Either way, every request carries the token. Anyone with the token controls the containers kunj
+makes on the box, so treat it like an SSH key: it lives in `~/.kunj/serve/token` on the box and in
+`~/.kunj/remotes.json` on the laptop, both readable by you only, and `kunj remote list` never shows it.
+
+<Aside>
+The server acts only on objects kunj made (they carry `kunj.*` labels), builds and removes only
+`kunj-*` images, and lets a client run a privileged container or another runtime only when started
+with `--allow-privileged` or `--allow-runtime sysbox-runc`. It is not a general Docker proxy.
+</Aside>
+
+## Commands
+
+```bash
+kunj serve [--listen 127.0.0.1:7433] [--allow-privileged] [--allow-runtime sysbox-runc] [--verbose]
+kunj serve token [--rotate]
+
+kunj remote add <name> --ssh user@host [--port 7433] | --url https://… [--token-stdin]
+kunj remote list [--json]
+kunj remote ping <name> [--json]
+kunj remote token <name> [--token-stdin]
+kunj remote remove <name>
+```
+
+`--verbose` on the server logs every request (method, route, status, duration); refusals and bad
+tokens are always logged, never a token or a request body.

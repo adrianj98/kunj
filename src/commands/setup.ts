@@ -138,6 +138,7 @@ export class SetupCommand extends BaseCommand {
 
     await this.offerCompanionApps();
 
+    console.log(chalk.gray('\nContainers on another machine: run kunj serve there, then kunj remote add <name> --ssh user@host here (see kunj remote --help)'));
     console.log(chalk.blue('\n🎉 Setup complete! Happy coding with kunj!'));
   }
 

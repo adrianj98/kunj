@@ -439,6 +439,26 @@ the snapshot), so a changed env secret needs `ct start --rebuild` (the start out
 prints the `kunj secret import ~/.kunj/<repo>/keep/.env --delete` hint when the repo has no secrets and
 a keep `.env`; `kunj setup` offers that import when the repo has no `secrets.enc`.
 
+## Remote Containers
+
+`kunj serve` (src/commands/serve.ts, src/lib/serve/{protocol,server,streams,guard,token,tunnel}.ts) runs on
+the Docker host and exposes `ContainerBackend` over HTTP and WebSocket; `RemoteKunjBackend`
+(src/lib/container/remote.ts) is the client, picked by `selectBackend()` (src/lib/container/select-backend.ts)
+from `--remote <name>` / `container.remote` (`local` forces the laptop). Spec: docs/specs/remote-containers.md.
+Thin server: lifecycle, hooks, secrets and bundles stay on the laptop; the box holds only Docker labels and
+`~/.kunj/serve/token`. Unary calls are JSON routes under `/v1/`; exec, logs and events are WebSockets (binary
+frames with a channel byte: 0 stdin, 1 stdout, 2 stderr; text frames `resize`/`exit`/`error`), copyIn and
+buildImage are chunked tar bodies. The server acts only on objects with `kunj.*` labels, builds/commits/removes
+only `kunj-*` tags, needs `--allow-privileged` / `--allow-runtime` for those run options, and reads
+(`inspectLabels`, `imageExists`, listings) openly. TTY execs (`shell`, `attach`, `agent`) go through the Docker
+Engine API on the server (`execTty()` in docker.ts, still the only module that touches Docker) and raw mode on
+the client (`Terminal` seam). `kunj remote add|list|remove|ping|token` keeps `~/.kunj/remotes.json` (0600;
+https anywhere, http only to loopback; tokens never listed); `--ssh` remotes get an `ssh -N -L` tunnel per
+process (tunnel.ts). `ct open` refuses on a remote (`remote-no-editor`); `ct list --json` reports
+`backend.kind/remote/features`; detached forwarders and bridges get `--remote`. Tests: `npm run test:remote`
+runs the container suites over the wire (`testBackend()` in remote-harness.ts; `itLocal` for the few that
+compare stream objects); `remote.docker.test.ts` needs a real daemon.
+
 ## Repository Registry & macOS App
 
 `~/.kunj/{reponame}/` does not record where a repository lives, so src/lib/repos.ts keeps

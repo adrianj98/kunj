@@ -121,6 +121,8 @@
 
 ### Task 7: Functional test, docs, setup
 
+**Status: done except running the Docker tests** (this commit): `remote.functional.test.ts` and `remote.docker.test.ts` are written but this session had no daemon; docs-site page `containers/remote.mdx`; CLAUDE.md paragraph; one hint line in `kunj setup`.
+
 **Files:**
 - Create: `test/functional/remote.functional.test.ts` (starts `kunj serve` as a child with a throwaway HOME, `remote add --url http://127.0.0.1:<port>`, runs start/list/shell(`script`)/forward/stop/remove with `--remote`)
 - Modify: `docs-site/src/content/docs/…/remote.mdx` (new page), `docs/specs/remote-containers.md` (status table), `docs/specs/README.md` (tracker), `CLAUDE.md` (a "Remote containers" paragraph), `src/commands/setup.ts` (asks about a remote when `ct` is used)

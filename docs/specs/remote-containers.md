@@ -10,7 +10,7 @@ later phase.
 
 | Part | State |
 | --- | --- |
-| Spec | Written, not reviewed |
+| Spec | Implemented through step 6 of the order below; TLS, per-user tokens and Remote-SSH attach stay later |
 | `container.dockerContext` over SSH validated end to end (prerequisite, no code) | Not started |
 | Protocol and `RemoteKunjBackend` (client) over an in-process server with `FakeBackend` | Shipped: unary calls, exec/copy/build/logs/events streams; `npm run test:remote` runs the container suites over the wire |
 | `kunj serve` (server) | Shipped: `serve [--listen] [--allow-privileged] [--allow-runtime] [--verbose]`, `serve token [--rotate]` |
@@ -19,7 +19,7 @@ later phase.
 | TTY exec over the WebSocket (`shell`, `attach`, `agent`): raw-mode client, resize frames, Engine API on the server | Shipped (unit-tested against a fake daemon socket; a real daemon still to try) |
 | `forward`, `forward --auto`, the MCP bridge against a remote | Covered by the suites over the wire |
 | `kunj events` watches each repository on the backend its `container.remote` names | Shipped (a remote that is down at startup is reported once and left out) |
-| Functional test against a real daemon | Not started |
+| Functional test (`test/functional/remote.functional.test.ts`) and `remote.docker.test.ts` | Written without a daemon at hand: not yet run |
 | Editor attach through Remote-SSH | Later |
 | TLS, multi-user | Later, own spec |
 
