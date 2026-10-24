@@ -112,6 +112,32 @@ describe('writeHostFiles', () => {
     }
   });
 
+  it.each(['.git/config', '.GIT/config', 'sub/.git/hooks/pre-commit'])('refuses %p inside a .git directory even when git ignores it', async (p) => {
+    fs.writeFileSync(path.join(root, '.gitignore'), '*\n');
+    const before = fs.readFileSync(path.join(root, '.git', 'config'), 'utf8');
+    const err = await writeHostFiles(root, new Map([[p, 'A="1"\n']]), { force: true }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(fs.readFileSync(path.join(root, '.git', 'config'), 'utf8')).toBe(before);
+    expect(fs.existsSync(path.join(root, 'sub'))).toBe(false);
+  });
+
+  it('refuses a path through a symlinked directory before writing any file or creating any directory', async () => {
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-outside-')));
+    try {
+      fs.symlinkSync(outside, path.join(root, 'link'));
+      const files = new Map([
+        ['.env', 'A="1"\n'],
+        ['link/sub/deep/.env', 'B="2"\n'],
+      ]);
+      const err = await writeHostFiles(root, files, { force: true }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(fs.readdirSync(outside)).toEqual([]);
+      expect(fs.existsSync(path.join(root, '.env'))).toBe(false);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it('replaces a symlink at the file path rather than writing through it', async () => {
     const outside = path.join(os.tmpdir(), `kunj-target-${process.pid}`);
     fs.writeFileSync(outside, 'untouched');

@@ -142,7 +142,7 @@
 
 ### Task 4: Resolution and host file delivery
 
-**Status: done** in the commit "Secrets: resolution by scope and target, host file rendering". Rulings in the ledger.
+**Status: done** in 009958c; review fix (a path through a symlinked directory is refused before any directory is created, and a path inside `.git` is refused) in the Review 4 commit. Rulings in the ledger.
 
 **Files:**
 - Create: `src/lib/secrets/resolve.ts`, `src/lib/secrets/deliver.ts`
@@ -156,7 +156,7 @@
   - `renderFiles(entries: SecretEntry[]): Map<string, string>` maps the relative file to `NAME=value` lines. Values are double-quoted with `\\`, `"` and newline escaped (`\n`) so `parseDotenv` reads them back, sorted by name. `parseDotenv` turns a raw CR into LF and has no `\r` escape, so a value containing `\r` does not round-trip; `set`/`import` keep it in the vault as given, and only the rendered file loses it.
   - `writeHostFiles(worktreeRoot: string, files: Map<string,string>, opts: { force?: boolean }): Promise<string[]>` checks `git check-ignore -q` per file and throws `SecretError('… is not ignored by git', 'not-ignored')` before writing anything. It writes with mode 0600 and refuses paths outside the root (`..`, absolute).
   - `loadSecrets(opts: { branch?: string; target: 'host'|'container'; create?: false }): Promise<SecretEntry[]>` does the glue: config, `getKunjDir`, `getUnlock`, both `readVault`s and `resolveSecrets`. It returns `[]` without unlocking when no `secrets.enc` exists.
-  - As built: `resolveSecrets`, `envOf` and `loadSecrets` (with `SecretTarget`, `LoadSecretsOptions`) are in resolve.ts; `renderFiles` and `writeHostFiles` in deliver.ts. `loadSecrets` also takes optional seams `kunjDir`, `globalDir`, `mode`, `env`, `platform`, `run`, `prompt`, `tty` (defaults: current repo, `secrets.keyProvider`, the process); `branch` undefined means no branch layer (callers pass the current branch). `resolveSecrets` sorts by name, drops `delivery.file` and `scope` meaning from global entries, and filters by target after the override. `writeHostFiles` returns the relative paths written, refuses (plain `Error`) a path outside the root, also through a symlinked directory, even with `force`, and writes via temp file + rename.
+  - As built: `resolveSecrets`, `envOf` and `loadSecrets` (with `SecretTarget`, `LoadSecretsOptions`) are in resolve.ts; `renderFiles` and `writeHostFiles` in deliver.ts. `loadSecrets` also takes optional seams `kunjDir`, `globalDir`, `mode`, `env`, `platform`, `run`, `prompt`, `tty` (defaults: current repo, `secrets.keyProvider`, the process); `branch` undefined means no branch layer (callers pass the current branch). `resolveSecrets` sorts by name, drops `delivery.file` and `scope` meaning from global entries, and filters by target after the override. `writeHostFiles` returns the relative paths written, refuses (plain `Error`) a path outside the root, also through a symlinked directory (checked for every file before anything is created), or with a `.git` component (any case), even with `force`, and writes via temp file + rename. A tracked file, and a root that is not a git repository, count as not ignored. A host-only branch entry hides the repo entry of that name from containers (filter after override).
   - Add `vaultKdf(file: string): Kdf | undefined` to vault.ts (reads the envelope's `kdf` without decrypting; `undefined` when missing; `secrets-corrupt` when not a v1 envelope) so the caller can pass `getUnlock` its `existingKdf`. Rules from Task 3 the glue must keep: `mode` is `secrets.keyProvider` from the resolved config; `existingKdf` is the kdf of whichever vault file exists, so a new repo vault next to a keychain global one reuses the same key instead of minting one; when the global and repo files have different kdfs, call `getUnlock` once per kdf and open each file with its own `Unlock`; reads pass `create: false`. Pass one `Unlock` (per kdf) to both files so a passphrase is asked once per command. Test with a fake `Runner`/`prompt`, never the real Keychain.
 - [x] **Step 1: Write the failing tests.**
   - A branch entry `X` overrides repo `X` for `feature/x` only. `main` still gets the repo value.
@@ -182,6 +182,7 @@
   - `export interface SecretListJson { secrets: Array<{ name: string; scope: 'global'|'repo'|'branch'; branch?: string; targets: Array<'host'|'container'>; delivery: { env: boolean; file?: string }; updatedAt: string }> }`
   - Subcommands per the spec table: `set`, `import`, `list`, `get`, `rm`, `env`, `apply [-a]`.
 
+- Reads (`get`, `env`, `apply`) go through `loadSecrets({ branch, target, … })` (Task 4) and must pass the current branch themselves: `branch` undefined means no branch layer. `apply` writes through `renderFiles` + `writeHostFiles(root, files, { force })`; a bad path is a plain `Error` (prints `{ error: "<message>" }` in `--json`), `not-ignored` is a `SecretError`. `get`/`list` read the raw files with `vaultKdf` + `getUnlock` + `readVault`, not `resolveSecrets`, when they need every scope (resolution keeps one branch and drops overridden entries).
 - Write paths (`set`, `import`, `rm`) call `getUnlock` with `create: true` and `existingKdf` from `vaultKdf` of both files (Task 4); only when neither file exists may a new key be made.
 
 - [ ] **Step 1: Write the failing tests.** Inject `Unlock` (or `getUnlock`'s `run`/`prompt`) through a test seam on the command, the way `repoId` is a seam in events, and use a temp HOME.
@@ -220,7 +221,7 @@
 - Test: `src/commands/__tests__/run.test.ts`, `src/lib/__tests__/agent-session.test.ts`
 
 **Interfaces:**
-- Consumes: `loadSecrets`, `envOf`, `renderFiles`, `writeHostFiles` (Task 4).
+- Consumes: `loadSecrets({ branch, target: 'host' })`, `envOf`, `renderFiles`, `writeHostFiles` (Task 4). `run` and `worktree add` pass the branch explicitly (the current one for `run` without `--branch`, the new worktree's for `add`): `loadSecrets` does not look it up.
 - Produces: `kunj run [--branch b] -- <cmd…>`. It spawns `cmd` with `{ ...process.env, ...envOf(host secrets) }` and `stdio: 'inherit'`, renders file deliveries first, and exits with the child's code (signal: 128+n).
 
 - [ ] **Step 1: Write the failing tests.**
@@ -244,7 +245,7 @@
 - Test: `src/lib/container/__tests__/lifecycle.test.ts` (FakeBackend), `src/lib/container/__tests__/integration.docker.test.ts`
 
 **Interfaces:**
-- Consumes: `loadSecrets`, `envOf`, `renderFiles`, `vaultStamp`.
+- Consumes: `loadSecrets({ branch, target: 'container' })` (pass the branch: undefined means no branch layer), `envOf`, `renderFiles`, `vaultStamp`. `writeHostFiles` is host only; the container render must apply its own path rules (inside `/workspace`, no `.git` component).
 - Produces: `ContainerJson.secretsChanged`.
 
 - [ ] **Step 1: Write the failing FakeBackend tests.**
