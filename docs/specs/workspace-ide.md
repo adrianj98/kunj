@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -207,14 +207,16 @@ the scripts, their variables and `fake-kunj`'s fixture naming rule.
 **Data flow.** `EnvironmentStore` holds `[RepoEnvironments]` and is the only source for the views. A
 refresh runs `kunj repos --json` (hidden and missing repos skipped), then per repo `worktree list --json`
 and `ct list --json` in parallel (a failing `ct list` marks that repo's backend unavailable; the worktrees
-still show), and merges them into `Environment` values (`id = "<repo>|<kind>|<branch>"`; a worktree and a
-container on the same branch are two rows). `EventStream` reads `kunj events --json` line by line on a
+still show), and merges them into `Environment` values (`id = "<repo name>|<kind>|<branch>"`, the name as `kunj repos`
+reports it; a worktree and a container on the same branch are two rows; bare and detached worktrees are
+left out). `repos` runs in the user's home, everything else in the repo's root. `EventStream` reads `kunj events --json` line by line on a
 background thread; the store maps `git`/`container`/`agent` events to a refresh of that repo and
 `repos`/`backend`/`sessions`/`forwards` to a full refresh, coalesced per repo (300 ms), and notifies the
 views on the main thread. The app never asks git or Docker for state. The status verb and dot are pure
 functions of an `Environment` (`Environment.statusVerb`, `Environment.dot`), in this order: missing
 worktree, stopped container, agent waiting, agent running, PR merged, PR open, dirty (`N changed files`),
-ahead (`↑N unpushed`), `Clean`; the dot is amber for waiting, green for running, idle otherwise. An
+ahead (`↑N unpushed`), `Clean`. `ct list` reports a container's dirty state without a count, upstream
+or PR, so a dirty container reads `Changed files` and its meta line shows `↑N` alone; the dot is amber for waiting, green for running, idle otherwise. An
 agent's `state` counts only while `agent.running` is true: a crashed agent never fires SessionEnd and
 leaves its last state behind. Refreshes are scoped to what changed: a `git` event re-runs only that
 repo's `worktree list --json`, a `container` event only its `ct list --json` (which execs into every
@@ -375,6 +377,17 @@ From `KunjCLI` (Task 3):
   expands a quoted `$PATH` with spaces, so a fish user gets only the fallback directories. Reading
   `/usr/bin/printenv PATH` between two marker lines would work in every shell.
 - [ ] Until Task 6's error state, a discovery error shows only as red text on the status bar's right.
+
+From the environment model (Task 4):
+
+- [ ] Environment ids (and so the layout keys) use the repo's name from `kunj repos`, which comes from
+  origin's URL: two clones of one repository registered at once get the same ids. Keying on `root`
+  would be unique but would change with the directory.
+- [ ] A worktree in the middle of a rebase is detached and has no branch in `worktree list`, so its row
+  disappears until the rebase ends; Task 5's store and Task 7's tabs must not close that environment's
+  terminals when its row drops out for a refresh or two.
+- [ ] `ct list` carries no PR for a container and no upstream, so a container row cannot show `PR #N`
+  or `↑N from main` as the mockup does; reporting them would be a CLI addition.
 
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).

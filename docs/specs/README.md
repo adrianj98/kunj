@@ -48,7 +48,7 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Workspace app v1 (native) | [workspace-ide.md](workspace-ide.md#architecture) | Started 2026-10-23 from the design package (`docs/workspace-app/`); plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`, 12 tasks; done: 1 (ace71b1), 2 scaffold (0e8ab41), 3 KunjCLI (e6feedc), 12 CLI part (7d497a6) |
+| Workspace app v1 (native) | [workspace-ide.md](workspace-ide.md#architecture) | Started 2026-10-23 from the design package (`docs/workspace-app/`); plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`, 12 tasks; done: 1 (ace71b1), 2 scaffold (0e8ab41), 3 KunjCLI (e6feedc), 4 JSON mirrors and environment model (53fdf6b), 12 CLI part (7d497a6) |
 
 ## To do
 
