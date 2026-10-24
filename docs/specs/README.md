@@ -52,13 +52,13 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
+| Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Plan `docs/superpowers/plans/2026-10-23-secret-manager.md`. Task 1 (dotenv parser, rulings in the spec) done; Tasks 2–8 left |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
 
 ## To do
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Design approved 2026-10-23; plan `docs/superpowers/plans/2026-10-23-secret-manager.md` waits for your review |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
 | Extra repos cloned next to the workspace | [container-system.md](container-system.md#roadmap) | — |

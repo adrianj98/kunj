@@ -67,7 +67,8 @@ itself when Docker is unavailable.
 
 ## Secrets
 
-*Designed 2026-10-23, not built.* Today secrets reach a container only as host environment variables
+*Designed 2026-10-23, not built.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
+(in progress; its rulings are written into Storage and Delivery below). Today secrets reach a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -99,11 +100,21 @@ tokens. Nothing is ever written into the repository.
   renders it as a `NAME=value` line into that file (relative to the worktree or container root; several
   secrets may share one file). Global secrets are environment variables only.
 - Resolution for a branch: global, then repo, then branch; the most specific wins.
-- **Key.** A random 32-byte key in the macOS Keychain (generic password `kunj-secrets`, created on first
-  use, read once per command with `security find-generic-password`), or libsecret `secret-tool` on Linux.
-  Without either: a passphrase stretched with scrypt, prompted once per command; `KUNJ_SECRETS_KEY`
-  supplies the key for CI and scripts. The vault is only unlocked by commands that deliver or manage
-  secrets, never by listings, so the fast path does not change.
+- **Key.** A random 32-byte key (64 hex chars) in the macOS Keychain (generic password, service
+  `kunj-secrets`, account `kunj`, created on first use, read once per command with
+  `security find-generic-password -s kunj-secrets -a kunj -w`), or libsecret `secret-tool` (attribute
+  `service kunj-secrets`) on Linux. The key never goes in argv when it is stored: `security -i` reads the
+  `add-generic-password` command from stdin, and `secret-tool store` reads the secret from stdin.
+  Without either: the `passphrase` kdf, `scrypt(passphrase, salt, 32, N=2^15, r=8, p=1)` with a 16-byte
+  random salt per file, prompted once per command. `KUNJ_SECRETS_KEY` (64 hex chars) supplies the raw key
+  for CI and scripts and overrides the keychain; it opens `keychain`-kdf files only. The setting
+  `secrets.keyProvider` (`auto|keychain|libsecret|passphrase`, default `auto`) picks the provider.
+  The vault is only unlocked by commands that deliver or manage secrets, and only when a `secrets.enc`
+  exists, never by listings (`worktree list`, `ct list`, `events`), so the fast path does not change.
+- **Stamp.** A container records the label `kunj.secrets`: the first 12 hex chars of the sha256 of the
+  global and repo `secrets.enc` bytes (ciphertext only, `''` when neither exists). `ct list` recomputes it
+  from the files without unlocking and compares. Any write to the vault marks every container of the
+  repo, which is coarse but reveals nothing.
 
 ### Commands
 
@@ -134,10 +145,20 @@ file it is removed from the keep store too.
   existing `docker run` env file, so the container rules hold (never `docker exec -e`, never a label,
   never a snapshot; snapshot builds get no secrets). A stored secret overrides a `container.env` entry
   of the same name. `file` deliveries render into `/workspace/<file>` as the sandbox user, mode 0600,
-  added to `.git/info/exclude` so the agent cannot commit them. A secret changed after the container
-  started reaches it on the next start or resume; `ct list` shows `secretsChanged: true` until then.
+  added to `.git/info/exclude` so the agent cannot commit them. `docker start` keeps the environment
+  of `docker run`, and the env file is the only allowed channel, so a changed `env` secret reaches a
+  container only when it is recreated (`ct start --rebuild`); `start` and resume re-render `file`
+  deliveries, and the start output hints at `--rebuild` when the stamp differs and the container has
+  env secrets. `ct list --json` shows `secretsChanged: true` while the label differs from the stamp.
+  `docker inspect` shows env-file variables in `Config.Env`, as it does for forwarded tokens today, so
+  "not in `docker inspect`" means not in a label and not for host-only secrets; anyone who can run
+  `docker inspect` already has root on the daemon.
 - **Host:** `kunj agent`, `kunj run` and the workspace app's worktree terminals get host-targeted `env`
-  secrets (tmux sessions through `new-session -e`, like `KUNJ_*`). `file` deliveries render into the
+  secrets, never through argv. `kunj agent` runs the tmux command as
+  `<node> <kunj> run --branch <b> -- <shell> -lc <agent.command>`, so the vault is unlocked inside the
+  session (not through `new-session -e`, which would put values in argv; `KUNJ_*` stay there); without
+  tmux it does the same in-process. The workspace app opens worktree terminals with
+  `kunj run -- $SHELL -l`. `file` deliveries render into the
   worktree when `kunj worktree add` creates it (where keep files apply today) and on
   `kunj secret apply`. A rendered file that git does not ignore is refused unless `--force`.
 - **The workspace app** never reads the vault; it runs kunj commands, which unlock through the keychain,
@@ -155,7 +176,8 @@ file it is removed from the keep store too.
   comments, `${X}` literal); resolution order; target filtering (a host-only secret never reaches the
   container env file); rendering, mode 0600, `.git/info/exclude`; the not-ignored refusal; a fake key
   provider so tests never touch the real Keychain. Docker test: a container-targeted secret is visible
-  in the container, a host-only one is not, and neither is in `docker inspect` or a snapshot image.
+  in the container, a host-only one is not and appears nowhere in `docker inspect`, no label holds a
+  value, and a snapshot image's `Config.Env` holds neither.
 
 **Code map (planned):** `src/lib/secrets/{vault,keyprovider,dotenv,resolve,deliver}.ts`,
 `src/commands/secret.ts`, `src/commands/run.ts`, `secrets.*` settings in `src/settings/secrets.ts`,
