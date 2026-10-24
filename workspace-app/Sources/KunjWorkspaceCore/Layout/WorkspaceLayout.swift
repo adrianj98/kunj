@@ -1,16 +1,19 @@
 import Foundation
 
-/// A tab worth restoring: shells restart, agent tabs reattach to tmux, editor tabs reopen `path`
+/// A tab worth restoring: shells reattach to their tmux session (or restart without one), agent tabs reattach to tmux, editor tabs reopen `path`
 /// (relative to the worktree or /workspace). Action tabs are never saved.
 public struct SavedTab: Codable, Equatable, Sendable {
     public var kind: TabKind
     public var title: String
     public var path: String?
+    /// A shell tab's tmux session id (`TerminalSpec.session`); absent in files from before it.
+    public var session: String?
 
-    public init(kind: TabKind, title: String, path: String?) {
+    public init(kind: TabKind, title: String, path: String?, session: String? = nil) {
         self.kind = kind
         self.title = title
         self.path = path
+        self.session = session
     }
 }
 

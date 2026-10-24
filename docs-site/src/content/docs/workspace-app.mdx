@@ -68,7 +68,10 @@ While the app finds kunj and lists your repositories, which can take a few secon
 is slow to start, the window shows a spinner with "Loading sessions…" and the step it is on.
 
 - **Sidebar.** The repositories in [`kunj repos`](../worktrees/macos-app/#kunj-repos), each with its
-  worktrees and containers. A row shows the branch, when you last did something in it, the kind
+  open sessions: the worktrees and containers you have tabs in, or where an agent runs. **N more…**
+  under a repository lists the others; click one to open it, or find it with ⌘K, which searches
+  them all. To close a session, right-click its row or press ⌘⇧W: its tabs close and all its tmux
+  sessions, shells and agents, end. A row shows the branch, when you last did something in it, the kind
   (worktree or container) and its state: *Waiting for input*, *Running* (the agent), *Merged #398*,
   *PR #412 open*, *3 changed files*, *↑2 unpushed*, *Clean*, or *Stopped* / *Missing*. The dot is
   green while an agent works, amber when it waits for you. A worktree and a container on the same
@@ -124,6 +127,9 @@ not UTF-8 and files over 5 MB are not opened.
 
 ## Agents
 
+You can run as many agents in an environment as you like: **Agent** (⌘⇧A) opens a new one each
+time, each in its own tmux session. Closing an agent's tab stops that agent.
+
 An agent tab runs `kunj agent <branch>` (in a container, `kunj ct agent <branch>`), which starts the
 agent (`agent.command`, `claude` by default) in a tmux session that kunj names, or attaches to it if
 it is already running. Because the session belongs to tmux and not to the app:
@@ -141,9 +147,14 @@ the app quits. Containers always use tmux inside the container.
 
 ## Tabs across launches
 
+Shell tabs run in tmux too when it is installed (on your Mac, or in the container's image), so
+quitting the app leaves them running with their history and whatever they were doing. The app
+reopens the environment you had selected, and its shells and agents reattach where they were.
+Closing a tab yourself (⌘W) ends its tmux session; without tmux a shell tab is a plain shell that
+ends with the app.
+
 The app remembers each environment's tabs in `~/.kunj/<repo>/workspace.json`. The first time you
-select an environment after launching, its shells reopen, its agent tab reattaches if the agent is
-still running, and its files reopen. A stopped container's tabs come back once it runs. Command tabs
+select an environment after launching, its shells and agents reattach, and its files reopen. A stopped container's tabs come back once it runs. Command tabs
 are not restored. The time on each sidebar row is your last activity there (typing in one of its
 tabs, or the branch changing), kept in the same file.
 
@@ -160,6 +171,7 @@ tabs, or the branch changing), kept in the same file.
 | ⌘⇧P | Create PR |
 | ⌘⇧C | Show or hide Changes |
 | ⌘⇧E | Show or hide Files |
+| ⌘⇧W | Close the session (all its tabs and tmux sessions) |
 | ⌘⇧] / ⌘⇧[ | Next / previous tab |
 | ⌘W | Close the tab |
 | ⌘S | Save the file |

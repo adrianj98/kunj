@@ -60,14 +60,30 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   running, amber waiting for input, idle otherwise), *title · relative time*, then *kind · status
   verb* in mono. The title is the branch (task titles need metadata the CLI does not report; see
   Decisions); the status verb comes from `Environment.statusVerb` (see Data flow). A ⌘K search box on
-  top, "+ New session" at the bottom, the agent count and kunj version under it.
+  top, "+ New session" at the bottom, the agent count and kunj version under it. Only **open
+  sessions** are listed (`sidebarGroups`): environments with tabs in the app or saved in the layout
+  file, a running or waiting agent, and the selection; each repository ends in an `N more…` row
+  (11 px `faint`) that lists the rest too (`Show fewer`), and a search lists every match, so any
+  environment can be opened. A row's menu and Environment > Close Session ⌘⇧W close the session:
+  every tab (an unsaved editor asks), then `kunj worktree shell <b> --kill` and `kunj agent stop <b>
+  --all` (containers: `kunj ct shell <b> --kill`, `kunj ct agent <b> --kill`), so its tmux sessions
+  end too, the ones started outside the app included; its saved tabs are cleared.
 - **Header:** title, then a mono meta line: repo / branch · kind · ahead/behind · PR (link) · ports.
   Actions right-aligned: Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O (outlined) and Create PR ⌘⇧P (the one
   filled button), plus an overflow menu with start/stop/remove and worktree remove.
 - **Tab bar (left column):** segmented pills, one per terminal or editor tab; a dot when its process
   has a notable state, or a `text2` dot on an editor tab with unsaved changes. Right side: `tmux <session> · uptime`, the split button (disabled until v2) and
   new-tab.
-- **Terminal tabs:** a login shell in the worktree, or `kunj ct shell <branch>` for a container.
+- **Terminal tabs:** a login shell in the worktree (`kunj worktree shell <branch> --session <id>`), or
+  `kunj ct shell <branch> --session <id>` for a container: with tmux (on the host, or in the image)
+  each shell tab is its own tmux session, so quitting the app keeps it and the next launch
+  reattaches; closing the tab (⌘W, its pill's menu) ends the session (`--kill`). Without tmux it is a
+  plain login shell. The id (8 hex) is saved with the tab.
+- **Many agents:** Agent ⌘⇧A opens a new agent tab each time, `kunj agent <branch> --session <id>`
+  (`kunj ct agent … --session <id>`), each its own tmux session; closing the tab stops that agent
+  (`kunj agent stop <b> --session <id>`, `kunj ct agent <b> --kill --session <id>`). An agent tab
+  saved before sessions has no id and attaches to the default session. The tab dots show the
+  environment's combined agent state.
 - **Agent tab:** a terminal running `kunj agent <branch>` or `kunj ct agent <branch>`, which attaches
   to the environment's tmux session, so a session started from the CLI shows up in the app and the
   reverse.
@@ -336,9 +352,12 @@ without `.git`): `{ "<kind>:<branch>": { "tabs": [{ "kind": "shell|agent|editor"
 on the same branch are two environments), written atomically, debounced 500 ms; action tabs
 are never saved; entries or tabs that do not decode are skipped, not the whole file. On selecting an
 environment for the first time in a session, once it can run them (worktree present, container running;
-until then its entry is not saved over), its tabs are restored with the titles of their specs: shells
-restart, one agent tab reattaches to tmux only while the agent runs (restoring one that ended would start
-a new agent), editor tabs reopen the file by its saved `path` (one that cannot be read closes). The app writes pending changes when it quits.
+until then its entry is not saved over), its tabs are restored with the titles of their specs: shell
+and agent tabs reattach to their tmux sessions by the saved `session` id (a shell without one
+restarts; an agent tab without one reattaches only while the default agent runs), editor tabs reopen
+the file by its saved `path` (one that cannot be read closes). The app writes pending changes when it
+quits, and remembers the selected environment (`selectedEnvironment`), selected again after the first
+listing so its tabs reattach.
 
 **Actions** (`ActionRunner`): Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O (`worktree open` / `ct open`),
 Create PR ⌘⇧P (`kunj pr` in an action tab, in the worktree; for a container environment the host

@@ -6,9 +6,9 @@ private let cli = KunjCLI(command: "kunj", path: "/login/bin:/usr/bin:/bin")
 private let baseEnv = ["HOME": "/Users/demo", "LANG": "de_DE.UTF-8", "USER": "demo"]
 
 private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cwd: String? = nil,
-                  cli: KunjCLI = cli, terminalEnv: [String: String] = baseEnv) throws -> TerminalSpec {
+                  cli: KunjCLI = cli, terminalEnv: [String: String] = baseEnv, session: String? = nil) throws -> TerminalSpec {
     try terminalSpec(cli: cli, env: env, kind: kind, action: action, shell: "/bin/zsh", terminalEnv: terminalEnv,
-                     cwd: cwd)
+                     cwd: cwd, session: session)
 }
 
 @Suite struct TerminalSpecTests {
@@ -48,6 +48,45 @@ private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cw
         let agent = try spec(testContainer(), .agent)
         #expect(agent.arguments == ["kunj", "ct", "agent", "feature/x"])
         #expect(agent.title == "agent")
+    }
+
+    /// A shell tab with a session runs in a tmux session kunj names (when tmux is there), so it is
+    /// reattached after the app quits; closing the tab ends it with --kill
+    @Test func shellSessionsGoThroughKunj() throws {
+        let wt = try spec(testWorktree(), .shell, session: "a1b2c3d4")
+        #expect(wt.executable == "/usr/bin/env")
+        #expect(wt.arguments == ["kunj", "worktree", "shell", "feature/x", "--session", "a1b2c3d4"])
+        #expect(wt.cwd == "/r/app")
+        #expect(wt.title == "zsh")
+        #expect(wt.session == "a1b2c3d4")
+        let ct = try spec(testContainer(), .shell, session: "a1b2c3d4")
+        #expect(ct.arguments == ["kunj", "ct", "shell", "feature/x", "--session", "a1b2c3d4"])
+        #expect(ct.title == "shell")
+        #expect(sessionKillArguments(env: testWorktree(), kind: .shell, session: "a1b2c3d4")
+                == ["worktree", "shell", "feature/x", "--session", "a1b2c3d4", "--kill"])
+        #expect(sessionKillArguments(env: testContainer(), kind: .shell, session: "a1b2c3d4")
+                == ["ct", "shell", "feature/x", "--session", "a1b2c3d4", "--kill"])
+        #expect(try spec(testWorktree(), .shell).session == nil)
+        let id = newTabSession()
+        #expect(id.count == 8 && id.allSatisfy { $0.isHexDigit } && id != newTabSession())
+    }
+
+    /// Each agent tab has its own session, so an environment can run many agents; an agent tab
+    /// restored from before sessions (no id) attaches to the default one
+    @Test func agentSessions() throws {
+        #expect(try spec(testWorktree(), .agent, session: "a1").arguments == ["kunj", "agent", "feature/x", "--session", "a1"])
+        #expect(try spec(testWorktree(), .agent, session: "a1").session == "a1")
+        #expect(try spec(testContainer(), .agent, session: "a1").arguments == ["kunj", "ct", "agent", "feature/x", "--session", "a1"])
+        #expect(try spec(testWorktree(), .agent).arguments == ["kunj", "agent", "feature/x"])
+        #expect(sessionKillArguments(env: testWorktree(), kind: .agent, session: "a1")
+                == ["agent", "stop", "feature/x", "--session", "a1"])
+        #expect(sessionKillArguments(env: testContainer(), kind: .agent, session: "a1")
+                == ["ct", "agent", "feature/x", "--kill", "--session", "a1"])
+        // closing the environment ends every shell and agent session of the branch
+        #expect(closeEnvironmentArguments(env: testWorktree())
+                == [["worktree", "shell", "feature/x", "--kill"], ["agent", "stop", "feature/x", "--all"]])
+        #expect(closeEnvironmentArguments(env: testContainer())
+                == [["ct", "shell", "feature/x", "--kill"], ["ct", "agent", "feature/x", "--kill"]])
     }
 
     @Test func actionTab() throws {

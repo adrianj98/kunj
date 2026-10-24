@@ -68,6 +68,22 @@ final class LayoutKeeper {
         }
     }
 
+    /// Whether the environment has tabs saved in the layout file (an open session from an earlier
+    /// run, listed in the sidebar before it is restored).
+    func hasSavedTabs(_ env: Environment) -> Bool {
+        !(layouts.layout(repo: env.repo.dirName, fallback: env.repo.name).branches[key(env)]?.tabs.isEmpty ?? true)
+    }
+
+    /// The environment's session was closed: no tabs are saved for it any more.
+    func closed(_ envId: String) {
+        guard let env = environment(envId) else { return }
+        restored.insert(envId)
+        layouts.update(repo: env.repo.dirName, fallback: env.repo.name, key: key(env)) {
+            $0.tabs = []
+            $0.active = nil
+        }
+    }
+
     /// A listing: environments whose state changed since the last one are active now.
     func listed(_ repos: [RepoEnvironments]) {
         let changed = tracker.changed(repos)

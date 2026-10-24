@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let showChangesKey = "showChanges"
     /// The app-wide Files column setting (default closed).
     static let showFilesKey = "showFiles"
+    /// The environment selected when the app last ran, selected again after the first listing.
+    static let selectedEnvironmentKey = "selectedEnvironment"
 
     nonisolated init(arguments: [String]) {
         if let i = arguments.firstIndex(of: "--screenshot"), i + 1 < arguments.count {
@@ -66,6 +68,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.terminalColumn.onNewTab = { [weak self] in self?.openTab(.shell) }
         wireEditors()
         windowController.onNewSession = { [weak self] in self?.newSession(nil) }
+        windowController.onCloseSession = { [weak self] id in
+            guard let self, let env = self.store?.environment(id: id) else { return }
+            let item = NSMenuItem()
+            item.representedObject = env
+            self.closeSession(item)
+        }
         windowController.onToggleChanges = { [weak self] in self?.toggleChanges(nil) }
         windowController.sidebar.search.onEscape = { [weak self] in self?.windowController.terminalColumn.focusActive() }
         // --demo renders the mockup, which shows the column; otherwise the saved setting (closed by default)
@@ -182,6 +190,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // its event stream now would leave a second `kunj events` running that nothing stops
         guard self.store === store else { return }
         windowController.showLoading(nil)
+        // pick up where the last run left off: its environment, whose tabs then reattach
+        if windowController.selectedEnvironment == nil,
+           let last = UserDefaults.standard.string(forKey: Self.selectedEnvironmentKey),
+           store.environment(id: last) != nil {
+            windowController.select(last)
+        }
         windowController.render(repos: store.repos)
         windowController.showListingError(store.lastError?.message)
         guard !terminating else { return }
@@ -209,14 +223,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let registry else { return ([], nil) }
             let tabs = registry.tabs(for: id)
             let active = registry.active(for: id)
-            return (tabs.map { SavedTab(kind: $0.kind, title: $0.title, path: ($0 as? EditorTab)?.path) },
+            return (tabs.map { SavedTab(kind: $0.kind, title: $0.title, path: ($0 as? EditorTab)?.path,
+                                        session: ($0 as? TerminalTab)?.spec?.session) },
                     tabs.firstIndex { $0 === active })
         }
         keeper.open = { [weak self] env, tab in
             if tab.kind == .editor {
                 if let path = tab.path { self?.windowController.terminalColumn.registry.openEditor(env: env, path: path) }
             } else {
-                _ = self?.startTab(env: env, kind: tab.kind)
+                // a tab saved before sessions has none: the default agent session, a plain shell
+                _ = self?.startTab(env: env, kind: tab.kind, session: tab.session)
             }
         }
         keeper.activate = { [weak registry] id, index in
@@ -227,13 +243,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keeper.onActivity = { [weak self] in self?.windowController.sidebar.refreshTimes() }
         // the column already listens to the registry: keep its handler and add the keeper's
         let columnHandler = registry.onChange
-        registry.onChange = { [weak keeper] id in
+        registry.onChange = { [weak keeper, weak self] id in
             columnHandler?(id)
             keeper?.tabsChanged(id)
+            // a tab opened or the last one closed changes which sessions the sidebar lists
+            self?.windowController.sidebar.reloadRows()
+        }
+        windowController.sidebar.isOpen = { [weak keeper, weak registry] env in
+            !(registry?.tabs(for: env.id).isEmpty ?? true) || keeper?.hasSavedTabs(env) == true
         }
         registry.onInput = { [weak keeper] id in keeper?.input(id) }
         windowController.lastActivity = { [weak keeper] id in keeper?.lastActivity(id) }
-        windowController.onSelect = { [weak keeper] env in keeper?.selected(env) }
+        windowController.onSelect = { [weak keeper] env in
+            keeper?.selected(env)
+            if let env { UserDefaults.standard.set(env.id, forKey: Self.selectedEnvironmentKey) }
+        }
         return keeper
     }
 
@@ -412,18 +436,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Opens a shell or the agent in the selected environment. Agent activates a running agent
-    /// tab; a refused spec (missing worktree, stopped container) shows inline in the column.
+    /// Opens a new shell or agent in the selected environment, each in its own tmux session (an
+    /// environment can run many agents); a refused spec (missing worktree, stopped container)
+    /// shows inline in the column.
     private func openTab(_ kind: TabKind) {
         guard let env = windowController.selectedEnvironment else { return }
         let column = windowController.terminalColumn
-        if kind == .agent,
-           let existing = column.registry.tabs(for: env.id).first(where: { $0.kind == .agent && $0.running }) {
-            column.registry.activate(existing)
-            column.focusActive()
-            return
-        }
-        if startTab(env: env, kind: kind) {
+        if startTab(env: env, kind: kind, session: newTabSession()) {
             DispatchQueue.main.async { column.focusActive() }
         }
     }
@@ -431,12 +450,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opens a `kind` tab in `env` (also one restored from the layout file); a refused spec shows
     /// inline in the column and opens nothing.
     @discardableResult
-    private func startTab(env: Environment, kind: TabKind) -> Bool {
+    private func startTab(env: Environment, kind: TabKind, session: String?) -> Bool {
         let column = windowController.terminalColumn
         guard let cli = kunj else { return false }
         do {
             let spec = try terminalSpec(cli: cli, env: env, kind: kind, shell: Self.loginShell,
-                                        terminalEnv: ProcessInfo.processInfo.environment)
+                                        terminalEnv: ProcessInfo.processInfo.environment, session: session)
             column.registry.open(spec: spec, env: env, kind: kind)
             log("opened \(kind.rawValue) in \(env.id): \(spec.executable) \(spec.arguments.joined(separator: " ")) (cwd \(spec.cwd))")
             return true
@@ -462,6 +481,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let tab = column.activeTab else { return }
         column.registry.close(tab)
         column.focusActive()
+    }
+
+    /// A kunj call whose output nobody reads (ending tmux sessions); failures are only logged.
+    private func runQuietly(_ cli: KunjCLI, _ args: [String], in env: Environment) {
+        Task.detached {
+            do {
+                let r = try await cli.runRaw(args, cwd: env.repo.root, stdin: nil, timeout: 30)
+                if r.exit != 0 { log("kunj \(args.joined(separator: " ")) exited \(r.exit): \(r.stderr)") }
+            } catch {
+                log("kunj \(args.joined(separator: " ")): \(error)")
+            }
+        }
+    }
+
+    /// Environment > Close Session (and the sidebar row's menu): closes every tab of the
+    /// environment (an unsaved editor asks first) and ends all its shell and agent tmux sessions,
+    /// the ones started outside the app too; the row leaves the list of open sessions.
+    @objc func closeSession(_ sender: Any?) {
+        let env = (sender as? NSMenuItem)?.representedObject as? Environment ?? windowController.selectedEnvironment
+        guard let env, let cli = kunj else { return }
+        let registry = windowController.terminalColumn.registry
+        for tab in registry.tabs(for: env.id) { registry.close(tab) }
+        // an editor whose Save prompt was cancelled keeps the session open
+        guard registry.tabs(for: env.id).allSatisfy({ !($0 is EditorTab) }) else { return }
+        for args in closeEnvironmentArguments(env: env) { runQuietly(cli, args, in: env) }
+        layoutKeeper?.closed(env.id)
+        windowController.sessionClosed(env.id)
     }
 
     /// The user's login shell: `$SHELL`, else the account's, else zsh.
@@ -519,6 +565,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// reloads the column (its counts), since a working-tree edit makes no `git` event.
     private func wireEditors() {
         let column = windowController.terminalColumn
+        // a shell or agent tab closed by the user ends its tmux session (quitting keeps them)
+        column.registry.onSessionClosed = { [weak self] tab in
+            guard let self, let cli = self.kunj, let session = tab.spec?.session,
+                  let env = self.store?.environment(id: tab.envId) else { return }
+            self.runQuietly(cli, sessionKillArguments(env: env, kind: tab.kind, session: session), in: env)
+        }
         let open: (Environment, String) -> Void = { [weak column] env, path in
             guard let column else { return }
             column.showMessage(nil)
@@ -589,6 +641,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "New Session…", action: #selector(newSession(_:)), keyEquivalent: "n").target = self
         menu.addItem(withTitle: "Search Sessions", action: #selector(focusSearch(_:)), keyEquivalent: "k").target = self
+        menu.addItem(withTitle: "Close Session", action: #selector(closeSession(_:)), keyEquivalent: "W").target = self
         let switchItem = NSMenuItem(title: "Switch to Session", action: nil, keyEquivalent: "")
         let switches = NSMenu(title: "Switch to Session")
         for n in 1...9 {
@@ -638,6 +691,8 @@ extension AppDelegate: NSMenuItemValidation {
             return env != nil && kunj != nil && env?.state != .missing && env?.state != .stopped
         case #selector(nextTab(_:)), #selector(previousTab(_:)):
             return env.map { windowController.terminalColumn.registry.tabs(for: $0.id).count > 1 } ?? false
+        case #selector(closeSession(_:)):
+            return kunj != nil && windowController?.selectedEnvironment != nil
         case #selector(closeTab(_:)):
             return windowController?.terminalColumn.activeTab != nil
         case #selector(saveFile(_:)):

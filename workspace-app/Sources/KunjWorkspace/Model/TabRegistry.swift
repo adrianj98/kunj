@@ -232,6 +232,8 @@ final class TabRegistry {
     private func remove(_ tab: any WorkspaceTab) {
         guard var tabs = tabsByEnv[tab.envId], let i = tabs.firstIndex(where: { $0 === tab }) else { return }
         if let terminal = tab as? TerminalTab {
+            // closed by the user (quitting goes through closeAll): its tmux session ends too
+            if terminal.spec?.session != nil { onSessionClosed?(terminal) }
             terminal.onExit = nil
             terminal.close()
             terminal.removeFromSuperview()
@@ -248,6 +250,9 @@ final class TabRegistry {
 
     /// Ends every terminal's process (the app is quitting). tmux sessions stay: `tmux attach` only
     /// detaches. Editor tabs need nothing (the app asked about unsaved ones before).
+    /// A tab with a tmux session was closed: end the session (`sessionKillArguments`).
+    var onSessionClosed: ((TerminalTab) -> Void)?
+
     func closeAll() {
         for tab in allTerminals {
             tab.onExit = nil

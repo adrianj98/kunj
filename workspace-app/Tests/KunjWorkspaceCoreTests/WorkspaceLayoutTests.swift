@@ -14,6 +14,19 @@ private func sampleLayout() -> WorkspaceLayout {
 }
 
 @Suite struct WorkspaceLayoutTests {
+    /// A shell tab keeps its tmux session id; files written before it decode without one
+    @Test func savedShellTabKeepsItsSession() throws {
+        let path = try tempDirectory().appendingPathComponent("workspace.json").path
+        var layout = WorkspaceLayout()
+        layout.branches["worktree:main"] = BranchLayout(
+            tabs: [SavedTab(kind: .shell, title: "zsh", path: nil, session: "a1b2c3d4")], active: 0)
+        try saveLayout(layout, path: path)
+        #expect(loadLayout(path: path).branches["worktree:main"]?.tabs.first?.session == "a1b2c3d4")
+        let old = #"{"worktree:main":{"tabs":[{"kind":"shell","title":"zsh"}],"active":0}}"#
+        try old.write(toFile: path, atomically: true, encoding: .utf8)
+        #expect(loadLayout(path: path).branches["worktree:main"]?.tabs == [SavedTab(kind: .shell, title: "zsh", path: nil)])
+    }
+
     @Test func layoutPathAndKey() {
         #expect(layoutPath(repoName: "kunj", home: "/h") == "/h/.kunj/kunj/workspace.json")
         #expect(layoutKey(kind: .worktree, branch: "feature/x") == "worktree:feature/x")
