@@ -325,9 +325,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runner.cli = { [weak self] in self?.kunj }
         runner.repos = { [weak self] in self?.store?.repos ?? self?.windowController.repos ?? [] }
         runner.window = { [weak self] in self?.windowController.window }
-        runner.openAction = { [weak self] env, spec in
+        runner.openAction = { [weak self] env, spec, onFinish in
             guard let column = self?.windowController.terminalColumn else { return }
-            column.registry.open(spec: spec, env: env, kind: .action)
+            column.registry.open(spec: spec, env: env, kind: .action, onFinish: onFinish)
             DispatchQueue.main.async { column.focusActive() }
         }
         runner.showMessage = { [weak self] text in self?.windowController.terminalColumn.showMessage(text) }

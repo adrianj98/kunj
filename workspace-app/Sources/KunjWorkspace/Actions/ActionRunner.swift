@@ -12,7 +12,8 @@ final class ActionRunner {
     /// The environments as the store has them.
     var repos: () -> [RepoEnvironments] = { [] }
     /// Opens an action tab running `spec` in `env`; returns false when it could not.
-    var openAction: (Environment, TerminalSpec) -> Void = { _, _ in }
+    /// Opens an action tab; `onFinish` gets kunj's exit code (not called when the tab is closed first).
+    var openAction: (Environment, TerminalSpec, ((Int32) -> Void)?) -> Void = { _, _, _ in }
     /// Shows an inline message in the terminal column (a refused spec).
     var showMessage: (String) -> Void = { _ in }
     /// Selects an environment by id (a new session once it appears).
@@ -23,7 +24,9 @@ final class ActionRunner {
     var window: () -> NSWindow? = { nil }
 
     /// New sessions waiting for their environment to appear in a listing.
-    private var pending: [(id: String, startAgent: Bool, until: Date)] = []
+    /// New sessions waiting to be selected: once kunj has finished (its hooks too, so their output
+    /// is seen) and a listing shows the environment.
+    private var pending: [(id: String, startAgent: Bool, until: Date, finished: Bool)] = []
     /// How long a new session is waited for (a container's first start can build images).
     private static let pendingTimeout: TimeInterval = 30 * 60
 
@@ -79,12 +82,14 @@ final class ActionRunner {
         }
     }
 
-    private func openTerminal(args: [String], cwd: String?, in env: Environment) {
+    private func openTerminal(args: [String], cwd: String?, in env: Environment, keepOpen: Bool = false,
+                              onFinish: ((Int32) -> Void)? = nil) {
         guard let cli = cli() else { return }
         do {
-            let spec = try terminalSpec(cli: cli, env: env, kind: .action, action: args, shell: AppDelegate.loginShell,
+            var spec = try terminalSpec(cli: cli, env: env, kind: .action, action: args, shell: AppDelegate.loginShell,
                                         terminalEnv: ProcessInfo.processInfo.environment, cwd: cwd)
-            openAction(env, spec)
+            if keepOpen { spec.closeOnExitZero = false }
+            openAction(env, spec, onFinish)
             log("action tab in \(env.id): kunj \(args.joined(separator: " "))\(cwd.map { " (cwd \($0))" } ?? "")")
         } catch let error as TerminalSpecError {
             showMessage(error.message)
@@ -117,8 +122,10 @@ final class ActionRunner {
     // MARK: new session
 
     /// Runs `worktree add -c` / `ct start -c` in an action tab of the repository's main worktree
-    /// (else another environment of it, else the selected one), then selects the new environment
-    /// when a listing shows it and, when asked, opens its agent.
+    /// (else another environment of it, else the selected one), which stays selected while kunj
+    /// runs, so the create hooks (`post-worktree-create`, `post-container-create`) are seen running;
+    /// the tab stays open afterwards with their output. Once kunj exits 0 the new environment is
+    /// selected (when a listing shows it) and, when asked, its agent opened; a failure stays on the tab.
     func newSession(_ request: NewSessionRequest, fallback: Environment?) {
         guard case .terminal(let args, _, let cwd) = newSessionPlan(request) else { return }
         let envs = repos().first { $0.repo == request.repo }?.environments ?? []
@@ -134,10 +141,17 @@ final class ActionRunner {
         if host.repo != request.repo { host.repo = request.repo }
         let id = environmentId(repo: request.repo.name, kind: request.kind, branch: request.branch)
         pending.removeAll { $0.id == id }
-        pending.append((id, request.startAgent, Date() + Self.pendingTimeout))
+        pending.append((id, request.startAgent, Date() + Self.pendingTimeout, false))
         select(host.id)
-        openTerminal(args: args, cwd: cwd, in: host)
-        listed(repos())
+        openTerminal(args: args, cwd: cwd, in: host, keepOpen: true) { [weak self] code in
+            guard let self else { return }
+            if code == 0 {
+                if let i = self.pending.firstIndex(where: { $0.id == id }) { self.pending[i].finished = true }
+                self.listed(self.repos())
+            } else {
+                self.pending.removeAll { $0.id == id }
+            }
+        }
     }
 
     /// A listing arrived: a new session that appeared is selected (and its agent opened once it
@@ -147,7 +161,7 @@ final class ActionRunner {
         pending.removeAll { $0.until < now }
         guard !pending.isEmpty else { return }
         let all = repos.flatMap(\.environments)
-        for p in pending {
+        for p in pending where p.finished {
             guard let env = all.first(where: { $0.id == p.id }) else { continue }
             let usable = env.kind == .worktree ? env.exists : env.state == .running
             guard usable else { continue }

@@ -574,9 +574,9 @@ From actions, settings and themes (Task 11):
   command change while tabs are open.
 - [ ] `kunj config --get … --global` answers the merged value; it is run in `$HOME`, so a home
   directory that is itself a git repository would read that repository's local config.
-- [ ] New session switches the selection to the new environment while its action tab (in the main
-  worktree) may still be printing, e.g. a container's `setup`; a failure after that point is only
-  seen by going back.
+- [x] New session now stays on its action tab until kunj exits (the create hooks' output, e.g.
+  `post-worktree-create` running `yarn`, is seen as it runs), keeps the tab open afterwards, and
+  selects the new environment only after exit 0; a failure stays on the tab.
 
 From distribution and the final checks (Task 12):
 

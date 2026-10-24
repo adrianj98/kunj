@@ -77,8 +77,9 @@ final class TabRegistry {
 
     /// Opens a tab running `spec` in `env` and makes it active.
     @discardableResult
-    func open(spec: TerminalSpec, env: Environment, kind: TabKind) -> TerminalTab {
+    func open(spec: TerminalSpec, env: Environment, kind: TabKind, onFinish: ((Int32) -> Void)? = nil) -> TerminalTab {
         let tab = makeTab(env: env, kind: kind, title: spec.title, spec: spec)
+        if let onFinish { finishers[tab.id] = onFinish }
         tab.start()
         // after start, so the tab bar sees the process running (its dot)
         onChange?(env.id)
@@ -234,8 +235,12 @@ final class TabRegistry {
         remove(tab)
     }
 
+    /// Called with an action tab's exit code (`open(onFinish:)`); dropped when the tab closes first.
+    private var finishers: [String: (Int32) -> Void] = [:]
+
     private func remove(_ tab: any WorkspaceTab) {
         guard var tabs = tabsByEnv[tab.envId], let i = tabs.firstIndex(where: { $0 === tab }) else { return }
+        finishers.removeValue(forKey: tab.id)
         if let terminal = tab as? TerminalTab {
             // closed by the user (quitting goes through closeAll): its tmux session ends too
             if terminal.spec?.session != nil { onSessionClosed?(terminal) }
@@ -269,6 +274,7 @@ final class TabRegistry {
     /// tab stays, with the exit status printed, so its output can be read.
     private func exited(_ tab: TerminalTab) {
         let code = tab.exited ?? -1
+        finishers.removeValue(forKey: tab.id)?(code)
         if code == 0 && (tab.kind == .shell || tab.spec?.closeOnExitZero == true) {
             remove(tab)
             return
