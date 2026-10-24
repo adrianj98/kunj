@@ -17,7 +17,7 @@ page only says where each thing stands.
 | [branch-containers.md](branch-containers.md) | Phase 1: isolation, names and labels, image, start/resume/remove, network helper and firewall, credentials, forwarding, hooks, `list --json` | Shipped |
 | [blueprints.md](blueprints.md) | `.kunj/blueprint.json`, presets, `init`, snapshots built by `start`, host-made bundles | Shipped |
 | [container-phase-2.md](container-phase-2.md) | Sidecar services, `ct open`, `forward --auto`, `ct prune`, Docker-in-Docker, host MCP bridge | Shipped |
-| [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | CLI contract shipped; app in progress (native) |
+| [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | Shipped (CLI contract and the native app v1) |
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
 
 ## Done
@@ -43,6 +43,7 @@ page only says where each thing stands.
 | `kunj ct file read\|write` | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 47fcefe, 5721f17 |
 | `kunj events --json` with status poll; exits when stopped even while Docker hangs | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | 189d9ba, 3685ef6, ce5691d, e1078df |
 | `kunj agent` checked with a real tmux 3.8: `-e` gives this branch's `KUNJ_*` with another tmux server running, a rerun reattaches (`-A`, same pane, no second agent), it starts from inside a tmux pane without the nesting error, the session has `window-size latest` | [workspace-ide.md](workspace-ide.md#cli-contract-shipped) | verified 2026-10-23 with tmux 3.8 on macOS, and 3.3a and 3.5a in Debian containers (`scripts/check-tmux-agent.sh`); no code change |
+| Workspace app v1 (native): `workspace-app/` (AppKit, SwiftTerm, Monaco): environments of every repo, terminals and agent tabs kept per environment, Changes column, editor tabs, actions and New session, layout restore, settings and themes; `kunj install workspace` and the release job; user docs | [workspace-ide.md](workspace-ide.md#architecture) | ace71b1, 0e8ab41, e6feedc, 53fdf6b, 8f49f54, 831d215, 95410df, d7b79fa, f3c01a5, a4ec693, 5158fe4, 45756ae, 062d22d, 2d972db, 54a0685, fb62af9, 7d497a6, f44b785; reviews 29be7f1, 3c0627d, 5e4a829, 7808f6f and the Task 12 review commit; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` |
 | Specs merged into one folder and checked against the code | this folder | f3a5e35, d1eea00 |
 | Native IDE spike: SwiftTerm handles five live Claude TUIs (6% CPU idle), Monaco diff in one WKWebView in under 1 s, menu shortcuts work with the webview focused; caveat: hidden tabs still parse on the main thread | [spikes/native-ide/REPORT.md](../../spikes/native-ide/REPORT.md) | 1c2aaa3, 1730cd1, 0e41a24 |
 
@@ -50,7 +51,6 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Workspace app v1 (native) | [workspace-ide.md](workspace-ide.md#architecture) | Started 2026-10-23 from the design package (`docs/workspace-app/`); plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`, 12 tasks; done: 1 (ace71b1), 2 scaffold (0e8ab41), 3 KunjCLI (e6feedc), 4 JSON mirrors and environment model (53fdf6b), 6 sidebar, header and status bar (95410df, d7b79fa), 5 core: event stream and environment store (8f49f54), 9–10 core: diff model and service, file access (831d215), 9 Changes column (f3c01a5), 7 terminals, agent tabs and tab bar, with the store wired into the app (a4ec693 core, 5158fe4, 45756ae), 8 layout persistence and last activity (062d22d core, 2d972db), 10 editor tabs (54a0685), 11 actions, New session, search, shortcuts, Settings and themes (fb62af9), 12 CLI part (7d497a6) |
 
 ## To do
 

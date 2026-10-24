@@ -41,7 +41,9 @@ What it needs:
 
 - **kunj 1.3.0 or newer** on your login shell's `PATH` (apps started from Finder don't get one
   otherwise). If kunj is missing or too old, the window says so and shows `npm install -g kunj`.
-  To use another command, such as `node /path/to/kunj/dist/index.js`, set it in Settings.
+  To use another command, such as `node /path/to/kunj/dist/index.js`, set it in Settings. If your
+  shell profile takes more than five seconds to start (for example while macOS asks whether the shell
+  may read a folder), the app says so under the message, with the `PATH` it used.
 - **tmux** (`brew install tmux`) so agents keep running when the app quits. See
   [Agents](#agents).
 - **Docker** for branch containers. Without it your worktrees still show; the containers show as

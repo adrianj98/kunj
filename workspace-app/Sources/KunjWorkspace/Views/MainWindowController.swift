@@ -12,6 +12,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private(set) var selectedId: String?
     private(set) var selectedEnvironment: Environment?
     private var discoveryError: String?
+    private var discoveryDetail: String?
 
     /// The user selected a row. `render` never calls it: a selection whose row is gone stays
     /// selected (and shows "Select an environment") until the row returns.
@@ -133,8 +134,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     /// Discovery failed (kunj missing or too old): one message in place of the list and the
     /// columns (Review Focus 1). nil clears it.
-    func showDiscoveryError(_ message: String?) {
+    func showDiscoveryError(_ message: String?, detail: String? = nil) {
         discoveryError = message
+        discoveryDetail = detail
         if message != nil { sidebar.versionLabel = "" }
         renderSelection()
     }
@@ -167,8 +169,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         if let discoveryError {
             emptyTitle.stringValue = discoveryError
             emptyTitle.textColor = theme.color(\.red)
-            emptyDetail.stringValue = "Install or update it with npm install -g kunj"
-            emptyDetail.isHidden = discoveryError.contains("npm install")
+            emptyDetail.stringValue = discoveryDetail ?? "Install or update it with npm install -g kunj"
+            emptyDetail.isHidden = discoveryDetail == nil && discoveryError.contains("npm install")
         } else {
             emptyTitle.stringValue = repos.isEmpty ? "No repositories yet" : "Select an environment"
             emptyTitle.textColor = theme.color(\.muted)
@@ -225,6 +227,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         emptyState.addArrangedSubview(emptyTitle)
         emptyState.addArrangedSubview(emptyDetail)
         emptyTitle.alignment = .center
+        // the login-shell timeout hint carries a whole PATH
+        emptyDetail.alignment = .center
+        emptyDetail.maximumNumberOfLines = 0
+        emptyDetail.lineBreakMode = .byCharWrapping
+        emptyDetail.preferredMaxLayoutWidth = 520
 
         let sidebarLine = lines[0], columnLine = lines[1], headerLine = lines[2], statusLine = lines[3]
         for v in [effect, sidebarLine, mainArea, header, headerLine, terminalColumn, columnLine, changesColumn,

@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa; terminals, agent tabs and the tab bar (`TerminalTab`, `TabRegistry`, `TabBarView`, `HiddenFeedScheduler`), the store and `kunj events` wired into the app, Environment and Tabs menus in 5158fe4, 45756ae; layout file, tab restore and last activity (`LayoutStore`, `LayoutKeeper`) in 062d22d, 2d972db; editor tabs (`EditorTab`, `EditorSave`, the `?mode=editor` page, the diff header's `Edit`, File > Save) in 54a0685; actions, New session, search, shortcuts, Settings, the Changes toggle and live themes (`ActionRunner`, `NewSessionSheet`, `SettingsWindow`) in fb62af9 |
+| The app (`workspace-app/`) | Shipped (v1, native); plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa; terminals, agent tabs and the tab bar (`TerminalTab`, `TabRegistry`, `TabBarView`, `HiddenFeedScheduler`), the store and `kunj events` wired into the app, Environment and Tabs menus in 5158fe4, 45756ae; layout file, tab restore and last activity (`LayoutStore`, `LayoutKeeper`) in 062d22d, 2d972db; editor tabs (`EditorTab`, `EditorSave`, the `?mode=editor` page, the diff header's `Edit`, File > Save) in 54a0685; actions, New session, search, shortcuts, Settings, the Changes toggle and live themes (`ActionRunner`, `NewSessionSheet`, `SettingsWindow`) in fb62af9; user docs (`docs-site/.../workspace-app.mdx`), README and CLAUDE.md sections in f44b785; review fixes in 29be7f1, 3c0627d, 5e4a829, 7808f6f and the Task 12 review commit (login-shell timeout) |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -193,7 +193,7 @@ Kunj Workspace.app
 
 | Target | Holds | Depends on |
 | --- | --- | --- |
-| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec` + `tabDot` + `exitCode(waitStatus:)`, `HiddenFeedScheduler`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout` + `LayoutStore` + `restorePlan` + `ActivityTracker`, `saveDecision` + `editorRefusal` (EditorSave), `actionPlan` + `newSessionPlan` + `runOutcome` + `KunjSetting` (ActionSpec), `DesignTokens` (generated), `RelativeTime` | Foundation only |
+| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec` + `tabDot` + `exitCode(waitStatus:)`, `HiddenFeedScheduler`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout` + `LayoutStore` + `restorePlan` + `ActivityTracker`, `saveDecision` + `editorRefusal` (EditorSave), `actionPlan` + `newSessionPlan` + `runOutcome` + `KunjSetting` (ActionSpec), `discoveryErrorDetail` (ShellEnvironment), `DesignTokens` (generated), `RelativeTime` | Foundation only |
 | `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `SidebarRowView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `DemoData` (`--demo`), `TerminalTab` (SwiftTerm), `EditorTab`, `TabRegistry` (terminals and editors as `WorkspaceTab`), `LayoutKeeper` (layout file and `lastActivity`), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
 | `KunjWorkspaceCoreTests` | `swift test` (Swift Testing), with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) and the helpers in `Support.swift` | Core |
 
@@ -268,7 +268,10 @@ does not help: a hidden tab queues its bytes and feeds them in slices under a ti
 turn (4 ms for all hidden tabs together), so a flood in a background environment delays that tab's
 catch-up instead of the UI. Nothing is ever dropped: cutting the stream can split an escape sequence
 and leave the terminal in the wrong mode. A shown tab is fed at once. The environment of every PTY: `TERM=xterm-256color`, `COLORTERM=truecolor`, `LANG`
-(user's or `en_US.UTF-8`), PATH from the login shell (resolved once, off the main thread, 5 s cap),
+(user's or `en_US.UTF-8`), PATH from the login shell (resolved once per discovery, off the main thread: `$SHELL -l -i -c` capped
+at 5 s; when that times out, `$SHELL -l -c` with the same cap, which reads `.zprofile` but not
+`.zshrc`, and a `kunj not found` then says the shell timed out, shows the PATH used and points to
+Settings),
 the Claude Code and terminal-program markers removed; kunj's own `--json` calls get the same
 environment, so nothing kunj spawns inherits the markers. The theme's `term*` tokens are the terminal
 colours (`termMuted` as bright black, `termAccent` as blue).
@@ -536,6 +539,24 @@ From actions, settings and themes (Task 11):
   worktree) may still be printing, e.g. a container's `setup`; a failure after that point is only
   seen by going back.
 
+From distribution and the final checks (Task 12):
+
+- [ ] Launched through LaunchServices (`open -n`, as from Finder or after `kunj install workspace`),
+  `$SHELL -l -i` ran past its 5 s cap while the same shell takes about 2 s from a terminal; the
+  user's `.zshrc` sources files in `~/Downloads`, so the likely cause is a privacy (TCC) prompt for
+  that folder, not confirmed. The review added the `-l -c` retry and the timeout message; whether
+  `-l` alone finds kunj (nvm is usually set up in `.zshrc`) and whether a longer cap is wanted needs
+  a launch from Finder by a person.
+- [ ] The `workspace-app` release job has not run yet: `macos-15` builds with Xcode's Swift, not the
+  6.4 Command Line Tools the app was built with, and `bundle.sh`'s SDK fallback only applies to the
+  Command Line Tools. The first tagged release will tell.
+- [ ] Not checked with the installed app: the whole loop (select, shell, agent attached to the CLI's
+  tmux session, Changes, edit and save, Create PR, quit without orphans); the live check ran a copy
+  from a terminal.
+- [ ] `kunj install workspace` (and `bundle.sh --install`) quit a running copy with `pkill`
+  (SIGTERM), which skips the app's quit path: unsaved editor tabs are lost without the prompt and
+  the layout is not flushed.
+
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).
 
@@ -543,7 +564,7 @@ From actions, settings and themes (Task 11):
 
 - `docs/superpowers/plans/2026-10-23-workspace-cli-contract.md`: the CLI contract above. Done.
 - `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`: the app (environment list, terminals, agent
-  attach, Changes column), native, rewritten 2026-10-23 from the Electron draft.
+  attach, Changes column), native, rewritten 2026-10-23 from the Electron draft. Done (Tasks 1–12).
 
 ## Code map
 

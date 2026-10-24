@@ -86,8 +86,9 @@ Launch arguments (after the executable):
 
 The kunj command is the `kunjCommand` default (Settings, or
 `defaults write dev.kunj.workspace kunjCommand "node /path/dist/index.js"`), else `kunj` on the login
-shell's PATH. The app shows its version at the sidebar's foot, or the error (`npm install -g kunj`)
-as the window's one message. On launch it logs to stderr whether the bundled fonts registered (they
+shell's PATH (`$SHELL -l -i`, 5 s cap, then `$SHELL -l` when that times out). The app shows its
+version at the sidebar's foot, or the error (`npm install -g kunj`) as the window's one message; after
+a login-shell timeout the line under it says so, with the PATH it used. On launch it logs to stderr whether the bundled fonts registered (they
 only do inside the `.app`). Not notarized: if macOS refuses to open it, right-click > Open, or
 `xattr -dr com.apple.quarantine "/Applications/Kunj Workspace.app"`.
 

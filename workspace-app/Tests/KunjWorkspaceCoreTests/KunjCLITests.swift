@@ -220,4 +220,32 @@ private func code(of body: () async throws -> Void) async -> KunjCLIError? {
         #expect(path == ShellEnvironment.fallbackPath)
         #expect(Date().timeIntervalSince(start) < 5)
     }
+
+    @Test func loginPathRetriesWithoutInteractiveWhenItTimesOut() async throws {
+        // A .zshrc that blocks (e.g. on a privacy prompt) hangs only the interactive shell
+        let shell = try tempDirectory().appendingPathComponent("zsh")
+        let script = """
+            #!/bin/sh
+            for a in "$@"; do [ "$a" = "-i" ] && sleep 30; done
+            PATH=/login/only/bin
+            eval "$3"
+            """
+        try script.write(to: shell, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell.path)
+        let result = await ShellEnvironment.resolveLoginPath(timeout: 0.5, shell: shell.path)
+        #expect(result.timedOut)
+        #expect(result.path == "/login/only/bin:" + ShellEnvironment.fallbackPath)
+    }
+
+    @Test func notFoundAfterALoginShellTimeoutSaysSo() throws {
+        let error = KunjCLIError(code: .notFound, message: "kunj not found on your PATH: npm install -g kunj")
+        let timedOut = ShellEnvironment.LoginPath(path: "/usr/bin", timedOut: true)
+        let detail = try #require(discoveryErrorDetail(error, loginPath: timedOut))
+        #expect(detail.contains("login shell"))
+        #expect(detail.contains("/usr/bin"))
+        #expect(detail.contains("Settings"))
+        // in time, or another error: no extra line
+        #expect(discoveryErrorDetail(error, loginPath: .init(path: "/usr/bin", timedOut: false)) == nil)
+        #expect(discoveryErrorDetail(KunjCLIError(code: .tooOld, message: "old"), loginPath: timedOut) == nil)
+    }
 }

@@ -109,7 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let configured = UserDefaults.standard.string(forKey: SettingsWindow.kunjCommandKey)?
             .trimmingCharacters(in: .whitespaces)
         let command = (configured?.isEmpty ?? true) ? "kunj" : configured!
-        let path = await ShellEnvironment.loginPath()
+        let login = await ShellEnvironment.resolveLoginPath()
+        let path = login.path
+        if login.timedOut { log("login shell: -l -i timed out, PATH from -l: \(path)") }
         do {
             let (cli, status) = try await KunjCLI.discover(command: command, path: path)
             // Settings changed the command while this ran: the new discovery owns the window
@@ -127,8 +129,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await loadEnvironments(cli: cli)
         } catch {
             let message = (error as? KunjCLIError)?.message ?? "\(error)"
+            let detail = (error as? KunjCLIError).flatMap { discoveryErrorDetail($0, loginPath: login) }
             log("kunj: \(message) (command \(command), PATH \(path))")
-            await MainActor.run { self.windowController.showDiscoveryError(message) }
+            await MainActor.run { self.windowController.showDiscoveryError(message, detail: detail) }
         }
     }
 
