@@ -107,18 +107,7 @@ public final class DiffService: @unchecked Sendable {
     // MARK: - steps
 
     private func target(for env: Environment) throws -> GitContext.Target {
-        switch env.kind {
-        case .worktree:
-            guard env.exists, let path = env.path, FileManager.default.fileExists(atPath: path) else {
-                throw DiffError.unavailable("The worktree of \(env.branch) is missing")
-            }
-            return .worktree(path: path)
-        case .container:
-            guard env.state == .running else {
-                throw DiffError.unavailable("The container of \(env.branch) is not running")
-            }
-            return .container(branch: env.branch, repoRoot: env.repo.root)
-        }
+        try gitTarget(for: env)
     }
 
     /// One `for-each-ref` for origin's branches and HEAD, then `merge-base <base> HEAD`.

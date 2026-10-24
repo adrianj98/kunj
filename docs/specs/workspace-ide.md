@@ -77,6 +77,14 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   `N files · +adds −dels` and a scope select
   (vs origin/<base>, default: everything since the fork point, working tree included; Uncommitted;
   Last commit); a file list (A/M/D letter, name, ± counts); Monaco's diff editor for the selected file.
+- **Files column (right edge, hidden by default):** a file explorer of the selected environment
+  (`git ls-files` tracked + untracked, ignored files left out; through `kunj ct exec` in a running
+  container), folders first, opened with a `Files` pill after `Changes` in the tab bar or View > Show
+  Files ⌘⇧E, 260 px wide at the window's right edge (the terminal and Changes columns keep 11:9 of
+  the rest). A double-click (or Return) on a file opens an editor tab. Open folders are kept per
+  environment for the session; it reloads 1 s after a `git` event of its repository; over 50,000
+  files only the first 50,000 are listed. One app-wide setting (`showFiles`), remembered; closed it
+  lists nothing. `FileLister`/`buildFileTree` in Core, `FilesColumn` in the app.
 - **Status bar:** container name or worktree path · uptime · services · forwards; right side the agent
   state and the ⌘1–9 hint.
 - **Editor tab** (v1): a changed file of the environment, edited in Monaco (see Editor tabs).
@@ -398,6 +406,8 @@ All 2026-10-23.
 - **The Changes column is hidden by default and opens on demand** (user, 2026-10-23), unlike the
   design's always-visible column: the terminal gets the width, and the toggle (tab-bar pill with the
   file count, ⌘⇧C) brings the diff in when needed.
+- **A Files column at the right edge** (user, 2026-10-24), not in the design: hidden until opened
+  (`Files` pill, ⌘⇧E), styled like the Changes file list.
 - **Ports in v1 as links;** webview previews and split panes in v2 (2026-10-23: the user kept them out of
   this build; the agent waiting state and editor tabs are in).
 - **Session titles are branch names** (2026-10-23); the design's task titles need metadata the CLI does

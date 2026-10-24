@@ -22,6 +22,8 @@ final class TabBarView: NSView {
     var onNewTab: () -> Void = {}
     /// The Changes pill was pressed (open or close the Changes column).
     var onToggleChanges: () -> Void = {}
+    /// The Files pill was pressed (open or close the Files column).
+    var onToggleFiles: () -> Void = {}
 
     private let pills = NSStackView()
     private let tmuxLabel = makeLabel("", font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
@@ -30,15 +32,20 @@ final class TabBarView: NSView {
     /// `Changes N` at the far right: `raised` while the column is open, N the environment's changed
     /// files (hidden when 0).
     private let changes: PillView
+    /// `Files` after it, `raised` while the Files column is open.
+    private let files: PillView
     private var items: [TabBarItem] = []
 
     init(theme: Theme) {
         self.theme = theme
         changes = PillView("Changes", theme: theme)
+        files = PillView("Files", theme: theme)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         changes.toolTip = "Show or hide the Changes column (⌘⇧C)"
         changes.onPress = { [weak self] in self?.onToggleChanges() }
+        files.toolTip = "Show or hide the Files column (⌘⇧E)"
+        files.onPress = { [weak self] in self?.onToggleFiles() }
         pills.orientation = .horizontal
         pills.spacing = 2
         pills.translatesAutoresizingMaskIntoConstraints = false
@@ -48,8 +55,12 @@ final class TabBarView: NSView {
         split.toolTip = "Split panes come in a later version"
         plus.toolTip = "New shell (⌘T)"
         plus.onPress = { [weak self] in self?.onNewTab() }
-        tmuxLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let right = NSStackView(views: [tmuxLabel, split, plus, changes])
+        // in a narrow bar (the Files column open) the tmux text gives way before the tabs, and the
+        // tabs clip at their edge rather than run under it
+        tmuxLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(100), for: .horizontal)
+        pills.wantsLayer = true
+        pills.layer?.masksToBounds = true
+        let right = NSStackView(views: [tmuxLabel, split, plus, changes, files])
         right.orientation = .horizontal
         right.spacing = 4
         right.setCustomSpacing(8, after: tmuxLabel)
@@ -92,6 +103,10 @@ final class TabBarView: NSView {
         changes.setAccessibilityLabel(count > 0 ? "Changes, \(count) files" : "Changes")
     }
 
+    func showFiles(open: Bool) {
+        files.active = open
+    }
+
     private func closeMenu(for id: String) -> NSMenu {
         let menu = NSMenu()
         let item = NSMenuItem(title: "Close Tab", action: #selector(closeFromMenu(_:)), keyEquivalent: "")
@@ -109,6 +124,7 @@ final class TabBarView: NSView {
         tmuxLabel.textColor = theme.color(\.faint)
         for b in [split, plus] { b.color = theme.color(\.muted); b.hoverFill = theme.color(\.raised) }
         changes.theme = theme
+        files.theme = theme
         let current = items
         items = []
         show(current, tmux: tmuxLabel.isHidden ? nil : tmuxLabel.stringValue)

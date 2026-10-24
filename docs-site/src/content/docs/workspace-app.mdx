@@ -83,6 +83,9 @@ is slow to start, the window shows a spinner with "Loading sessions…" and the 
   changed, with added and removed line counts, and a diff of the selected file. The scope menu
   compares with the branch's base (`origin/<base>`, from where the branch forked, uncommitted work
   included), uncommitted changes only, or the last commit. It follows the branch as it changes.
+- **Files** (hidden until you open it with the **Files** pill or ⌘⇧E), at the window's right
+  edge: the branch's files as a tree, without the ones git ignores. Double-click a file to edit it
+  in a tab. In a container it lists `/workspace`, so the container must be running.
 - **Status bar.** The worktree path or container name, uptime, services and forwarded ports; the
   agent state on the right.
 
@@ -156,6 +159,7 @@ tabs, or the branch changing), kept in the same file.
 | ⌘O | Open in VS Code |
 | ⌘⇧P | Create PR |
 | ⌘⇧C | Show or hide Changes |
+| ⌘⇧E | Show or hide Files |
 | ⌘⇧] / ⌘⇧[ | Next / previous tab |
 | ⌘W | Close the tab |
 | ⌘S | Save the file |

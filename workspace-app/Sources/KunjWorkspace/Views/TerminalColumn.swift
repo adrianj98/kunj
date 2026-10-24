@@ -15,6 +15,7 @@ final class TerminalColumn: NSView {
     var onNewTab: () -> Void = {}
     /// The tab bar's Changes pill.
     var onToggleChanges: () -> Void = {}
+    var onToggleFiles: () -> Void = {}
 
     private let tabBar: TabBarView
     private let barLine = FillView(.clear)
@@ -67,6 +68,7 @@ final class TerminalColumn: NSView {
         }
         tabBar.onNewTab = { [weak self] in self?.onNewTab() }
         tabBar.onToggleChanges = { [weak self] in self?.onToggleChanges() }
+        tabBar.onToggleFiles = { [weak self] in self?.onToggleFiles() }
         registry.onChange = { [weak self] envId in
             guard let self else { return }
             if envId == self.environment?.id { self.messageText = nil }
@@ -97,6 +99,11 @@ final class TerminalColumn: NSView {
     /// The Changes pill's state: the environment's changed files and whether the column is open.
     func setChanges(count: Int, open: Bool) {
         tabBar.showChanges(count: count, open: open)
+    }
+
+    /// The Files pill: open (active) or not.
+    func setFiles(open: Bool) {
+        tabBar.showFiles(open: open)
     }
 
 

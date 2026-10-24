@@ -27,9 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let themeArgument: ThemeChoice?
     /// `--changes` / `--no-changes`: the Changes column open or closed for this run (not saved).
     private let changesArgument: Bool?
+    /// `--files` / `--no-files`: the Files column open or closed for this run (not saved).
+    private let filesArgument: Bool?
 
     /// The app-wide Changes column setting (default closed).
     static let showChangesKey = "showChanges"
+    /// The app-wide Files column setting (default closed).
+    static let showFilesKey = "showFiles"
 
     nonisolated init(arguments: [String]) {
         if let i = arguments.firstIndex(of: "--screenshot"), i + 1 < arguments.count {
@@ -43,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             themeArgument = nil
         }
         changesArgument = arguments.contains("--changes") ? true : (arguments.contains("--no-changes") ? false : nil)
+        filesArgument = arguments.contains("--files") ? true : (arguments.contains("--no-files") ? false : nil)
         demo = arguments.contains("--demo")
         demoLoading = arguments.contains("--loading")
         super.init()
@@ -66,6 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // --demo renders the mockup, which shows the column; otherwise the saved setting (closed by default)
         let changesOpen = changesArgument ?? (demo || UserDefaults.standard.bool(forKey: Self.showChangesKey))
         windowController.setChangesVisible(changesOpen, animated: false)
+        windowController.onToggleFiles = { [weak self] in self?.toggleFiles(nil) }
+        // the mockup has no Files column, so --demo leaves it closed unless --files
+        let filesOpen = filesArgument ?? (!demo && UserDefaults.standard.bool(forKey: Self.showFilesKey))
+        windowController.setFilesVisible(filesOpen, animated: false)
         wireRunner()
         windowController.showWindow(nil)
         windowController.window?.makeKeyAndOrderFront(nil)
@@ -75,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             windowController.showLoading(.findingKunj)
         } else if demo {
             windowController.changesColumn.source = DemoChanges()
+            windowController.filesColumn.source = DemoFiles()
             windowController.lastActivity = DemoData.lastActivity
             windowController.render(repos: DemoData.repos, selected: DemoData.selectedId)
             windowController.setKunjVersion(DemoData.version)
@@ -128,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.kunjStatus = status
                 self.windowController.setKunjVersion(status.label)
                 self.windowController.changesColumn.source = DiffService(cli: cli)
+                self.windowController.filesColumn.source = FileListerSource(cli: cli)
                 self.windowController.terminalColumn.registry.fileAccess = FileAccess(cli: cli)
                 self.settings?.cli = cli
                 self.windowController.header.show(self.windowController.selectedEnvironment)
@@ -161,7 +172,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keeper.selected(self.windowController.selectedEnvironment)
         }
         // the Changes column follows git events and container status changes of its repository
-        store.onRepoChanged = { [weak windowController] root in windowController?.changesColumn.repoChanged(root: root) }
+        store.onRepoChanged = { [weak windowController] root in
+            windowController?.changesColumn.repoChanged(root: root)
+            windowController?.filesColumn.repoChanged(root: root)
+        }
         windowController.showLoading(.listing)
         await store.refreshAll()
         // a change of the kunj command (reconnect) dropped this store while it listed: starting
@@ -349,6 +363,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.terminalColumn.focusActive()
     }
 
+    /// View > Show/Hide Files (⌘⇧E) and the tab bar's pill; saved app-wide.
+    @objc func toggleFiles(_ sender: Any?) {
+        let visible = !windowController.filesVisible
+        windowController.setFilesVisible(visible, animated: true)
+        UserDefaults.standard.set(visible, forKey: Self.showFilesKey)
+    }
+
     /// View > Show/Hide Changes (⌘⇧C) and the tab bar's pill; saved app-wide.
     @objc func toggleChanges(_ sender: Any?) {
         let visible = !windowController.changesVisible
@@ -498,12 +519,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// reloads the column (its counts), since a working-tree edit makes no `git` event.
     private func wireEditors() {
         let column = windowController.terminalColumn
-        windowController.changesColumn.onEdit = { [weak column] env, path in
+        let open: (Environment, String) -> Void = { [weak column] env, path in
             guard let column else { return }
             column.showMessage(nil)
             column.registry.openEditor(env: env, path: path) { [weak column] reason in column?.showMessage(reason) }
             DispatchQueue.main.async { column.focusActive() }
         }
+        windowController.changesColumn.onEdit = open
+        // a double-click (or Return) on a file in the Files column
+        windowController.filesColumn.onOpen = open
         column.registry.onSaved = { [weak windowController] tab in
             windowController?.changesColumn.repoChanged(root: tab.env.repo.root)
         }
@@ -550,6 +574,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(themeItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Show Changes", action: #selector(toggleChanges(_:)), keyEquivalent: "C").target = self
+        menu.addItem(withTitle: "Show Files", action: #selector(toggleFiles(_:)), keyEquivalent: "E").target = self
         return menu
     }
 
@@ -631,6 +656,9 @@ extension AppDelegate: NSMenuItemValidation {
             return item.tag <= (windowController?.visibleEnvironmentIds.count ?? 0)
         case #selector(toggleChanges(_:)):
             item.title = windowController?.changesVisible == true ? "Hide Changes" : "Show Changes"
+            return true
+        case #selector(toggleFiles(_:)):
+            item.title = windowController?.filesVisible == true ? "Hide Files" : "Show Files"
             return true
         default:
             return true

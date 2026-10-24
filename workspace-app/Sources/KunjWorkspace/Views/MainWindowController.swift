@@ -24,6 +24,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     var lastActivity: (String) -> Date? = { _ in nil } { didSet { sidebar.lastActivity = lastActivity } }
     /// The tab bar's Changes pill was pressed (the app toggles the column and saves it).
     var onToggleChanges: () -> Void = {}
+    /// The tab bar's Files pill was pressed.
+    var onToggleFiles: () -> Void = {}
+    /// Whether the Files column (the right edge, `FilesColumn.width`) is open; closed by default.
+    private(set) var filesVisible = false
+    private var filesWidth: NSLayoutConstraint!
+    private var filesLineWidth: NSLayoutConstraint!
+    private let filesLine = FillView(.clear)
     /// Whether the Changes column is open (`setChangesVisible`); closed, the terminal column takes
     /// the width and the column computes nothing.
     private(set) var changesVisible = true
@@ -39,6 +46,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     let header: HeaderView
     let terminalColumn: TerminalColumn
     let changesColumn: ChangesColumn
+    let filesColumn: FilesColumn
     let statusBar: StatusBarView
     private let lines = (0..<4).map { _ in FillView(.clear) }
     private let mainArea = FillView(.clear)
@@ -54,6 +62,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         header = HeaderView(theme: t)
         terminalColumn = TerminalColumn(theme: t)
         changesColumn = ChangesColumn(theme: t)
+        filesColumn = FilesColumn(theme: t)
         statusBar = StatusBarView(theme: t)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
@@ -74,6 +83,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             self.onHeaderAction(action, env)
         }
         terminalColumn.onToggleChanges = { [weak self] in self?.onToggleChanges() }
+        terminalColumn.onToggleFiles = { [weak self] in self?.onToggleFiles() }
         ThemeManager.shared.onChange.append { [weak self] t in self?.apply(t) }
         apply(t)
         renderSelection()
@@ -102,6 +112,22 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         sidebar.selectedId = id
         renderSelection()
         onSelect(selectedEnvironment)
+    }
+
+    /// Opens or closes the Files column at the right edge: closed, it is 0 wide and lists nothing.
+    func setFilesVisible(_ visible: Bool, animated: Bool) {
+        guard visible != filesVisible else { return }
+        filesVisible = visible
+        filesColumn.isActive = visible
+        filesWidth.constant = visible ? FilesColumn.width : 0
+        filesLineWidth.constant = visible ? 1 : 0
+        renderSelection()
+        guard animated, let content = window?.contentView else { return }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            ctx.allowsImplicitAnimation = true
+            content.layoutSubtreeIfNeeded()
+        }
     }
 
     /// Opens or closes the Changes column: closed, it collapses to zero width (the terminal column
@@ -169,11 +195,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         header.show(env)
         terminalColumn.show(env)
         changesColumn.show(env)
+        filesColumn.show(env)
         statusBar.show(env, environmentCount: environmentCount)
         terminalColumn.setChanges(count: env?.changedFiles ?? 0, open: changesVisible)
+        terminalColumn.setFiles(open: filesVisible)
         let showColumns = env != nil
         for v in [terminalColumn, lines[2]] as [NSView] { v.isHidden = !showColumns }
         for v in [changesColumn, lines[1]] as [NSView] { v.isHidden = !showColumns || !changesVisible }
+        for v in [filesColumn, filesLine] as [NSView] { v.isHidden = !showColumns || !filesVisible }
         emptyState.isHidden = showColumns
         let text = emptyStateText(discoveryError: discoveryError, discoveryDetail: discoveryDetail,
                                   loading: loading, hasRepos: !repos.isEmpty)
@@ -194,11 +223,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         root.color = t.color(\.bg)
         mainArea.color = t.color(\.bg)
         sideTint.color = t.color(\.side, alpha: Self.sideTintAlpha)
-        for l in lines { l.color = t.color(\.border) }
+        for l in lines + [filesLine] { l.color = t.color(\.border) }
         sidebar.theme = t
         header.theme = t
         terminalColumn.theme = t
         changesColumn.theme = t
+        filesColumn.theme = t
         statusBar.theme = t
         emptyDetail.textColor = t.color(\.faint)
         renderSelection()
@@ -247,7 +277,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
         let sidebarLine = lines[0], columnLine = lines[1], headerLine = lines[2], statusLine = lines[3]
         for v in [effect, sidebarLine, mainArea, header, headerLine, terminalColumn, columnLine, changesColumn,
-                  statusLine, statusBar, emptyState] as [NSView] {
+                  filesLine, filesColumn, statusLine, statusBar, emptyState] as [NSView] {
             root.addSubview(v)
         }
         let leftShare = L.paneSplit.0 / (L.paneSplit.0 + L.paneSplit.1)
@@ -296,7 +326,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             columnLine.bottomAnchor.constraint(equalTo: terminalColumn.bottomAnchor),
 
             changesColumn.leadingAnchor.constraint(equalTo: columnLine.trailingAnchor),
-            changesColumn.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            changesColumn.trailingAnchor.constraint(equalTo: filesLine.leadingAnchor),
+
+            filesLine.topAnchor.constraint(equalTo: terminalColumn.topAnchor),
+            filesLine.bottomAnchor.constraint(equalTo: terminalColumn.bottomAnchor),
+            filesColumn.leadingAnchor.constraint(equalTo: filesLine.trailingAnchor),
+            filesColumn.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            filesColumn.topAnchor.constraint(equalTo: terminalColumn.topAnchor),
+            filesColumn.bottomAnchor.constraint(equalTo: terminalColumn.bottomAnchor),
             changesColumn.topAnchor.constraint(equalTo: terminalColumn.topAnchor),
             changesColumn.bottomAnchor.constraint(equalTo: terminalColumn.bottomAnchor),
 
@@ -306,8 +343,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             emptyState.centerYAnchor.constraint(equalTo: mainArea.centerYAnchor),
             emptyState.leadingAnchor.constraint(greaterThanOrEqualTo: mainArea.leadingAnchor, constant: 40),
         ])
-        splitWidth = terminalColumn.widthAnchor.constraint(equalTo: header.widthAnchor, multiplier: leftShare, constant: -1)
-        fullWidth = terminalColumn.trailingAnchor.constraint(equalTo: root.trailingAnchor)
+        // 11:9 of the width left of the Files column (the whole header width while it is closed)
+        splitWidth = terminalColumn.widthAnchor.constraint(equalTo: changesColumn.widthAnchor,
+                                                           multiplier: leftShare / (1 - leftShare), constant: -1)
+        fullWidth = terminalColumn.trailingAnchor.constraint(equalTo: filesLine.leadingAnchor)
+        filesWidth = filesColumn.widthAnchor.constraint(equalToConstant: 0)
+        filesWidth.isActive = true
+        filesLineWidth = filesLine.widthAnchor.constraint(equalToConstant: 0)
+        filesLineWidth.isActive = true
         splitWidth.isActive = true
         columnLineWidth = columnLine.widthAnchor.constraint(equalToConstant: 1)
         columnLineWidth.isActive = true

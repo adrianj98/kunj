@@ -75,3 +75,13 @@ final class DemoChanges: ChangesSource {
 
     """
 }
+
+/// The Files column's listing for `--demo --files`: the demo's changed files and a few around them.
+final class DemoFiles: FilesSource {
+    func files(env: Environment) async throws -> FileLister.Listing {
+        let around = [".gitignore", "README.md", "package.json", "packages/insights/package.json",
+                      "packages/insights/src/index.ts", "packages/insights/tsconfig.json"]
+        let paths = Set(DemoChanges.files.map(\.path) + around).sorted()
+        return FileLister.Listing(paths: paths, truncated: false)
+    }
+}

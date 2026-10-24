@@ -37,6 +37,22 @@ public struct GitContext {
     }
 }
 
+/// Where git runs for an environment: its worktree, or its running container (refused otherwise).
+public func gitTarget(for env: Environment) throws -> GitContext.Target {
+    switch env.kind {
+    case .worktree:
+        guard env.exists, let path = env.path, FileManager.default.fileExists(atPath: path) else {
+            throw DiffError.unavailable("The worktree of \(env.branch) is missing")
+        }
+        return .worktree(path: path)
+    case .container:
+        guard env.state == .running else {
+            throw DiffError.unavailable("The container of \(env.branch) is not running")
+        }
+        return .container(branch: env.branch, repoRoot: env.repo.root)
+    }
+}
+
 /// How to run `git <args>` for a target. A worktree runs `/usr/bin/git -C <path>` with
 /// `GIT_OPTIONAL_LOCKS=0` (so a read never rewrites the index, which is a `git` event and another
 /// refresh); a container runs `kunj ct exec <branch> -- git …` in the repository root (kunj

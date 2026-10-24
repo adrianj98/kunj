@@ -81,6 +81,7 @@ Launch arguments (after the executable):
 | `--screenshot <png>` | Renders the window after its first layout (waiting for Monaco's page, at most 8 s), writes the PNG (sRGB, 2x) and quits. Compare a `--demo` render with `docs/workspace-app/design/mockups/warm.png` |
 | `--theme warm\|light\|graphite` (or `-theme`) | The theme for this run, not saved |
 | `--changes` / `--no-changes` | The Changes column open or closed for this run, not saved |
+| `--files` / `--no-files` | The Files column open or closed for this run, not saved (`--demo` leaves it closed unless `--files`) |
 | `--loading` | With `--demo`: the startup state (spinner, "Loading sessions…", "Finding kunj") instead of the demo data |
 | `-kunjCommand "<command>"` | The kunj command for this run (`node /path/dist/index.js` for a dev build) |
 | `-openTabs "<env id>#<kind>,…"` | After the first listing, selects each environment and opens the tab (`kunj\|worktree\|main#shell,kunj\|worktree\|main#agent`); an entry without `#kind` only selects, which restores its saved tabs. For checking PTYs live without assistive access |
