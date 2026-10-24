@@ -1,0 +1,41 @@
+{
+  "repos": [
+    {
+      "root": "/Users/demo/projects/alertd-core.git",
+      "gitCommonDir": "/Users/demo/projects/alertd-core.git",
+      "name": "alertd-core",
+      "bare": true,
+      "addedAt": "2026-10-07T00:49:53.484Z",
+      "lastSeen": "2026-10-23T23:31:30.514Z",
+      "exists": true
+    },
+    {
+      "root": "/Users/demo/projects/kunj",
+      "gitCommonDir": "/Users/demo/projects/kunj/.git",
+      "name": "kunj",
+      "bare": false,
+      "addedAt": "2026-10-07T00:49:51.278Z",
+      "lastSeen": "2026-10-23T23:31:29.961Z",
+      "exists": true
+    },
+    {
+      "root": "/Users/demo/projects/old-prototype",
+      "gitCommonDir": "/Users/demo/projects/old-prototype/.git",
+      "name": "old-prototype",
+      "bare": false,
+      "addedAt": "2026-09-01T10:00:00.000Z",
+      "lastSeen": "2026-09-02T10:00:00.000Z",
+      "exists": false
+    },
+    {
+      "root": "/Users/demo/projects/scratch",
+      "gitCommonDir": "/Users/demo/projects/scratch/.git",
+      "name": "scratch",
+      "bare": false,
+      "hidden": true,
+      "addedAt": "2026-09-05T10:00:00.000Z",
+      "lastSeen": "2026-10-20T10:00:00.000Z",
+      "exists": true
+    }
+  ]
+}

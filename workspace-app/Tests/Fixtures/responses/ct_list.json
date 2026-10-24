@@ -1,0 +1,64 @@
+{
+  "repo": "alertd-core",
+  "backend": {
+    "kind": "docker",
+    "context": "default"
+  },
+  "containers": [
+    {
+      "branch": "feat/llm-insights",
+      "name": "kunj-alertd-core-feat-llm-insights-6d1f0a",
+      "id": "8f3c2a1b9d7e6f5a4c3b2a1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f",
+      "state": "running",
+      "image": "kunj-blueprint-alertd-core:5b2e9f1c",
+      "imageInfo": {
+        "tag": "kunj-blueprint-alertd-core:5b2e9f1c",
+        "kind": "blueprint"
+      },
+      "blueprint": {
+        "hash": "5b2e9f1c",
+        "stale": false
+      },
+      "createdAt": "2026-10-23T21:12:40.000Z",
+      "firewall": "default",
+      "dind": "off",
+      "ports": [
+        {
+          "container": 3000,
+          "host": 3000,
+          "kind": "forward",
+          "pid": 48211
+        }
+      ],
+      "agent": {
+        "running": true,
+        "state": "waiting"
+      },
+      "workspace": {
+        "head": "b41c9e2",
+        "ahead": 3,
+        "dirty": true
+      },
+      "status": "ok",
+      "services": [
+        {
+          "name": "postgres",
+          "state": "running",
+          "port": 5432
+        },
+        {
+          "name": "redis",
+          "state": "running",
+          "port": 6379
+        }
+      ],
+      "bridges": [
+        {
+          "name": "chrome",
+          "pid": 48230
+        }
+      ]
+    }
+  ],
+  "orphans": []
+}
