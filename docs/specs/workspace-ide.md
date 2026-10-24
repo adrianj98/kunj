@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa; terminals, agent tabs and the tab bar (`TerminalTab`, `TabRegistry`, `TabBarView`, `HiddenFeedScheduler`), the store and `kunj events` wired into the app, Environment and Tabs menus in 5158fe4, 45756ae; layout file, tab restore and last activity (`LayoutStore`, `LayoutKeeper`) in 062d22d, 2d972db; editor tabs (`EditorTab`, `EditorSave`, the `?mode=editor` page, the diff header's `Edit`, File > Save) in 54a0685 |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa; terminals, agent tabs and the tab bar (`TerminalTab`, `TabRegistry`, `TabBarView`, `HiddenFeedScheduler`), the store and `kunj events` wired into the app, Environment and Tabs menus in 5158fe4, 45756ae; layout file, tab restore and last activity (`LayoutStore`, `LayoutKeeper`) in 062d22d, 2d972db; editor tabs (`EditorTab`, `EditorSave`, the `?mode=editor` page, the diff header's `Edit`, File > Save) in 54a0685; actions, New session, search, shortcuts, Settings, the Changes toggle and live themes (`ActionRunner`, `NewSessionSheet`, `SettingsWindow`) in fb62af9 |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -70,7 +70,8 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   to the environment's tmux session, so a session started from the CLI shows up in the app and the
   reverse.
 - **Changes column (right, hidden by default):** the terminal column takes the full width until it is
-  opened with the Changes toggle (a `Changes` pill with the file count at the right of the tab bar,
+  opened with the Changes toggle (a `Changes` pill with the uncommitted-file count at the right of the tab bar,
+  `Changes` alone at 0, since the base scope can still show committed work;
   View > Show Changes ⌘⇧C); it closes the same way. Open or closed is one app-wide UI setting,
   remembered across launches; while closed the column does not compute diffs. When open: header
   `N files · +adds −dels` and a scope select
@@ -192,7 +193,7 @@ Kunj Workspace.app
 
 | Target | Holds | Depends on |
 | --- | --- | --- |
-| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec` + `tabDot` + `exitCode(waitStatus:)`, `HiddenFeedScheduler`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout` + `LayoutStore` + `restorePlan` + `ActivityTracker`, `saveDecision` + `editorRefusal` (EditorSave), `DesignTokens` (generated), `RelativeTime` | Foundation only |
+| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec` + `tabDot` + `exitCode(waitStatus:)`, `HiddenFeedScheduler`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout` + `LayoutStore` + `restorePlan` + `ActivityTracker`, `saveDecision` + `editorRefusal` (EditorSave), `actionPlan` + `newSessionPlan` + `runOutcome` + `KunjSetting` (ActionSpec), `DesignTokens` (generated), `RelativeTime` | Foundation only |
 | `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `SidebarRowView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `DemoData` (`--demo`), `TerminalTab` (SwiftTerm), `EditorTab`, `TabRegistry` (terminals and editors as `WorkspaceTab`), `LayoutKeeper` (layout file and `lastActivity`), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
 | `KunjWorkspaceCoreTests` | `swift test` (Swift Testing), with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) and the helpers in `Support.swift` | Core |
 
@@ -324,12 +325,19 @@ checkout of that branch is used when it exists, else the button is disabled with
 session ⌘N (a sheet: repo, branch, base, worktree or container, start an agent; runs `worktree add -c`
 or `ct start -c` in an action tab), the overflow menu (container start/stop/remove/rebuild, worktree
 remove, copy path, reveal in Finder, `ct prune`), ports as links (`open http://localhost:<host>`),
-⌘K search filtering the sidebar, ⌘1–9 selecting the nth row, ⌘⇧] / ⌘⇧[ and ⌘W for tabs. Destructive
-actions confirm with an `NSAlert`. Settings (⌘,): the kunj command (default `kunj`), the theme
+⌘K search filtering the sidebar (Esc clears it, Esc again returns to the terminal), ⌘1–9 selecting
+the nth row the search leaves, ⌘⇧] / ⌘⇧[ and ⌘W for tabs. The overflow menu lists only the items of
+the environment's kind and greys the rest with the reason as tooltip. Destructive actions confirm with
+an `NSAlert` with a "Force" checkbox. A `.run` action that fails, or answers `success: false` (`worktree
+open` when the editor did not start), shows an alert; `ct open`'s `exec` (an editor that cannot attach)
+is shown as information. New session's action tab runs in the repository's main worktree, and the new
+environment is selected (its agent opened when asked) once a listing shows it usable. Settings (⌘,): the kunj command (default `kunj`), the theme
 (`auto` = light ↔ warm by system appearance, `warm`, `light`, `graphite`), and two agent toggles that
 are kunj settings, not app state: "Run agents in tmux" (`agent.tmux`) and "Show tmux status line"
 (`agent.tmuxStatus`), read with `kunj config --get <key> --global --json` and written with
-`kunj config --set <key>=<bool> --global`, so the CLI and the app share them. They apply to agents
+`kunj config --set <key>=<bool> --global`, so the CLI and the app share them (an unset key reads as
+kunj's default). Changing the kunj command rediscovers kunj and rebuilds the store and the event
+stream; open tabs keep the command they started with. They apply to agents
 started afterwards; a running session keeps its mode.
 
 **Window.** Transparent title bar with the traffic lights inside the sidebar's 52 px top (as in the
@@ -515,6 +523,18 @@ From the editor tabs (Task 10):
 - [ ] An `EditorTab` keeps the `Environment` it was opened with; a container stopped (or a worktree
   removed) since fails at save with an alert, and the tab stays open.
 - [ ] A restored editor tab whose file is gone closes without a message (only logged).
+
+From actions, settings and themes (Task 11):
+
+- [ ] Not checked by hand: each header and overflow action on real worktrees and containers, New
+  session end to end (worktree and container, with an agent), the removal sheets, ⌘K/⌘1–9 while a
+  terminal or the editor page has focus, the Settings toggles writing the global config, and a kunj
+  command change while tabs are open.
+- [ ] `kunj config --get … --global` answers the merged value; it is run in `$HOME`, so a home
+  directory that is itself a git repository would read that repository's local config.
+- [ ] New session switches the selection to the new environment while its action tab (in the main
+  worktree) may still be printing, e.g. a container's `setup`; a failure after that point is only
+  seen by going back.
 
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).

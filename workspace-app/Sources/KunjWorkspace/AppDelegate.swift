@@ -112,6 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let path = await ShellEnvironment.loginPath()
         do {
             let (cli, status) = try await KunjCLI.discover(command: command, path: path)
+            // Settings changed the command while this ran: the new discovery owns the window
+            if Task.isCancelled { return }
             log("kunj: \(status.binary) \(status.version)\(status.dev ? " (dev build)" : "")")
             await MainActor.run {
                 self.kunj = cli
@@ -149,6 +151,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the Changes column follows git events and container status changes of its repository
         store.onRepoChanged = { [weak windowController] root in windowController?.changesColumn.repoChanged(root: root) }
         await store.refreshAll()
+        // a change of the kunj command (reconnect) dropped this store while it listed: starting
+        // its event stream now would leave a second `kunj events` running that nothing stops
+        guard self.store === store else { return }
         windowController.render(repos: store.repos)
         windowController.showListingError(store.lastError?.message)
         guard !terminating else { return }

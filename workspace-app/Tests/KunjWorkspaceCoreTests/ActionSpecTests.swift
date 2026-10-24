@@ -104,4 +104,28 @@ import Testing
         #expect(try value(#"{"key":"agent.tmux"}"#) == nil)
         #expect(try value(#"{"key":"agent.tmux","value":{"a":1}}"#) == nil)
     }
+    @Test func runResultsThatDidNothingAreReported() throws {
+        func decode(_ json: String) throws -> RunResultJson {
+            try JSONDecoder().decode(RunResultJson.self, from: Data(json.utf8))
+        }
+        // `worktree open` answers success false when the editor did not start: not silent
+        let notOpened = try decode(#"{"success":false,"path":"/r/wt","branch":"x","editorCommand":"code"}"#)
+        guard case .failed(let title, let detail) = runOutcome(["worktree", "open", "/r/wt"], notOpened) else {
+            Issue.record("expected failed"); return
+        }
+        #expect(title == "The editor did not open")
+        #expect(detail.contains("code"))
+        let disabled = try decode(#"{"success":false,"path":"/r/wt","branch":"x","editorCommand":""}"#)
+        guard case .failed(_, let why) = runOutcome(["worktree", "open", "/r/wt"], disabled) else {
+            Issue.record("expected failed"); return
+        }
+        #expect(why.contains("worktree.editorCommand"))
+        // ct open with an editor that cannot attach: the command to run instead
+        let exec = try decode(#"{"success":true,"branch":"x","name":"n","editor":"vim","uri":null,"exec":"kunj ct shell x"}"#)
+        #expect(runOutcome(["ct", "open", "x"], exec)
+            == .info(title: "The editor cannot attach to a container", detail: "Open a shell in it with:\nkunj ct shell x"))
+        #expect(runOutcome(["ct", "stop", "x"], try decode(#"{"success":true,"branch":"x","name":"n"}"#)) == .done)
+        #expect(runOutcome(["ct", "stop", "x"], try decode(#"{"success":false}"#))
+            == .failed(title: "kunj ct stop failed", detail: "kunj reported no success"))
+    }
 }

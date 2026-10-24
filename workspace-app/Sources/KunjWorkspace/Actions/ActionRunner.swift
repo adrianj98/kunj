@@ -1,13 +1,6 @@
 import AppKit
 import KunjWorkspaceCore
 
-/// `kunj ct open` / `worktree open --json`: `exec` is set when the configured editor cannot attach
-/// to a container (the command to run instead).
-private struct OpenResultJson: Decodable {
-    var success: Bool
-    var exec: String?
-}
-
 /// Carries out the header's buttons, the overflow menu, the port links and New session through
 /// `actionPlan`/`newSessionPlan`: `.terminal` opens an action tab (`kunj <args>`), `.run` runs
 /// `kunj <args> --json` and shows an alert when it fails, `.external` opens the URL, `.local` copies
@@ -108,10 +101,11 @@ final class ActionRunner {
         log("running kunj \(args.joined(separator: " ")) in \(root)")
         Task { @MainActor in
             do {
-                let result: OpenResultJson = try await cli.run(args, cwd: root, timeout: 600)
-                if let exec = result.exec {
-                    self.alert("The editor cannot attach to a container", detail: "Open a shell in it with:\n\(exec)",
-                               style: .informational)
+                let result: RunResultJson = try await cli.run(args, cwd: root, timeout: 600)
+                switch runOutcome(args, result) {
+                case .done: break
+                case .info(let title, let detail): self.alert(title, detail: detail, style: .informational)
+                case .failed(let title, let detail): self.alert(title, detail: detail, style: .warning)
                 }
             } catch {
                 let message = (error as? KunjCLIError)?.message ?? "\(error)"

@@ -8,7 +8,7 @@ public enum EnvAction: Equatable, Sendable {
 }
 
 /// How `ActionRunner` carries out an action: `terminal` runs `kunj <args>` in an action tab (in
-/// `cwd`, else the repository root), `run` runs `kunj <args> --json` and expects `SuccessJson`,
+/// `cwd`, else the repository root), `run` runs `kunj <args> --json` and reads `RunResultJson`,
 /// `external` opens a URL, `local` hands a path (or container name) to copy or reveal, and
 /// `disabled` greys the control out with `reason` as its tooltip.
 public enum ActionPlan: Equatable, Sendable {
@@ -174,4 +174,37 @@ public struct ConfigValueJson: Decodable, Equatable, Sendable {
             bool = nil
         }
     }
+}
+
+/// What a `.run` action answers: `{ success }`, plus `exec` from `ct open` when the editor cannot
+/// attach to a container and `editorCommand` from `worktree open`.
+public struct RunResultJson: Decodable, Equatable, Sendable {
+    public var success: Bool
+    public var exec: String?
+    public var editorCommand: String?
+}
+
+/// How `ActionRunner` reports a `.run` action's answer.
+public enum RunOutcome: Equatable, Sendable {
+    case done
+    case info(title: String, detail: String)
+    case failed(title: String, detail: String)
+}
+
+/// `worktree open` exits 0 with `success: false` when the editor did not start (not on the PATH,
+/// or `worktree.editorCommand` empty), which would otherwise do nothing visible.
+public func runOutcome(_ args: [String], _ result: RunResultJson) -> RunOutcome {
+    if !result.success {
+        if args.first == "worktree", args.dropFirst().first == "open" {
+            let command = result.editorCommand ?? ""
+            return .failed(title: "The editor did not open", detail: command.isEmpty
+                ? "worktree.editorCommand is empty, so kunj opens no editor."
+                : "kunj could not start \(command) (worktree.editorCommand). Is it on your login PATH?")
+        }
+        return .failed(title: "kunj \(args.prefix(2).joined(separator: " ")) failed", detail: "kunj reported no success")
+    }
+    if let exec = result.exec {
+        return .info(title: "The editor cannot attach to a container", detail: "Open a shell in it with:\n\(exec)")
+    }
+    return .done
 }
