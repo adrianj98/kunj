@@ -108,6 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.windowController.render(repos: store.repos)
             self.windowController.showListingError(store.lastError?.message)
         }
+        // the Changes column follows git events and container status changes of its repository
+        store.onRepoChanged = { [weak windowController] root in windowController?.changesColumn.repoChanged(root: root) }
         await store.refreshAll()
         windowController.render(repos: store.repos)
         windowController.showListingError(store.lastError?.message)
