@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-24 — `kunj worktree list --containers`
+
+- `kunj worktree list --json --containers` adds the repository's containers (`kunj ct list --json` shape plus the
+  branch's pull request). `ContainerCommand.listJson()` is the list code split out of `list`; the container module
+  loads lazily; Docker down gives `available: false`. Why: the extension and the macOS app show containers as rows
+  like worktrees, with PRs, from one CLI call and without matching logic of their own.
+
 ## 2026-10-24 — Containers in the VS Code extension and the macOS app: spec
 
 - Added `docs/specs/containers-in-apps.md` and moved the work to In progress in the tracker. Why: user asked

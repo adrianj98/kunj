@@ -32,6 +32,7 @@ import {
   findWorktreeIn,
   getPullRequestForBranch,
   listWorktreesDetailed,
+  pickPullRequest,
   DEFAULT_PR_MAX_AGE_SECONDS,
   PullRequestInfo,
   defaultWorktreePathFor,
@@ -61,13 +62,14 @@ import { resolveBaseRef } from '../lib/base-branch';
 import { recordRepo } from '../lib/repos';
 import { AgentError, checkShellSessionId, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, readTmuxSessions, runTmux, shellArgv, shellSessionName } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
-import type { ShellKillJson, WorktreeJson, WorktreeListJson } from '../lib/json-types';
+import type { BranchContainerJson, ShellKillJson, WorktreeJson, WorktreeListContainersJson, WorktreeListJson } from '../lib/json-types';
 
 interface WorktreeOptions {
   all?: boolean;
   status?: boolean;
   pr?: boolean;
   fresh?: boolean;
+  containers?: boolean;
   web?: boolean;
   newBranch?: boolean;
   create?: boolean;
@@ -114,6 +116,7 @@ export class WorktreeCommand extends BaseCommand {
       options: [
         { flags: '--no-status', description: 'Skip per-worktree git status (faster listing)' },
         { flags: '--no-pr', description: '[list] Skip pull request lookup (gh / glab)' },
+        { flags: '--containers', description: "[list] Also list this repository's branch containers (kunj ct)" },
         { flags: '--fresh', description: `[list|pr] Bypass the ${DEFAULT_PR_MAX_AGE_SECONDS}s pull request cache` },
         { flags: '-w, --web', description: '[pr] Open the pull request in the browser' },
         { flags: '-b, --new-branch', description: '[add] Create a new branch for the worktree' },
@@ -221,13 +224,25 @@ export class WorktreeCommand extends BaseCommand {
   // ---------------------------------------------------------------------
 
   private async list(options: WorktreeOptions): Promise<void> {
-    const listing = await listWorktreesDetailed({
-      includeStatus: options.status !== false,
-      includePullRequests: options.pr !== false,
-      pullRequestMaxAge: options.fresh ? 0 : DEFAULT_PR_MAX_AGE_SECONDS,
-    });
+    // Docker is asked concurrently with git; the container module loads only when asked for
+    const [listing, found] = await Promise.all([
+      listWorktreesDetailed({
+        includeStatus: options.status !== false,
+        includePullRequests: options.pr !== false,
+        pullRequestMaxAge: options.fresh ? 0 : DEFAULT_PR_MAX_AGE_SECONDS,
+      }),
+      options.containers ? this.listContainers(options.status !== false) : Promise.resolve(undefined),
+    ]);
     const { worktrees, repoRoot: mainRoot, currentPath } = listing;
     recordRepo(listing.gitCommonDir);
+    const containers = found && {
+      ...found,
+      items: found.items.map((c): BranchContainerJson => {
+        if (options.pr === false) return { ...c, prLabel: null };
+        const pr = listing.pullRequests ? pickPullRequest(listing.pullRequests, c.branch) : null;
+        return { ...c, pullRequest: pr, prLabel: pr ? `#${pr.number} ${pr.state}` : null };
+      }),
+    };
 
     if (this.jsonMode) {
       this.outputJSON({
@@ -236,6 +251,7 @@ export class WorktreeCommand extends BaseCommand {
         pullRequestLookup: listing.pullRequestLookup,
         pullRequestsFromCache: listing.pullRequestsFromCache,
         worktrees: worktrees.map(wt => this.toJSON(wt)),
+        ...(containers ? { containers } : {}),
       } satisfies WorktreeListJson);
       return;
     }
@@ -272,9 +288,37 @@ export class WorktreeCommand extends BaseCommand {
       }
     }
 
+    if (containers) {
+      console.log('');
+      console.log(chalk.blue('Containers:'));
+      if (!containers.available) console.log(chalk.gray(`  unavailable: ${containers.message ?? 'Docker could not be asked'}`));
+      else if (containers.items.length === 0) console.log(chalk.gray('  none'));
+      for (const c of containers.items) {
+        const running = c.state === 'running';
+        let line = `${running ? chalk.green('●') : chalk.gray('○')} ${chalk.white(c.branch)}  ${running ? chalk.green(c.state) : chalk.gray(c.state)}`;
+        if (c.workspace.ahead) line += chalk.cyan(`  ↑${c.workspace.ahead}`);
+        if (c.workspace.dirty) line += chalk.yellow('  dirty');
+        if (c.agent.running) line += chalk.cyan('  [agent]');
+        if (c.pullRequest) line += `  ${this.describePullRequest(c.pullRequest)}`;
+        console.log(line);
+      }
+    }
+
     console.log('');
     console.log(chalk.gray("Tip: Use 'kunj worktree add <branch>' to create a worktree"));
     console.log(chalk.gray("     Use 'kunj worktree open <branch>' to open one in your editor"));
+  }
+
+  // This repository's containers as `kunj ct list --json` has them; Docker being down or missing
+  // never fails the worktree listing
+  private async listContainers(status: boolean): Promise<WorktreeListContainersJson> {
+    try {
+      const { ContainerCommand } = await import('./container');
+      const list = await new ContainerCommand().listJson({ status });
+      return { available: true, items: list.containers.map(c => ({ ...c, prLabel: null })) };
+    } catch (error) {
+      return { available: false, message: error instanceof Error ? error.message : String(error), items: [] };
+    }
   }
 
   private describeSession(session: WorktreeSession): string {

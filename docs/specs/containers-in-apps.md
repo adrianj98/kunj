@@ -8,7 +8,7 @@ has them ([workspace-ide.md](workspace-ide.md)).
 
 | Part | State |
 | --- | --- |
-| CLI: `kunj worktree list --json --containers` | In progress |
+| CLI: `kunj worktree list --json --containers` | Shipped |
 | VS Code extension: container rows and actions | In progress |
 | macOS app: container rows and actions | In progress |
 | Refresh on `kunj events` | Not started |

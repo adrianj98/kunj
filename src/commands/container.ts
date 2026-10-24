@@ -1022,10 +1022,53 @@ export class ContainerCommand extends BaseCommand {
   // ---------------------------------------------------------------------
 
   private async list(options: ContainerOptions): Promise<void> {
-    const ctx = await this.context(options);
     const commonDir = getRepoCommonDir();
     if (commonDir) recordRepo(commonDir);
+    const { json, mains, helpers } = await this.collectList(options);
+    const { containers, orphans } = json;
 
+    if (this.jsonMode) {
+      this.outputJSON(json);
+      return;
+    }
+
+    console.log(chalk.blue(options.all ? 'Containers (all repositories):' : `Containers for ${json.repo}:`));
+    console.log(chalk.gray('─'.repeat(70)));
+    if (containers.length === 0) {
+      console.log(chalk.gray('  none'));
+    }
+    containers.forEach((c, i) => {
+      const running = c.state === 'running';
+      let line = `${running ? chalk.green('●') : chalk.gray('○')} ${chalk.white(c.branch)}  ${running ? chalk.green(c.state) : chalk.gray(c.state)}  ${chalk.gray(c.image)}`;
+      if (c.blueprint) line += c.blueprint.stale ? chalk.yellow('  [blueprint stale]') : chalk.cyan('  [blueprint]');
+      if (c.dind !== 'off') line += chalk.magenta(`  [dind ${c.dind}]`);
+      if (c.agent.running) line += chalk.cyan('  [agent]');
+      if (c.workspace.ahead) line += chalk.cyan(`  +${c.workspace.ahead} ahead`);
+      if (c.workspace.dirty) line += chalk.yellow('  dirty');
+      if (c.status === 'timeout' || c.status === 'error') line += chalk.red(`  status ${c.status}`);
+      if (c.bridges.length) line += chalk.cyan(`  [mcp ${c.bridges.map(b => b.name).join(' ')}]`);
+      if (c.ports.length) line += '  ' + c.ports.map(p => `${p.host}→${p.container}`).join(' ');
+      if (c.services.length) {
+        line += '  ' + c.services.map(svc => (svc.state === 'running' ? chalk.cyan(svc.name) : chalk.yellow(`${svc.name} ${svc.state}`))).join(' ');
+      }
+      const helper = helpers.get(`${mains[i].name}-net-helper`);
+      if (running && helper?.state !== 'running') line += chalk.red('  [firewall helper down]');
+      console.log(line);
+    });
+    if (orphans.length) {
+      console.log(chalk.yellow(`orphans: ${orphans.length} (${orphans.map(o => o.name).join(', ')}); run kunj ct prune`));
+    }
+    console.log('');
+    console.log(chalk.gray("Tip: Use 'kunj ct start <branch>' to start a container"));
+  }
+
+  /** `kunj ct list --json` of this repository, for `kunj worktree list --containers` */
+  async listJson(options: { status?: boolean; context?: string } = {}): Promise<ContainerListJson> {
+    return (await this.collectList(options)).json;
+  }
+
+  private async collectList(options: ContainerOptions): Promise<{ json: ContainerListJson; mains: ContainerInfo[]; helpers: Map<string, ContainerInfo> }> {
+    const ctx = await this.context(options);
     const repoFilter: Record<string, string> = options.all ? {} : { [LABEL.repo]: ctx.repo.id };
     let all = await ctx.backend.list(repoFilter);
     if (options.all) all = all.filter(c => c.labels[LABEL.repo]);
@@ -1077,44 +1120,13 @@ export class ContainerCommand extends BaseCommand {
       };
     });
 
-    if (this.jsonMode) {
-      this.outputJSON({
-        repo: ctx.repo.name,
-        backend: { kind: 'docker', context: ctx.dockerContext || 'default' },
-        containers,
-        orphans,
-      } satisfies ContainerListJson);
-      return;
-    }
-
-    console.log(chalk.blue(options.all ? 'Containers (all repositories):' : `Containers for ${ctx.repo.name}:`));
-    console.log(chalk.gray('─'.repeat(70)));
-    if (containers.length === 0) {
-      console.log(chalk.gray('  none'));
-    }
-    containers.forEach((c, i) => {
-      const running = c.state === 'running';
-      let line = `${running ? chalk.green('●') : chalk.gray('○')} ${chalk.white(c.branch)}  ${running ? chalk.green(c.state) : chalk.gray(c.state)}  ${chalk.gray(c.image)}`;
-      if (c.blueprint) line += c.blueprint.stale ? chalk.yellow('  [blueprint stale]') : chalk.cyan('  [blueprint]');
-      if (c.dind !== 'off') line += chalk.magenta(`  [dind ${c.dind}]`);
-      if (c.agent.running) line += chalk.cyan('  [agent]');
-      if (c.workspace.ahead) line += chalk.cyan(`  +${c.workspace.ahead} ahead`);
-      if (c.workspace.dirty) line += chalk.yellow('  dirty');
-      if (c.status === 'timeout' || c.status === 'error') line += chalk.red(`  status ${c.status}`);
-      if (c.bridges.length) line += chalk.cyan(`  [mcp ${c.bridges.map(b => b.name).join(' ')}]`);
-      if (c.ports.length) line += '  ' + c.ports.map(p => `${p.host}→${p.container}`).join(' ');
-      if (c.services.length) {
-        line += '  ' + c.services.map(svc => (svc.state === 'running' ? chalk.cyan(svc.name) : chalk.yellow(`${svc.name} ${svc.state}`))).join(' ');
-      }
-      const helper = helpers.get(`${mains[i].name}-net-helper`);
-      if (running && helper?.state !== 'running') line += chalk.red('  [firewall helper down]');
-      console.log(line);
-    });
-    if (orphans.length) {
-      console.log(chalk.yellow(`orphans: ${orphans.length} (${orphans.map(o => o.name).join(', ')}); run kunj ct prune`));
-    }
-    console.log('');
-    console.log(chalk.gray("Tip: Use 'kunj ct start <branch>' to start a container"));
+    const json: ContainerListJson = {
+      repo: ctx.repo.name,
+      backend: { kind: 'docker', context: ctx.dockerContext || 'default' },
+      containers,
+      orphans,
+    };
+    return { json, mains, helpers };
   }
 
   // ---------------------------------------------------------------------

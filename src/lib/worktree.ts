@@ -265,6 +265,8 @@ export interface WorktreeListing {
   currentPath: string | null;
   pullRequestLookup: PullRequestLookup;
   pullRequestsFromCache: boolean;
+  // Every PR of the repository (null when not looked up or the lookup failed), for branches without a worktree
+  pullRequests: PullRequestInfo[] | null;
   worktrees: WorktreeInfo[];
 }
 
@@ -357,6 +359,7 @@ export async function listWorktreesDetailed(options: ListWorktreesOptions = {}):
     currentPath: paths.currentPath,
     pullRequestLookup: !includePullRequests ? 'skipped' : prResult.pullRequests ? prResult.provider || 'github' : 'unavailable',
     pullRequestsFromCache: prResult.fromCache,
+    pullRequests: prResult.pullRequests,
     worktrees,
   };
 }

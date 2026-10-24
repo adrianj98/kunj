@@ -7,7 +7,7 @@
  *
  * Type-only imports and no runtime code: the commands on the fast path import it freely.
  */
-import type { WorktreeInfo, PullRequestLookup } from './worktree';
+import type { WorktreeInfo, PullRequestInfo, PullRequestLookup } from './worktree';
 import type { KnownRepoInfo } from './repos';
 import type { ContainerStatus } from './container/env';
 import type { ServiceState } from './container/services';
@@ -59,7 +59,23 @@ export interface WorktreeListJson {
   pullRequestLookup: PullRequestLookup;
   pullRequestsFromCache: boolean;
   worktrees: WorktreeJson[];
+  /** With --containers: this repository's branch containers, listed alongside the worktrees */
+  containers?: WorktreeListContainersJson;
 }
+
+export interface WorktreeListContainersJson {
+  /** false when Docker could not be asked; `items` is then empty and `message` says why */
+  available: boolean;
+  message?: string;
+  items: BranchContainerJson[];
+}
+
+/** A `kunj ct list --json` container plus its branch's pull request, looked up like a worktree's */
+export type BranchContainerJson = ContainerJson & {
+  /** Absent with --no-pr; null when the branch has none or the lookup failed */
+  pullRequest?: PullRequestInfo | null;
+  prLabel: string | null;
+};
 
 // ---- kunj repos --json -----------------------------------------------------------------------
 

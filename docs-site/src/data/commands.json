@@ -1059,6 +1059,11 @@
         "default": null
       },
       {
+        "flags": "--containers",
+        "description": "[list] Also list this repository's branch containers (kunj ct)",
+        "default": null
+      },
+      {
         "flags": "--fresh",
         "description": "[list|pr] Bypass the 60s pull request cache",
         "default": null

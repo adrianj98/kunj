@@ -795,6 +795,21 @@ describe('ContainerCommand', () => {
     }
   });
 
+  it('listJson returns what list --json prints, and --no-status skips the exec', async () => {
+    backend.existing = [mainContainer('feat-x'), helperContainer('feat-x')];
+    (lifecycle.containerStatus as jest.Mock).mockClear();
+    (lifecycle.containerStatus as jest.Mock).mockResolvedValue({ agentRunning: false, head: 'a1b2c3d4', ahead: 0, dirty: false, status: 'ok' });
+
+    await new ContainerCommand().execute('list', { json: true });
+    const listed = await new ContainerCommand().listJson();
+    expect(listed).toEqual(JSON.parse(stdout.join('')));
+
+    (lifecycle.containerStatus as jest.Mock).mockClear();
+    const quick = await new ContainerCommand().listJson({ status: false });
+    expect(lifecycle.containerStatus).not.toHaveBeenCalled();
+    expect(quick.containers[0].status).toBe('skipped');
+  });
+
   it('prints the list json shape', async () => {
     backend.existing = [mainContainer('feat-x'), helperContainer('feat-x')];
     (lifecycle.containerStatus as jest.Mock).mockResolvedValue({

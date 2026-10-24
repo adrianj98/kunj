@@ -171,6 +171,11 @@ New worktrees default to `${repoconfig}/kunj/worktrees/<branch>` (`worktree.base
 src/lib/worktree-defaults.ts), which keeps them out of the working tree in a normal repo and inside
 the repository directory in a bare one. Bare repositories are supported throughout: `--show-toplevel`
 fatals there, so ask git for `--git-common-dir` first. Pull requests are fetched in one `gh pr list` (or `glab mr list`) call and cached for 60s in `~/.kunj/pr-cache.json`; pass `--no-pr` to skip or `--fresh` to bypass the cache.
+`list --containers` adds the repository's branch containers (`containers: { available, message?, items }`,
+each a `kunj ct list --json` container plus its branch's `pullRequest` from the same `gh` call) for the
+extension and the macOS app, which show them as rows like worktrees (docs/specs/containers-in-apps.md).
+The container module is imported lazily only then, Docker is asked concurrently with git, and Docker
+being down gives `available: false`, never a failed listing.
 
 **Performance:** `src/index.ts` has a fast path (`src/commands/fast.ts`) that loads only the requested command for `worktree`, `repos` and `prompt-info`, because importing the full registry pulls in AWS, LangChain and Jira and costs ~1s. A listing makes one `git rev-parse`, one `git worktree list` and one `git status --porcelain=v2 --branch` per worktree. Keep it that way: don't add per-worktree subprocesses or heavy top-level imports to these modules.
 
