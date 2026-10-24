@@ -175,8 +175,37 @@ private func repos(_ envs: [Environment]) -> [RepoEnvironments] {
         a2.ahead = 1
         let c = diffTestEnvironment(branch: "c", path: "/c")
         #expect(tracker.changed(repos([a2, b, c])) == [a.id, c.id])
-        // gone and back counts as a change
+        // gone and back changed counts as a change
         #expect(tracker.changed(repos([a2, c])).isEmpty)
-        #expect(tracker.changed(repos([a2, b, c])) == [b.id])
+        var b2 = b
+        b2.ahead = 2
+        #expect(tracker.changed(repos([a2, b2, c])) == [b.id])
+    }
+
+    /// A failed `ct list` (Docker restarting) or `worktree list` drops environments from one
+    /// listing; their return unchanged is not activity, or every container would read "now".
+    @Test func environmentsBackUnchangedAfterAFailedListingAreNotActivity() {
+        var tracker = ActivityTracker()
+        let a = diffTestEnvironment(branch: "a", path: "/a")
+        let box = diffTestEnvironment(kind: .container, branch: "a", path: nil)
+        #expect(tracker.changed(repos([a, box])).isEmpty)
+        #expect(tracker.changed(repos([a])).isEmpty)
+        #expect(tracker.changed(repos([])).isEmpty)
+        #expect(tracker.changed(repos([a, box])).isEmpty)
+    }
+
+    /// `worktree list` reports no pull request when `gh` fails (offline): losing or regaining the
+    /// lookup is not activity, a pull request's own change is.
+    @Test func aPullRequestLookupComingAndGoingIsNotActivity() {
+        var tracker = ActivityTracker()
+        let withPR = diffTestEnvironment(branch: "a", path: "/a", prBase: "main")
+        var withoutPR = withPR
+        withoutPR.pullRequest = nil
+        #expect(tracker.changed(repos([withPR])).isEmpty)
+        #expect(tracker.changed(repos([withoutPR])).isEmpty)
+        #expect(tracker.changed(repos([withPR])).isEmpty)
+        var merged = withPR
+        merged.pullRequest?.state = "MERGED"
+        #expect(tracker.changed(repos([merged])) == [withPR.id])
     }
 }

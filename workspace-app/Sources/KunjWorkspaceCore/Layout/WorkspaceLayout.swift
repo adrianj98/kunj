@@ -121,8 +121,11 @@ public func restorePlan(_ entry: BranchLayout, env: Environment,
 }
 
 /// Which environments changed since the last listing, for `lastActivity`. The first listing only
-/// primes (launching the app is not activity); after that an environment whose state differs, or
-/// one that appeared (also one that comes back after a listing without it), is reported.
+/// primes (launching the app is not activity); after that an environment whose state differs from
+/// the last time it was listed, or one never listed before, is reported. An environment missing from
+/// a listing is remembered, because a failed `ct list` (Docker restarting) or `worktree list` drops
+/// environments for a listing: one that comes back unchanged is not activity. A pull request that
+/// appears or disappears is not either (`worktree list` reports none when `gh` fails); its changes are.
 public struct ActivityTracker: Sendable {
     private var seen: [String: Environment]?
 
@@ -131,9 +134,25 @@ public struct ActivityTracker: Sendable {
     /// The ids, in listing order, of environments that changed or appeared.
     public mutating func changed(_ repos: [RepoEnvironments]) -> [String] {
         let envs = repos.flatMap(\.environments)
-        defer { seen = Dictionary(envs.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }
-        guard let seen else { return [] }
-        return envs.filter { seen[$0.id] != $0 }.map(\.id)
+        let before = seen
+        var now = before ?? [:]
+        for env in envs { now[env.id] = env }
+        seen = now
+        guard let before else { return [] }
+        var changed: [String] = []
+        for env in envs where !changed.contains(env.id) {
+            if let old = before[env.id], Self.sameActivity(old, env) { continue }
+            changed.append(env.id)
+        }
+        return changed
+    }
+
+    private static func sameActivity(_ a: Environment, _ b: Environment) -> Bool {
+        guard a.pullRequest == nil || b.pullRequest == nil else { return a == b }
+        var a = a, b = b
+        a.pullRequest = nil
+        b.pullRequest = nil
+        return a == b
     }
 }
 

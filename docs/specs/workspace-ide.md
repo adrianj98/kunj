@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa; terminals, agent tabs and the tab bar (`TerminalTab`, `TabRegistry`, `TabBarView`, `HiddenFeedScheduler`), the store and `kunj events` wired into the app, Environment and Tabs menus in 5158fe4, 45756ae |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa; terminals, agent tabs and the tab bar (`TerminalTab`, `TabRegistry`, `TabBarView`, `HiddenFeedScheduler`), the store and `kunj events` wired into the app, Environment and Tabs menus in 5158fe4, 45756ae; layout file, tab restore and last activity (`LayoutStore`, `LayoutKeeper`) in 062d22d, 2d972db |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -108,7 +108,7 @@ version, with its own config loading and hooks, and the GUI would soon do things
 - **Diff content:** read-only `git` in a worktree, `kunj ct exec <branch> -- git …` in a container. The
   app's own git calls run with `GIT_OPTIONAL_LOCKS=0`; otherwise they refresh the index, which
   `kunj events` reports, and the app would refresh in a loop.
-- **App state:** UI layout only, `~/.kunj/<reponame>/workspace.json`, `{ [branch]: { tabs, active } }`
+- **App state:** UI layout only, `~/.kunj/<reponame>/workspace.json`, `{ "<kind>:<branch>": { tabs, active, lastActivity } }`
   (one file per repo, so slashes in branch names do not matter). tmux and Docker hold the real state.
 
 ### CLI contract (shipped)
@@ -192,8 +192,8 @@ Kunj Workspace.app
 
 | Target | Holds | Depends on |
 | --- | --- | --- |
-| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec` + `tabDot` + `exitCode(waitStatus:)`, `HiddenFeedScheduler`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout`, `DesignTokens` (generated), `RelativeTime` | Foundation only |
-| `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `SidebarRowView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `DemoData` (`--demo`), `TerminalTab` (SwiftTerm), `TabRegistry`, `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
+| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec` + `tabDot` + `exitCode(waitStatus:)`, `HiddenFeedScheduler`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout` + `LayoutStore` + `restorePlan` + `ActivityTracker`, `DesignTokens` (generated), `RelativeTime` | Foundation only |
+| `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `SidebarRowView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `DemoData` (`--demo`), `TerminalTab` (SwiftTerm), `TabRegistry`, `LayoutKeeper` (layout file and `lastActivity`), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
 | `KunjWorkspaceCoreTests` | `swift test` (Swift Testing), with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) and the helpers in `Support.swift` | Core |
 
 SwiftTerm is vendored at an exact tag by `scripts/prepare-swiftterm.sh` (the spike's one-line
@@ -233,7 +233,9 @@ container), `agent` (which carries `repo` when kunj knows it) the repo's `worktr
 `repos`/`backend`/`sessions`/`forwards` everything. After the event stream restarts, the store does a
 full refresh, because events from the gap are lost (the first `hello`, which follows the app's initial
 refresh, is skipped). The relative time is the app's own `lastActivity` per environment
-(bumped when its state hash changes or a tab of it is used; persisted in the layout file).
+(bumped when the environment differs from the last listing that had it, or a key is pressed in one of
+its tabs, at most every 5 s; an environment missing from one listing, after a failed `ct list` or
+`worktree list`, and a pull request that appears or disappears are not activity; persisted in the layout file).
 
 **Agent state.** Running comes from tmux (`agent.running`); *waiting for input* comes from Claude Code
 hooks that kunj installs: `kunj agent` and `kunj ct agent` append `--settings '<json>'` to a command
@@ -301,8 +303,11 @@ tab id, and Swift holds the path, so content from a container cannot steer a wri
 **Layout file** `~/.kunj/<reponame>/workspace.json`: `{ "<kind>:<branch>": { "tabs": [{ "kind": "shell|agent|editor",
 "title", "path"? }], "active", "lastActivity" } }` (keyed by kind too, because a worktree and a container
 on the same branch are two environments), written atomically, debounced 500 ms; action tabs
-are never saved. On selecting an environment for the first time in a session its tabs are restored
-(agent tabs reattach to tmux; editor tabs reopen the file).
+are never saved; entries or tabs that do not decode are skipped, not the whole file. On selecting an
+environment for the first time in a session, once it can run them (worktree present, container running;
+until then its entry is not saved over), its tabs are restored with the titles of their specs: shells
+restart, one agent tab reattaches to tmux only while the agent runs (restoring one that ended would start
+a new agent), editor tabs reopen the file (Task 10). The app writes pending changes when it quits.
 
 **Actions** (`ActionRunner`): Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O (`worktree open` / `ct open`),
 Create PR ⌘⇧P (`kunj pr` in an action tab, in the worktree; for a container environment the host
@@ -476,7 +481,16 @@ From the terminals (Task 7):
 - [ ] SwiftTerm's overlay scroller is hidden while `--screenshot` renders (cacheDisplay draws its
   track); whether it stays out of the way on screen has not been checked by a person.
 - [ ] `-openTabs "<envId>#<kind>,…"` is a launch argument for checking PTYs without assistive access;
-  Task 8's restore may make it redundant.
+  Task 8 kept it (an entry without `#kind` only selects, which restores) for live checks.
+
+From the layout file (Task 8):
+
+- [ ] Any other change of an `Environment` counts as activity, e.g. a pull request's checks or review
+  state, a container's ports or services, or Docker coming back with containers stopped; a narrower
+  activity signature (head, dirty, ahead, agent) would need `head` in the model.
+- [ ] Two apps (or two repositories with the same kunj repo name) write the same `workspace.json`;
+  the last save wins, there is no merge.
+- [ ] Key presses that are menu shortcuts (⌘W, ⌘1) while a tab has focus count as input.
 - [ ] A hidden tab's queue is fed whole when its process exits, on the main thread, so a large
   backlog in a background tab can stall the UI once at exit.
 
