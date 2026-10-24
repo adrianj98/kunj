@@ -4,6 +4,10 @@ import KunjWorkspaceCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let screenshotPath: String?
     private var windowController: MainWindowController!
+    /// The kunj CLI once discovery succeeded (Tasks 4+ build the environment store on it).
+    private(set) var kunj: KunjCLI?
+    private(set) var kunjStatus: KunjStatus?
+    private var discovery: Task<Void, Never>?
 
     init(arguments: [String]) {
         if let i = arguments.firstIndex(of: "--screenshot"), i + 1 < arguments.count {
@@ -21,10 +25,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.showWindow(nil)
         windowController.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        discovery = Task { await self.discoverKunj() }
 
         if let screenshotPath {
-            // After the first layout pass and draw
-            DispatchQueue.main.async { [weak self] in
+            // After discovery (so the status bar shows the kunj version) and the next layout pass
+            Task { @MainActor [weak self] in
+                await self?.discovery?.value
                 self?.windowController.snapshotPNG { data in
                     if let data {
                         FileManager.default.createFile(atPath: screenshotPath, contents: data)
@@ -35,6 +41,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSApp.terminate(nil)
                 }
             }
+        }
+    }
+
+    /// Resolves the login-shell PATH, then runs `kunj -V` (both off the main thread) and shows the
+    /// result on the right of the status bar: `kunj 1.4.2`, `kunj 1.0.0 dev`, or the error
+    /// (`kunj not found on your PATH: npm install -g kunj`). The command is the `kunjCommand`
+    /// default (`defaults write <bundle id> kunjCommand "node /path/dist/index.js"`), else `kunj`.
+    private func discoverKunj() async {
+        let configured = UserDefaults.standard.string(forKey: "kunjCommand")?
+            .trimmingCharacters(in: .whitespaces)
+        let command = (configured?.isEmpty ?? true) ? "kunj" : configured!
+        let path = await ShellEnvironment.loginPath()
+        do {
+            let (cli, status) = try await KunjCLI.discover(command: command, path: path)
+            log("kunj: \(status.binary) \(status.version)\(status.dev ? " (dev build)" : "")")
+            await MainActor.run {
+                self.kunj = cli
+                self.kunjStatus = status
+                self.windowController.setKunjStatus(status.label, isError: false)
+            }
+        } catch {
+            let message = (error as? KunjCLIError)?.message ?? "\(error)"
+            log("kunj: \(message) (command \(command), PATH \(path))")
+            await MainActor.run { self.windowController.setKunjStatus(message, isError: true) }
         }
     }
 

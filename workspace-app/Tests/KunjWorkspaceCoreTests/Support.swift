@@ -1,7 +1,8 @@
 import Foundation
+@testable import KunjWorkspaceCore
 
 // Shared test support: fixture paths and the fake kunj CLI (Tests/Fixtures/fake-kunj).
-// Task 3 adds a KunjCLI pointed at `fakeKunjPath` here.
+// fakeKunjCLI() is a KunjCLI pointed at `fakeKunjPath`.
 
 /// workspace-app/ (this file is workspace-app/Tests/KunjWorkspaceCoreTests/Support.swift)
 let appRoot = URL(fileURLWithPath: #filePath)
@@ -57,4 +58,18 @@ func runFakeKunj(_ args: [String], environment: [String: String] = [:], cwd: URL
     let data = out.fileHandleForReading.readDataToEndOfFile()
     p.waitUntilExit()
     return (String(decoding: data, as: UTF8.self), p.terminationStatus)
+}
+
+/// A KunjCLI whose command is fake-kunj, with `environment` passed through `env K=V …` in the
+/// command itself (so tests never change the test process's environment). `path` is what the
+/// runner hands to the child as PATH; fake-kunj only needs the system tools.
+func fakeKunjCLI(environment: [String: String] = [:], path: String = "/usr/bin:/bin") -> KunjCLI {
+    KunjCLI(command: fakeKunjCommand(environment: environment), path: path)
+}
+
+/// The command string for fake-kunj with `environment` set (double quotes as splitArguments reads them).
+func fakeKunjCommand(environment: [String: String] = [:]) -> String {
+    let vars = environment.sorted { $0.key < $1.key }.map { "\"\($0.key)=\($0.value)\"" }
+    return (vars.isEmpty ? [] : ["env"] + vars).joined(separator: " ")
+        + (vars.isEmpty ? "" : " ") + "\"\(fakeKunjPath)\""
 }

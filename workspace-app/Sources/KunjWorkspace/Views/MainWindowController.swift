@@ -37,6 +37,8 @@ final class MainWindowController: NSWindowController {
     private(set) var rightColumn: NSView!
     private(set) var statusBar: NSView!
     private let statusRight = NSTextField(labelWithString: "")
+    /// Bottom right of the sidebar, under "+ New session" (spec Layout, warm.png): `kunj 1.4.2`.
+    private let sidebarVersion = NSTextField(labelWithString: "")
 
     init() {
         let window = NSWindow(
@@ -56,10 +58,13 @@ final class MainWindowController: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Right side of the status bar: the kunj version, or an error in `red`.
+    /// The kunj version goes to the sidebar's foot (as in warm.png); a discovery error, too long
+    /// for the sidebar, goes to the right of the status bar in `red` (Task 6 adds the window's
+    /// error state).
     func setKunjStatus(_ text: String, isError: Bool) {
-        statusRight.stringValue = text
-        statusRight.textColor = NSColor(token: isError ? tokens.red : tokens.muted)
+        sidebarVersion.stringValue = isError ? "" : text
+        statusRight.stringValue = isError ? text : ""
+        statusRight.textColor = NSColor(token: tokens.red)
     }
 
     private func buildLayout() {
@@ -91,10 +96,20 @@ final class MainWindowController: NSWindowController {
         let statusLine = FillView(border)
         statusBar = FillView(bg)
 
-        statusRight.font = .monospacedSystemFont(ofSize: DesignTokens.TypeScale.caption, weight: .regular)
+        let caption = DesignTokens.TypeScale.caption
+        let mono = NSFont(name: "\(DesignTokens.Fonts.mono)-Regular", size: caption)
+            ?? .monospacedSystemFont(ofSize: caption, weight: .regular)
+        statusRight.font = mono
         statusRight.textColor = NSColor(token: tokens.muted)
+        statusRight.lineBreakMode = .byTruncatingTail
         statusRight.translatesAutoresizingMaskIntoConstraints = false
         statusBar.addSubview(statusRight)
+
+        sidebarVersion.font = mono
+        sidebarVersion.textColor = NSColor(token: tokens.muted)
+        sidebarVersion.alignment = .right
+        sidebarVersion.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(sidebarVersion)
 
         for v: NSView in [effect, sidebarLine, header!, headerLine, leftColumn!, columnLine, rightColumn!, statusLine, statusBar!] {
             root.addSubview(v)
@@ -148,6 +163,10 @@ final class MainWindowController: NSWindowController {
 
             statusRight.trailingAnchor.constraint(equalTo: statusBar.trailingAnchor, constant: -16),
             statusRight.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
+            statusRight.leadingAnchor.constraint(greaterThanOrEqualTo: statusBar.leadingAnchor, constant: 16),
+
+            sidebarVersion.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -16),
+            sidebarVersion.centerYAnchor.constraint(equalTo: effect.bottomAnchor, constant: -19),
         ])
     }
 
