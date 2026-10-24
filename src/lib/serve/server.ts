@@ -113,7 +113,10 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     routes.push({ method, pattern: path.split('/').filter(Boolean), handler });
 
   route('GET', '/v1/info', async () => {
-    const info: InfoJson = { kunj: opts.version, protocol: PROTOCOL_VERSION, features: backend.features };
+    // Docker-in-Docker is reported only as the flags allow it, so the client refuses before trying
+    const dind = backend.features.dockerInDocker.filter(
+      mode => (mode === 'privileged' && flags.allowPrivileged) || (mode === 'sysbox' && flags.allowRuntimes.includes('sysbox-runc')));
+    const info: InfoJson = { kunj: opts.version, protocol: PROTOCOL_VERSION, features: { ...backend.features, dockerInDocker: dind } };
     return info;
   });
 

@@ -71,7 +71,7 @@ describe('kunj serve: unary routes', () => {
 
   it('describes itself', async () => {
     const r = await request(port, 'GET', '/v1/info');
-    expect(r).toEqual({ status: 200, body: { kunj: '9.9.9', protocol: PROTOCOL_VERSION, features: fake.features } });
+    expect(r).toEqual({ status: 200, body: { kunj: '9.9.9', protocol: PROTOCOL_VERSION, features: { ...fake.features, dockerInDocker: [] } } });
     const e = await request(port, 'GET', '/v1/engine');
     expect(e.body).toEqual({ ...fake.infoResult, context: 'default' });
   });
