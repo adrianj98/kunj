@@ -33,14 +33,14 @@ final class LayoutKeeper {
 
     func lastActivity(_ envId: String) -> Date? {
         guard let env = environment(envId) else { return nil }
-        return layouts.layout(repo: env.repo.dirName).branches[key(env)]?.lastActivity
+        return layouts.layout(repo: env.repo.dirName, fallback: env.repo.name).branches[key(env)]?.lastActivity
     }
 
     /// The environment was selected (or the store changed while it is): restores its saved tabs
     /// the first time it can run them.
     func selected(_ env: Environment?) {
         guard let env, !restored.contains(env.id) else { return }
-        guard let entry = layouts.layout(repo: env.repo.dirName).branches[key(env)] else {
+        guard let entry = layouts.layout(repo: env.repo.dirName, fallback: env.repo.name).branches[key(env)] else {
             restored.insert(env.id)
             return
         }
@@ -60,9 +60,9 @@ final class LayoutKeeper {
         guard restored.contains(envId), let env = environment(envId) else { return }
         let open = tabs(envId)
         let saved = tabsToSave(open.tabs, active: open.active)
-        let entry = layouts.layout(repo: env.repo.dirName).branches[key(env)]
+        let entry = layouts.layout(repo: env.repo.dirName, fallback: env.repo.name).branches[key(env)]
         guard entry?.tabs != saved.tabs || entry?.active != saved.active else { return }
-        layouts.update(repo: env.repo.dirName, key: key(env)) {
+        layouts.update(repo: env.repo.dirName, fallback: env.repo.name, key: key(env)) {
             $0.tabs = saved.tabs
             $0.active = saved.active
         }
@@ -93,7 +93,7 @@ final class LayoutKeeper {
 
     private func bump(_ envId: String, now: Date) {
         guard let env = environment(envId) else { return }
-        layouts.update(repo: env.repo.dirName, key: key(env)) { $0.lastActivity = now }
+        layouts.update(repo: env.repo.dirName, fallback: env.repo.name, key: key(env)) { $0.lastActivity = now }
     }
 
     private func key(_ env: Environment) -> String {

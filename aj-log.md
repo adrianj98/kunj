@@ -1118,3 +1118,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - workspace-app EnvironmentStore: refreshes queued per repository, a full refresh waits for all. Why: final review, one slow ct list held up every repository.
 - docs: spec, plan (final review note), workspace-app README updated for the four fixes; deferred minors listed in the spec. Why: review after each task.
 - docs/specs/README.md, workspace-ide.md: the final review fix commit named (22336bb). Why: commits listed by hash.
+- workspace-app LayoutStore: reads ~/.kunj/<folder name>/workspace.json while ~/.kunj/<kunjName>/ has none. Why: adversarial review of 22336bb, tabs saved before kunjName were dropped for bare or renamed clones.

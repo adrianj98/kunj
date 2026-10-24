@@ -99,6 +99,20 @@ private func sampleLayout() -> WorkspaceLayout {
         #expect(loadLayout(path: path).branches["worktree:feature/x"]?.tabs.count == 1)
     }
 
+    /// Builds before kunjName saved under the folder name: read from there until the first save
+    /// under kunj's name
+    @Test func layoutStoreFallsBackToTheFolderNamedFile() throws {
+        let home = try tempDirectory().path
+        try saveLayout(sampleLayout(), path: layoutPath(repoName: "alertd-core", home: home))
+        let store = LayoutStore(home: home)
+        #expect(store.layout(repo: "alertd", fallback: "alertd-core") == sampleLayout())
+        store.update(repo: "alertd", fallback: "alertd-core", key: "worktree:main") { $0.active = 0 }
+        store.flush()
+        let moved = loadLayout(path: layoutPath(repoName: "alertd", home: home))
+        #expect(moved.branches["worktree:main"]?.active == 0)
+        for (key, entry) in sampleLayout().branches where key != "worktree:main" { #expect(moved.branches[key] == entry) }
+    }
+
     @Test func layoutStoreReadsExistingFile() throws {
         let home = try tempDirectory().path
         try saveLayout(sampleLayout(), path: layoutPath(repoName: "app", home: home))

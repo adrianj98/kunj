@@ -199,15 +199,17 @@ public final class LayoutStore: @unchecked Sendable {
         self.debounceMs = debounceMs
     }
 
-    public func layout(repo: String) -> WorkspaceLayout {
+    /// `fallback`: the folder name a build before `kunjName` saved under, read while `repo` has no
+    /// file (the next save writes under `repo`)
+    public func layout(repo: String, fallback: String? = nil) -> WorkspaceLayout {
         lock.lock(); defer { lock.unlock() }
-        return cached(repo)
+        return cached(repo, fallback: fallback)
     }
 
     /// Changes the entry `key` of `repo` (created empty when absent) and schedules the save.
-    public func update(repo: String, key: String, _ change: (inout BranchLayout) -> Void) {
+    public func update(repo: String, fallback: String? = nil, key: String, _ change: (inout BranchLayout) -> Void) {
         lock.lock()
-        var layout = cached(repo)
+        var layout = cached(repo, fallback: fallback)
         var entry = layout.branches[key] ?? BranchLayout()
         change(&entry)
         layout.branches[key] = entry
@@ -228,9 +230,13 @@ public final class LayoutStore: @unchecked Sendable {
         for repo in repos { save(repo: repo) }
     }
 
-    private func cached(_ repo: String) -> WorkspaceLayout {
+    private func cached(_ repo: String, fallback: String? = nil) -> WorkspaceLayout {
         if let layout = cache[repo] { return layout }
-        let layout = loadLayout(path: layoutPath(repoName: repo, home: home))
+        var path = layoutPath(repoName: repo, home: home)
+        if let fallback, fallback != repo, !FileManager.default.fileExists(atPath: path) {
+            path = layoutPath(repoName: fallback, home: home)
+        }
+        let layout = loadLayout(path: path)
         cache[repo] = layout
         return layout
     }
