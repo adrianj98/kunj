@@ -13,6 +13,8 @@ import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { getGitCommonDir } from '../lib/worktree';
 import { addRepo, hideRepo, listRepos, pruneRepos, getReposPath } from '../lib/repos';
+import type { KnownRepoInfo } from '../lib/repos';
+import { kunjDirName } from '../lib/repo-identity';
 
 interface ReposOptions {
   all?: boolean;
@@ -71,7 +73,7 @@ export class ReposCommand extends BaseCommand {
   private list(options: ReposOptions): void {
     const repos = listRepos({ includeHidden: options.all });
     if (this.jsonMode) {
-      this.outputJSON({ repos } satisfies ReposJson);
+      this.outputJSON(reposJson(repos));
       return;
     }
     if (repos.length === 0) {
@@ -126,4 +128,8 @@ export class ReposCommand extends BaseCommand {
     }
     console.log(removed.length ? chalk.green(`✓ Forgot ${removed.length} missing repositor${removed.length === 1 ? 'y' : 'ies'}`) : chalk.gray('Nothing to prune'));
   }
+}
+
+export function reposJson(repos: KnownRepoInfo[]): ReposJson {
+  return { repos: repos.map(r => ({ ...r, kunjName: kunjDirName(r) })) };
 }

@@ -17,6 +17,8 @@ private final class FakeKunj: @unchecked Sendable {
     var containersFail = false
     var worktreesFail = false
     var extraRepos: [RepoRef] = []
+    /// `ct list` of this repository takes 800 ms (Docker starting, say)
+    var slowContainersRoot: String?
 
     func bump(_ key: String) { lock.lock(); counts[key, default: 0] += 1; lock.unlock() }
     func count(_ key: String) -> Int { lock.lock(); defer { lock.unlock() }; return counts[key] ?? 0 }
@@ -48,7 +50,10 @@ private func makeStore(_ fake: FakeKunj, coalesceMs: Int = 30) -> EnvironmentSto
         cli: fakeKunjCLI(), coalesceMs: coalesceMs,
         lister: { _ in fake.list() },
         worktrees: { _, repo in try fake.worktrees(repo) },
-        containers: { _, repo in fake.containers(repo) })
+        containers: { _, repo in
+            if repo.root == fake.slowContainersRoot { try? await Task.sleep(nanoseconds: 800_000_000) }
+            return fake.containers(repo)
+        })
 }
 
 private func sleepMs(_ ms: UInt64) async { try? await Task.sleep(nanoseconds: ms * 1_000_000) }
@@ -86,6 +91,22 @@ private func sleepMs(_ ms: UInt64) async { try? await Task.sleep(nanoseconds: ms
         #expect(fake.count("ct:\(repoA.root)") == 1)
         #expect(fake.count("wt:\(repoB.root)") == 1)
         #expect(fake.count("all") == 1)
+    }
+
+    /// One repository's slow `ct list` must not hold up another repository's refresh
+    @Test func aSlowRepoDoesNotHoldUpAnother() async {
+        let fake = FakeKunj()
+        let store = makeStore(fake, coalesceMs: 10)
+        await store.refreshAll()
+        fake.slowContainersRoot = repoA.root
+        store.handle(.container(repoRoot: repoA.root, branch: "feat/llm-insights", container: "c", action: "status"))
+        await sleepMs(100)
+        store.handle(.git(repoRoot: repoB.root))
+        await sleepMs(200)
+        #expect(fake.count("wt:\(repoB.root)") == 2)
+        #expect(fake.count("ct:\(repoA.root)") == 1)
+        await sleepMs(800)
+        #expect(fake.count("ct:\(repoA.root)") == 2)
     }
 
     @Test func containerEventRefreshesOnlyThatRepoContainers() async {

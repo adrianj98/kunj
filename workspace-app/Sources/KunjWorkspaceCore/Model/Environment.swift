@@ -39,11 +39,15 @@ public struct RepoRef: Equatable, Hashable, Sendable {
     /// What every kunj call runs in: the repository's root (the git dir for a bare repo).
     public var root: String
     public var bare: Bool
+    /// kunj's directory for the repository, `~/.kunj/<dirName>` (where workspace.json goes): named
+    /// after origin, so it can differ from `name` for a bare clone or a renamed checkout
+    public var dirName: String
 
-    public init(name: String, root: String, bare: Bool) {
+    public init(name: String, root: String, bare: Bool, dirName: String? = nil) {
         self.name = name
         self.root = root
         self.bare = bare
+        self.dirName = dirName ?? folderDirName(name)
     }
 }
 

@@ -44,6 +44,13 @@ private func responses(_ files: [String: String]) throws -> URL {
         #expect(repos.repos[0].bare == true)
         #expect(repos.repos[3].hidden == true)
         #expect(repos.repos[2].exists == false)
+        // ~/.kunj/<dir> is named after origin (kunjName), not the folder; an older kunj sends no
+        // kunjName, then the folder without .git is kunj's own fallback
+        #expect(repos.repos[0].kunjDirName == "alertd")
+        #expect(repos.repos[1].kunjDirName == "kunj")
+        var old = repos.repos[0]
+        old.kunjName = nil
+        #expect(old.kunjDirName == "alertd-core")
 
         let wt: WorktreeListJson = try fixture("worktree_list.json")
         #expect(wt.worktrees.count == 5)
@@ -227,7 +234,7 @@ private func responses(_ files: [String: String]) throws -> URL {
         let rootA = try tempDirectory(), rootB = try tempDirectory()
         let repos = """
             {"repos":[
-             {"root":"\(rootA.path)","gitCommonDir":"\(rootA.path)","name":"alertd-core","bare":true,"lastSeen":"x","exists":true},
+             {"root":"\(rootA.path)","gitCommonDir":"\(rootA.path)","name":"alertd-core","kunjName":"alertd","bare":true,"lastSeen":"x","exists":true},
              {"root":"\(rootB.path)","gitCommonDir":"\(rootB.path)/.git","name":"kunj","bare":false,"lastSeen":"x","exists":true},
              {"root":"/nonexistent/old","gitCommonDir":"/nonexistent/old/.git","name":"old","bare":false,"lastSeen":"x","exists":false},
              {"root":"/nonexistent/hidden","gitCommonDir":"/nonexistent/hidden/.git","name":"hidden","bare":false,"hidden":true,"lastSeen":"x","exists":true}
@@ -241,7 +248,9 @@ private func responses(_ files: [String: String]) throws -> URL {
         let (list, error) = await listEnvironments(cli: cli)
         #expect(error == nil)
         #expect(list.map(\.repo.name) == ["alertd-core", "kunj"])
-        #expect(list[0].repo == RepoRef(name: "alertd-core", root: rootA.path, bare: true))
+        #expect(list[0].repo == RepoRef(name: "alertd-core", root: rootA.path, bare: true, dirName: "alertd"))
+        #expect(list[1].repo.dirName == "kunj")
+        #expect(RepoRef(name: "core.git", root: "/r/core.git", bare: true).dirName == "core")
         #expect(list[0].environments.count == 4)
         #expect(list[1].environments.first?.id == "kunj|worktree|chore/bun-upgrade")
         // every call runs in the repository's root and names nothing else

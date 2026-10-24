@@ -4,6 +4,7 @@
       "root": "/Users/demo/projects/alertd-core.git",
       "gitCommonDir": "/Users/demo/projects/alertd-core.git",
       "name": "alertd-core",
+      "kunjName": "alertd",
       "bare": true,
       "addedAt": "2026-10-07T00:49:53.484Z",
       "lastSeen": "2026-10-23T23:31:30.514Z",

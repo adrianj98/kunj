@@ -46,3 +46,9 @@ export function repoIdentity(where?: { commonDir: string; repoRoot: string }): R
   const originUrl = stripUserinfo(getOriginUrl() || '');
   return { root, name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root), originUrl };
 }
+
+// The directory kunj keeps a registered repository's files in (~/.kunj/<this>), as getKunjDir()
+// names it: from origin, not the folder, which differs for a bare clone or a renamed checkout
+export function kunjDirName(repo: { root: string; gitCommonDir: string }): string {
+  return repoIdentity({ commonDir: repo.gitCommonDir, repoRoot: repo.root }).name;
+}

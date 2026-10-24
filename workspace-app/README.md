@@ -44,7 +44,7 @@ All run from anywhere (they `cd` to `workspace-app/`).
 | `scripts/test.sh [swift test args]` | `swift test` (e.g. `scripts/test.sh --filter FakeKunjTests`). Fetches SwiftTerm first, since SwiftPM resolves every dependency even for the Core tests |
 | `scripts/bundle.sh [--install]` | SwiftTerm, fonts, Monaco, a release build per architecture joined with `lipo`, `build/Kunj Workspace.app` (Info.plist, SwiftTerm's resource bundle, `web/`, `fonts/`), ad-hoc signed. `--install` replaces `/Applications/Kunj Workspace.app` and launches it |
 | `scripts/gen-tokens.js` | `node scripts/gen-tokens.js` regenerates `DesignTokens.swift` after `tokens.json` changes; `DesignTokensTests` fails when they drift |
-| `scripts/prepare-swiftterm.sh` | Clones SwiftTerm v1.20.0 into `vendor/` and changes `Shaders.metal` from `.process` to `.copy` so it builds without Xcode's `metal` (compiled at runtime instead). Takes a lock, so parallel runs wait for one fetch |
+| `scripts/prepare-swiftterm.sh` | Clones SwiftTerm v1.20.0 into `vendor/` and changes `Shaders.metal` from `.process` to `.copy` so it builds without Xcode's `metal` (compiled at runtime instead), and makes the forked terminal child close every descriptor above 2 (`forkpty` leaves the app's pipes open in it). `vendor/SwiftTerm/.kunj-version` holds `1.20.0+kunj2`; bump the suffix when the patches change. Takes a lock, so parallel runs wait for one fetch |
 | `scripts/fetch-fonts.sh` | Downloads Inter 4.1 and JetBrains Mono 2.304, checks pinned sha256s, extracts the TTFs and licences into `Resources/fonts/`; skips when present |
 
 Environment variables:

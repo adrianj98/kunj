@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 public enum FileAccessError: Error, Equatable {
-    /// Absolute, empty, or with a `..` component (or kunj's `bad-path`)
+    /// Absolute, empty, with a `..` component, through a symlink that leaves the worktree (or kunj's `bad-path`)
     case badPath
     /// No such file, a worktree that is gone, or kunj's `not-found`
     case notFound
@@ -25,7 +25,7 @@ public struct FileAccess: Sendable {
         case .worktree:
             let url = try worktreeURL(env, path)
             // Only a regular file (a symlink to one is followed): a fifo blocks and a device never ends
-            let type = (try? FileManager.default.attributesOfItem(atPath: url.resolvingSymlinksInPath().path))?[.type]
+            let type = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type]
             guard type as? FileAttributeType == .typeRegular else { throw FileAccessError.notFound }
             let data: Data
             do {
@@ -47,16 +47,18 @@ public struct FileAccess: Sendable {
         }
     }
 
-    /// Writes `content` atomically. In a worktree a symlink is written through (the link stays a
-    /// link), missing directories are created and an existing file keeps its mode.
+    /// Writes `content` atomically. In a worktree a symlink inside it is written through (the link
+    /// stays a link), missing directories are created and an existing file keeps its mode.
     public func write(env: Environment, path: String, content: String) async throws {
         let path = try checkedPath(path)
         switch env.kind {
         case .worktree:
-            let url = try worktreeURL(env, path).resolvingSymlinksInPath()
+            let url = try worktreeURL(env, path)
             let fm = FileManager.default
             let mode = (try? fm.attributesOfItem(atPath: url.path))?[.posixPermissions]
             try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // Checked again: a directory could have been swapped for a link since
+            guard try worktreeURL(env, path) == url else { throw FileAccessError.badPath }
             try Data(content.utf8).write(to: url, options: .atomic)
             if let mode { try? fm.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path) }
         case .container:
@@ -74,9 +76,24 @@ public struct FileAccess: Sendable {
         KunjWorkspaceCore.digest(s)
     }
 
+    /// The file with every symlink resolved, refused when that lands outside the worktree: a branch
+    /// (one an agent wrote, say) can carry `config.ts -> ~/.zshrc`. Missing trailing components are
+    /// kept as they are, so a new file can be written; a dangling link is refused.
     private func worktreeURL(_ env: Environment, _ path: String) throws -> URL {
-        guard env.exists, let root = env.path else { throw FileAccessError.notFound }
-        return URL(fileURLWithPath: root).appendingPathComponent(path)
+        guard env.exists, let root = env.path, let realRoot = realPath(root) else { throw FileAccessError.notFound }
+        var existing = URL(fileURLWithPath: realRoot).appendingPathComponent(path)
+        var rest: [String] = []
+        var resolved = realPath(existing.path)
+        while resolved == nil {
+            if (try? FileManager.default.attributesOfItem(atPath: existing.path)) != nil { throw FileAccessError.badPath }
+            rest.insert(existing.lastPathComponent, at: 0)
+            existing = existing.deletingLastPathComponent()
+            guard existing.path.count >= realRoot.count else { throw FileAccessError.notFound }
+            resolved = realPath(existing.path)
+        }
+        let full = ([resolved!] + rest).joined(separator: "/")
+        guard full == realRoot || full.hasPrefix(realRoot + "/") else { throw FileAccessError.badPath }
+        return URL(fileURLWithPath: full)
     }
 
     private func mapped(_ error: KunjCLIError) -> Error {
@@ -86,6 +103,13 @@ public struct FileAccess: Sendable {
         default: return error
         }
     }
+}
+
+/// realpath(3): every symlink resolved, nil when the path does not exist
+private func realPath(_ path: String) -> String? {
+    guard let p = realpath(path, nil) else { return nil }
+    defer { free(p) }
+    return String(cString: p)
 }
 
 /// SHA-256 hex of `s`'s UTF-8 bytes.

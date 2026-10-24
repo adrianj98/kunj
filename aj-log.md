@@ -1111,3 +1111,9 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - docs/specs/README.md: "Workspace app v1" moved to Done with its commits; workspace-ide.md's state is Shipped. Why: Task 12 ships the app.
 - docs/superpowers/plans/2026-10-23-workspace-app-v1.md: Task 12 status and as-built (MAC_APPS, installMacApp options, release job, docs page location, checks, the login-shell fix). Why: Task 12 review.
 - docs/specs/README.md, workspace-ide.md: the Task 12 review commit named (c09bbd7). Why: commits listed by hash.
+- workspace-app FileAccess: worktree paths resolved with realpath and refused outside the worktree, read and write. Why: final review, a branch's `config.ts -> ~/.zshrc` let ⌘S overwrite a file outside the worktree.
+- workspace-app prepare-swiftterm.sh: SwiftTerm's forked child closes descriptors above 2 (stamp 1.20.0+kunj2); test target depends on SwiftTerm for PtyDescriptorTests. Why: final review, terminal tabs inherited kunj events' stdin and other pipes, so a background job kept kunj events alive after a crash.
+- kunj repos --json: additive `kunjName` (RepoJson in json-types.ts, kunjDirName() in repo-identity.ts); kunj events watches agent state under it. Why: final review, kunj names ~/.kunj/<name> after origin, the registry's name is the folder, so a bare or renamed clone never got waiting events.
+- workspace-app RepoRef.dirName / KnownRepo.kunjName: workspace.json goes to ~/.kunj/<kunjName>. Why: same finding, the layout file landed in a stray directory.
+- workspace-app EnvironmentStore: refreshes queued per repository, a full refresh waits for all. Why: final review, one slow ct list held up every repository.
+- docs: spec, plan (final review note), workspace-app README updated for the four fixes; deferred minors listed in the spec. Why: review after each task.

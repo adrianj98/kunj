@@ -6,7 +6,9 @@ import Foundation
 /// its `ct list` (which execs into every container), and `sessions`/`forwards`/`repos`/`backend`,
 /// a `hello` after a stream restart, or an event for a repository the store does not know, run
 /// everything. A scoped result replaces only its half of the repository's environments (worktrees
-/// or containers), so it is re-merged with the other half. Refreshes run one at a time, in order.
+/// or containers), so it is re-merged with the other half. Refreshes of one repository run one at a
+/// time, in order; a full refresh waits for every running one and they all wait for it, but one
+/// repository's slow `ct list` does not hold up another's.
 /// `kunj events` watches the repositories it found at start, so a clean full listing whose roots
 /// differ from those restarts the stream (its `hello` then refreshes everything again).
 @MainActor
@@ -30,7 +32,9 @@ public final class EnvironmentStore {
     private let worktrees: WorktreeLister
     private let containers: ContainerLister
     private var timers: [Key: Task<Void, Never>] = [:]
-    private var tail: Task<Void, Never>?
+    /// The last queued refresh per repository root; `allTail` the last full one.
+    private var tails: [String: Task<Void, Never>] = [:]
+    private var allTail: Task<Void, Never>?
     private var seenHello = false
     /// The repository whose scoped refresh set `lastError` (nil when a full refresh set it).
     private var errorRoot: String?
@@ -67,25 +71,37 @@ public final class EnvironmentStore {
     // MARK: refreshes
 
     public func refreshAll() async {
-        await serial { await self.runAll() }
+        await serial(root: nil) { await self.runAll() }
     }
 
     /// Both halves of one repository; a full refresh when the store does not know `root`.
     public func refreshRepo(root: String) async {
-        await serial {
-            guard self.index(of: root) != nil else { await self.runAll(); return }
+        guard index(of: root) != nil else { await refreshAll(); return }
+        await serial(root: root) {
             await self.runWorktrees(root: root)
             await self.runContainers(root: root)
         }
     }
 
-    private func serial(_ work: @escaping @MainActor () async -> Void) async {
-        let previous = tail
+    /// Queues `work` behind the repository's earlier refreshes (and the last full one), or with
+    /// `root` nil behind everything queued.
+    private func serial(root: String?, _ work: @escaping @MainActor () async -> Void) async {
+        let previous: [Task<Void, Never>]
+        if let root {
+            previous = [tails[root] ?? allTail].compactMap { $0 }
+        } else {
+            previous = Array(tails.values) + [allTail].compactMap { $0 }
+        }
         let task = Task { @MainActor in
-            await previous?.value
+            for p in previous { await p.value }
             await work()
         }
-        tail = task
+        if let root {
+            tails[root] = task
+        } else {
+            tails = [:]
+            allTail = task
+        }
         await task.value
     }
 
@@ -215,12 +231,10 @@ public final class EnvironmentStore {
             try? await Task.sleep(nanoseconds: delay)
             guard let self, !Task.isCancelled else { return }
             self.timers[key] = nil
-            await self.serial {
-                switch key {
-                case .all: await self.runAll()
-                case .worktrees(let root): await self.runWorktrees(root: root)
-                case .containers(let root): await self.runContainers(root: root)
-                }
+            switch key {
+            case .all: await self.serial(root: nil) { await self.runAll() }
+            case .worktrees(let root): await self.serial(root: root) { await self.runWorktrees(root: root) }
+            case .containers(let root): await self.serial(root: root) { await self.runContainers(root: root) }
             }
         }
     }

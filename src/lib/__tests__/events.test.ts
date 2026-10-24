@@ -262,6 +262,19 @@ describe('watchEvents', () => {
     expect(ofType('agent')[0]).toEqual({ type: 'agent', session: 'kunj-app-x-abc123', running: true, state: 'waiting', repo: { name: 'app', root: repo.root }, at: expect.any(String) });
   });
 
+  it('agent state is watched in the directory kunj names after origin, not the folder', async () => {
+    // A bare clone or a folder named differently: kunj agent writes ~/.kunj/<origin name>
+    fs.writeFileSync(path.join(repo.gitCommonDir, 'config'), '[remote "origin"]\n\turl = git@github.com:acme/app.git\n');
+    repo = { ...repo, name: 'app-checkout' };
+    const stateDir = path.join(kunjDir, 'app', 'agent-state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    start();
+    await prime('agent', () => fs.writeFileSync(path.join(stateDir, 'kunj-app-x-abc123'), 'running'));
+    fs.writeFileSync(path.join(stateDir, 'kunj-app-x-abc123'), 'waiting');
+    await waitFor(() => ofType('agent').length > 0);
+    expect(ofType('agent')[0]).toMatchObject({ session: 'kunj-app-x-abc123', state: 'waiting', repo: { name: 'app-checkout', root: repo.root } });
+  });
+
   it('agent state events come only on a change, carry the repo, and not for a deleted file', async () => {
     const stateDir = path.join(kunjDir, 'app', 'agent-state');
     const file = path.join(stateDir, 'kunj-app-x-abc123');

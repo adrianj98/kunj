@@ -198,7 +198,9 @@ Kunj Workspace.app
 | `KunjWorkspaceCoreTests` | `swift test` (Swift Testing), with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) and the helpers in `Support.swift` | Core |
 
 SwiftTerm is vendored at an exact tag by `scripts/prepare-swiftterm.sh` (the spike's one-line
-`Shaders.metal` patch, so it builds with the Command Line Tools). Monaco's `min/vs` build is copied
+`Shaders.metal` patch, so it builds with the Command Line Tools, and a second patch in `Pty.swift`:
+the forked child closes every descriptor above 2 before `execve`, because `forkpty` does not and a
+shell's background job would otherwise hold `kunj events`' stdin open after the app is gone). Monaco's `min/vs` build is copied
 into `Resources/web/vs` by `web/copy-monaco.js`; Inter and JetBrains Mono (OFL) are fetched at pinned
 versions into `Resources/fonts` by `scripts/fetch-fonts.sh` and registered through
 `ATSApplicationFontsPath`. `scripts/gen-tokens.js` turns `docs/workspace-app/design/tokens.json` into
@@ -220,7 +222,8 @@ waits 2 s, then SIGTERM, then SIGKILL), reads it line by line on a background th
 with doubling backoff (1–30 s, reset after a child outlived 30 s). The store maps `git`/`container`/`agent`
 events to a refresh of that repo and `repos`/`backend`/`sessions`/`forwards`, or an event for a repo it
 does not know, to a full refresh, coalesced per key (300 ms from the first event; a pending full refresh
-swallows scoped ones; refreshes run one at a time), and calls `onChange` on the main actor only when
+swallows scoped ones; one repository's refreshes run one at a time, a full refresh waits for all of
+them and they for it, so one repository's slow `ct list` does not hold up another's), and calls `onChange` on the main actor only when
 `repos` or `lastError` changed. `kunj events` resolves its repositories once, so a full listing whose
 roots differ from the ones the stream started with restarts it. The app never asks git or Docker for state. The status verb and dot are pure
 functions of an `Environment` (`Environment.statusVerb`, `Environment.dot`), in this order: missing
@@ -303,7 +306,9 @@ open tab of the same file is activated instead). A binary file (a NUL byte), one
 replacement character after the lossy decode) and one over 5 MB are refused with an inline message,
 since saving their decoded text would corrupt them. ⌘S (File > Save, or inside Monaco) saves through
 `FileAccess` (`fs` for a worktree, `kunj ct file write` for a container; paths relative, no `..`; a
-worktree read takes regular files only, a write goes through a symlink and keeps the file's mode) and
+worktree read takes regular files only, a write goes through a symlink and keeps the file's mode;
+every symlink is resolved and a path that lands outside the worktree is refused, read or write, since
+a branch can carry `config.ts -> ~/.zshrc`) and
 reloads the Changes column; the tab shows a `text2` dot while dirty (status colours stay for agent
 states), and text typed while a save is in flight stays dirty. The file is read again before a save:
 one that changed since it was opened asks before overwriting, one that was deleted asks before
@@ -313,7 +318,9 @@ editor count as the environment's activity. A crashed editor page is reloaded wi
 again (unsaved text is lost). No language servers. The web views never name a file to Swift: a save message carries only the
 tab id, and Swift holds the path, so content from a container cannot steer a write.
 
-**Layout file** `~/.kunj/<reponame>/workspace.json`: `{ "<kind>:<branch>": { "tabs": [{ "kind": "shell|agent|editor",
+**Layout file** `~/.kunj/<reponame>/workspace.json` (`<reponame>` is `kunjName` from `kunj repos --json`,
+named after origin as kunj names the directory, not the folder; an older kunj without it: the folder
+without `.git`): `{ "<kind>:<branch>": { "tabs": [{ "kind": "shell|agent|editor",
 "title", "path"? }], "active", "lastActivity" } }` (keyed by kind too, because a worktree and a container
 on the same branch are two environments), written atomically, debounced 500 ms; action tabs
 are never saved; entries or tabs that do not decode are skipped, not the whole file. On selecting an
@@ -556,6 +563,20 @@ From distribution and the final checks (Task 12):
 - [ ] `kunj install workspace` (and `bundle.sh --install`) quit a running copy with `pkill`
   (SIGTERM), which skips the app's quit path: unsaved editor tabs are lost without the prompt and
   the layout is not flushed.
+
+From the final review:
+
+- [ ] Environment ids are `<repo name>|<kind>|<branch>` with the folder name, so two registered
+  repositories whose folders share a name share ids (in memory only; the layout file is per
+  `kunjName`). Keying them by root was not done: it touches every id and needs a person to hit it.
+- [ ] `ct list` keeps its 120 s timeout; with refreshes queued per repository it holds up only its
+  own repository.
+- [ ] Minor findings deferred (in the ledger): a `contents` call landing in the next environment of
+  the Changes column, `git diff` without `--` and `--numstat` without `-z`, a timed-out kunj call
+  leaving its `docker` child, a late failure of a cancelled discovery, New session filed under
+  another repository's id when its repository has none, ⌘W on a running action tab not asking, no
+  progress for `ct stop`/`ct open`, two non-token default colours in `TabBarView`, Swift 5 mode
+  without strict concurrency, and `LayoutStore.save` writing while holding its lock.
 
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).

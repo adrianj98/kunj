@@ -29,9 +29,38 @@ import Testing
         try FileManager.default.createDirectory(at: dir.appendingPathComponent("sub"), withIntermediateDirectories: true)
         let files = FileAccess(cli: fakeKunjCLI())
         let env = diffTestEnvironment(path: dir.path)
-        for name in ["fifo", "zero", "sub"] {
+        for name in ["fifo", "sub"] {
             await #expect(throws: FileAccessError.notFound) { _ = try await files.read(env: env, path: name) }
         }
+        // A link out of the worktree is refused before its type is looked at
+        await #expect(throws: FileAccessError.badPath) { _ = try await files.read(env: env, path: "zero") }
+    }
+
+    /// A branch can carry a symlink out of the worktree: reading or saving through it is refused,
+    /// a link that stays inside is written through and stays a link
+    @Test func symlinksOutOfTheWorktreeAreRefused() async throws {
+        let outside = try tempDirectory()
+        let secret = outside.appendingPathComponent("zshrc")
+        try "keep\n".write(to: secret, atomically: true, encoding: .utf8)
+        let dir = try tempDirectory()
+        let fm = FileManager.default
+        try fm.createSymbolicLink(atPath: dir.appendingPathComponent("config.ts").path, withDestinationPath: secret.path)
+        try fm.createSymbolicLink(atPath: dir.appendingPathComponent("out").path, withDestinationPath: outside.path)
+        try "inside\n".write(to: dir.appendingPathComponent("real.ts"), atomically: true, encoding: .utf8)
+        try fm.createSymbolicLink(atPath: dir.appendingPathComponent("alias.ts").path, withDestinationPath: "real.ts")
+        let files = FileAccess(cli: fakeKunjCLI())
+        let env = diffTestEnvironment(path: dir.path)
+
+        for bad in ["config.ts", "out/zshrc", "out/new/file.ts"] {
+            await #expect(throws: FileAccessError.badPath) { _ = try await files.read(env: env, path: bad) }
+            await #expect(throws: FileAccessError.badPath) { try await files.write(env: env, path: bad, content: "x") }
+        }
+        #expect(try String(contentsOf: secret, encoding: .utf8) == "keep\n")
+        #expect(!fm.fileExists(atPath: outside.appendingPathComponent("new").path))
+
+        try await files.write(env: env, path: "alias.ts", content: "changed\n")
+        #expect(try String(contentsOf: dir.appendingPathComponent("real.ts"), encoding: .utf8) == "changed\n")
+        #expect(try fm.destinationOfSymbolicLink(atPath: dir.appendingPathComponent("alias.ts").path) == "real.ts")
     }
 
     @Test func writeKeepsTheFileMode() async throws {

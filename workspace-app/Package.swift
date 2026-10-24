@@ -22,7 +22,8 @@ let package = Package(
         ),
         .testTarget(
             name: "KunjWorkspaceCoreTests",
-            dependencies: ["KunjWorkspaceCore"],
+            // SwiftTerm only for the check that a terminal's child inherits no descriptor of the app
+            dependencies: ["KunjWorkspaceCore", "SwiftTerm"],
             path: "Tests/KunjWorkspaceCoreTests"
         ),
     ],

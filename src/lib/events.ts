@@ -23,6 +23,7 @@ import { forwardsFile } from './container/autoforward';
 import { WORKTREE_SESSIONS_FILE } from './worktree';
 import { REPOS_FILE } from './repos';
 import { agentStateDir, listTmuxSessions, readAgentState } from './agent-session';
+import { kunjDirName } from './repo-identity';
 import type { AgentHookState } from './agent-session';
 
 const execFileAsync = promisify(execFile);
@@ -233,7 +234,7 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
   // created by kunj agent; watched once it exists (resynced with the git watches)
   const stateWatchers = new Map<string, fs.FSWatcher>();
   const syncStateWatch = (repo: KnownRepoInfo) => {
-    const dir = agentStateDir(path.join(kunjDir, repo.name));
+    const dir = agentStateDir(path.join(kunjDir, kunjDirName(repo)));
     if (stateWatchers.has(dir) || !fs.existsSync(dir)) return;
     // Only a change is an event: PreToolUse rewrites the same value on every tool call. A deleted
     // file (SessionEnd) is not one either; the tmux poll reports the session ending.

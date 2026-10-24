@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { repoIdentity, readOriginUrl } from '../repo-identity';
+import { repoIdentity, readOriginUrl, kunjDirName } from '../repo-identity';
+import { reposJson } from '../../commands/repos';
 import { repoIdFromUrl } from '../container/names';
 import { agentSessionName } from '../agent-session';
 
@@ -24,4 +25,19 @@ test('without an origin the name and id come from the repository root', () => {
   fs.writeFileSync(path.join(dir, 'config'), '[core]\n\tbare = false\n');
   expect(repoIdentity({ commonDir: dir, repoRoot: '/src/shop.git' })).toMatchObject({ name: 'shop', id: repoIdFromUrl('/src/shop.git'), originUrl: '' });
   expect(repoIdentity({ commonDir: path.join(dir, 'missing'), repoRoot: '/src/shop' }).name).toBe('shop');
+});
+
+describe('kunjDirName', () => {
+  it('names a bare clone or a renamed checkout after origin, else the folder without .git', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-dirname-'));
+    const bare = path.join(tmp, 'alertd-core.git');
+    fs.mkdirSync(bare);
+    expect(kunjDirName({ root: bare, gitCommonDir: bare })).toBe('alertd-core');
+    fs.writeFileSync(path.join(bare, 'config'), '[remote "origin"]\n\turl = git@github.com:acme/core.git\n');
+    expect(kunjDirName({ root: bare, gitCommonDir: bare })).toBe('core');
+    const json = reposJson([{ root: bare, gitCommonDir: bare, name: 'alertd-core.git', bare: true,
+      addedAt: '', lastSeen: '', exists: true }]);
+    expect(json.repos[0]).toMatchObject({ name: 'alertd-core.git', kunjName: 'core' });
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });

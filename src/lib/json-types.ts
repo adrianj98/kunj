@@ -48,8 +48,14 @@ export interface WorktreeListJson {
 
 // ---- kunj repos --json -----------------------------------------------------------------------
 
+export interface RepoJson extends KnownRepoInfo {
+  /** The directory kunj keeps this repository's files in, `~/.kunj/<kunjName>`: named after
+   * origin, so it can differ from `name` (the folder) for a bare clone or a renamed checkout */
+  kunjName: string;
+}
+
 export interface ReposJson {
-  repos: KnownRepoInfo[];
+  repos: RepoJson[];
 }
 
 // ---- kunj ct list --json ---------------------------------------------------------------------

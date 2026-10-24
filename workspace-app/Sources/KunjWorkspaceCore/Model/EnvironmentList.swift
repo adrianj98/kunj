@@ -107,7 +107,7 @@ public func listEnvironments(cli: KunjCLI) async -> ([RepoEnvironments], KunjCLI
     }
     let repos = known.repos
         .filter { $0.exists && $0.hidden != true }
-        .map { RepoRef(name: $0.name, root: $0.root, bare: $0.bare) }
+        .map { RepoRef(name: $0.name, root: $0.root, bare: $0.bare, dirName: $0.kunjDirName) }
 
     let results = await withTaskGroup(of: (Int, Result<RepoEnvironments, KunjCLIError>).self) { group in
         for (i, repo) in repos.enumerated() {

@@ -610,3 +610,5 @@ Run: `cd workspace-app && scripts/test.sh && scripts/bundle.sh --install` then u
 ```bash
 git add -A && git commit -m "workspace-app: release job, kunj install workspace and docs" && git push
 ```
+
+**Final review** (whole branch, 438a565..15c84b7): no Critical; four Important fixed in one pass, each with a test seen failing first: terminal children inherited the app's descriptors (`prepare-swiftterm.sh` patches `Pty.swift` to close fds > 2 in the child; `PtyDescriptorTests`, the test target now depends on SwiftTerm), editor reads and saves followed symlinks out of the worktree (`FileAccess.worktreeURL` resolves with `realpath` and refuses outside the root; `symlinksOutOfTheWorktreeAreRefused`), the layout file and `kunj events`' agent-state watch used the folder name instead of kunj's origin-based name (`kunj repos --json` adds `kunjName`, `RepoRef.dirName`, `kunjDirName()` in repo-identity.ts; tests in events, repo-identity and `EnvironmentTests`), and one global refresh queue (`EnvironmentStore.serial(root:)` queues per repository; `aSlowRepoDoesNotHoldUpAnother`). Minors deferred to the spec's open questions.

@@ -18,6 +18,16 @@ public struct KnownRepo: Decodable, Equatable, Sendable {
     public var hidden: Bool?
     public var exists: Bool
     public var lastSeen: String
+    /// Since 1.3.0; see `kunjDirName`
+    public var kunjName: String?
+
+    /// The directory kunj keeps the repository's files in (`~/.kunj/<this>`). An older kunj does
+    /// not send it: then the folder without `.git`, kunj's own fallback without an origin.
+    public var kunjDirName: String { kunjName ?? folderDirName(name) }
+}
+
+func folderDirName(_ name: String) -> String {
+    name.hasSuffix(".git") ? String(name.dropLast(4)) : name
 }
 
 // ---- kunj worktree list --json
