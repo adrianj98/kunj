@@ -43,6 +43,27 @@ export interface RemoteOptions {
   token: string;
   /** How the remote is called in messages (its name in remotes.json) */
   name?: string;
+  /** The terminal a TTY exec with 'inherit' streams drives (default: this process's) */
+  terminal?: Terminal;
+}
+
+/** What a TTY exec needs from the terminal it runs in; process.stdin/stdout by default, a fake in tests. */
+export interface Terminal {
+  stdin: NodeJS.ReadableStream & { setRawMode?(mode: boolean): unknown; isRaw?: boolean; isTTY?: boolean; pause(): unknown; resume(): unknown };
+  stdout: NodeJS.WritableStream & { columns?: number; rows?: number };
+  /** Calls `cb` on every size change; returns the unsubscribe */
+  onResize(cb: () => void): () => void;
+}
+
+export function processTerminal(): Terminal {
+  return {
+    stdin: process.stdin,
+    stdout: process.stdout,
+    onResize: cb => {
+      process.on('SIGWINCH', cb);
+      return () => process.off('SIGWINCH', cb);
+    },
+  };
 }
 
 interface Reply {
@@ -219,7 +240,7 @@ export class RemoteKunjBackend implements ContainerBackend {
   }
 
   exec(id: string, cmd: string[], io: ExecIO = {}): Promise<{ exitCode: number; stdout: string }> {
-    if (io.tty) return Promise.reject(new Error('remote TTY exec: not implemented yet'));
+    if (io.tty) return this.execTtyStream(id, cmd, io);
     return this.execStream(id, cmd, io);
   }
 
@@ -294,6 +315,86 @@ export class RemoteKunjBackend implements ContainerBackend {
         if (signal.aborted) return resolve();
         reject(failed ?? new Error('docker events failed: the remote closed the event stream'));
       });
+    });
+  }
+
+  /**
+   * A TTY exec (shell, attach, agent): this process is the terminal. Raw mode on its stdin, bytes to
+   * channel 0, the pty's output from channel 1, a resize frame at once and on every size change, the
+   * terminal restored on every way out. Streams other than 'inherit' are used as given (tests).
+   */
+  private execTtyStream(id: string, cmd: string[], io: ExecIO): Promise<{ exitCode: number; stdout: string }> {
+    const term = this.opts.terminal ?? processTerminal();
+    const stdin = typeof io.stdin === 'object' ? (io.stdin as Terminal['stdin']) : term.stdin;
+    const stdout = io.stdout && io.stdout !== 'inherit' ? io.stdout : term.stdout;
+    const size = () => ({ cols: (stdout as Terminal['stdout']).columns || 80, rows: (stdout as Terminal['stdout']).rows || 24 });
+    const request: ExecRequest = { cmd, user: io.user, workdir: io.workdir, env: io.env, tty: true, stdin: true };
+    return new Promise((resolve, reject) => {
+      const ws = this.socket(`/v1/containers/${encodeURIComponent(id)}/exec`);
+      let settled = false;
+      let exitCode: number | undefined;
+      let failure: Error | undefined;
+      let unsubscribe = () => {};
+      const wasRaw = !!stdin.isRaw;
+      const rawMode = (on: boolean) => {
+        if (stdin.setRawMode && (stdin.isTTY ?? true)) stdin.setRawMode(on);
+      };
+      const restore = () => rawMode(wasRaw);
+
+      const onData = (chunk: Buffer | string) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        ws.send(encodeFrame(CHANNEL.stdin, typeof chunk === 'string' ? Buffer.from(chunk) : chunk), { binary: true });
+      };
+      const onEnd = () => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(encodeFrame(CHANNEL.stdin, ''), { binary: true });
+      };
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        stdin.off('data', onData);
+        stdin.off('end', onEnd);
+        stdin.pause();
+        unsubscribe();
+        process.off('exit', restore);
+        restore();
+        fn();
+      };
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify(request));
+        ws.send(JSON.stringify({ resize: size() } satisfies ExecControl));
+        unsubscribe = term.onResize(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ resize: size() } satisfies ExecControl));
+        });
+        // Restored even when something else ends the process while the shell runs
+        process.once('exit', restore);
+        rawMode(true);
+        stdin.on('data', onData);
+        stdin.once('end', onEnd);
+        stdin.resume();
+      });
+      ws.on('message', (data: RawData, binary: boolean) => {
+        if (binary) {
+          const { channel, data: bytes } = decodeFrame(rawToBuffer(data));
+          if (channel === CHANNEL.stdout || channel === CHANNEL.stderr) {
+            if (!stdout.write(bytes)) {
+              ws.pause();
+              stdout.once('drain', () => ws.resume());
+            }
+          }
+          return;
+        }
+        const control = parseControl(rawToString(data));
+        if ('exit' in control) exitCode = control.exit;
+        else if ('error' in control) failure = new Error(control.error);
+      });
+      ws.on('error', err => finish(() => reject(this.wsError(err))));
+      ws.on('close', () =>
+        finish(() => {
+          if (failure) return reject(failure);
+          if (exitCode === undefined) return reject(new Error('exec ended: connection closed'));
+          resolve({ exitCode, stdout: '' });
+        }));
     });
   }
 

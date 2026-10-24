@@ -98,6 +98,8 @@
 
 ### Task 5: TTY exec
 
+**Status: done** (this commit): `execTty()` in docker.ts (`parseEngineEndpoint`, no keep-alive), the TTY branch of `serveExec`, `RemoteKunjBackend.execTtyStream` with the `Terminal` seam, `FakeBackend.execTty`. The Docker test against a real daemon is left for Task 7.
+
 **Files:**
 - Modify: `src/lib/container/docker.ts` (`execTty()` over the Engine API: socket path from `docker context inspect`, hijack, resize, exit code), `src/lib/container/backend.ts` (optional `execTty?` on the interface, used by the server for `tty: true`), `src/lib/serve/server.ts`, `src/lib/container/remote.ts` (raw-mode terminal), `src/lib/container/__tests__/fake-backend.ts` (`execTty` fake)
 - Test: `src/lib/container/__tests__/remote-tty.test.ts` (fake terminal: duplex pair, `setRawMode` recorded), `src/lib/container/__tests__/docker.test.ts` (Engine API request shapes against a fake Unix socket server), `remote.docker.test.ts` (`stty size` after a resize; hang-up on close)

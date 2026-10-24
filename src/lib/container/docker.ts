@@ -1,5 +1,6 @@
 import { ChildProcess, spawn, SpawnOptions } from 'child_process';
-import { Readable } from 'stream';
+import * as http from 'http';
+import { PassThrough, Readable } from 'stream';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -16,6 +17,8 @@ import {
   Labels,
   LabelledObject,
   LogOptions,
+  TtyExecOptions,
+  TtySession,
   isImageRef,
 } from './backend';
 
@@ -196,10 +199,25 @@ export function composeConfigArgs(projectDir: string, noEnvResolution = true): s
     ...(noEnvResolution ? ['--no-env-resolution'] : [])];
 }
 
+/** Where the daemon's HTTP API is: a Unix socket or a TCP address, from the context's endpoint URL. */
+export type EngineEndpoint = { socketPath: string } | { host: string; port: number };
+
+/** `unix:///var/run/docker.sock` or `tcp://host:2375`; anything else (ssh, npipe, TLS) is not reachable here. */
+export function parseEngineEndpoint(hostUrl: string): EngineEndpoint {
+  const text = hostUrl.trim();
+  if (text.startsWith('unix://')) return { socketPath: text.slice('unix://'.length) };
+  if (text.startsWith('tcp://')) {
+    const url = new URL(text);
+    return { host: url.hostname, port: Number(url.port || 2375) };
+  }
+  throw new Error(`A TTY exec needs a unix:// or tcp:// Docker endpoint; this context uses ${text || '(none)'}`);
+}
+
 export class LocalDockerBackend implements ContainerBackend {
   readonly features = { localPorts: true, editorAttach: true, dockerInDocker: ['sysbox', 'privileged'] as Array<'sysbox' | 'privileged'> };
   private readonly context?: string;
   private readonly dockerPath: string;
+  private endpoint?: Promise<EngineEndpoint>;
 
   constructor(options: { context?: string; dockerPath?: string } = {}) {
     this.context = options.context;
@@ -478,6 +496,123 @@ export class LocalDockerBackend implements ContainerBackend {
           resolve({ exitCode, stdout: Buffer.concat(stdout).toString() });
         }));
     });
+  }
+
+  // ---- TTY exec through the Engine API -----------------------------------------------------------
+  // `docker exec -t` needs a terminal on its own stdin and kunj serve has none, so a remote client's
+  // shell is created with the daemon's HTTP API, which allocates the pty itself. This is the one
+  // place kunj talks to the daemon without the docker CLI; the endpoint comes from the context.
+
+  private engineEndpoint(): Promise<EngineEndpoint> {
+    this.endpoint ??= (async () => {
+      const out = await this.checked(['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']);
+      return parseEngineEndpoint(out.stdout);
+    })();
+    return this.endpoint;
+  }
+
+  /** One API call with a JSON body; resolves with the parsed reply (or {} when empty). */
+  private async engineCall(method: string, apiPath: string, body?: unknown): Promise<any> {
+    const endpoint = await this.engineEndpoint();
+    return new Promise((resolve, reject) => {
+      const data = body === undefined ? undefined : JSON.stringify(body);
+      const headers: http.OutgoingHttpHeaders = data ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) } : {};
+      // No keep-alive: these calls are rare and a kept socket to a daemon that restarted gives EPIPE
+      const req = http.request({ ...endpoint, method, path: apiPath, headers, agent: false }, res => {
+        const chunks: Buffer[] = [];
+        res.on('data', (d: Buffer) => chunks.push(d));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString();
+          let parsed: any = {};
+          try {
+            parsed = text ? JSON.parse(text) : {};
+          } catch {
+            parsed = { message: text };
+          }
+          if ((res.statusCode ?? 500) >= 300) return reject(new Error(`docker exec failed: ${parsed.message ?? `HTTP ${res.statusCode}`}`));
+          resolve(parsed);
+        });
+      });
+      req.on('error', err => reject(new Error(`docker exec failed: ${err.message}`)));
+      req.end(data);
+    });
+  }
+
+  async execTty(id: string, cmd: string[], opts: TtyExecOptions): Promise<TtySession> {
+    const created = await this.engineCall('POST', `/containers/${encodeURIComponent(id)}/exec`, {
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: true,
+      Cmd: cmd,
+      ...(opts.user ? { User: opts.user } : {}),
+      ...(opts.workdir ? { WorkingDir: opts.workdir } : {}),
+      Env: Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${v}`),
+    });
+    const execId: string = created.Id;
+    const endpoint = await this.engineEndpoint();
+
+    // Start with the connection hijacked: after the 101 the socket carries the pty's bytes both ways
+    const socket = await new Promise<import('net').Socket>((resolve, reject) => {
+      const data = JSON.stringify({ Detach: false, Tty: true });
+      const req = http.request({
+        ...endpoint,
+        agent: false,
+        method: 'POST',
+        path: `/exec/${execId}/start`,
+        headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data), connection: 'Upgrade', upgrade: 'tcp' },
+      });
+      req.on('upgrade', (_res, sock, head) => {
+        if (head.length) sock.unshift(head);
+        resolve(sock);
+      });
+      req.on('response', res => {
+        const chunks: Buffer[] = [];
+        res.on('data', (d: Buffer) => chunks.push(d));
+        res.on('end', () => reject(new Error(`docker exec failed: the daemon did not hijack the exec (HTTP ${res.statusCode}): ${Buffer.concat(chunks).toString().trim()}`)));
+      });
+      req.on('error', err => reject(new Error(`docker exec failed: ${err.message}`)));
+      req.end(data);
+    });
+
+    const stdout = new PassThrough();
+    socket.pipe(stdout);
+    let closed = false;
+    const exit = new Promise<number>((resolve, reject) => {
+      const finish = async () => {
+        // The process has ended when its connection does; its exit code is in the exec's state
+        try {
+          for (let i = 0; i < 50; i++) {
+            const state = await this.engineCall('GET', `/exec/${execId}/json`);
+            if (!state.Running) return resolve(typeof state.ExitCode === 'number' ? state.ExitCode : 1);
+            await new Promise(r => setTimeout(r, 100));
+          }
+          resolve(1);
+        } catch (err) {
+          if (closed) resolve(129);
+          else reject(err);
+        }
+      };
+      socket.on('end', finish);
+      socket.on('close', () => {
+        if (!socket.readableEnded) finish();
+      });
+      socket.on('error', err => (closed ? undefined : reject(new Error(`docker exec failed: ${err.message}`))));
+    });
+    await this.engineCall('POST', `/exec/${execId}/resize?h=${opts.rows}&w=${opts.cols}`).catch(() => undefined);
+
+    return {
+      stdin: socket,
+      stdout,
+      resize: async (cols, rows) => {
+        await this.engineCall('POST', `/exec/${execId}/resize?h=${rows}&w=${cols}`).catch(() => undefined);
+      },
+      wait: () => exit,
+      close: () => {
+        closed = true;
+        socket.destroy();
+      },
+    };
   }
 
   async copyIn(id: string, dir: string, tar: NodeJS.ReadableStream): Promise<void> {

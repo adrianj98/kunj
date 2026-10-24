@@ -7,7 +7,7 @@ import * as http from 'http';
 import { Duplex, PassThrough, Writable } from 'stream';
 import { URL } from 'url';
 import WebSocket, { RawData, WebSocketServer } from 'ws';
-import { BuildOptions, ContainerBackend, ExecIO, ExecTimeoutError } from '../container/backend';
+import { BuildOptions, ContainerBackend, ExecIO, ExecTimeoutError, TtySession } from '../container/backend';
 import { Guard } from './guard';
 import {
   CHANNEL,
@@ -123,13 +123,20 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
   const stdout = frameWriter(ws, CHANNEL.stdout);
   const stderr = frameWriter(ws, CHANNEL.stderr);
   let closed = false;
+  let tty: TtySession | undefined;
+  // The newest resize, kept until the pty exists
+  let size: { cols: number; rows: number } | undefined;
   const requestText = firstMessage(ws);
 
   ws.on('message', (data: RawData, binary: boolean) => {
     if (!binary) {
-      // Control frames from the client after the request: only resize, which a non-TTY exec ignores
+      // Control frames from the client after the request: resize (a non-TTY exec ignores it)
       try {
-        parseControl(rawToBuffer(data).toString());
+        const control = parseControl(rawToBuffer(data).toString());
+        if ('resize' in control) {
+          size = control.resize;
+          tty?.resize(size.cols, size.rows).catch(() => undefined);
+        }
       } catch {
         /* the request itself, or junk */
       }
@@ -145,13 +152,37 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
   });
   ws.on('close', () => {
     closed = true;
-    // The client went away mid-exec: ending stdin is how `docker exec -i` learns it
+    // The client went away mid-exec: ending stdin is how `docker exec -i` learns it; a pty is hung up
     stdin.destroy();
+    tty?.close();
   });
 
   const request = checkExecRequest(JSON.parse(await requestText));
   await opts.guard.container(id);
-  if (request.tty) throw new ServeError(400, 'bad-request', 'TTY exec is not supported by this server yet');
+
+  if (request.tty) {
+    if (!opts.backend.execTty) throw new ServeError(400, 'bad-request', 'this server cannot run a TTY exec');
+    tty = await opts.backend.execTty(id, request.cmd, {
+      user: request.user,
+      workdir: request.workdir,
+      env: request.env,
+      cols: size?.cols ?? 80,
+      rows: size?.rows ?? 24,
+    });
+    if (closed) {
+      tty.close();
+      return;
+    }
+    stdin.pipe(tty.stdin);
+    tty.stdout.pipe(stdout);
+    const exitCode = await tty.wait();
+    await new Promise<void>(resolve => (stdout.writableFinished ? resolve() : stdout.end(resolve)));
+    if (!closed) {
+      sendControl(ws, { exit: exitCode });
+      ws.close();
+    }
+    return;
+  }
   if (!request.stdin) stdin.end();
 
   const io: ExecIO = {

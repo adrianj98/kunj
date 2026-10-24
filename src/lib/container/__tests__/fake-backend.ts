@@ -1,6 +1,7 @@
 // In-memory ContainerBackend for lifecycle and port-forwarding tests. Records every call;
 // exec results are programmed by the joined command.
-import { BackendEvent, ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecTimeoutError, ImageInfo, Labels, LogOptions } from '../backend';
+import { PassThrough } from 'stream';
+import { BackendEvent, ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecTimeoutError, ImageInfo, Labels, LogOptions, TtyExecOptions, TtySession } from '../backend';
 
 export const FAKE_STARTED_AT = '2026-01-01T00:00:00.000000000Z';
 /** Old enough that nothing is inside prune's orphan grace period */
@@ -182,6 +183,54 @@ export class FakeBackend implements ContainerBackend {
       io.stdout.write(input.toUpperCase());
     }
     return this.execResults.get(key) ?? { exitCode: 0, stdout: '' };
+  }
+
+  /** TTY sessions opened through execTty, in order: what they were asked, what they got, how they ended */
+  ttySessions: Array<{ id: string; cmd: string[]; opts: TtyExecOptions; input: Buffer[]; resizes: Array<{ cols: number; rows: number }>; closed: boolean; stdinEnded: boolean }> = [];
+  /** The exit code a TTY session reports when its stdin ends (or endTty() is called) */
+  ttyExitCode = 0;
+  /** Ends every open TTY session with `code` (as if the process exited) */
+  endTty: (code?: number) => void = () => {};
+
+  async execTty(id: string, cmd: string[], opts: TtyExecOptions): Promise<TtySession> {
+    this.record('execTty', [id, cmd, opts]);
+    const record = { id, cmd, opts, input: [] as Buffer[], resizes: [] as Array<{ cols: number; rows: number }>, closed: false, stdinEnded: false };
+    this.ttySessions.push(record);
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    let done!: (code: number) => void;
+    const exit = new Promise<number>(resolve => (done = resolve));
+    const end = (code: number) => {
+      stdout.end();
+      done(code);
+    };
+    // The fake pty echoes its input uppercased, like a shell with echo on would show it
+    stdin.on('data', (d: Buffer) => {
+      record.input.push(d);
+      stdout.write(d.toString('latin1').toUpperCase());
+    });
+    stdin.on('end', () => {
+      record.stdinEnded = true;
+      end(this.ttyExitCode);
+    });
+    const previous = this.endTty;
+    this.endTty = (code = this.ttyExitCode) => {
+      previous(code);
+      end(code);
+    };
+    stdout.write(`$ ${cmd.join(' ')}\r\n`);
+    return {
+      stdin,
+      stdout,
+      resize: async (cols, rows) => {
+        record.resizes.push({ cols, rows });
+      },
+      wait: () => exit,
+      close: () => {
+        record.closed = true;
+        end(129);
+      },
+    };
   }
 
   async copyIn(id: string, dir: string, _tar: NodeJS.ReadableStream): Promise<void> {

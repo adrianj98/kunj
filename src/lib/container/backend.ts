@@ -79,6 +79,27 @@ export interface ExecIO {
   timeoutMs?: number;
 }
 
+/** A TTY exec (shell, attach, agent) for the remote server: the pty's bytes both ways, resize, exit. */
+export interface TtyExecOptions {
+  user?: string;
+  workdir?: string;
+  env?: Record<string, string>;
+  cols: number;
+  rows: number;
+}
+
+export interface TtySession {
+  /** Bytes to the pty (end() is stdin EOF) */
+  stdin: NodeJS.WritableStream;
+  /** Bytes from the pty: stdout and stderr merged, as a terminal sees them */
+  stdout: NodeJS.ReadableStream;
+  resize(cols: number, rows: number): Promise<void>;
+  /** The exit code once the process ends; rejects when the transport failed */
+  wait(): Promise<number>;
+  /** Hang up: closes the pty's connection, which is SIGHUP to the process */
+  close(): void;
+}
+
 export class ExecTimeoutError extends Error {
   constructor(message: string) {
     super(message);
@@ -146,6 +167,11 @@ export interface ContainerBackend {
   containerRun(id: string): Promise<{ state: ContainerInfo['state']; startedAt: string } | null>;
   /** stdout is captured unless io.stdout is given; a non-zero exit is returned, not thrown */
   exec(id: string, cmd: string[], io?: ExecIO): Promise<{ exitCode: number; stdout: string }>;
+  /**
+   * A TTY exec without a terminal of our own (kunj serve's, for a client's shell): the Docker Engine
+   * API allocates the pty. Optional: `exec` with tty and 'inherit' is the local way.
+   */
+  execTty?(id: string, cmd: string[], opts: TtyExecOptions): Promise<TtySession>;
   copyIn(id: string, dir: string, tar: NodeJS.ReadableStream): Promise<void>;
   start(id: string): Promise<void>;
   stop(id: string): Promise<void>;

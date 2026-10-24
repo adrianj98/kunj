@@ -3,7 +3,10 @@ import { EventEmitter } from 'events';
 import { PassThrough, Readable } from 'stream';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
-import { LocalDockerBackend, composeConfigArgs, runArgs, parsePsJson, parseInspect, parseImageLs, parseImageInspect, parseDockerEvent } from '../docker';
+import * as http from 'http';
+import * as os from 'os';
+import * as path from 'path';
+import { LocalDockerBackend, composeConfigArgs, parseEngineEndpoint, runArgs, parsePsJson, parseInspect, parseImageLs, parseImageInspect, parseDockerEvent } from '../docker';
 import { FakeBackend } from './fake-backend';
 import { BackendEvent } from '../backend';
 import { ContainerSpec, ExecTimeoutError } from '../backend';
@@ -491,6 +494,109 @@ describe('docker backend', () => {
       results.push({ code: 0, stdout: '' });
       await expect(backend.listNetworks({})).resolves.toEqual([]);
       expect(spawnMock).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('execTty over the Engine API', () => {
+    it('parses endpoints', () => {
+      expect(parseEngineEndpoint('unix:///var/run/docker.sock\n')).toEqual({ socketPath: '/var/run/docker.sock' });
+      expect(parseEngineEndpoint('tcp://box:2376')).toEqual({ host: 'box', port: 2376 });
+      expect(parseEngineEndpoint('tcp://10.0.0.5')).toEqual({ host: '10.0.0.5', port: 2375 });
+      expect(() => parseEngineEndpoint('ssh://me@box')).toThrow(/unix:\/\/ or tcp:\/\//);
+    });
+
+    // A daemon on a Unix socket: creates the exec, hijacks start (echoes uppercased, ends on "exit"),
+    // records resizes, reports the exit code
+    let dir: string;
+    let server: http.Server;
+    let sock: string;
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    const hijacked = new Set<import('stream').Duplex>();
+    let exitCode = 0;
+
+    beforeEach(async () => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-engine-'));
+      sock = path.join(dir, 'docker.sock');
+      calls.length = 0;
+      exitCode = 0;
+      server = http.createServer((req, res) => {
+        const chunks: Buffer[] = [];
+        req.on('data', d => chunks.push(d));
+        req.on('end', () => {
+          const text = Buffer.concat(chunks).toString();
+          calls.push({ method: req.method!, url: req.url!, body: text ? JSON.parse(text) : undefined });
+          if (req.url === '/containers/kunj-x/exec') return res.end(JSON.stringify({ Id: 'e1' }));
+          if (req.url === '/containers/missing/exec') {
+            res.writeHead(404, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify({ message: 'No such container: missing' }));
+          }
+          if (req.url?.startsWith('/exec/e1/resize')) {
+            res.writeHead(201);
+            return res.end();
+          }
+          if (req.url === '/exec/e1/json') return res.end(JSON.stringify({ Running: false, ExitCode: exitCode }));
+          res.writeHead(500);
+          res.end('{"message":"unexpected"}');
+        });
+      });
+      server.on('upgrade', (req, socket, head) => {
+        hijacked.add(socket);
+        calls.push({ method: req.method!, url: req.url! });
+        socket.write('HTTP/1.1 101 UPGRADED\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n');
+        // `head` is the start request's JSON body, which a daemon consumes; the pty bytes follow
+        void head;
+        socket.on('data', (d: Buffer) => {
+          const text = d.toString();
+          if (text.includes('exit')) {
+            exitCode = 3;
+            socket.end('bye\r\n');
+          } else socket.write(text.toUpperCase());
+        });
+      });
+      await new Promise<void>(r => server.listen(sock, r));
+    });
+
+    afterEach(async () => {
+      // A hijacked socket is not one of the server's connections any more
+      for (const s of hijacked) s.destroy();
+      hijacked.clear();
+      server.closeAllConnections();
+      await new Promise<void>(r => server.close(() => r()));
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('creates, hijacks, resizes and reports the exit code', async () => {
+      results.push({ stdout: `unix://${sock}\n` }); // docker context inspect
+      const backend = new LocalDockerBackend({ context: 'box' });
+      const session = await backend.execTty('kunj-x', ['sh', '-l'], { user: 'dev', workdir: '/workspace', env: { TERM: 'xterm' }, cols: 100, rows: 30 });
+      expect(argvOf(0)).toEqual(['--context', 'box', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']);
+      expect(calls[0]).toEqual({ method: 'POST', url: '/containers/kunj-x/exec', body: { AttachStdin: true, AttachStdout: true, AttachStderr: true, Tty: true, Cmd: ['sh', '-l'], User: 'dev', WorkingDir: '/workspace', Env: ['TERM=xterm'] } });
+      expect(calls[1]).toEqual({ method: 'POST', url: '/exec/e1/start' });
+      expect(calls[2]).toEqual({ method: 'POST', url: '/exec/e1/resize?h=30&w=100', body: undefined });
+      const out: Buffer[] = [];
+      session.stdout.on('data', d => out.push(d));
+      session.stdin.write('ls\r');
+      await new Promise(r => setTimeout(r, 50));
+      expect(Buffer.concat(out).toString()).toBe('LS\r');
+      await session.resize(80, 24);
+      expect(calls.at(-1)).toEqual({ method: 'POST', url: '/exec/e1/resize?h=24&w=80', body: undefined });
+      session.stdin.write('exit\r');
+      expect(await session.wait()).toBe(3);
+      expect(Buffer.concat(out).toString()).toBe('LS\rbye\r\n');
+      expect(calls.at(-1)).toEqual({ method: 'GET', url: '/exec/e1/json', body: undefined });
+    });
+
+    it('passes the daemon error on when the container is missing', async () => {
+      results.push({ stdout: `unix://${sock}\n` });
+      const backend = new LocalDockerBackend();
+      await expect(backend.execTty('missing', ['sh'], { cols: 80, rows: 24 })).rejects.toThrow('docker exec failed: No such container: missing');
+    });
+
+    it('close() hangs up and wait() settles', async () => {
+      results.push({ stdout: `unix://${sock}\n` });
+      const session = await new LocalDockerBackend().execTty('kunj-x', ['sh'], { cols: 80, rows: 24 });
+      session.close();
+      expect(await session.wait()).toBe(exitCode);
     });
   });
 

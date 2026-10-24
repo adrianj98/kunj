@@ -1553,7 +1553,14 @@ describe('ContainerCommand', () => {
     it('hands --remote to the background forwarder it starts for agent', async () => {
       h.fake.existing = [mainContainer('feat'), helperContainer('feat')];
       h.fake.execResults.set('sh -c command -v socat', { exitCode: 0, stdout: '/usr/bin/socat\n' });
+      // The agent's tmux session is a TTY exec over the wire; end it as soon as the fake pty is open
+      const ended = (async () => {
+        while (h.fake.ttySessions.length === 0) await new Promise(r => setTimeout(r, 5));
+        h.fake.endTty(0);
+      })();
       await new ContainerCommand().execute('agent', 'feat', { remote: 'box' });
+      await ended;
+      expect(h.fake.ttySessions[0].cmd[0]).toBe('tmux');
       const spawned = (autoforward.spawnDetached as jest.Mock).mock.calls.map(c => c[0] as string[]);
       expect(spawned.some(args => args[0] === 'ct' && args[1] === 'forward' && args.includes('--remote') && args.includes('box'))).toBe(true);
     });

@@ -132,10 +132,6 @@ describe('RemoteKunjBackend: streams', () => {
       expect(stdinClosed).toBe(true);
       h = await startHarness(); // for afterEach
     });
-
-    it('a TTY exec is refused for now', async () => {
-      await expect(h.remote.exec('kunj-r-b-1', ['sh'], { tty: true, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' })).rejects.toThrow(/TTY/);
-    });
   });
 
   describe('copyIn and buildImage', () => {

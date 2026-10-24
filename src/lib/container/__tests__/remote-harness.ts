@@ -85,8 +85,11 @@ function sharedServer(): Promise<{ server: ServeServer; port: number }> {
       allowRuntimes: ['sysbox-runc'],
       guardLookup: fakeLookup(() => holder.current),
     });
-    shared = server.listen('127.0.0.1', 0).then(a => {
+    shared = server.listen('127.0.0.1', 0).then(async a => {
       server.http.unref();
+      // The server asks the Docker context once, on its first /v1/info: ask it now, while the backend
+      // is still the placeholder, so no test's fake records that contextName call
+      await new RemoteKunjBackend({ baseUrl: `http://127.0.0.1:${a.port}`, token: HARNESS_TOKEN, name: 'harness' }).ready();
       return { server, port: a.port };
     });
   }
