@@ -244,6 +244,14 @@ The server is not a Docker proxy. Every id it is given must be an object kunj ma
   through `copyIn`, so a snapshot of a private origin needs no token on the box. `kunj ct blueprint
   snapshot` and `status` take `--remote` like `start`.
 - **Prune:** `git ls-remote --heads origin` runs on the laptop, the Docker side on the box. Unchanged.
+- **The apps' terminals** (the workspace app's shell and agent tabs, a VS Code terminal) run
+  `kunj ct shell|agent <branch> --session <id>` in a pty as they do today; kunj runs the host-side parts,
+  then its one TTY exec is the `ssh -t … kunj serve exec` above with inherited stdio, so the pty is
+  SwiftTerm's → ssh → the box → `docker exec -it`. tmux stays inside the container, so a reopened tab
+  reattaches as locally. For this to work from a GUI, `ssh` must never prompt: keys through the agent
+  (macOS gives GUI apps `SSH_AUTH_SOCK`), and `kunj remote add --ssh` connects once, interactively, so
+  the host key is in `known_hosts` before any app session. A prompt that does appear lands in the
+  terminal tab, where it can be answered.
 - **The SSH tunnel** lives for one kunj process. Detached helpers (`forward --auto`, `ct mcp`) are
   their own processes and open their own tunnel; `spawnDetached` passes `--remote` as it passes
   `--context` today.
