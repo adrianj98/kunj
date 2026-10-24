@@ -1110,3 +1110,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - docs/specs/workspace-ide.md: the app marked Shipped with its commits, the PATH paragraph as built, `discoveryErrorDetail` in the Architecture table, Task 12 open questions (timeout cause, release job not run yet, loop not checked with the installed app, pkill skips the quit prompt), plan marked done. Why: Task 12 review.
 - docs/specs/README.md: "Workspace app v1" moved to Done with its commits; workspace-ide.md's state is Shipped. Why: Task 12 ships the app.
 - docs/superpowers/plans/2026-10-23-workspace-app-v1.md: Task 12 status and as-built (MAC_APPS, installMacApp options, release job, docs page location, checks, the login-shell fix). Why: Task 12 review.
+- docs/specs/README.md, workspace-ide.md: the Task 12 review commit named (c09bbd7). Why: commits listed by hash.
