@@ -50,6 +50,16 @@ export async function listTmuxSessions(): Promise<string[] | null> {
   return Array.isArray(sessions) ? sessions : null;
 }
 
+// One session by exact name (`=`), for when the full listing failed; any failure reads as absent
+export async function hasTmuxSession(name: string): Promise<boolean> {
+  try {
+    await execFileAsync('tmux', ['has-session', '-t', `=${name}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function agentRunning(sessions: string[] | null, name: string): boolean | null {
   return sessions === null ? null : sessions.includes(name);
 }

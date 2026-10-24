@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { agentSessionName, agentRunning, agentArgv, listTmuxSessions, readTmuxSessions } from '../agent-session';
+import { agentSessionName, agentRunning, agentArgv, hasTmuxSession, listTmuxSessions, readTmuxSessions } from '../agent-session';
 
 jest.mock('child_process', () => ({
   ...jest.requireActual('child_process'),
@@ -81,6 +81,14 @@ describe('listTmuxSessions', () => {
 test('agentArgv shows the tmux status line when asked', () => {
   const argv = agentArgv('kunj-x', '/wt', 'claude', {}, { status: true });
   expect(argv.slice(-6)).toEqual([';', 'set-option', '-t', 'kunj-x', 'status', 'on']);
+});
+
+test('hasTmuxSession runs has-session for that name only and is false on any failure', async () => {
+  tmuxResult(null);
+  expect(await hasTmuxSession('kunj-x')).toBe(true);
+  expect(execFileMock.mock.calls[execFileMock.mock.calls.length - 1].slice(0, 2)).toEqual(['tmux', ['has-session', '-t', '=kunj-x']]);
+  tmuxResult(failure({ stderr: "can't find session" }));
+  expect(await hasTmuxSession('kunj-x')).toBe(false);
 });
 
 describe('agent state hooks', () => {

@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { AgentCommand } from '../agent';
-import { AgentError, agentArgv, agentSessionName, agentStateFile, readTmuxSessions, runTmux, killTmuxSession, withAgentHooks } from '../../lib/agent-session';
+import { AgentError, agentArgv, agentSessionName, agentStateFile, hasTmuxSession, readTmuxSessions, runTmux, killTmuxSession, withAgentHooks } from '../../lib/agent-session';
 import { loadResolvedConfig } from '../../lib/config';
 
 jest.mock('../../lib/worktree', () => ({
@@ -24,6 +24,7 @@ jest.mock('../../lib/agent-session', () => ({
   readTmuxSessions: jest.fn(),
   runTmux: jest.fn(async () => 0),
   killTmuxSession: jest.fn(async () => undefined),
+  hasTmuxSession: jest.fn(async () => false),
 }));
 
 jest.mock('../../lib/config', () => ({
@@ -160,6 +161,15 @@ test('agent.tmux false reattaches to a session that is still running instead of 
   tmuxSessions.mockResolvedValue([session]);
   (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'aider', tmux: false } });
   await new AgentCommand().execute('start', 'feature-a', {});
+  expect((runTmux as jest.Mock).mock.calls[0][0][0]).toBe('tmux');
+});
+
+test('agent.tmux false asks tmux for the session when the listing failed, and reattaches', async () => {
+  tmuxSessions.mockResolvedValue('failed');
+  (hasTmuxSession as jest.Mock).mockResolvedValueOnce(true);
+  (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'aider', tmux: false } });
+  await new AgentCommand().execute('start', 'feature-a', {});
+  expect(hasTmuxSession).toHaveBeenCalledWith(session);
   expect((runTmux as jest.Mock).mock.calls[0][0][0]).toBe('tmux');
 });
 

@@ -9,7 +9,7 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, agentStateDir, agentStateFile, directArgv, killTmuxSession, readTmuxSessions, runTmux, withAgentHooks } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, agentStateDir, agentStateFile, directArgv, hasTmuxSession, killTmuxSession, readTmuxSessions, runTmux, withAgentHooks } from '../lib/agent-session';
 import type { AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
@@ -108,7 +108,8 @@ export class AgentCommand extends BaseCommand {
     // agent.tmux false: direct, like --no-tmux (no hint: the user chose it), except that an agent still
     // running in this worktree's session is reattached rather than joined by a second one. The
     // --no-tmux flag is explicit and always runs directly.
-    const running = sessions?.includes(session) === true;
+    // A failed listing does not mean no session: ask tmux about this one before running a second agent
+    const running = sessions ? sessions.includes(session) : tmux === 'failed' && config.agent?.tmux === false && opts.tmux !== false && await hasTmuxSession(session);
     const wantTmux = opts.tmux !== false && (config.agent?.tmux !== false || running);
     const direct = !wantTmux || tmux === 'missing';
     if (tmux === 'missing' && wantTmux) process.stderr.write(NO_TMUX_HINT + '\n');
