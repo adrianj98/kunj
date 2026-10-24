@@ -26,6 +26,7 @@ export { HooksCommand } from './hooks';
 export { ReposCommand } from './repos';
 export { EventsCommand } from './events';
 export { SecretCommand } from './secret';
+export { RunCommand } from './run';
 export { InstallCommand } from './install';
 export { UICommand } from '../ui';
 
@@ -59,6 +60,7 @@ import { HooksCommand } from './hooks';
 import { ReposCommand } from './repos';
 import { EventsCommand } from './events';
 import { SecretCommand } from './secret';
+import { RunCommand } from './run';
 import { InstallCommand } from './install';
 import { UICommand } from '../ui';
 
@@ -93,6 +95,7 @@ export function getAllCommands(): BaseCommand[] {
     new ReposCommand(),
     new EventsCommand(),
     new SecretCommand(),
+    new RunCommand(),
     new InstallCommand(),
     new UICommand(),
   ];

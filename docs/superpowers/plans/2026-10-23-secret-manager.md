@@ -213,6 +213,8 @@
 
 ### Task 6: Host delivery: `kunj run`, `kunj agent` and `worktree add`
 
+**Status: done** (Task 6 commit). Rulings in the ledger. As built: the shared logic is `hostSecrets({ branch, root, unlock, warn })` and `runAttached(argv, env, cwd?)` in a new `src/lib/secrets/host.ts` (used by `run`, `agent`, `worktree shell` and `worktree add`); `kunjEntry()` (the `.ts`→`dist/index.js` rule) is in a new `src/lib/self.ts`, used by `kunjSelf()` and `spawnDetached`; `hostRunArgv(branch | undefined, argv)` and `hostSecretEnv(branch, root)` (lazy import of host.ts) are in agent-session.ts. The tmux command is an argv array (tmux runs it without a shell), not a shell-quoted string. `kunj worktree shell` gets the same treatment (`--session` in tmux under `kunj run`, direct in-process), since the workspace app opens terminals with it. `addWorktree` takes `secretsUnlock` (test seam) and returns `secretFiles` and `secretWarnings`; `worktree add --json` adds `secretFiles`.
+
 **Files:**
 - Create: `src/commands/run.ts`
 - Modify:
@@ -227,15 +229,15 @@
 - Consumes: `loadSecrets({ branch, target: 'host' })`, `envOf`, `renderFiles`, `writeHostFiles` (Task 4). `openVaults` and `configuredMode` are exported from resolve.ts (Task 5): use `loadSecrets` for one branch; `openVaults` + `resolveSecrets` only when resolving several branches from one unlock. Give `run` the same `unlock` seam shape as `SecretCommandDeps.unlock` (getUnlock's `mode`/`env`/`platform`/`run`/`prompt`/`tty`) so tests pass `KUNJ_SECRETS_KEY` and a runner that throws. `run` and `worktree add` pass the branch explicitly (the current one for `run` without `--branch`, the new worktree's for `add`): `loadSecrets` does not look it up.
 - Produces: `kunj run [--branch b] -- <cmd…>`. It spawns `cmd` with `{ ...process.env, ...envOf(host secrets) }` and `stdio: 'inherit'`, renders file deliveries first, and exits with the child's code (signal: 128+n).
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `run -- node -e "process.exit(process.env.FOO==='v'?3:4)"` exits 3 with the host secret `FOO=v`.
   - A container-only secret is absent.
   - When the vault has no files, `run` works with no unlock attempted (the `getUnlock` spy is not called).
   - `agentArgv` built by `kunj agent` for a branch whose secrets include `FOO=v` contains `run`, `--branch` and the branch, and no element contains `v` as a value or `FOO=`.
-- [ ] **Step 2:** Run the tests. Expected: FAIL.
-- [ ] **Step 3:** Implement. In `agent.ts`, the tmux command becomes the shell-quoted `kunjSelf()` + `run --branch <b> -- <shell> -lc <agent.command>`. The direct path calls the same `run` logic in-process. Keep `KUNJ_*` as they are.
-- [ ] **Step 4:** Run the tests and `npm run lint`. Expected: PASS.
-- [ ] **Step 5:** Commit: `git commit -m "Secrets on the host: kunj run, kunj agent under kunj run, new worktrees"`.
+- [x] **Step 2:** Run the tests. Expected: FAIL.
+- [x] **Step 3:** Implement. In `agent.ts`, the tmux command becomes the shell-quoted `kunjSelf()` + `run --branch <b> -- <shell> -lc <agent.command>`. The direct path calls the same `run` logic in-process. Keep `KUNJ_*` as they are.
+- [x] **Step 4:** Run the tests and `npm run lint`. Expected: PASS.
+- [x] **Step 5:** Commit: `git commit -m "Secrets on the host: kunj run, kunj agent under kunj run, new worktrees"`.
 
 ### Task 7: Container delivery
 

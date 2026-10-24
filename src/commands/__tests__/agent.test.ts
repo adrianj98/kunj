@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import { AgentCommand } from '../agent';
-import { AgentError, killTmuxSessionIfExists, agentArgv, agentSessionName, agentStateFile, hasTmuxSession, readTmuxSessions, runTmux, killTmuxSession, withAgentHooks } from '../../lib/agent-session';
+import { AgentError, killTmuxSessionIfExists, agentArgv, agentSessionName, agentStateFile, hasTmuxSession, hostRunArgv, loginShell, readTmuxSessions, runTmux, killTmuxSession, withAgentHooks } from '../../lib/agent-session';
 import { loadResolvedConfig } from '../../lib/config';
+import { hostSecrets } from '../../lib/secrets/host';
 
 jest.mock('../../lib/worktree', () => ({
   ...jest.requireActual('../../lib/worktree'),
@@ -36,6 +37,11 @@ jest.mock('../../lib/config', () => ({
 // The state directory under the mocked kunj dir is never created on disk
 jest.mock('fs', () => ({ ...jest.requireActual<object>('fs'), mkdirSync: jest.fn() }));
 
+// The secrets a direct start puts in the agent's environment; the tmux path never opens the vault
+jest.mock('../../lib/secrets/host', () => ({
+  hostSecrets: jest.fn(async () => ({ env: { FOO: 's3cret-value' }, files: [] })),
+}));
+
 jest.mock('../../lib/git', () => ({
   getCurrentBranch: jest.fn(async () => 'feature-a'),
 }));
@@ -44,6 +50,8 @@ const session = agentSessionName('app', 'github.com/acme/app', 'feature-a');
 const stateFile = agentStateFile('/h/.kunj/app', session);
 const claudeWithHooks = withAgentHooks('claude', stateFile, true);
 const tmuxSessions = readTmuxSessions as jest.Mock;
+// tmux runs the agent under `kunj run --branch <b>`, which unlocks the vault inside the session
+const underRun = (branch: string, command: string) => hostRunArgv(branch, [loginShell(), '-lc', command]);
 let stdout: string[];
 let ttyBefore: boolean | undefined;
 
@@ -55,6 +63,7 @@ beforeEach(() => {
   });
   tmuxSessions.mockReset();
   (runTmux as jest.Mock).mockClear();
+  (hostSecrets as jest.Mock).mockClear();
   (killTmuxSession as jest.Mock).mockClear();
   ttyBefore = process.stdin.isTTY;
   (process.stdin as any).isTTY = true;
@@ -82,9 +91,30 @@ test('start runs tmux in the worktree with agent.command', async () => {
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('start', 'feature-a', {});
   const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile };
-  expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', claudeWithHooks, vars), '/wt/feature-a', expect.objectContaining(vars));
+  expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', underRun('feature-a', claudeWithHooks), vars), '/wt/feature-a', expect.objectContaining(vars));
   // tmux takes a new session's environment from its server, not this client: the values go in argv
   expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(expect.arrayContaining(['-e', 'KUNJ_BRANCH=feature-a', '-e', 'KUNJ_WORKTREE=/wt/feature-a']));
+});
+
+test('start under tmux runs the agent through kunj run for the branch; no secret is in argv or opened here', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  await new AgentCommand().execute('start', 'feature-a', {});
+  const [argv, , env] = (runTmux as jest.Mock).mock.calls[0];
+  const i = argv.indexOf('run');
+  expect(argv.slice(i, i + 4)).toEqual(['run', '--branch', 'feature-a', '--']);
+  expect(argv.some((a: string) => a.includes('s3cret-value') || a.includes('FOO='))).toBe(false);
+  expect(env).not.toHaveProperty('FOO');
+  expect(hostSecrets).not.toHaveBeenCalled();
+});
+
+test('start without tmux puts the branch\'s host secrets in the agent\'s environment, not in argv', async () => {
+  tmuxSessions.mockResolvedValue('missing');
+  jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  await new AgentCommand().execute('start', 'feature-a', {});
+  expect(hostSecrets).toHaveBeenCalledWith(expect.objectContaining({ branch: 'feature-a', root: '/wt/feature-a' }));
+  const [argv, , env] = (runTmux as jest.Mock).mock.calls[0];
+  expect(env).toEqual(expect.objectContaining({ FOO: 's3cret-value', KUNJ_BRANCH: 'feature-a' }));
+  expect(argv.join(' ')).not.toContain('s3cret-value');
 });
 
 test('start works inside a tmux pane: TMUX is not passed on', async () => {
@@ -104,7 +134,7 @@ test('a bare branch name starts, and --command overrides the setting', async () 
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('feature-a', { command: 'aider' });
   expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(
-    agentArgv(session, '/wt/feature-a', 'aider', { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile }),
+    agentArgv(session, '/wt/feature-a', underRun('feature-a', 'aider'), { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile }),
   );
 });
 
@@ -247,7 +277,7 @@ describe('--session: several agents per worktree', () => {
     await new AgentCommand().execute('start', 'feature-a', { session: 'two' } as any);
     const file = agentStateFile('/h/.kunj/app', two);
     const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: file };
-    expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', withAgentHooks('claude', file, true), vars), '/wt/feature-a', expect.objectContaining(vars));
+    expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', underRun('feature-a', withAgentHooks('claude', file, true)), vars), '/wt/feature-a', expect.objectContaining(vars));
     expect(two).toBe(session + '-a-two');
   });
 

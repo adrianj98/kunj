@@ -15,6 +15,7 @@ import { applyKeptFiles } from './keep';
 import { expandVariables, repoVariables } from './config-vars';
 import { DEFAULT_WORKTREE_BASE_DIR } from './worktree-defaults';
 import type { AgentSessionJson, AgentState } from './json-types';
+import type { UnlockSeam } from './secrets/host';
 import { agentRunning, agentSessionName, agentSessionsOf, agentStateFile, combineAgentStates, listTmuxSessions, readAgentState } from './agent-session';
 import { repoIdentity } from './repo-identity';
 
@@ -602,6 +603,8 @@ export interface AddWorktreeOptions {
   base?: string;
   force?: boolean;
   cwd?: string;
+  // Test seam for unlocking the vault (getUnlock's mode/env/platform/run/prompt/tty)
+  secretsUnlock?: UnlockSeam;
 }
 
 // True when `branch` exists locally or as a remote-tracking branch, which
@@ -616,7 +619,7 @@ export async function branchExists(branch: string, cwd?: string): Promise<boolea
 
 export async function addWorktree(
   options: AddWorktreeOptions
-): Promise<{ path: string; branch: string; keptFiles: string[]; createdBranch: boolean; output: string }> {
+): Promise<{ path: string; branch: string; keptFiles: string[]; secretFiles: string[]; secretWarnings: string[]; createdBranch: boolean; output: string }> {
   const newBranch = !!options.newBranch || (!!options.createBranch && !(await branchExists(options.branch, options.cwd)));
   const args = ['git', 'worktree', 'add'];
   if (options.force) args.push('--force');
@@ -639,8 +642,24 @@ export async function addWorktree(
     // Keep files are a convenience; never fail worktree creation over them
   }
 
+  // Then the branch's host secret files (after keep files, so a rendered .env replaces a kept one).
+  // Like keep files they never fail the worktree: a locked vault or an unignored file is a warning.
+  const secretWarnings: string[] = [];
+  let secretFiles: string[] = [];
+  try {
+    const { hostSecrets } = await import('./secrets/host');
+    ({ files: secretFiles } = await hostSecrets({
+      branch: options.branch,
+      root: options.path,
+      unlock: options.secretsUnlock,
+      warn: (message) => secretWarnings.push(message),
+    }));
+  } catch (error) {
+    secretWarnings.push(`Secrets not delivered: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   const output = [stderr, stdout].map(s => s.trim()).filter(Boolean).join('\n');
-  return { path: options.path, branch: options.branch, keptFiles, createdBranch: newBranch, output };
+  return { path: options.path, branch: options.branch, keptFiles, secretFiles, secretWarnings, createdBranch: newBranch, output };
 }
 
 export async function removeWorktree(worktreePath: string, force = false, cwd?: string): Promise<void> {

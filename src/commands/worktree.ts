@@ -60,7 +60,7 @@ import {
 } from '../lib/keep';
 import { resolveBaseRef } from '../lib/base-branch';
 import { recordRepo } from '../lib/repos';
-import { AgentError, checkShellSessionId, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, readTmuxSessions, runTmux, shellArgv, shellSessionName } from '../lib/agent-session';
+import { AgentError, agentArgv, checkShellSessionId, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, readTmuxSessions, runTmux, shellSessionName } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
 import type { BranchContainerJson, ShellKillJson, WorktreeJson, WorktreeListContainersJson, WorktreeListJson } from '../lib/json-types';
 
@@ -212,14 +212,19 @@ export class WorktreeCommand extends BaseCommand {
     const shell = loginShell();
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;
-    let argv = [shell, '-l'];
+    // Host secrets: a tmux shell runs under `kunj run`, which unlocks the vault inside the session
+    // (never new-session -e, which would put the values in argv); a direct one gets them here.
+    const branch = wt.branch || undefined;
     if (name) {
       const config = await loadResolvedConfig(process.cwd());
       if (config.agent?.tmux !== false && (await readTmuxSessions()) !== 'missing') {
-        argv = shellArgv(name, wt.path, shell, { status: config.agent?.tmuxStatus === true });
+        const argv = agentArgv(name, wt.path, hostRunArgv(branch, [shell, '-l']), {}, { status: config.agent?.tmuxStatus === true });
+        process.exitCode = await runTmux(argv, wt.path, env);
+        return;
       }
     }
-    process.exitCode = await runTmux(argv, wt.path, env);
+    const secrets = await hostSecretEnv(branch, wt.path);
+    process.exitCode = await runTmux([shell, '-l'], wt.path, { ...env, ...secrets });
   }
 
   // ---------------------------------------------------------------------
@@ -445,10 +450,12 @@ export class WorktreeCommand extends BaseCommand {
     }
 
     let keptFiles: string[] = [];
+    let secretFiles: string[] = [];
+    let secretWarnings: string[] = [];
     let createdBranch = false;
     let gitOutput = '';
     try {
-      ({ keptFiles, createdBranch, output: gitOutput } = await addWorktree({
+      ({ keptFiles, secretFiles, secretWarnings, createdBranch, output: gitOutput } = await addWorktree({
         branch,
         path: targetPath,
         newBranch: creating,
@@ -464,6 +471,12 @@ export class WorktreeCommand extends BaseCommand {
     if (keptFiles.length > 0) {
       this.progress(chalk.gray(`Restored ${keptFiles.length} keep file(s): ${keptFiles.join(', ')}`));
     }
+    if (secretFiles.length > 0) {
+      this.progress(chalk.gray(`Rendered ${secretFiles.length} secret file(s): ${secretFiles.join(', ')}`));
+    }
+    for (const warning of secretWarnings) {
+      this.progress(chalk.yellow(`⚠ ${warning}`));
+    }
     // Runs inside the new worktree, after keep files are in place
     const post = await runHook('post-worktree-create', worktreeHookContext(repo, targetPath, branch), hookOptions);
     hooks.push(post);
@@ -478,6 +491,7 @@ export class WorktreeCommand extends BaseCommand {
         createdBranch,
         base: base?.ref || null,
         keptFiles,
+        secretFiles,
         hooks,
       });
       return;

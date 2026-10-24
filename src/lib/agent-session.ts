@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
 import { containerNames } from './container/names';
+import { kunjEntry } from './self';
 
 const execFileAsync = promisify(execFile);
 
@@ -142,6 +143,27 @@ export function agentArgv(name: string, cwd: string, command: string | string[],
 // A login shell in the session (no KUNJ_* variables: it is not an agent)
 export function shellArgv(name: string, cwd: string, shell: string, opts: { status?: boolean } = {}): string[] {
   return agentArgv(name, cwd, [shell, '-l'], {}, opts);
+}
+
+// This CLI as argv: node and its entry (src/lib/self.ts), for commands tmux runs
+export function kunjSelf(): string[] {
+  return [process.execPath, kunjEntry()];
+}
+
+// `argv` under `kunj run`, which unlocks the vault and puts the host secrets in argv's environment.
+// tmux sessions start agents and shells this way: `new-session -e` would put the values in argv.
+// Without a branch, run resolves with the branch checked out where it runs (the session's -c).
+export function hostRunArgv(branch: string | undefined, argv: string[]): string[] {
+  return [...kunjSelf(), 'run', ...(branch ? ['--branch', branch] : []), '--', ...argv];
+}
+
+// The branch's host secrets for a process started here without tmux (`kunj agent`, `kunj worktree shell`),
+// file deliveries rendered into the worktree first (warnings on stderr). Loaded lazily: the listing
+// imports this module and must not load the vault code.
+export async function hostSecretEnv(branch: string | undefined, root: string): Promise<Record<string, string>> {
+  const { hostSecrets } = await import('./secrets/host');
+  const { env } = await hostSecrets({ branch, root, warn: (message) => process.stderr.write(`⚠ ${message}\n`) });
+  return env;
 }
 
 // Without tmux: the agent runs in this terminal, through the login shell as tmux would run it

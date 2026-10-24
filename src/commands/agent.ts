@@ -9,7 +9,7 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, agentSessionsOf, agentStateDir, agentStateFile, checkShellSessionId, directArgv, hasTmuxSession, killTmuxSession, killTmuxSessionIfExists, readAgentState, readTmuxSessions, runTmux, withAgentHooks } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, agentSessionsOf, agentStateDir, agentStateFile, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, readAgentState, readTmuxSessions, loginShell, runTmux, withAgentHooks } from '../lib/agent-session';
 import type { AgentSessionJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
@@ -142,7 +142,14 @@ export class AgentCommand extends BaseCommand {
     const wantTmux = opts.tmux !== false && (config.agent?.tmux !== false || running);
     const direct = !wantTmux || tmux === 'missing';
     if (tmux === 'missing' && wantTmux) process.stderr.write(NO_TMUX_HINT + '\n');
-    const argv = direct ? directArgv(command) : agentArgv(session, wt.path, command, vars, { status: config.agent?.tmuxStatus === true });
-    process.exitCode = await runTmux(argv, wt.path, { ...env, ...vars });
+    // Host secrets: in tmux, `kunj run` unlocks the vault inside the session (new-session -e would put
+    // the values in argv; KUNJ_* stay there); directly, the same resolution in-process.
+    if (!direct) {
+      const argv = agentArgv(session, wt.path, hostRunArgv(wt.branch, [loginShell(), '-lc', command]), vars, { status: config.agent?.tmuxStatus === true });
+      process.exitCode = await runTmux(argv, wt.path, { ...env, ...vars });
+      return;
+    }
+    const secrets = await hostSecretEnv(wt.branch, wt.path);
+    process.exitCode = await runTmux(directArgv(command), wt.path, { ...env, ...vars, ...secrets });
   }
 }

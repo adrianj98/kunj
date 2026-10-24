@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
-import { AgentError, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName } from '../agent-session';
+import { AgentError, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName, kunjSelf, hostRunArgv } from '../agent-session';
+import { kunjEntry } from '../self';
 
 jest.mock('child_process', () => ({
   ...jest.requireActual('child_process'),
@@ -236,5 +237,38 @@ describe('many agent sessions per worktree', () => {
     execFileMock.mockReset();
     execFileMock.mockImplementation((...args: any[]) => args[args.length - 1](Object.assign(new Error('x'), { code: 'ENOENT' })));
     await expect(killTmuxSessionsWithPrefix('p-sh-')).resolves.toEqual([]);
+  });
+});
+
+describe('kunjSelf and hostRunArgv', () => {
+  const argv1 = process.argv[1];
+  afterEach(() => {
+    process.argv[1] = argv1;
+  });
+
+  test('kunjSelf is node plus the CLI entry; under ts-node the built dist/index.js', () => {
+    process.argv[1] = '/usr/local/lib/node_modules/kunj/dist/index.js';
+    expect(kunjSelf()).toEqual([process.execPath, '/usr/local/lib/node_modules/kunj/dist/index.js']);
+    process.argv[1] = '/src/kunj/src/index.ts';
+    const [node, entry] = kunjSelf();
+    expect(node).toBe(process.execPath);
+    expect(entry).toMatch(/[\\/]dist[\\/]index\.js$/);
+    expect(kunjEntry()).toBe(entry);
+  });
+
+  test('hostRunArgv runs the command under kunj run for the branch, with no secret in argv', () => {
+    process.argv[1] = '/k/dist/index.js';
+    const argv = agentArgv('kunj-x', '/wt', hostRunArgv('feature/x', ['/bin/zsh', '-lc', 'claude']), { KUNJ_BRANCH: 'feature/x' });
+    expect(argv).toEqual([
+      'tmux', '-u', 'new-session', '-A', '-s', 'kunj-x', '-c', '/wt', '-e', 'KUNJ_BRANCH=feature/x',
+      process.execPath, '/k/dist/index.js', 'run', '--branch', 'feature/x', '--', '/bin/zsh', '-lc', 'claude',
+      ';', 'set-option', '-t', 'kunj-x', 'window-size', 'latest', ';', 'set-option', '-t', 'kunj-x', 'status', 'off',
+    ]);
+    expect(argv.some((a) => a.includes('FOO='))).toBe(false);
+  });
+
+  test('hostRunArgv without a branch lets run use the worktree\'s current branch', () => {
+    process.argv[1] = '/k/dist/index.js';
+    expect(hostRunArgv(undefined, ['/bin/zsh', '-l'])).toEqual([process.execPath, '/k/dist/index.js', 'run', '--', '/bin/zsh', '-l']);
   });
 });

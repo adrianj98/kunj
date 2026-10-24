@@ -1,8 +1,14 @@
 // kunj worktree shell [branch] [--session <id>] [--kill]: a login shell in a worktree, kept in a host
 // tmux session (kunjsh-…) when --session is given so it survives the app that opened it.
 import { WorktreeCommand } from '../worktree';
-import { AgentError, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, readTmuxSessions, runTmux, shellSessionName } from '../../lib/agent-session';
+import { AgentError, hostRunArgv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, readTmuxSessions, runTmux, shellSessionName } from '../../lib/agent-session';
 import { loadResolvedConfig } from '../../lib/config';
+import { hostSecrets } from '../../lib/secrets/host';
+
+// The host secrets a direct shell gets in its environment; a tmux shell gets them from kunj run inside
+jest.mock('../../lib/secrets/host', () => ({
+  hostSecrets: jest.fn(async () => ({ env: { FOO: 's3cret-value' }, files: [] })),
+}));
 
 jest.mock('../../lib/worktree', () => ({
   ...jest.requireActual('../../lib/worktree'),
@@ -54,6 +60,7 @@ beforeEach(() => {
   jest.spyOn(console, 'log').mockImplementation(() => {});
   run.mockClear();
   run.mockResolvedValue(0);
+  (hostSecrets as jest.Mock).mockClear();
   tmux.mockReset();
   tmux.mockResolvedValue([]);
   kill.mockClear();
@@ -76,11 +83,14 @@ test('without --session: a plain login shell in the worktree, exit code passed t
   run.mockResolvedValue(3);
   await new WorktreeCommand().execute('shell', 'feature-a', { } as any);
   expect(run).toHaveBeenCalledTimes(1);
-  const [argv, cwd] = run.mock.calls[0];
+  const [argv, cwd, env] = run.mock.calls[0];
   expect(argv).toEqual(['/bin/zsh', '-l']);
   expect(cwd).toBe('/wt/feature-a');
   expect(tmux).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(3);
+  // The branch's host secrets, in the environment only
+  expect(hostSecrets).toHaveBeenCalledWith(expect.objectContaining({ branch: 'feature-a', root: '/wt/feature-a' }));
+  expect(env.FOO).toBe('s3cret-value');
 });
 
 test('no branch: the current worktree; $SHELL unset falls back to sh', async () => {
@@ -94,13 +104,17 @@ test('--session: new-session -A in the worktree, no KUNJ_ agent variables, TMUX 
   await new WorktreeCommand().execute('shell', 'feature-a', { session: 'tab1' } as any);
   const [argv, cwd, env] = run.mock.calls[0];
   expect(argv).toEqual([
-    'tmux', '-u', 'new-session', '-A', '-s', session, '-c', '/wt/feature-a', '/bin/zsh', '-l',
+    'tmux', '-u', 'new-session', '-A', '-s', session, '-c', '/wt/feature-a', ...hostRunArgv('feature-a', ['/bin/zsh', '-l']),
     ';', 'set-option', '-t', session, 'window-size', 'latest', ';', 'set-option', '-t', session, 'status', 'off',
   ]);
   expect(session).toMatch(/^kunjsh-.*-sh-tab1$/);
   expect(cwd).toBe('/wt/feature-a');
   expect(env.TMUX).toBeUndefined();
   expect(Object.keys(env).filter(k => k.startsWith('KUNJ_AGENT') || k === 'KUNJ_BRANCH')).toEqual([]);
+  // The vault is opened by kunj run inside the session: no value here or in argv
+  expect(hostSecrets).not.toHaveBeenCalled();
+  expect(env.FOO).toBeUndefined();
+  expect(argv.join(' ')).not.toContain('s3cret-value');
 });
 
 test('--session with agent.tmuxStatus keeps the status line', async () => {
@@ -115,6 +129,7 @@ test('--session without tmux runs the login shell directly, without a hint', asy
   run.mockResolvedValue(5);
   await new WorktreeCommand().execute('shell', 'feature-a', { session: 'tab1' } as any);
   expect(run.mock.calls[0][0]).toEqual(['/bin/zsh', '-l']);
+  expect(run.mock.calls[0][2].FOO).toBe('s3cret-value');
   expect(err).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(5);
 });

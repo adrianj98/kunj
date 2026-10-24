@@ -27,6 +27,23 @@ The command is `agent.command` (default `claude`); `--command <cmd>` overrides i
 agent starts in the worktree's directory with `KUNJ_BRANCH`, `KUNJ_REPO` and `KUNJ_WORKTREE` set.
 `kunj agent` needs a terminal, and works from inside a tmux pane too.
 
+## Secrets
+
+The agent gets the branch's host secrets (`kunj secret`, whose targets include `host`) as
+environment variables, and their file deliveries (such as `.env`) are written into the worktree
+first. In tmux the agent runs under `kunj run --branch <branch>`, which opens the secret store inside
+the session, so no value is ever in a command line; without tmux kunj does the same before starting
+the agent. `kunj worktree shell` gives its shells the same environment. Any other command can get it
+too:
+
+```bash
+kunj run -- npm run dev
+kunj run --branch fix/login -- $SHELL -l
+```
+
+`kunj run` passes on the command's exit code. A file that git does not ignore is not written, with a
+warning, and the command still runs.
+
 ## Several agents in one worktree
 
 `--session <id>` runs another agent next to the default one, in its own tmux session; the id is 1

@@ -19,6 +19,7 @@ const FAST_COMMANDS: Record<string, () => Promise<BaseCommand>> = {
   repos: async () => new (await import('./repos')).ReposCommand(),
   events: async () => new (await import('./events')).EventsCommand(),
   secret: async () => new (await import('./secret')).SecretCommand(),
+  run: async () => new (await import('./run')).RunCommand(),
   'prompt-info': async () => new (await import('./prompt-info')).PromptInfoCommand(),
 };
 

@@ -13,6 +13,7 @@ import * as path from 'path';
 import { ContainerBackend } from './backend';
 import { Forwarder, forwardPort } from './forward';
 import { pidRegistry } from './pidregistry';
+import { kunjEntry } from '../self';
 
 const POLL_MS = 2000;
 const STATE_POLL_MS = 5000;
@@ -133,13 +134,9 @@ export function forwarderFor(container: { id: string; name: string }, file: stri
   return readForwards(file).find(r => r.port === 0 && recordIsFor(r, container))?.pid;
 }
 
-/**
- * Runs this CLI again in the background (`kunj <args>`), detached from our terminal; returns its pid.
- * argv[1] is the CLI entry (dist/index.js, or the npm bin link to it). Under ts-node it is a .ts file
- * that plain node cannot run, so the package's built dist/index.js is used instead.
- */
+/** Runs this CLI again in the background (`kunj <args>`), detached from our terminal; returns its pid. */
 export function spawnDetached(args: string[], logFile?: string): number {
-  const entry = /\.ts$/.test(process.argv[1] ?? '') ? path.resolve(__dirname, '../../../dist/index.js') : process.argv[1];
+  const entry = kunjEntry();
   let fd: number | undefined;
   try {
     if (logFile) fd = openLog(logFile);

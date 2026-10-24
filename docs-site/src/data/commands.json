@@ -847,6 +847,26 @@
     "helpText": "Actions:\n  list (default)   Known repositories, most recently used first\n  add [path]       Add the repository containing path (default: current directory)\n  remove <path>    Hide a repository; it stays hidden until added again\n  prune            Forget repositories whose directory no longer exists\n\nRepositories are recorded as kunj runs in them, in ~/.kunj/repos.json"
   },
   {
+    "name": "run",
+    "usage": "run <command...>",
+    "description": "Run a command with the host secrets in its environment",
+    "arguments": "<command...>",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--branch <branch>",
+        "description": "Resolve the secrets of this branch (default: the current one)",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Put -- before the command so its own options are not read as kunj's:\n  kunj run -- npm run dev\n  kunj run --branch feature/x -- $SHELL -l\n\nThe command gets the global, repo and branch secrets whose targets include host and that are\ndelivered as environment variables. File deliveries are written into this worktree first (a file\ngit does not ignore is skipped with a warning). The exit code is the command's."
+  },
+  {
     "name": "secret",
     "usage": "secret [action] [args...]",
     "description": "Manage encrypted secrets and where they are delivered",
