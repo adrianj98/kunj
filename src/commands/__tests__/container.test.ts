@@ -68,6 +68,11 @@ jest.mock('../../lib/container/prune', () => ({
   applyPrune: jest.fn(async () => ({ removed: ['kunj-app-gone-abc123'], failed: [] })),
 }));
 
+// Never the developer's gh login
+jest.mock('../../lib/container/tokens', () => ({
+  githubTokenSource: jest.fn(async () => ({ source: 'gh', enabled: true })),
+}));
+
 let mockConfirm = true;
 jest.mock('inquirer', () => ({ __esModule: true, default: { prompt: jest.fn(async () => ({ ok: mockConfirm })) } }));
 
@@ -259,10 +264,23 @@ describe('ContainerCommand', () => {
     expect(start).toHaveBeenLastCalledWith(undefined, startOptions);
   });
 
+  it('token status --json prints where the GitHub token comes from, for origin\'s host', async () => {
+    const { githubTokenSource } = jest.requireMock('../../lib/container/tokens') as { githubTokenSource: jest.Mock };
+    await new ContainerCommand().execute('token', 'status', { json: true });
+    expect(JSON.parse(stdout.join(''))).toEqual({ github: { source: 'gh', enabled: true } });
+    expect(githubTokenSource.mock.calls[0][2]).toBe('github.com');
+    stdout.length = 0;
+    const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    await new ContainerCommand().execute('token', 'nope', { json: true });
+    expect(JSON.parse(stdout.join('')).error.message).toMatch(/Unknown token action 'nope'/);
+    expect(exit).toHaveBeenCalledWith(1);
+    exit.mockRestore();
+  });
+
   it('rejects unknown actions', async () => {
     await new ContainerCommand().execute('frobnicate', {});
     expect(errors).toEqual([
-      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, mcp, logs, list, stop, remove, prune, blueprint, file",
+      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, mcp, logs, list, stop, remove, prune, blueprint, file, token",
     ]);
     expect(process.exitCode).toBe(1);
   });

@@ -171,6 +171,14 @@ The defaults are the model credentials and a GitHub token:
 when `CLAUDE_CODE_USE_BEDROCK` is on, because Bedrock cannot work without them. Nothing else from
 your environment is forwarded.
 
+One token can come from somewhere other than your environment: when `GH_TOKEN` is in the list, none
+of `GH_TOKEN`, `GITHUB_TOKEN` and `GITLAB_TOKEN` is set, and origin is on GitHub, kunj forwards
+`gh auth token --hostname <origin host>` as `GH_TOKEN`. That is your `gh` login's token, usually
+with far wider scope than one repository: the agent can use it on every repository and organization
+your account reaches. If that is too much, set `container.useGhToken` to `false` and forward a
+fine-grained token limited to the repository instead. `kunj ct token status` shows which source a new
+container would use.
+
 ### The git credential helper
 
 When a token is forwarded (`GH_TOKEN`, `GITHUB_TOKEN` or `GITLAB_TOKEN`), kunj installs a small git
@@ -179,8 +187,8 @@ host** (and port). If the agent adds another remote, or a dependency points git 
 helper says nothing and the token is not sent.
 
 An SSH origin (`git@github.com:acme/shop.git`) is cloned over HTTPS with the token instead, since the
-container has no SSH keys and your SSH agent is not forwarded. Without a token, `kunj ct start`
-refuses an SSH origin.
+container has no SSH keys and your SSH agent is not forwarded. Without a token (from your
+environment or `gh auth token`), `kunj ct start` refuses an SSH origin.
 
 The token is still in the container's environment, so tools that read it directly, such as `gh`,
 can use it for anything its scope allows. A fine-grained token limited to the one repository keeps

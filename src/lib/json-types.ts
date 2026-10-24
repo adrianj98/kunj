@@ -143,6 +143,16 @@ export interface FileWriteJson {
   path: string;
 }
 
+/**
+ * `kunj ct token status --json`: where a new container's GitHub token would come from. `source` is
+ * 'env' when container.env forwards GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN from the host env, 'gh'
+ * when `gh auth token` gives one for origin's host now, else null. `enabled` is container.useGhToken.
+ * Token values are never printed.
+ */
+export interface ContainerTokenStatusJson {
+  github: { source: 'env' | 'gh' | null; enabled: boolean };
+}
+
 // ---- kunj agent --json -----------------------------------------------------------------------
 
 export interface AgentStatusJson {

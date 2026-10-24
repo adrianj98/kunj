@@ -528,6 +528,19 @@ whose container is gone. Run `kunj ct prune --dry-run --force` first to see what
 [blueprint](../blueprints/): how a new container installs its tools and dependencies, and the
 snapshot image new containers start from.
 
+## token
+
+`kunj ct token status` says where a new container's GitHub token would come from: your environment
+(`container.env`), `gh auth token` for origin's host, or nowhere. It never prints the token.
+
+```bash
+kunj ct token status --json
+# { "github": { "source": "gh", "enabled": true } }
+```
+
+`source` is `env`, `gh` or `null`; `enabled` is `container.useGhToken`. See
+[environment and secrets](../configuration/#environment-and-secrets).
+
 ## Getting work out
 
 There is no "copy out" command, on purpose: origin is the only channel. The agent (or you, through

@@ -80,6 +80,21 @@ and `GITLAB_TOKEN` are not in the default list, so add them if that is where you
 { "container": { "env": ["ANTHROPIC_API_KEY", "GITLAB_TOKEN"] } }
 ```
 
+If none of those three is set in your environment and origin is on GitHub (github.com, or a GitHub
+Enterprise host `gh` is logged in to), kunj asks the GitHub CLI instead: it runs
+`gh auth token --hostname <origin host>` and forwards the result as `GH_TOKEN`. So a `gh auth login`
+on your machine is enough, even when `gh` keeps its token in the macOS Keychain and a desktop app
+started kunj without your shell's environment. This only happens while `GH_TOKEN` is in
+`container.env`, and only when a new container is created. The agent in the container can use that
+token for anything your `gh` login can do; to turn it off:
+
+```bash
+kunj config --set container.useGhToken=false --global
+```
+
+`kunj ct token status` says where a new container's token would come from (`--json` for scripts); it
+never prints the token.
+
 Secrets reach the container only through the environment of `docker run`; see
 [how secrets reach the container](../security/#how-secrets-reach-the-container).
 

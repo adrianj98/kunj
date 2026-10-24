@@ -1282,6 +1282,18 @@
     "sensitive": false
   },
   {
+    "key": "container.useGhToken",
+    "type": "boolean",
+    "category": "container",
+    "default": true,
+    "description": "When container.env names GH_TOKEN and the host env has no GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN, forward `gh auth token` for origin's GitHub host as GH_TOKEN. The agent in the container can use this token with everything your gh login can do; false turns it off",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "container.files",
     "type": "array",
     "category": "container",

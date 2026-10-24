@@ -148,6 +148,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj agent [start|status|stop] [branch] [--session <id>] [--all]` - Run one or more agents in host tmux sessions for a worktree (see Worktree agents below)
 - `kunj container [start|shell|exec|agent|attach|open|forward|logs|list|stop|remove|prune|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
+- `kunj ct token status [--json]` - Where a new container's GitHub token comes from (`ContainerTokenStatusJson`; never prints the token)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
 - `kunj events [--json] [--repo <path>...]` - Stream changes to worktrees, containers and agents as NDJSON (see Events below)
@@ -292,6 +293,11 @@ bridges; a running main whose helper replacement fails is stopped. firewall.sh b
 (visible in `ps` and `inspect`) and never put them in labels. The git credential helper
 (`src/container/sandbox/git-credential-kunj`) is streamed into `$HOME/.kunj/bin/` of every container
 that gets a token, whatever the image, and answers only for origin's `host[:port]`.
+When container.env names `GH_TOKEN`, the host env gives none of `TOKEN_KEYS` and `container.useGhToken`
+is not false, a GitHub origin (github.com, or a host in gh's `hosts.yml`) gets
+`gh auth token --hostname <host>` as `GH_TOKEN` (src/lib/container/tokens.ts, execFile, 10 s, no
+shell). It is asked lazily (a new container, or seeding a resumed one), never for a snapshot (its
+`container.env` is empty); tests pass `StartOptions.tokenLookup` so they never reach the real gh.
 
 **Tests:** `npm test` runs everything with the fake backend. `npm run test:docker`
 (`*.docker.test.ts`) drives a real Docker daemon, builds the images and checks the firewall; it

@@ -30,6 +30,14 @@ export function registerContainerSettings(): void {
       examples: ['ANTHROPIC_API_KEY', 'NODE_ENV=development'],
     },
     {
+      key: 'container.useGhToken',
+      description:
+        "When container.env names GH_TOKEN and the host env has no GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN, forward `gh auth token` for origin's GitHub host as GH_TOKEN. The agent in the container can use this token with everything your gh login can do; false turns it off",
+      type: 'boolean',
+      defaultValue: true,
+      category: 'container',
+    },
+    {
       key: 'container.files',
       description: 'Host files copied into new containers, as hostPath:containerPath',
       type: 'array',

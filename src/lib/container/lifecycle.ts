@@ -31,6 +31,7 @@ import {
   STATUS_SCRIPT,
   truthy,
 } from './env';
+import { TokenLookup, withHostTokens } from './tokens';
 import { getKeepDir, listKeptFiles } from '../keep';
 import { getGlobalKunjDir, getKunjDir } from '../config';
 import { ConfigVariables, expandVariables } from '../config-vars';
@@ -103,6 +104,8 @@ export interface StartOptions {
   withoutDind?: boolean;
   /** `kunj ct open`: a running helper on an older image is left alone (only `start` replaces it) */
   keepStaleHelper?: boolean;
+  /** Where host tokens are looked up when the host env forwards none (`gh auth token`); tests replace it */
+  tokenLookup?: TokenLookup;
   /** The forwarder and bridge registries (tests); default ~/.kunj/container-{forwards,bridges}.json */
   registryFiles?: { forwards?: string; bridges?: string };
 }
@@ -546,7 +549,7 @@ async function seedIfNeeded(
           ? ' If the repository has private submodules, they cannot be fetched during a snapshot yet.'
           : hasToken
             ? ''
-            : ' If origin needs authentication, forward a token with container.env (GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN).'),
+            : ' If origin needs authentication, forward a token with container.env (GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN) or log in with `gh auth login`.'),
       'seed'
     );
   }
@@ -733,12 +736,19 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   if (!origin.originHost) {
     throw new StartError('Origin has no host; a container can only clone from a remote origin', 'origin');
   }
-  const env = forwardedEnv(cfg, options.hostEnv, vars);
-  const hasToken = TOKEN_KEYS.some(k => env[k]);
+  const hostEnv = forwardedEnv(cfg, options.hostEnv, vars);
+  // gh is asked only when a token is needed: a new container's env-file, or seeding a resumed one
+  const withTokens = once(async () => (await withHostTokens(hostEnv, cfg, origin.originHost, options.tokenLookup)).env)!;
 
   if (labels && !options.rebuild) {
-    return resume(backend, options, names, origin, env, hasToken, engine.runtimes);
+    const hasToken = async () => {
+      const env = await withTokens();
+      return TOKEN_KEYS.some(k => env[k]);
+    };
+    return resume(backend, options, names, origin, hostEnv, hasToken, engine.runtimes);
   }
+  const env = await withTokens();
+  const hasToken = TOKEN_KEYS.some(k => env[k]);
 
   // Docker-in-Docker is refused here, before anything is pushed or created, when it cannot or must not run
   const dind: DindMode = options.withoutDind ? 'off' : dindMode(cfg);
@@ -751,7 +761,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     // A bundle is cloned instead of origin, and the host that made it has just fetched the branch
     if (origin.isSsh && !hasToken && !options.bundle) {
       throw new StartError(
-        `Origin ${origin.originUrl} uses SSH, which the container cannot use without a token; forward GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN with container.env`,
+        `Origin ${origin.originUrl} uses SSH, which the container cannot use without a token; forward GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN with container.env, or log in with \`gh auth login\` (used when container.useGhToken is not false)`,
         'no-token'
       );
     }
@@ -1050,7 +1060,7 @@ async function resume(
   names: ContainerNames,
   origin: { originUrl: string; originHost: string },
   env: Record<string, string>,
-  hasToken: boolean,
+  hasToken: () => Promise<boolean>,
   runtimes: string[]
 ): Promise<StartResult> {
   const { repo, warn } = options;
@@ -1139,8 +1149,8 @@ async function resume(
     result.user = await step('docker', () => effectiveUser(backend, main.id, user));
     const seededBefore = await step('docker', () => hasSeedMarker(backend, main.id));
     const fromSnapshot = recorded.imageKind === 'blueprint';
-    result.seeded = await step('seed', () =>
-      seedIfNeeded(backend, main.id, user, home, options, origin, hasToken, seededBefore, fromSnapshot));
+    result.seeded = await step('seed', async () =>
+      seedIfNeeded(backend, main.id, user, home, options, origin, !seededBefore && (await hasToken()), seededBefore, fromSnapshot));
     if (result.seeded) {
       Object.assign(result, await step('docker', () => copyFiles(backend, main.id, user, home, options, variables(options))));
     }

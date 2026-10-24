@@ -14,6 +14,7 @@ import { ResolvedBlueprint, blueprintHash, parseBlueprint, snapshotTag } from '.
 import { Preset } from '../presets';
 import { planSnapshot } from '../snapshot';
 import { KunjConfig } from '../../../types';
+import { TokenLookup } from '../tokens';
 
 let keepDir = '';
 let keptFiles: string[] = [];
@@ -91,8 +92,14 @@ function options(over: Partial<StartOptions> = {}): StartOptions {
     warn: () => {},
     // Never the developer's ~/.kunj registries
     registryFiles: { forwards: path.join(tmp, 'forwards.json'), bridges: path.join(tmp, 'bridges.json') },
+    // Never the developer's gh login
+    tokenLookup: noTokens(),
     ...over,
   };
+}
+
+function noTokens(token: string | null = null): TokenLookup & { gh: jest.Mock } {
+  return { gh: jest.fn(async (_host: string) => token) as any, ghKnowsHost: () => false };
 }
 
 function backend(): FakeBackend {
@@ -411,6 +418,61 @@ describe('startContainer', () => {
 
     mocked.inspectOrigin.mockResolvedValue({ originUrl: '/srv/app.git', originHost: '', credentialHost: '', branchOnOrigin: true, unpushed: 0, isSsh: false });
     await expect(startContainer(backend(), options())).rejects.toMatchObject({ code: 'origin' });
+  });
+
+  it("an ssh GitHub origin with no token in the host env uses gh auth token, only in the env-file", async () => {
+    mocked.inspectOrigin.mockResolvedValue({
+      originUrl: 'git@github.com:acme/app.git',
+      originHost: 'github.com',
+      credentialHost: 'github.com',
+      branchOnOrigin: true,
+      unpushed: 0,
+      isSsh: true,
+    });
+    const tokens = noTokens('gho_secret');
+    const b = backend();
+    await startContainer(b, options({ hostEnv: { ANTHROPIC_API_KEY: 'k' }, tokenLookup: tokens }));
+    expect(tokens.gh).toHaveBeenCalledWith('github.com');
+    const [main, helper] = runSpecs(b);
+    expect(main.env.GH_TOKEN).toBe('gho_secret');
+    expect(helper.env.GH_TOKEN).toBeUndefined();
+    // Never in labels, the helper, an exec's argv or its env
+    const { env: _env, ...rest } = main;
+    expect(JSON.stringify(rest)).not.toContain('gho_secret');
+    expect(JSON.stringify(helper)).not.toContain('gho_secret');
+    expect(JSON.stringify(b.callsOf('exec'))).not.toContain('gho_secret');
+  });
+
+  it('asks gh nothing when the host env has a token, or when useGhToken is false (then refuses an ssh origin)', async () => {
+    const tokens = noTokens('gho_secret');
+    const env = ['GITHUB_TOKEN', 'GH_TOKEN', 'ANTHROPIC_API_KEY'];
+    await startContainer(backend(), options({ hostEnv: { GITHUB_TOKEN: 't', ANTHROPIC_API_KEY: 'k' }, tokenLookup: tokens, config: { container: { env } } as KunjConfig }));
+    expect(tokens.gh).not.toHaveBeenCalled();
+
+    mocked.inspectOrigin.mockResolvedValue({
+      originUrl: 'git@github.com:acme/app.git',
+      originHost: 'github.com',
+      credentialHost: 'github.com',
+      branchOnOrigin: true,
+      unpushed: 0,
+      isSsh: true,
+    });
+    const err = startContainer(backend(), options({ hostEnv: {}, tokenLookup: tokens, config: { container: { useGhToken: false } } as KunjConfig }));
+    await expect(err).rejects.toMatchObject({ code: 'no-token' });
+    await expect(err).rejects.toThrow(/gh auth login/);
+    expect(tokens.gh).not.toHaveBeenCalled();
+  });
+
+  it('resuming a seeded container asks gh nothing', async () => {
+    const tokens = noTokens('gho_secret');
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.existing = [
+      info({ state: 'exited' }),
+      info({ id: 'helper-id', name: names.helper, state: 'exited', labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'helper' }) }),
+    ];
+    await startContainer(b, options({ hostEnv: {}, tokenLookup: tokens }));
+    expect(tokens.gh).not.toHaveBeenCalled();
   });
 
   it('rolls back everything created when seed fails', async () => {

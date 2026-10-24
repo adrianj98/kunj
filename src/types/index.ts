@@ -60,6 +60,8 @@ export interface KunjConfig {
     image?: string;
     agentCommand?: string;
     env?: string[];
+    // Forward `gh auth token` as GH_TOKEN when the host env has no token (default true)
+    useGhToken?: boolean;
     files?: string[];
     keepFiles?: boolean;
     network?: { allow?: string[]; allowHost?: boolean };

@@ -16,6 +16,7 @@
 //   kunj container prune [--all] [--dry-run] [--force] [--yes]
 //   kunj container blueprint init|snapshot|status|remove
 //   kunj container file read|write [branch] <path>
+//   kunj container token status                       where a new container's GitHub token comes from
 //
 // `ct` is an alias. The command is on the fast path (src/commands/fast.ts): keep heavy
 // imports out of this module, and load inquirer lazily.
@@ -34,7 +35,8 @@ import { shellQuote } from '../lib/config-vars';
 import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
-import { ContainerStatus, describeGuard, emptyStatus } from '../lib/container/env';
+import { ContainerStatus, describeGuard, emptyStatus, forwardedEnv } from '../lib/container/env';
+import { githubTokenSource } from '../lib/container/tokens';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
 import { Forwarder, TUNNEL_PROBE, forwardPort, parseForwardSpec, parseTunnelProbe } from '../lib/container/forward';
 import { ForwardRecord, HELPER_NO_SOCAT, autoForwardIgnore, detachedLogFile, forwarderFor, readForwards, recordIsFor, runAutoForward, spawnDetached, updateForwards } from '../lib/container/autoforward';
@@ -55,14 +57,14 @@ import {
 } from '../lib/container/lifecycle';
 import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
 import { CONTAINER_AGENT_STATE_FILE, agentArgv, checkShellSessionId, withAgentHooks } from '../lib/agent-session';
-import { stripUserinfo } from '../lib/container/seed';
+import { parseOrigin, stripUserinfo } from '../lib/container/seed';
 import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
 import { precheckDind } from '../lib/container/dind';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
 import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount } from '../lib/container/prune';
 import { KunjConfig } from '../types';
-import type { ContainerJson, ContainerListJson, FileReadJson, FileWriteJson, ShellKillJson } from '../lib/json-types';
+import type { ContainerJson, ContainerListJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, ShellKillJson } from '../lib/json-types';
 
 interface ContainerOptions {
   json?: boolean;
@@ -99,7 +101,8 @@ interface Context {
   dockerContext?: string;
 }
 
-const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'mcp', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file'];
+const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'mcp', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file', 'token'];
+const TOKEN_ACTIONS = ['status'];
 const FILE_ACTIONS = ['read', 'write'];
 const BLUEPRINT_ACTIONS = ['init', 'snapshot', 'status', 'remove'];
 const WORKSPACE = '/workspace';
@@ -167,6 +170,7 @@ export class ContainerCommand extends BaseCommand {
         '  prune [--all] [--dry-run]            remove containers of branches gone from origin, orphans and old images',
         '  file read [branch] <path>            print a file of /workspace',
         '  file write [branch] <path>           write stdin to a file of /workspace (content on stdin)',
+        '  token status                         where a new container\'s GitHub token comes from (never prints it)',
         '',
         'Blueprint (how a new container is set up: tools, setup and maintain commands):',
         '  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json',
@@ -189,6 +193,10 @@ export class ContainerCommand extends BaseCommand {
         'e.g. {"chrome": {}}), agent also bridges a browser MCP server on this machine into the',
         "container's Claude Code: a fixed set of browser tools, no file paths, downloads refused, and",
         "navigation only to the container's forwarded ports (or container.mcp.chrome.allowOrigins).",
+        '',
+        'Tokens: a new container gets GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN from the host env when',
+        'container.env names it. With none set and origin on GitHub, kunj forwards `gh auth token` as',
+        'GH_TOKEN (container.useGhToken: false turns that off). The agent can use that token.',
         '',
         '[branch] defaults to the current branch. `ct` is short for `container`.',
       ].join('\n'),
@@ -282,6 +290,8 @@ export class ContainerCommand extends BaseCommand {
         return this.blueprint(target, options);
       case 'file':
         return this.file(target, rest, options);
+      case 'token':
+        return this.token(target, options);
     }
   }
 
@@ -1160,6 +1170,38 @@ export class ContainerCommand extends BaseCommand {
     await writeWorkspaceFile(ctx.backend, main.id, relPath, process.stdin, user);
     if (this.jsonMode) this.outputJSON({ success: true, path: relPath } satisfies FileWriteJson);
     else console.log(chalk.green(`✓ wrote ${relPath}`));
+  }
+
+  // ---------------------------------------------------------------------
+  // token
+  // ---------------------------------------------------------------------
+
+  private async token(sub: string | undefined, options: ContainerOptions): Promise<void> {
+    if ((sub || 'status').toLowerCase() !== 'status') {
+      throw new ContainerError(`Unknown token action '${sub}'. Expected one of: ${TOKEN_ACTIONS.join(', ')}`);
+    }
+    const config = await loadResolvedConfig(process.cwd());
+    const cfg = config.container;
+    // Outside a repository (or without a remote origin) the answer is for github.com
+    const originHost = parseOrigin(stripUserinfo(getOriginUrl() || '')).host || 'github.com';
+    const root = getRepoCommonRoot() ?? '';
+    const vars = { repoRoot: root, repoName: getRepoName() || path.basename(root), home: os.homedir() };
+    const github = await githubTokenSource(forwardedEnv(cfg, process.env, vars), cfg, originHost);
+    const json: ContainerTokenStatusJson = { github };
+    if (this.jsonMode) {
+      this.outputJSON(json);
+      return;
+    }
+    const where =
+      github.source === 'env'
+        ? 'from the host environment (container.env)'
+        : github.source === 'gh'
+          ? `from \`gh auth token\` for ${originHost}`
+          : github.enabled
+            ? `none: set GH_TOKEN, or log in with \`gh auth login\`${originHost === 'github.com' ? '' : ` --hostname ${originHost}`}`
+            : 'none: set GH_TOKEN (container.useGhToken is false, so gh is not asked)';
+    console.log(`GitHub token: ${where}`);
+    if (github.source === 'gh') console.log(chalk.gray('  The agent in the container can use it; container.useGhToken: false turns this off.'));
   }
 
   // ---------------------------------------------------------------------

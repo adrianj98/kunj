@@ -81,6 +81,8 @@ existing `.env` files. **Non-goals for v1:** sharing with a team, SOPS or commit
 repos cannot hold them), external vaults (1Password, AWS Secrets Manager), short-lived or per-container
 tokens. Nothing is ever written into the repository.
 
+Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in the host env, a GitHub origin's container gets `gh auth token --hostname <host>` as `GH_TOKEN` (`container.useGhToken`, default true; `kunj ct token status`).
+
 ### Storage
 
 - `~/.kunj/secrets.enc` holds global secrets; `~/.kunj/<repo>/secrets.enc` holds the repo's, including
