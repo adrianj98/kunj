@@ -19,6 +19,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     var onHeaderAction: (HeaderAction, Environment) -> Void = { _, _ in }
     var onNewSession: () -> Void = {}
     var lastActivity: (String) -> Date? = { _ in nil } { didSet { sidebar.lastActivity = lastActivity } }
+    /// The tab bar's Changes pill was pressed (the app toggles the column and saves it).
+    var onToggleChanges: () -> Void = {}
+    /// Whether the Changes column is open (`setChangesVisible`); closed, the terminal column takes
+    /// the width and the column computes nothing.
+    private(set) var changesVisible = true
+    private var splitWidth: NSLayoutConstraint!
+    private var fullWidth: NSLayoutConstraint!
+    /// The hairline between the columns: 0 wide while the Changes column is closed.
+    private var columnLineWidth: NSLayoutConstraint!
 
     private let root = FillView(.clear)
     private let effect = NSVisualEffectView()
@@ -60,6 +69,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             guard let self, let env = self.selectedEnvironment else { return }
             self.onHeaderAction(action, env)
         }
+        terminalColumn.onToggleChanges = { [weak self] in self?.onToggleChanges() }
         ThemeManager.shared.onChange.append { [weak self] t in self?.apply(t) }
         apply(t)
         renderSelection()
@@ -89,6 +99,32 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         renderSelection()
         onSelect(selectedEnvironment)
     }
+
+    /// Opens or closes the Changes column: closed, it collapses to zero width (the terminal column
+    /// takes the window) and stops computing diffs; opened, it loads the selected environment.
+    func setChangesVisible(_ visible: Bool, animated: Bool) {
+        guard visible != changesVisible else { return }
+        changesVisible = visible
+        changesColumn.isActive = visible
+        columnLineWidth.constant = visible ? 1 : 0
+        if visible {
+            fullWidth.isActive = false
+            splitWidth.isActive = true
+        } else {
+            splitWidth.isActive = false
+            fullWidth.isActive = true
+        }
+        renderSelection()
+        guard animated, let content = window?.contentView else { return }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            ctx.allowsImplicitAnimation = true
+            content.layoutSubtreeIfNeeded()
+        }
+    }
+
+    /// The ids of the visible sidebar rows, in order (⌘1–9 select the nth).
+    var visibleEnvironmentIds: [String] { sidebar.visibleIds }
 
     /// The kunj version (`kunj 1.4.2`, `kunj 1.0.0 dev`) at the sidebar's foot.
     func setKunjVersion(_ label: String) {
@@ -123,8 +159,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         terminalColumn.show(env)
         changesColumn.show(env)
         statusBar.show(env, environmentCount: environmentCount)
+        terminalColumn.setChanges(count: env?.changedFiles ?? 0, open: changesVisible)
         let showColumns = env != nil
-        for v in [terminalColumn, changesColumn, lines[1], lines[2]] as [NSView] { v.isHidden = !showColumns }
+        for v in [terminalColumn, lines[2]] as [NSView] { v.isHidden = !showColumns }
+        for v in [changesColumn, lines[1]] as [NSView] { v.isHidden = !showColumns || !changesVisible }
         emptyState.isHidden = showColumns
         if let discoveryError {
             emptyTitle.stringValue = discoveryError
@@ -233,22 +271,27 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             terminalColumn.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             terminalColumn.topAnchor.constraint(equalTo: headerLine.bottomAnchor),
             terminalColumn.bottomAnchor.constraint(equalTo: statusLine.topAnchor),
-            terminalColumn.widthAnchor.constraint(equalTo: header.widthAnchor, multiplier: leftShare, constant: -1),
 
             columnLine.leadingAnchor.constraint(equalTo: terminalColumn.trailingAnchor),
             columnLine.topAnchor.constraint(equalTo: terminalColumn.topAnchor),
             columnLine.bottomAnchor.constraint(equalTo: terminalColumn.bottomAnchor),
-            columnLine.widthAnchor.constraint(equalToConstant: 1),
 
             changesColumn.leadingAnchor.constraint(equalTo: columnLine.trailingAnchor),
             changesColumn.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             changesColumn.topAnchor.constraint(equalTo: terminalColumn.topAnchor),
             changesColumn.bottomAnchor.constraint(equalTo: terminalColumn.bottomAnchor),
 
+            terminalColumn.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor),
+
             emptyState.centerXAnchor.constraint(equalTo: mainArea.centerXAnchor),
             emptyState.centerYAnchor.constraint(equalTo: mainArea.centerYAnchor),
             emptyState.leadingAnchor.constraint(greaterThanOrEqualTo: mainArea.leadingAnchor, constant: 40),
         ])
+        splitWidth = terminalColumn.widthAnchor.constraint(equalTo: header.widthAnchor, multiplier: leftShare, constant: -1)
+        fullWidth = terminalColumn.trailingAnchor.constraint(equalTo: root.trailingAnchor)
+        splitWidth.isActive = true
+        columnLineWidth = columnLine.widthAnchor.constraint(equalToConstant: 1)
+        columnLineWidth.isActive = true
     }
 
     private func pin(_ v: NSView, to parent: NSView) {

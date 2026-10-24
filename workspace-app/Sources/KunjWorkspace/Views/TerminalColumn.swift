@@ -13,6 +13,8 @@ final class TerminalColumn: NSView {
     let registry: TabRegistry
     /// The tab bar's `+`.
     var onNewTab: () -> Void = {}
+    /// The tab bar's Changes pill.
+    var onToggleChanges: () -> Void = {}
 
     private let tabBar: TabBarView
     private let barLine = FillView(.clear)
@@ -64,6 +66,7 @@ final class TerminalColumn: NSView {
             self.registry.close(tab)
         }
         tabBar.onNewTab = { [weak self] in self?.onNewTab() }
+        tabBar.onToggleChanges = { [weak self] in self?.onToggleChanges() }
         registry.onChange = { [weak self] envId in
             guard let self else { return }
             if envId == self.environment?.id { self.messageText = nil }
@@ -91,6 +94,11 @@ final class TerminalColumn: NSView {
 
     var activeTab: (any WorkspaceTab)? { environment.flatMap { registry.active(for: $0.id) } }
     var activeEditor: EditorTab? { activeTab as? EditorTab }
+    /// The Changes pill's state: the environment's changed files and whether the column is open.
+    func setChanges(count: Int, open: Bool) {
+        tabBar.showChanges(count: count, open: open)
+    }
+
 
     /// Gives the active tab the keyboard.
     func focusActive() {

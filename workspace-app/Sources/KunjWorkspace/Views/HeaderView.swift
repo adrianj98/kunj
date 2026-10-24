@@ -14,6 +14,9 @@ final class HeaderView: NSView {
     var onAction: (HeaderAction) -> Void = { _ in }
     /// Opens a URL (the PR, a port); the app passes NSWorkspace.open.
     var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// The plan of an action (the app's ActionRunner): Open in VS Code and Create PR are enabled
+    /// by it, with the reason as the tooltip when not.
+    var plan: (EnvAction, Environment) -> ActionPlan = { _, _ in .disabled(reason: "kunj is not ready") }
     var theme: Theme { didSet { apply() } }
     private(set) var environment: Environment?
 
@@ -124,6 +127,16 @@ final class HeaderView: NSView {
         agent.isEnabled = usable
         shell.toolTip = usable ? nil : (env.kind == .container ? "Start the container first" : "The worktree directory is missing")
         agent.toolTip = shell.toolTip
+        let openAction: EnvAction = env.kind == .container ? .ctOpen : .worktreeOpen
+        for (button, action) in [(open as ActionButton, openAction), (createPR as ActionButton, EnvAction.createPR)] {
+            if case .disabled(let reason) = plan(action, env) {
+                button.isEnabled = false
+                button.toolTip = reason
+            } else {
+                button.isEnabled = true
+                button.toolTip = nil
+            }
+        }
         for b in buttons { b.needsDisplay = true }
     }
 }

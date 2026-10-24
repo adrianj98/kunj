@@ -92,6 +92,9 @@ final class SidebarView: NSView {
         for r in list.rows { r.time = timeText(r.environment.id) }
     }
 
+    /// The ids of the rows the search leaves, in order (⌘1–9).
+    var visibleIds: [String] { environmentIds(filterEnvironments(repos, query: query)) }
+
     private func timeText(_ id: String) -> String { lastActivity(id).map { relativeTime($0) } ?? "" }
 
     private func reload() {

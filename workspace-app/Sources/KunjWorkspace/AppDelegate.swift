@@ -17,6 +17,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Saves and restores each environment's tabs and its `lastActivity` (not in `--demo`).
     private var layoutKeeper: LayoutKeeper?
     private var terminating = false
+    /// Header buttons, the overflow menu, port links and New session.
+    private let runner = ActionRunner()
+    private var settings: SettingsWindow?
+    private var newSessionSheet: NewSessionSheet?
+    /// `--theme <name>`: this run's theme (not saved), for screenshots against light.png/graphite.png.
+    private let themeArgument: ThemeChoice?
+    /// `--changes` / `--no-changes`: the Changes column open or closed for this run (not saved).
+    private let changesArgument: Bool?
+
+    /// The app-wide Changes column setting (default closed).
+    static let showChangesKey = "showChanges"
 
     nonisolated init(arguments: [String]) {
         if let i = arguments.firstIndex(of: "--screenshot"), i + 1 < arguments.count {
@@ -24,13 +35,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             screenshotPath = nil
         }
+        if let i = arguments.firstIndex(of: "--theme"), i + 1 < arguments.count {
+            themeArgument = ThemeChoice(rawValue: arguments[i + 1])
+        } else {
+            themeArgument = nil
+        }
+        changesArgument = arguments.contains("--changes") ? true : (arguments.contains("--no-changes") ? false : nil)
         demo = arguments.contains("--demo")
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logFonts()
-        if demo && UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["theme"] == nil {
+        if let themeArgument {
+            ThemeManager.shared.override = themeArgument
+        } else if demo && UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["theme"] == nil {
             ThemeManager.shared.override = .warm
         }
         NSApp.mainMenu = buildMenu()
@@ -38,6 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.onHeaderAction = { [weak self] action, env in self?.headerAction(action, env) }
         windowController.terminalColumn.onNewTab = { [weak self] in self?.openTab(.shell) }
         wireEditors()
+        windowController.onNewSession = { [weak self] in self?.newSession(nil) }
+        windowController.onToggleChanges = { [weak self] in self?.toggleChanges(nil) }
+        windowController.sidebar.search.onEscape = { [weak self] in self?.windowController.terminalColumn.focusActive() }
+        // --demo renders the mockup, which shows the column; otherwise the saved setting (closed by default)
+        let changesOpen = changesArgument ?? (demo || UserDefaults.standard.bool(forKey: Self.showChangesKey))
+        windowController.setChangesVisible(changesOpen, animated: false)
+        wireRunner()
         windowController.showWindow(nil)
         windowController.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -57,7 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in
                 await self?.discovery?.value
                 // Monaco loads in about a second; give the diff time to render (at most 8 s)
-                for _ in 0..<80 where self?.windowController.changesColumn.diffView.ready != true {
+                for _ in 0..<80 where self?.windowController.changesVisible == true
+                    && self?.windowController.changesColumn.diffView.ready != true {
                     try? await Task.sleep(nanoseconds: 100_000_000)
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -79,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (`kunj not found on your PATH: npm install -g kunj`). The command is the `kunjCommand`
     /// default (`defaults write <bundle id> kunjCommand "node /path/dist/index.js"`), else `kunj`.
     private func discoverKunj() async {
-        let configured = UserDefaults.standard.string(forKey: "kunjCommand")?
+        let configured = UserDefaults.standard.string(forKey: SettingsWindow.kunjCommandKey)?
             .trimmingCharacters(in: .whitespaces)
         let command = (configured?.isEmpty ?? true) ? "kunj" : configured!
         let path = await ShellEnvironment.loginPath()
@@ -92,6 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.windowController.setKunjVersion(status.label)
                 self.windowController.changesColumn.source = DiffService(cli: cli)
                 self.windowController.terminalColumn.registry.fileAccess = FileAccess(cli: cli)
+                self.settings?.cli = cli
+                self.windowController.header.show(self.windowController.selectedEnvironment)
             }
             await loadEnvironments(cli: cli)
         } catch {
@@ -112,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let store else { return }
             keeper.listed(store.repos)
             self.windowController.render(repos: store.repos)
+            self.runner.listed(store.repos)
             self.windowController.showListingError(store.lastError?.message)
             // a selected environment that could not restore its tabs (stopped) may now
             keeper.selected(self.windowController.selectedEnvironment)
@@ -132,6 +162,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// environment restores its tabs, tab changes are saved, listings and key presses bump
     /// `lastActivity`, which the sidebar shows.
     private func makeLayoutKeeper(store: EnvironmentStore) -> LayoutKeeper {
+        // after a change of the kunj command the keeper stays (its restored set, its chained
+        // registry handler) and only reads the new store
+        if let keeper = layoutKeeper {
+            keeper.environment = { [weak store] id in store?.environment(id: id) }
+            return keeper
+        }
         let keeper = LayoutKeeper()
         layoutKeeper = keeper
         let registry = windowController.terminalColumn.registry
@@ -218,12 +254,123 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch action {
         case .shell: openTab(.shell)
         case .agent: openTab(.agent)
-        default: log("header action \(action) for \(env.id)")
+        case .open: runner.perform(env.kind == .container ? .ctOpen : .worktreeOpen, env: env)
+        case .createPR: runner.perform(.createPR, env: env)
+        case .more(let anchor):
+            let menu = runner.overflowMenu(env: env)
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 4), in: anchor)
+        }
+    }
+
+    /// The runner's view of the app: the store's environments, action tabs in the terminal column,
+    /// alerts on the window. The header asks it which buttons are enabled.
+    private func wireRunner() {
+        runner.cli = { [weak self] in self?.kunj }
+        runner.repos = { [weak self] in self?.store?.repos ?? self?.windowController.repos ?? [] }
+        runner.window = { [weak self] in self?.windowController.window }
+        runner.openAction = { [weak self] env, spec in
+            guard let column = self?.windowController.terminalColumn else { return }
+            column.registry.open(spec: spec, env: env, kind: .action)
+            DispatchQueue.main.async { column.focusActive() }
+        }
+        runner.showMessage = { [weak self] text in self?.windowController.terminalColumn.showMessage(text) }
+        runner.select = { [weak self] id in self?.windowController.select(id) }
+        runner.openAgent = { [weak self] env in
+            self?.windowController.select(env.id)
+            self?.openTab(.agent)
+        }
+        // --demo renders the mockup, whose buttons are all enabled (its container has no host
+        // worktree in DemoData, and nothing runs without kunj anyway)
+        let demo = self.demo
+        windowController.header.plan = { [weak self] action, env in
+            if demo { return .run(args: []) }
+            return self?.runner.plan(action, env) ?? .disabled(reason: "kunj is not ready")
         }
     }
 
     @objc func openShell(_ sender: Any?) { openTab(.shell) }
     @objc func openAgent(_ sender: Any?) { openTab(.agent) }
+
+    @objc func openInEditor(_ sender: Any?) {
+        guard let env = windowController.selectedEnvironment else { return }
+        runner.perform(env.kind == .container ? .ctOpen : .worktreeOpen, env: env)
+    }
+
+    @objc func createPR(_ sender: Any?) {
+        guard let env = windowController.selectedEnvironment else { return }
+        runner.perform(.createPR, env: env)
+    }
+
+    /// New Session (⌘N): the sheet over the window; Create runs it through the runner.
+    @objc func newSession(_ sender: Any?) {
+        guard newSessionSheet == nil, let window = windowController.window else { return }
+        let repos = store?.repos ?? windowController.repos
+        guard !repos.isEmpty else { NSSound.beep(); return }
+        let sheet = NewSessionSheet(repos: repos, preferred: windowController.selectedEnvironment?.repo,
+                                    theme: ThemeManager.shared.current)
+        sheet.onCreate = { [weak self] request in
+            guard let self else { return }
+            log("new session: \(request.kind.rawValue) \(request.branch) in \(request.repo.name)")
+            self.runner.newSession(request, fallback: self.windowController.selectedEnvironment)
+        }
+        newSessionSheet = sheet
+        guard let panel = sheet.window else { return }
+        window.beginSheet(panel) { [weak self] _ in self?.newSessionSheet = nil }
+    }
+
+    /// ⌘K: the sidebar's search field.
+    @objc func focusSearch(_ sender: Any?) { windowController.sidebar.search.focus() }
+
+    /// ⌘1–9: the nth row the search leaves.
+    @objc func switchSession(_ sender: NSMenuItem) {
+        let ids = windowController.visibleEnvironmentIds
+        let n = sender.tag
+        guard n >= 1, n <= ids.count else { NSSound.beep(); return }
+        windowController.select(ids[n - 1])
+        windowController.terminalColumn.focusActive()
+    }
+
+    /// View > Show/Hide Changes (⌘⇧C) and the tab bar's pill; saved app-wide.
+    @objc func toggleChanges(_ sender: Any?) {
+        let visible = !windowController.changesVisible
+        windowController.setChangesVisible(visible, animated: true)
+        UserDefaults.standard.set(visible, forKey: Self.showChangesKey)
+    }
+
+    @objc func showSettings(_ sender: Any?) {
+        if settings == nil {
+            let s = SettingsWindow()
+            s.onKunjCommandChanged = { [weak self] in self?.reconnect() }
+            settings = s
+        }
+        settings?.cli = kunj
+        settings?.showWindow(nil)
+        settings?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// The kunj command changed in Settings: stop the event stream, drop the store and discover
+    /// kunj again with the new command (open tabs keep running with the command they started with).
+    private func reconnect() {
+        guard !demo, !terminating else { return }
+        log("kunj command changed: rediscovering")
+        discovery?.cancel()
+        let oldEvents = events
+        events = nil
+        store?.onChange = nil
+        store?.onRepoChanged = nil
+        store = nil
+        kunj = nil
+        kunjStatus = nil
+        settings?.cli = nil
+        windowController.render(repos: [])
+        windowController.setKunjVersion("")
+        windowController.showListingError(nil)
+        windowController.showDiscoveryError(nil)
+        discovery = Task {
+            if let oldEvents { await oldEvents.stop() }
+            await self.discoverKunj()
+        }
+    }
 
     /// Opens a shell or the agent in the selected environment. Agent activates a running agent
     /// tab; a refused spec (missing worktree, stopped container) shows inline in the column.
@@ -305,6 +452,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func appMenu() -> NSMenu {
         let menu = NSMenu(title: "Kunj Workspace")
+        menu.addItem(withTitle: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",").target = self
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Hide Kunj Workspace", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Kunj Workspace", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -380,14 +529,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         themeItem.submenu = themes
         menu.addItem(themeItem)
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Show Changes", action: #selector(toggleChanges(_:)), keyEquivalent: "C").target = self
         return menu
     }
 
-    /// Environment: Shell ⌘T, Agent ⌘⇧A (the header's buttons).
+    /// Environment: the header's buttons (Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O, Create PR ⌘⇧P),
+    /// New Session ⌘N, Search ⌘K and Switch to Session ⌘1–9.
     private func environmentMenu() -> NSMenu {
         let menu = NSMenu(title: "Environment")
         menu.addItem(withTitle: "New Shell", action: #selector(openShell(_:)), keyEquivalent: "t").target = self
         menu.addItem(withTitle: "Agent", action: #selector(openAgent(_:)), keyEquivalent: "A").target = self
+        menu.addItem(withTitle: "Open in VS Code", action: #selector(openInEditor(_:)), keyEquivalent: "o").target = self
+        menu.addItem(withTitle: "Create PR", action: #selector(createPR(_:)), keyEquivalent: "P").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "New Session…", action: #selector(newSession(_:)), keyEquivalent: "n").target = self
+        menu.addItem(withTitle: "Search Sessions", action: #selector(focusSearch(_:)), keyEquivalent: "k").target = self
+        let switchItem = NSMenuItem(title: "Switch to Session", action: nil, keyEquivalent: "")
+        let switches = NSMenu(title: "Switch to Session")
+        for n in 1...9 {
+            let item = NSMenuItem(title: "Session \(n)", action: #selector(switchSession(_:)), keyEquivalent: "\(n)")
+            item.tag = n
+            item.target = self
+            switches.addItem(item)
+        }
+        switchItem.submenu = switches
+        menu.addItem(switchItem)
         return menu
     }
 
@@ -431,6 +598,21 @@ extension AppDelegate: NSMenuItemValidation {
             return windowController?.terminalColumn.activeTab != nil
         case #selector(saveFile(_:)):
             return windowController?.terminalColumn.activeEditor?.loaded == true
+        case #selector(openInEditor(_:)):
+            guard let env else { return false }
+            if case .disabled = runner.plan(env.kind == .container ? .ctOpen : .worktreeOpen, env) { return false }
+            return kunj != nil
+        case #selector(createPR(_:)):
+            guard let env else { return false }
+            if case .disabled = runner.plan(.createPR, env) { return false }
+            return kunj != nil
+        case #selector(newSession(_:)):
+            return kunj != nil && !(store?.repos.isEmpty ?? true) && newSessionSheet == nil
+        case #selector(switchSession(_:)):
+            return item.tag <= (windowController?.visibleEnvironmentIds.count ?? 0)
+        case #selector(toggleChanges(_:)):
+            item.title = windowController?.changesVisible == true ? "Hide Changes" : "Show Changes"
+            return true
         default:
             return true
         }

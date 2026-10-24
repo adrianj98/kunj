@@ -20,17 +20,25 @@ final class TabBarView: NSView {
     var onSelect: (String) -> Void = { _ in }
     var onClose: (String) -> Void = { _ in }
     var onNewTab: () -> Void = {}
+    /// The Changes pill was pressed (open or close the Changes column).
+    var onToggleChanges: () -> Void = {}
 
     private let pills = NSStackView()
     private let tmuxLabel = makeLabel("", font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
     private let split = BarIconButton(.split, label: "Split pane")
     private let plus = BarIconButton(.plus, label: "New tab")
+    /// `Changes N` at the far right: `raised` while the column is open, N the environment's changed
+    /// files (hidden when 0).
+    private let changes: PillView
     private var items: [TabBarItem] = []
 
     init(theme: Theme) {
         self.theme = theme
+        changes = PillView("Changes", theme: theme)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
+        changes.toolTip = "Show or hide the Changes column (⌘⇧C)"
+        changes.onPress = { [weak self] in self?.onToggleChanges() }
         pills.orientation = .horizontal
         pills.spacing = 2
         pills.translatesAutoresizingMaskIntoConstraints = false
@@ -41,10 +49,11 @@ final class TabBarView: NSView {
         plus.toolTip = "New shell (⌘T)"
         plus.onPress = { [weak self] in self?.onNewTab() }
         tmuxLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let right = NSStackView(views: [tmuxLabel, split, plus])
+        let right = NSStackView(views: [tmuxLabel, split, plus, changes])
         right.orientation = .horizontal
         right.spacing = 4
         right.setCustomSpacing(8, after: tmuxLabel)
+        right.setCustomSpacing(8, after: plus)
         right.translatesAutoresizingMaskIntoConstraints = false
         for v in [pills, right] as [NSView] { addSubview(v) }
         NSLayoutConstraint.activate([
@@ -76,6 +85,13 @@ final class TabBarView: NSView {
         }
     }
 
+    /// The Changes pill: open (active) or not, and the changed-file count (0: no count).
+    func showChanges(count: Int, open: Bool) {
+        changes.active = open
+        changes.count = count > 0 ? "\(count)" : nil
+        changes.setAccessibilityLabel(count > 0 ? "Changes, \(count) files" : "Changes")
+    }
+
     private func closeMenu(for id: String) -> NSMenu {
         let menu = NSMenu()
         let item = NSMenuItem(title: "Close Tab", action: #selector(closeFromMenu(_:)), keyEquivalent: "")
@@ -92,6 +108,7 @@ final class TabBarView: NSView {
     private func apply() {
         tmuxLabel.textColor = theme.color(\.faint)
         for b in [split, plus] { b.color = theme.color(\.muted); b.hoverFill = theme.color(\.raised) }
+        changes.theme = theme
         let current = items
         items = []
         show(current, tmux: tmuxLabel.isHidden ? nil : tmuxLabel.stringValue)

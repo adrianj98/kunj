@@ -129,3 +129,49 @@ public func isValidBranchName(_ name: String) -> Bool {
     }
     return true
 }
+
+/// kunj settings the app shows in Settings. They are kunj's (global config), not the app's, so the
+/// CLI and the app share them.
+public enum KunjSetting: String, CaseIterable, Sendable {
+    case agentTmux = "agent.tmux"
+    case agentTmuxStatus = "agent.tmuxStatus"
+
+    /// kunj's default when the setting is not in any config file.
+    public var defaultValue: Bool {
+        switch self {
+        case .agentTmux: return true
+        case .agentTmuxStatus: return false
+        }
+    }
+}
+
+/// `kunj config --get <key> --global` (run with `--json`, in the home directory).
+public func configGetArgs(_ setting: KunjSetting) -> [String] {
+    ["config", "--get", setting.rawValue, "--global"]
+}
+
+/// `kunj config --set <key>=<bool> --global`.
+public func configSetArgs(_ setting: KunjSetting, _ value: Bool) -> [String] {
+    ["config", "--set", "\(setting.rawValue)=\(value)", "--global"]
+}
+
+/// `kunj config --get <key> --json`: `{ key, value }`, `value` absent when the key is not set
+/// anywhere. `bool` is the value as a boolean (also from `"true"`/`"false"`), nil otherwise.
+public struct ConfigValueJson: Decodable, Equatable, Sendable {
+    public var key: String
+    public var bool: Bool?
+
+    private enum CodingKeys: String, CodingKey { case key, value }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = try c.decode(String.self, forKey: .key)
+        if let b = try? c.decode(Bool.self, forKey: .value) {
+            bool = b
+        } else if let s = try? c.decode(String.self, forKey: .value) {
+            bool = s == "true" ? true : (s == "false" ? false : nil)
+        } else {
+            bool = nil
+        }
+    }
+}

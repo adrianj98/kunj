@@ -227,8 +227,9 @@ class ActionButton: NSButton {
         let hintColor: NSColor
         switch style {
         case .filled:
-            fill = theme.color(\.primaryBg, alpha: pressedDown ? 0.85 : (hovering ? 0.93 : 1))
-            stroke = theme.color(\.primaryBg)
+            // disabled: the same fill, faded (Create PR on a container without a host worktree)
+            fill = theme.color(\.primaryBg, alpha: !isEnabled ? 0.4 : (pressedDown ? 0.85 : (hovering ? 0.93 : 1)))
+            stroke = theme.color(\.primaryBg, alpha: isEnabled ? 1 : 0)
             labelColor = theme.color(\.primaryFg)
             hintColor = theme.color(\.primaryHint)
         case .wide:
@@ -285,7 +286,10 @@ final class PillView: NSButton {
     var dot: NSColor? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var active: Bool { didSet { needsDisplay = true } }
     var theme: Theme { didSet { needsDisplay = true } }
+    /// A count after the label in mono 11 `muted` (the Changes pill's file count); nil: none.
+    var count: String? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var onPress: (() -> Void)?
+    private var countFont: NSFont { Theme.mono(DesignTokens.TypeScale.caption) }
     private var labelFont: NSFont { Theme.sans(DesignTokens.TypeScale.small, weight: active ? .medium : .regular) }
 
     init(_ label: String, dot: NSColor? = nil, active: Bool = false, theme: Theme) {
@@ -307,7 +311,8 @@ final class PillView: NSButton {
     override func accessibilityValue() -> Any? { active ? "selected" : nil }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 20 + textWidth(label, Theme.sans(12, weight: .medium)) + (dot == nil ? 0 : 13), height: 26)
+        NSSize(width: 20 + textWidth(label, Theme.sans(12, weight: .medium)) + (dot == nil ? 0 : 13)
+                   + (count.map { 6 + textWidth($0, countFont) } ?? 0), height: 26)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -322,7 +327,8 @@ final class PillView: NSButton {
             NSBezierPath(ovalIn: NSRect(x: x, y: bounds.midY - 3, width: 6, height: 6)).fill()
             x += 13
         }
-        drawText(label, font: labelFont, color: theme.color(active ? \.text : \.text2), x: x, midY: bounds.midY)
+        x = drawText(label, font: labelFont, color: theme.color(active ? \.text : \.text2), x: x, midY: bounds.midY)
+        if let count { drawText(count, font: countFont, color: theme.color(\.muted), x: x + 6, midY: bounds.midY) }
     }
 }
 
@@ -377,8 +383,25 @@ final class SearchField: BoxView, NSTextFieldDelegate {
             attributes: [.font: Theme.sans(12.5), .foregroundColor: theme.color(\.muted)])
     }
 
+    /// Esc pressed in the field (after it was cleared): the app gives the terminal the keyboard back.
+    var onEscape: (() -> Void)?
+
     func controlTextDidChange(_ obj: Notification) { onChange?(field.stringValue) }
     func focus() { window?.makeFirstResponder(field) }
+
+    /// Empties the field (and the filter).
+    func clear() {
+        guard !field.stringValue.isEmpty else { return }
+        field.stringValue = ""
+        onChange?("")
+    }
+
+    /// Esc clears the search; a second Esc on an empty field leaves it.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        if field.stringValue.isEmpty { onEscape?() } else { clear() }
+        return true
+    }
 }
 
 /// A shortcut badge: mono 10.5 in `muted`, 1 px `borderStrong`, radius 4, padding 1 × 5.

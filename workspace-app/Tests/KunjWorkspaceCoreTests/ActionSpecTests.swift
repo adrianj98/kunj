@@ -85,4 +85,23 @@ import Testing
             #expect(!isValidBranchName(bad), "\(bad)")
         }
     }
+
+    @Test func kunjSettingArgs() {
+        #expect(configSetArgs(.agentTmux, false) == ["config", "--set", "agent.tmux=false", "--global"])
+        #expect(configSetArgs(.agentTmuxStatus, true) == ["config", "--set", "agent.tmuxStatus=true", "--global"])
+        #expect(configGetArgs(.agentTmux) == ["config", "--get", "agent.tmux", "--global"])
+        #expect(KunjSetting.agentTmux.defaultValue == true)
+        #expect(KunjSetting.agentTmuxStatus.defaultValue == false)
+    }
+
+    @Test func configValueDecodes() throws {
+        func value(_ json: String) throws -> Bool? {
+            try JSONDecoder().decode(ConfigValueJson.self, from: Data(json.utf8)).bool
+        }
+        #expect(try value(#"{"key":"agent.tmux","value":false}"#) == false)
+        #expect(try value(#"{"key":"agent.tmux","value":true}"#) == true)
+        #expect(try value(#"{"key":"agent.tmux","value":"false"}"#) == false)
+        #expect(try value(#"{"key":"agent.tmux"}"#) == nil)
+        #expect(try value(#"{"key":"agent.tmux","value":{"a":1}}"#) == nil)
+    }
 }

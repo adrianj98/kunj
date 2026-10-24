@@ -23,6 +23,14 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private(set) var environment: Environment?
     /// Set once kunj is discovered (or by `--demo`); the column stays empty until then.
     var source: ChangesSource? { didSet { reload() } }
+    /// False while the column is closed (the Changes toggle): no summaries or contents are loaded
+    /// and `git` events are ignored; opening it loads the selected environment at once.
+    var isActive = true {
+        didSet {
+            guard isActive != oldValue else { return }
+            if isActive { reload() } else { pendingReload?.cancel(); pendingReload = nil; summaryGeneration += 1 }
+        }
+    }
 
     private let bar = FillView(.clear)
     private let barLine = FillView(.clear)
@@ -220,6 +228,7 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     private func scheduleReload() {
+        guard isActive else { return }
         pendingReload?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.reload() }
         pendingReload = work
@@ -238,7 +247,7 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private func reload() {
         pendingReload?.cancel()
         pendingReload = nil
-        guard let env = environment, let source else { return }
+        guard isActive, let env = environment, let source else { return }
         summaryGeneration += 1
         let generation = summaryGeneration
         let scope = self.scope
