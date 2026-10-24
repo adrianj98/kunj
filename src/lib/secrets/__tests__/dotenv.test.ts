@@ -67,6 +67,22 @@ describe('parseDotenv', () => {
     ]);
   });
 
+  it('never echoes file text in an error message', () => {
+    const errorOf = (text: string): string => {
+      try {
+        parseDotenv(text);
+      } catch (e) {
+        return (e as Error).message;
+      }
+      throw new Error('expected parseDotenv to throw');
+    };
+    // An unquoted PEM/base64 continuation line: everything before the `=` padding is key material.
+    expect(errorOf('KEY=MIIBIjAN\nS3CRETBASE64LINE+/AB==')).not.toContain('S3CRETBASE64');
+    // A stray quote pairs with the next entry's opening quote; the text after it is a value.
+    expect(errorOf("A='abc\nTOKEN='s3cret-value'")).not.toContain('s3cret');
+    expect(errorOf('A="x" s3cret-tail')).not.toContain('s3cret');
+  });
+
   it('counts lines inside multi-line values for later errors', () => {
     expect(() => parseDotenv('E="a\nb"\n1X=y')).toThrow(/line 3/);
   });

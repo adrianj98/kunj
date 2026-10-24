@@ -1,6 +1,7 @@
 // Parse .env files for `kunj secret import`: KEY=value, `export KEY=`, single quotes (literal),
 // double quotes (\n \" \\ escapes, may span lines), comments and blank lines. `${X}` is never
-// expanded. Errors name the line the entry starts on.
+// expanded. Errors name the line the entry starts on and never quote the file's text, which may be a
+// value (a base64 continuation line, the tail of a mispaired quote).
 
 export const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -31,7 +32,7 @@ export function parseDotenv(text: string): Array<{ name: string; value: string }
   const finishQuoted = (from: number, start: number): void => {
     const end = lineEnd(from);
     const rest = src.slice(from, end);
-    if (!/^[ \t]*(#.*)?$/.test(rest)) fail(start, `unexpected text after closing quote: ${rest.trim()}`);
+    if (!/^[ \t]*(#.*)?$/.test(rest)) fail(start, 'unexpected text after closing quote');
     nextLine(from);
   };
 
@@ -50,7 +51,7 @@ export function parseDotenv(text: string): Array<{ name: string; value: string }
     let name = raw.slice(0, eq).trim();
     const exported = /^export[ \t]+(.*)$/.exec(name);
     if (exported) name = exported[1].trim();
-    if (!isSecretName(name)) fail(start, `invalid name "${name}"`);
+    if (!isSecretName(name)) fail(start, 'invalid name (expected [A-Za-z_][A-Za-z0-9_]*)');
 
     let i = pos + eq + 1;
     while (src[i] === ' ' || src[i] === '\t') i++;

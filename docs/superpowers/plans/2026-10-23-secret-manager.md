@@ -21,7 +21,7 @@
 - Files: `~/.kunj/secrets.enc` (global) and `~/.kunj/<repo>/secrets.enc` (repo and branch), JSON envelope `{ version: 1, kdf: "keychain" | "passphrase", salt, iv, ciphertext, tag }` (base64 fields), AES-256-GCM, written atomically (temp file + rename) with mode 0600.
 - Keychain item: generic password, service `kunj-secrets`, account `kunj`, value 64 hex chars (32 bytes). libsecret: `secret-tool` with attribute `service kunj-secrets`. `KUNJ_SECRETS_KEY` (64 hex chars) overrides both.
 - Passphrase kdf: `crypto.scrypt(passphrase, salt, 32, { N: 2**15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })`, 16-byte random salt per file, 12-byte random IV per write. A wrong passphrase three times gives `secrets-locked`.
-- Error codes (`jsonCode` on a `SecretError`, printed without a stack trace like `AgentError`): `secrets-locked`, `secrets-corrupt`, `secret-not-found`, `bad-name`, `not-ignored`.
+- Error codes (`jsonCode` on a `SecretError`, printed without a stack trace like `AgentError`): `secrets-locked`, `secrets-corrupt`, `secret-not-found`, `bad-name`, `not-ignored`, `bad-dotenv` (added in Review 1: a malformed line in an imported `.env`).
 - The vault is unlocked only by commands that deliver or manage secrets, and only when a `secrets.enc` file exists. Listings (`worktree list`, `ct list`, `events`) never unlock it.
 - `secret` and `run` are fast-path commands (`src/commands/fast.ts`): no AWS, LangChain or top-level inquirer imports. Load inquirer lazily if it is used at all.
 - Tests never touch the real Keychain. Every test uses an injected `KeyProvider`.
@@ -47,15 +47,17 @@
 
 ### Task 1: dotenv parser and spec rulings
 
+**Status: done** in c2a722f; review fix (error messages never quote file text) in the Review 1 commit.
+
 **Files:**
 - Create: `src/lib/secrets/dotenv.ts`
 - Test: `src/lib/secrets/__tests__/dotenv.test.ts`
 - Modify: `docs/specs/container-system.md` (Secrets section: write Rulings 1–6 into Storage/Delivery; status line "Plan: docs/superpowers/plans/2026-10-23-secret-manager.md")
 
 **Interfaces:**
-- Produces: `parseDotenv(text: string): Array<{ name: string; value: string }>`, which throws `Error('line N: …')` on a malformed line. `isSecretName(name: string): boolean`, and `NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/`.
+- Produces: `parseDotenv(text: string): Array<{ name: string; value: string }>`, which throws a plain `Error('line N: …')` on a malformed line (N is the line the entry starts on; the message never contains text from the file). Entries come in first-seen order, last value wins. CRLF and lone CR are normalised to LF everywhere, including inside quoted values. Single-quoted values may span lines; spaces around `=` are allowed; text after a closing quote other than a `# comment` is an error; double-quote escapes other than `\n \" \\` are kept with their backslash. `isSecretName(name: string): boolean`, and `NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/`.
 
-- [ ] **Step 1: Write the failing table test** `parseDotenv` covering each case:
+- [x] **Step 1: Write the failing table test** `parseDotenv` covering each case:
   - `A=1` gives `1`.
   - `export B=2` gives `2`.
   - `C='x # y'` gives `x # y`.
@@ -70,10 +72,10 @@
   - Duplicate names: the last one wins.
 
   Also `isSecretName('A_1')` is true, and `isSecretName('A-1')` is false.
-- [ ] **Step 2:** `npx jest src/lib/secrets/__tests__/dotenv.test.ts`. Expected: FAIL, the module is not found.
-- [ ] **Step 3: Implement** a line scanner. Single quotes are literal. Double quotes handle `\n \" \\` and may span lines. Unquoted values stop at ` #`.
-- [ ] **Step 4:** Run the test. Expected: PASS.
-- [ ] **Step 5:** Edit the spec section with the rulings, then commit both files and add an `aj-log.md` line: `git commit -m "Secrets: dotenv parser; spec rulings for container env, tmux and keychain writes"`.
+- [x] **Step 2:** `npx jest src/lib/secrets/__tests__/dotenv.test.ts`. Expected: FAIL, the module is not found.
+- [x] **Step 3: Implement** a line scanner. Single quotes are literal. Double quotes handle `\n \" \\` and may span lines. Unquoted values stop at ` #`.
+- [x] **Step 4:** Run the test. Expected: PASS.
+- [x] **Step 5:** Edit the spec section with the rulings, then commit both files and add an `aj-log.md` line: `git commit -m "Secrets: dotenv parser; spec rulings for container env, tmux and keychain writes"`.
 
 ### Task 2: Vault (envelope crypto and store)
 
@@ -84,7 +86,7 @@
 **Interfaces:**
 - Consumes: `isSecretName` (Task 1).
 - Produces:
-  - `class SecretError extends Error { constructor(message: string, readonly jsonCode: 'secrets-locked'|'secrets-corrupt'|'secret-not-found'|'bad-name'|'not-ignored') }`. Add `SecretError` to BaseCommand's no-stack list.
+  - `class SecretError extends Error { constructor(message: string, readonly jsonCode: 'secrets-locked'|'secrets-corrupt'|'secret-not-found'|'bad-name'|'not-ignored'|'bad-dotenv') }`. Add `SecretError` to BaseCommand's no-stack list.
   - `interface SecretEntry { name: string; value: string; scope?: { branch?: string }; targets: Array<'host'|'container'>; delivery: { env: boolean; file?: string }; updatedAt: string }`
   - `interface Unlock { kdf: 'keychain'|'passphrase'; keyFor(salt: Buffer): Promise<Buffer> }` (the keychain kdf ignores the salt).
   - `readVault(file: string, unlock: Unlock): Promise<SecretEntry[]>` returns `[]` when the file is missing.
@@ -141,7 +143,7 @@
 - Produces:
   - `resolveSecrets(global: SecretEntry[], repo: SecretEntry[], branch: string | undefined, target: 'host'|'container'): SecretEntry[]` applies the order global, then repo, then branch (most specific wins by name), then filters by target.
   - `envOf(entries: SecretEntry[]): Record<string,string>` (env-delivered only).
-  - `renderFiles(entries: SecretEntry[]): Map<string, string>` maps the relative file to `NAME=value` lines. Values are double-quoted and escaped so `parseDotenv` reads them back, sorted by name.
+  - `renderFiles(entries: SecretEntry[]): Map<string, string>` maps the relative file to `NAME=value` lines. Values are double-quoted with `\\`, `"` and newline escaped (`\n`) so `parseDotenv` reads them back, sorted by name. `parseDotenv` turns a raw CR into LF and has no `\r` escape, so a value containing `\r` does not round-trip; `set`/`import` keep it in the vault as given, and only the rendered file loses it.
   - `writeHostFiles(worktreeRoot: string, files: Map<string,string>, opts: { force?: boolean }): Promise<string[]>` checks `git check-ignore -q` per file and throws `SecretError('… is not ignored by git', 'not-ignored')` before writing anything. It writes with mode 0600 and refuses paths outside the root (`..`, absolute).
   - `loadSecrets(opts: { branch?: string; target: 'host'|'container'; create?: false }): Promise<SecretEntry[]>` does the glue: config, `getKunjDir`, `getUnlock`, both `readVault`s and `resolveSecrets`. It returns `[]` without unlocking when no `secrets.enc` exists.
 - [ ] **Step 1: Write the failing tests.**
@@ -183,6 +185,7 @@
 - [ ] **Step 3: Implement.**
   - Read the `set` value from a hidden prompt on a TTY, otherwise from stdin, stripping one trailing newline.
   - The import confirmation lists the names and their add or replace status.
+  - A `parseDotenv` error is rethrown as `SecretError('<file>: line N: …', 'bad-dotenv')` (no stack trace, never the file's text). Add a test.
   - Defaults:
     - Targets: `host,container`.
     - Delivery: env.
