@@ -16,6 +16,7 @@ private final class FakeKunj: @unchecked Sendable {
     private var counts: [String: Int] = [:]
     var containersFail = false
     var worktreesFail = false
+    var extraRepos: [RepoRef] = []
 
     func bump(_ key: String) { lock.lock(); counts[key, default: 0] += 1; lock.unlock() }
     func count(_ key: String) -> Int { lock.lock(); defer { lock.unlock() }; return counts[key] ?? 0 }
@@ -34,7 +35,8 @@ private final class FakeKunj: @unchecked Sendable {
 
     func list() -> ([RepoEnvironments], KunjCLIError?) {
         bump("all")
-        return ([repoA, repoB].map { repo in
+        lock.lock(); let extra = extraRepos; lock.unlock()
+        return (([repoA, repoB] + extra).map { repo in
             mergeEnvironments(repo: repo, worktrees: try? worktrees(repo), containers: containers(repo))
         }, nil)
     }
@@ -216,5 +218,43 @@ private func sleepMs(_ ms: UInt64) async { try? await Task.sleep(nanoseconds: ms
         let ok = await waitUntil(3) { fake.count("all") >= 2 }
         await stream.stop()
         #expect(ok)
+    }
+
+    @Test func aChangedRepositorySetRestartsTheStream() async {
+        // kunj events watches the repositories it found at start: a repo added (or hidden) later
+        // is only watched after a restart.
+        let fake = FakeKunj()
+        let store = makeStore(fake, coalesceMs: 20)
+        await store.refreshAll()
+        let stream = store.makeEventStream(backoff: 0.05...0.1)
+        store.start(events: stream)
+        // events.ndjson's backend event runs a full refresh; the same repositories: no restart.
+        #expect(await waitUntil(3) { fake.count("all") >= 2 })
+        await sleepMs(100)
+        #expect(stream.restarts == 0)
+        fake.extraRepos = [RepoRef(name: "new", root: "/r/new", bare: false)]
+        store.handle(.registry(kind: "repos", repoRoot: nil))
+        let ok = await waitUntil(3) { stream.restarts == 1 }
+        await stream.stop()
+        #expect(ok)
+        #expect(store.repos.map(\.repo.root) == [repoA.root, repoB.root, "/r/new"])
+    }
+
+    @Test func aFailedListingDoesNotRestartTheStream() async {
+        let fake = FakeKunj()
+        var fail = false
+        let store = EnvironmentStore(
+            cli: fakeKunjCLI(), coalesceMs: 20,
+            lister: { _ in fail ? ([], KunjCLIError(code: .commandFailed, message: "repos failed")) : fake.list() },
+            worktrees: { _, repo in try fake.worktrees(repo) }, containers: { _, repo in fake.containers(repo) })
+        await store.refreshAll()
+        let stream = store.makeEventStream(backoff: 0.05...0.1)
+        store.start(events: stream)
+        #expect(await waitUntil(3) { stream.pid != nil })
+        fail = true
+        await store.refreshAll()
+        await sleepMs(200)
+        await stream.stop()
+        #expect(stream.restarts == 0)
     }
 }

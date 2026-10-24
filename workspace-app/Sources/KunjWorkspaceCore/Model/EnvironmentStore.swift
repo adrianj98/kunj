@@ -7,6 +7,8 @@ import Foundation
 /// a `hello` after a stream restart, or an event for a repository the store does not know, run
 /// everything. A scoped result replaces only its half of the repository's environments (worktrees
 /// or containers), so it is re-merged with the other half. Refreshes run one at a time, in order.
+/// `kunj events` watches the repositories it found at start, so a clean full listing whose roots
+/// differ from those restarts the stream (its `hello` then refreshes everything again).
 @MainActor
 public final class EnvironmentStore {
     public typealias Lister = (KunjCLI) async -> ([RepoEnvironments], KunjCLIError?)
@@ -29,6 +31,10 @@ public final class EnvironmentStore {
     /// The repository whose scoped refresh set `lastError` (nil when a full refresh set it).
     private var errorRoot: String?
     private var events: EventStream?
+    /// The repository roots the running `kunj events` was started with (as far as the store knows).
+    private var watchedRoots: Set<String>?
+    /// The roots of the last full listing that did not fail.
+    private var cleanRoots: Set<String>?
 
     private enum Key: Hashable {
         case all
@@ -94,6 +100,21 @@ public final class EnvironmentStore {
         let (list, error) = await lister(cli)
         errorRoot = nil
         publish(list, error)
+        restartEventsIfReposChanged(list, error)
+    }
+
+    /// `kunj events` watches the repositories it found when it started, so a repository added,
+    /// un-hidden or hidden since then needs a new child. Only a clean listing is compared: a failed
+    /// one drops repositories that are still registered.
+    private func restartEventsIfReposChanged(_ list: [RepoEnvironments], _ error: KunjCLIError?) {
+        guard error == nil else { return }
+        let roots = Set(list.map(\.repo.root))
+        cleanRoots = roots
+        guard let events else { return }
+        guard let watched = watchedRoots else { watchedRoots = roots; return }
+        guard roots != watched else { return }
+        watchedRoots = roots
+        events.restart()
     }
 
     private func runWorktrees(root: String) async {
@@ -165,6 +186,7 @@ public final class EnvironmentStore {
     /// stops it (`await events.stop()`) before the app terminates.
     public func start(events: EventStream) {
         self.events = events
+        watchedRoots = cleanRoots
         events.start()
     }
 

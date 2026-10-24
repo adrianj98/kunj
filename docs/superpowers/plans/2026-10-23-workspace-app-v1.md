@@ -260,13 +260,16 @@ git add workspace-app aj-log.md && git commit -m "workspace-app: JSON mirrors an
 
 ### Task 5: Event stream and the environment store
 
+**Status:** the core (`EventStream`, `EnvironmentStore`, `listWorktrees`/`listContainers`) shipped in 8f49f54, as built below; Step 3 (the `AppDelegate` wiring) moved to Task 7, which replaces `loadEnvironments` with the store.
+
 **Files:**
 - Create: `workspace-app/Sources/KunjWorkspaceCore/CLI/EventStream.swift`, `workspace-app/Sources/KunjWorkspaceCore/Model/EnvironmentStore.swift`, fixture `Tests/Fixtures/responses/events.ndjson` (a `hello`, a `git`, a `container`, a `backend`), `fake-kunj` `events` case: prints the fixture line by line with 20 ms gaps and then waits for stdin EOF unless `FAKE_KUNJ_EVENTS_EXIT=1`
 - Test: `workspace-app/Tests/KunjWorkspaceCoreTests/EventStreamTests.swift`, `workspace-app/Tests/KunjWorkspaceCoreTests/EnvironmentStoreTests.swift`
 
 **Interfaces:**
-- `EventStream.swift`: `public enum KunjEvent: Equatable { case hello(version: String, repos: Int); case git(repoRoot: String?); case registry(kind: String, repoRoot: String?); case container(repoRoot: String?, branch: String?, container: String, action: String); case agent(session: String, running: Bool, state: String?); case backend(available: Bool, message: String?); case error(code: String?, message: String) }`; `public func parseEventLine(_ line: String) -> KunjEvent?` (nil for a malformed line); `public final class EventStream { public init(cli: KunjCLI, onEvent: @escaping @Sendable (KunjEvent) -> Void, backoff: ClosedRange<TimeInterval> = 1...30); public func start(); public func stop() async` (closes the child's stdin, waits up to 2 s, then SIGTERM); restarts after exit with doubling backoff while started; `public private(set) var restarts: Int` }`.
+- `EventStream.swift`: `public enum KunjEvent: Equatable { case hello(version: String, repos: Int); case git(repoRoot: String?); case registry(kind: String, repoRoot: String?); case container(repoRoot: String?, branch: String?, container: String, action: String); case agent(session: String, running: Bool, state: String?, repoRoot: String?); case backend(available: Bool, message: String?); case error(code: String?, message: String) }`; `public func parseEventLine(_ line: String) -> KunjEvent?` (nil for a malformed line); `public final class EventStream { public init(cli: KunjCLI, onEvent: @escaping @Sendable (KunjEvent) -> Void, backoff: ClosedRange<TimeInterval> = 1...30); public func start(); public func stop() async` (closes the child's stdin, waits up to 2 s, then SIGTERM); restarts after exit with doubling backoff while started; `public func restart()` (closes the running child's stdin so a new one starts after `backoff.lowerBound`, SIGTERM if it is still running 2 s later); `public private(set) var restarts: Int`; `public var pid: Int32?` }`.
 - `EnvironmentStore.swift`: `@MainActor public final class EnvironmentStore { public init(cli: KunjCLI, coalesceMs: Int = 300, lister: @escaping (KunjCLI) async -> ([RepoEnvironments], KunjCLIError?) = listEnvironments); public private(set) var repos: [RepoEnvironments]; public private(set) var lastError: KunjCLIError?; public var onChange: (() -> Void)?; public func refreshAll() async; public func refreshRepo(root: String) async; public func handle(_ event: KunjEvent)` (git → that repo's worktree list only; container → that repo's ct list only; agent → its repo's worktree list when the event has a repo, else all; registry/backend → all; hello after a restart → a full refresh; coalesced per key with a timer; the store keeps each repo's last worktree and container results apart so a scoped refresh re-merges with the other half) ; `public func environment(id: String) -> Environment?`; `public func start(events: EventStream)` }`.
+- As built (8f49f54), beyond the above: `KunjEvent` is `Sendable`; `.agent` carries `repoRoot` (kunj sends `repo` on hook-state changes, not on the tmux poll's start/end). `EventStream` runs `kunj events --json` in the home directory like `repos`, discards stderr, resets the backoff after a child lived longer than `backoff.upperBound`, and `stop()` sends SIGKILL 1 s after SIGTERM if needed. `EnvironmentStore.init` also takes `worktrees:` (default `listWorktrees`) and `containers:` (default `listContainers`), so scoped refreshes are tested without per-root fixtures; a scoped result replaces only its kind's half of `RepoEnvironments.environments`, so the store keeps no raw JSON. An event whose repo the store does not know (null or unlisted root) runs a full refresh; a pending full refresh swallows scoped ones; the first `hello` is ignored (it follows the initial `refreshAll`) and every later one refreshes all; refreshes run one at a time, in order; `onChange` fires only when `repos` or `lastError` changed; a failed scoped `worktree list` keeps the last result and sets `lastError` until that repo's next success. `kunj events` resolves its repositories once, at start, so a clean full listing whose roots differ from the ones the stream started with calls `restart()` (a repo added, un-hidden or hidden since launch). `makeEventStream(backoff:)` builds a stream whose events hop to the main actor into `handle`; Task 7 wires it: `let s = store.makeEventStream(); store.start(events: s)` after `refreshAll()`, and `await s.stop()` in `applicationShouldTerminate`. `RelativeTime` is Task 6's.
 - A scoped refresh needs one repo's half on its own, which `listEnvironments` (Task 4) does not expose: factor its per-repo calls into `public func listWorktrees(cli:repo:) async throws -> WorktreeListJson` and `public func listContainers(cli:repo:) async -> Result<ContainerListJson, KunjCLIError>` (both `cwd: repo.root`), keep `listEnvironments` built on them, and re-merge with `mergeEnvironments(repo:worktrees:containers:)`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -275,7 +278,7 @@ git add workspace-app aj-log.md && git commit -m "workspace-app: JSON mirrors an
 func testParseEventLines() { … hello, git with repo, container with null repo, agent with state, backend, malformed → nil }
 func testStreamDeliversAndRestarts() async { … FAKE_KUNJ_EVENTS_EXIT=1, backoff 0.05...0.1: ≥ 4 events, restarts ≥ 1 within 1 s }
 func testStopClosesStdinAndWaits() async { … start, stop(): child pid gone (kill(pid, 0) == -1) }
-func testStoreCoalescesGitEvents() async { … lister counting calls; three .git for one root within 20 ms, coalesceMs 50 → 1 call }
+func testStoreCoalescesGitEvents() async { … counting calls; three .git for one root within 10 ms, coalesceMs 250 → 1 scoped worktree list, no ct list, no full listing (50 ms was flaky on a busy MainActor) }
 func testBackendEventRefreshesAll() async { … }
 func testStoreKeepsWorktreesWhenContainersFail() async { … lister returns backend .unavailable → environments non-empty }
 ```
@@ -285,7 +288,7 @@ func testStoreKeepsWorktreesWhenContainersFail() async { … lister returns back
 Run: `scripts/test.sh`
 Expected: PASS.
 
-- [ ] **Step 3: Wire into the app**
+- [ ] **Step 3: Wire into the app** (done by Task 7)
 
 `AppDelegate` creates the store after discovery, `refreshAll()`, starts the stream, stops it in `applicationShouldTerminate` (returning `.terminateLater` until `stop()` resolves). The status bar's left side shows `N environments · M agents running` for now.
 
@@ -352,7 +355,7 @@ git add workspace-app aj-log.md && git commit -m "workspace-app: sidebar, header
 
 **Files:**
 - Create: `workspace-app/Sources/KunjWorkspaceCore/Terminal/TerminalSpec.swift`, `workspace-app/Sources/KunjWorkspace/Terminal/TerminalTab.swift`, `workspace-app/Sources/KunjWorkspace/Views/TabBarView.swift`, `workspace-app/Sources/KunjWorkspace/Model/TabRegistry.swift`
-- Modify: `Views/TerminalColumn.swift` (Task 6's placeholder: keep `show(_:)` and `theme`, replace the inside), `MainWindowController.swift`, `AppDelegate.swift` (`loadEnvironments` → the `EnvironmentStore`; add `tabsMenu()`/`environmentMenu()` to `buildMenu`) (menu: Tabs ⌘⇧] ⌘⇧[ ⌘W, Environment ⌘T ⌘⇧A, Edit menu as in the spike), `HeaderView` wiring
+- Modify: `Views/TerminalColumn.swift` (Task 6's placeholder: keep `show(_:)` and `theme`, replace the inside), `MainWindowController.swift`, `AppDelegate.swift` (`loadEnvironments` → the `EnvironmentStore` and its event stream, with Task 5's Step 3 checks: a commit updates the row within a second, no `kunj events` left after quitting; add `tabsMenu()`/`environmentMenu()` to `buildMenu`) (menu: Tabs ⌘⇧] ⌘⇧[ ⌘W, Environment ⌘T ⌘⇧A, Edit menu as in the spike), `HeaderView` wiring
 - Test: `workspace-app/Tests/KunjWorkspaceCoreTests/TerminalSpecTests.swift`
 
 **Interfaces:**

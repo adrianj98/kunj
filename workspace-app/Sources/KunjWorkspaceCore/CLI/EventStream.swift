@@ -116,6 +116,26 @@ public final class EventStream: @unchecked Sendable {
         }
     }
 
+    /// Ends the running child so a new one starts after `backoff.lowerBound` (counted in
+    /// `restarts`): `kunj events` resolves its repositories once, at start. Closes its stdin, and
+    /// sends SIGTERM if it is still running 2 s later. Does nothing when not started or between runs.
+    public func restart() {
+        lock.lock()
+        guard started, let child = process else { lock.unlock(); return }
+        delay = backoff.lowerBound
+        let input = stdinPipe
+        stdinPipe = nil
+        lock.unlock()
+        try? input?.fileHandleForWriting.close()
+        queue.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let stuck = self.process === child && child.isRunning
+            self.lock.unlock()
+            if stuck { kill(child.processIdentifier, SIGTERM) }
+        }
+    }
+
     /// Ends this run (no restart) and hands back its child and stdin.
     private func detach() -> (Process?, Pipe?) {
         lock.lock(); defer { lock.unlock() }

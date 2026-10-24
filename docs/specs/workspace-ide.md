@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -209,10 +209,15 @@ refresh runs `kunj repos --json` (hidden and missing repos skipped), then per re
 and `ct list --json` in parallel (a failing `ct list` marks that repo's backend unavailable; the worktrees
 still show), and merges them into `Environment` values (`id = "<repo name>|<kind>|<branch>"`, the name as `kunj repos`
 reports it; a worktree and a container on the same branch are two rows; bare and detached worktrees are
-left out). `repos` runs in the user's home, everything else in the repo's root. `EventStream` reads `kunj events --json` line by line on a
-background thread; the store maps `git`/`container`/`agent` events to a refresh of that repo and
-`repos`/`backend`/`sessions`/`forwards` to a full refresh, coalesced per repo (300 ms), and notifies the
-views on the main thread. The app never asks git or Docker for state. The status verb and dot are pure
+left out). `repos` runs in the user's home, everything else in the repo's root. `EventStream` runs
+`kunj events --json` in the home directory with stdin held open (closing it ends the child; `stop()`
+waits 2 s, then SIGTERM, then SIGKILL), reads it line by line on a background thread and restarts it
+with doubling backoff (1–30 s, reset after a child outlived 30 s). The store maps `git`/`container`/`agent`
+events to a refresh of that repo and `repos`/`backend`/`sessions`/`forwards`, or an event for a repo it
+does not know, to a full refresh, coalesced per key (300 ms from the first event; a pending full refresh
+swallows scoped ones; refreshes run one at a time), and calls `onChange` on the main actor only when
+`repos` or `lastError` changed. `kunj events` resolves its repositories once, so a full listing whose
+roots differ from the ones the stream started with restarts it. The app never asks git or Docker for state. The status verb and dot are pure
 functions of an `Environment` (`Environment.statusVerb`, `Environment.dot`), in this order: missing
 worktree, stopped container, agent waiting, agent running, PR merged, PR open, dirty (`N changed files`),
 ahead (`↑N unpushed`), `Clean`. `ct list` reports a container's dirty state without a count, upstream
@@ -222,7 +227,8 @@ leaves its last state behind. Refreshes are scoped to what changed: a `git` even
 repo's `worktree list --json`, a `container` event only its `ct list --json` (which execs into every
 container), `agent` (which carries `repo` when kunj knows it) the repo's `worktree list`, and
 `repos`/`backend`/`sessions`/`forwards` everything. After the event stream restarts, the store does a
-full refresh, because events from the gap are lost. The relative time is the app's own `lastActivity` per environment
+full refresh, because events from the gap are lost (the first `hello`, which follows the app's initial
+refresh, is skipped). The relative time is the app's own `lastActivity` per environment
 (bumped when its state hash changes or a tab of it is used; persisted in the layout file).
 
 **Agent state.** Running comes from tmux (`agent.running`); *waiting for input* comes from Claude Code
@@ -394,6 +400,16 @@ From the environment model (Task 4):
   terminals when its row drops out for a refresh or two.
 - [ ] `ct list` carries no PR for a container and no upstream, so a container row cannot show `PR #N`
   or `↑N from main` as the mockup does; reporting them would be a CLI addition.
+
+From the event stream and store (Task 5):
+
+- [ ] The tmux poll's `agent` events (an agent starting or ending) carry no `repo`, so each runs a full
+  refresh, whose `ct list` execs into every container of every repo; kunj could map the session name
+  to its repo as it does for the hook-state events. A `container` event whose origin kunj could not
+  map (`repo: null`) does the same.
+- [ ] A scoped `worktree list` failure sets `lastError`, which only that repo's next success clears; a
+  full refresh's partial error (one repo dropped) stays until the next full refresh, so the status
+  bar can show an error for a repo that recovered through a scoped refresh.
 
 From the window chrome (Task 6):
 

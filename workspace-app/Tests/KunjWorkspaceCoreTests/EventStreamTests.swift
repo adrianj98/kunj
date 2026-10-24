@@ -111,6 +111,29 @@ func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) async -> Bool {
         #expect(kill(pid, 0) == -1)
     }
 
+    @Test func restartReplacesTheChild() async throws {
+        // kunj events resolves its repositories once, so the store restarts it when they change.
+        let box = EventBox()
+        let stream = EventStream(cli: fakeKunjCLI(), onEvent: { box.add($0) }, backoff: 0.05...0.1)
+        stream.start()
+        #expect(await waitUntil(3) { box.events.count >= 4 })
+        let first = try #require(stream.pid)
+        stream.restart()
+        let ok = await waitUntil(3) { stream.restarts == 1 && stream.pid != nil && stream.pid != first }
+        #expect(ok)
+        #expect(kill(first, 0) == -1)
+        #expect(await waitUntil(3) { box.events.filter { if case .hello = $0 { return true }; return false }.count == 2 })
+        await stream.stop()
+    }
+
+    @Test func restartBeforeStartIsHarmless() async {
+        let stream = EventStream(cli: fakeKunjCLI(), onEvent: { _ in })
+        stream.restart()
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        #expect(stream.pid == nil)
+        #expect(stream.restarts == 0)
+    }
+
     @Test func stopBeforeStartIsHarmless() async {
         let stream = EventStream(cli: fakeKunjCLI(), onEvent: { _ in })
         await stream.stop()
