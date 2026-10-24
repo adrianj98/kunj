@@ -31,3 +31,24 @@ private func file(_ path: String, _ status: FileStatus = .modified) -> ChangedFi
         #expect(changesCountLabel(0) == "0 files")
     }
 }
+
+@Suite struct ShownDiffTests {
+    private let shown = ShownDiff(environmentId: "r:w:main", scope: .base, path: "a.ts", original: "x\n", modified: "y\n")
+
+    @Test func theSameDiffIsNotShownAgain() {
+        // A reload after an unrelated git event must not reset the diff (and its scroll position)
+        #expect(!diffNeedsShowing(shown: shown, next: shown))
+    }
+
+    @Test func anythingDifferentIsShown() {
+        #expect(diffNeedsShowing(shown: nil, next: shown))
+        var other = shown; other.modified = "z\n"
+        #expect(diffNeedsShowing(shown: shown, next: other))
+        other = shown; other.scope = .uncommitted
+        #expect(diffNeedsShowing(shown: shown, next: other))
+        other = shown; other.path = "b.ts"
+        #expect(diffNeedsShowing(shown: shown, next: other))
+        other = shown; other.environmentId = "r:c:main"
+        #expect(diffNeedsShowing(shown: shown, next: other))
+    }
+}

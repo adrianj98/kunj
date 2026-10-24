@@ -34,3 +34,27 @@ public func selectedIndexAfterRefresh(previous: String?, files: [ChangedFile]) -
 public func changesCountLabel(_ n: Int) -> String {
     n == 1 ? "1 file" : "\(n) files"
 }
+
+/// What the Changes column's diff editor shows. The column reloads on every `git` event of the
+/// repository (any worktree's) and refetches the selected file each time; showing the same diff
+/// again would reset Monaco's scroll position and folded regions, so it is shown only when
+/// `diffNeedsShowing` says it changed.
+public struct ShownDiff: Equatable {
+    public var environmentId: String
+    public var scope: DiffScope
+    public var path: String
+    public var original: String
+    public var modified: String
+    public init(environmentId: String, scope: DiffScope, path: String, original: String, modified: String) {
+        self.environmentId = environmentId
+        self.scope = scope
+        self.path = path
+        self.original = original
+        self.modified = modified
+    }
+}
+
+/// True unless `next` is exactly what is already shown (nil: nothing, or the page reloaded).
+public func diffNeedsShowing(shown: ShownDiff?, next: ShownDiff) -> Bool {
+    shown != next
+}

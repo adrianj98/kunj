@@ -50,6 +50,9 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private var contentGeneration = 0
     private var selecting = false
     private var pendingReload: DispatchWorkItem?
+    /// What the diff editor shows (nil after `clear` or a page reload): an identical refetch is
+    /// not sent again, so an unrelated `git` event does not scroll the diff back to the top.
+    private var shown: ShownDiff?
 
     static let debounce: TimeInterval = 0.5
 
@@ -176,7 +179,7 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         loaded = false
         table.reloadData()
         render()
-        Task { await self.diffView.call("clear") }
+        clearDiff()
         reload()
     }
 
@@ -257,6 +260,11 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         failed = true
         table.reloadData()
         render()
+        clearDiff()
+    }
+
+    private func clearDiff() {
+        shown = nil
         Task { await self.diffView.call("clear") }
     }
 
@@ -267,7 +275,7 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let generation = contentGeneration
         let row = table.selectedRow
         guard let env = environment, let source, row >= 0, row < summary.files.count else {
-            Task { await self.diffView.call("clear") }
+            clearDiff()
             return
         }
         let file = summary.files[row]
@@ -276,17 +284,22 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
             do {
                 let (original, modified) = try await source.contents(env: env, scope: scope, file: file)
                 guard generation == self.contentGeneration else { return }
+                let next = ShownDiff(environmentId: env.id, scope: scope, path: file.path,
+                                     original: original, modified: modified)
+                guard diffNeedsShowing(shown: self.shown, next: next) else { return }
+                self.shown = next
                 await self.diffView.call("showDiff", ["original": original, "modified": modified,
                                                       "language": "", "path": file.path])
             } catch {
                 guard generation == self.contentGeneration else { return }
                 log("diff contents of \(file.path) failed: \(error)")
-                await self.diffView.call("clear")
+                self.clearDiff()
             }
         }
     }
 
     private func pageReady() {
+        shown = nil // a reloaded page shows nothing
         Task {
             await diffView.call("setTheme", ["tokens": MonacoWebView.tokens(theme)])
         }

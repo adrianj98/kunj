@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -269,8 +269,14 @@ HEAD, is an error the column shows, never a fallback to a local branch. Every gi
 `--no-optional-locks -c core.quotePath=false`, because a container does not get the host's
 `GIT_OPTIONAL_LOCKS`. Contents are `git show <ref>:<path>` and the working file (fs in a worktree,
 `kunj ct file read` in a container; a worktree symlink reads as its target text, as git stores it).
-Monaco's diff editor renders the selected file read-only; the Monaco theme is built from the tokens
-(`bg`, `addBg`, `faintest` line numbers).
+Monaco's diff editor renders the selected file read-only (inline at the column's width, unchanged
+regions folded to 3 lines of context; a file with one empty side in a single-side editor with every
+line marked `+` or `−`); the Monaco theme is built from the tokens (`bg`, `addBg`, `faintest` line
+numbers) and leaves code monochrome. The page's functions take one argument object
+(`window.kunj.showDiff({original, modified, language, path})`). The column reloads 500 ms after a
+`git` event of its repository or a container `status` event (`EnvironmentStore.onRepoChanged`), keeps
+the selected path and the scope per environment, and refetches the selected file without re-sending
+an identical diff, so the view does not jump back to the top.
 
 **Editor tabs.** Double-clicking a changed file (or "Edit" in the diff header) opens it as a tab in the
 left column, in the second WKWebView (`?mode=editor`, one Monaco model per open file). ⌘S saves through
@@ -435,6 +441,16 @@ From the diff and file core (Tasks 9–10):
   `git diff` and added as untracked. The column selects rows by path, so they should be merged.
 - [ ] `DiffError.commandFailed` names the command and exit code only (the runner drops stderr), so a
   failing `git` in a container shows no reason.
+
+From the Changes column (Task 9):
+
+- [ ] A binary file (numstat `-`, counts 0) is decoded lossily and sent to Monaco as text, and a large
+  file is sent whole; the column could show "Binary file" (a NUL in the first 8 KB, as git checks) and
+  cap the size it diffs.
+- [ ] Monaco shows no `@@ … @@  path` hunk header as `warm.png` does; the folded regions stand in for
+  them. Task 10's `Edit` button needs a place: a header over the diff would hold both.
+- [ ] Any `git` event of the repository reloads the column, also one from another worktree of it;
+  `kunj events` could name the worktree so only its environment reloads.
 
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).
