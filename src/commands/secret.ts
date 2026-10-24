@@ -375,7 +375,8 @@ export class SecretCommand extends BaseCommand {
   }
 
   // --delete: the source goes, and so does its keep copy, so a new worktree does not get the
-  // plaintext file back. A source inside the keep store is removed through it.
+  // plaintext file back. A source inside the keep store is removed through it. A symlink is removed
+  // itself, never the file it points to, unless that file is in the keep store.
   private async deleteSource(source: string): Promise<void> {
     const real = (p: string) => {
       try {
@@ -384,11 +385,11 @@ export class SecretCommand extends BaseCommand {
         return path.resolve(p);
       }
     };
-    const abs = real(source);
-    const inKeep = path.relative(real(getKeepDir()), abs);
+    // The named path with its directories resolved, but not its last component.
+    const abs = path.join(real(path.dirname(source)), path.basename(source));
+    const inKeep = path.relative(real(getKeepDir()), real(source));
     if (inKeep && !inKeep.startsWith('..') && !path.isAbsolute(inKeep)) {
       deleteKeptFile(inKeep.split(path.sep).join('/'));
-      return;
     }
     fs.rmSync(abs, { force: true });
     let root: string;

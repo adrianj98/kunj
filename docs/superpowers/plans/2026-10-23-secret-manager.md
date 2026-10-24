@@ -171,7 +171,7 @@
 
 ### Task 5: `kunj secret` command
 
-**Status: done** in the commit "kunj secret: set, import, list, get, rm, env, apply". Rulings in the ledger.
+**Status: done** in 6c08cd1; review fix (`import --delete` of a symlinked source removes the link, never the file it points to, and a link into the keep store removes the keep copy too) in the Review 5 commit. Rulings in the ledger.
 
 **Files:**
 - Create: `src/commands/secret.ts`
@@ -224,7 +224,7 @@
 - Test: `src/commands/__tests__/run.test.ts`, `src/lib/__tests__/agent-session.test.ts`
 
 **Interfaces:**
-- Consumes: `loadSecrets({ branch, target: 'host' })`, `envOf`, `renderFiles`, `writeHostFiles` (Task 4). `run` and `worktree add` pass the branch explicitly (the current one for `run` without `--branch`, the new worktree's for `add`): `loadSecrets` does not look it up.
+- Consumes: `loadSecrets({ branch, target: 'host' })`, `envOf`, `renderFiles`, `writeHostFiles` (Task 4). `openVaults` and `configuredMode` are exported from resolve.ts (Task 5): use `loadSecrets` for one branch; `openVaults` + `resolveSecrets` only when resolving several branches from one unlock. Give `run` the same `unlock` seam shape as `SecretCommandDeps.unlock` (getUnlock's `mode`/`env`/`platform`/`run`/`prompt`/`tty`) so tests pass `KUNJ_SECRETS_KEY` and a runner that throws. `run` and `worktree add` pass the branch explicitly (the current one for `run` without `--branch`, the new worktree's for `add`): `loadSecrets` does not look it up.
 - Produces: `kunj run [--branch b] -- <cmd…>`. It spawns `cmd` with `{ ...process.env, ...envOf(host secrets) }` and `stdio: 'inherit'`, renders file deliveries first, and exits with the child's code (signal: 128+n).
 
 - [ ] **Step 1: Write the failing tests.**
@@ -268,7 +268,7 @@
 
 **Files:**
 - Modify:
-  - `src/commands/secret.ts`: `list` with no secrets and a keep `.env` prints `Found a kept .env: kunj secret import ~/.kunj/<repo>/keep/.env --delete`.
+  - `src/commands/secret.ts`: `list` (no `--global`/`--branch` narrowing, text mode only; `--json` stays a bare `SecretListJson`) with no secrets and a keep `.env` (`hasKeptFile('.env')`) prints `Found a kept .env: kunj secret import ~/.kunj/<repo>/keep/.env --delete`.
   - `src/commands/setup.ts`: offer the same import (lazy inquirer is already used there).
   - `CLAUDE.md`: a Secrets subsection under Branch Containers, plus the command list.
   - `docs/specs/container-system.md`: status "Shipped" with the commits.

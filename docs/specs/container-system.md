@@ -69,7 +69,7 @@ itself when Docker is unavailable.
 
 *Designed 2026-10-23; in progress.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, Task 5); `kunj run` and the container and host delivery paths are not. Today secrets reach a container only as host environment variables
+(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, 6c08cd1 and its review fix); `kunj run` and the container and host delivery paths are not. Today secrets reach a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -160,8 +160,8 @@ naming the file and the line the entry starts on; the message never quotes the f
 be a value.
 Defaults: repo scope, `targets: host,container`, env plus `file: .env` (so the worktree gets its `.env`
 back). In a terminal it shows the names it will add or replace, never values, and asks once (`--yes`
-skips; `--json` prints the names). `--delete` removes the source afterwards; when the source is a keep
-file it is removed from the keep store too.
+skips; `--json` prints the names). `--delete` removes the source afterwards (a symlink is removed itself, never the file it points to); when the source is,
+or links to, a keep file it is removed from the keep store too, as is the keep copy at the source's path in the worktree.
 
 ### Delivery
 

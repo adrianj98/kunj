@@ -349,6 +349,27 @@ describe('import', () => {
     expect((await repoEntries()).map((e) => e.name)).toEqual(['A']);
   });
 
+  test('--delete of a symlinked source removes the link, not the file it points to', async () => {
+    const shared = path.join(dirs.home, 'shared.env');
+    fs.writeFileSync(shared, 'A=1\n');
+    const link = path.join(root, '.env');
+    fs.symlinkSync(shared, link);
+    await cmd({ cwd: () => root }).execute('import', ['.env'], { yes: true, delete: true });
+    expect(fs.existsSync(shared)).toBe(true);
+    expect(() => fs.lstatSync(link)).toThrow();
+  });
+
+  test('--delete of a symlink into the keep store removes the keep copy and the link', async () => {
+    const kept = path.join(dirs.kunj, 'keep', '.env');
+    fs.mkdirSync(path.dirname(kept), { recursive: true });
+    fs.writeFileSync(kept, 'A=1\n');
+    const link = path.join(root, '.env');
+    fs.symlinkSync(kept, link);
+    await cmd({ cwd: () => root }).execute('import', ['.env'], { yes: true, delete: true });
+    expect(fs.existsSync(kept)).toBe(false);
+    expect(() => fs.lstatSync(link)).toThrow();
+  });
+
   test('--delete of the keep file itself removes it from the keep store', async () => {
     const kept = path.join(dirs.kunj, 'keep', 'config', '.env');
     fs.mkdirSync(path.dirname(kept), { recursive: true });
