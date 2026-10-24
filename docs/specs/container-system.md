@@ -69,7 +69,7 @@ itself when Docker is unavailable.
 
 *Designed 2026-10-23; in progress.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix); the commands and the container and host delivery paths are not. Today secrets reach a container only as host environment variables
+(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, Task 5); `kunj run` and the container and host delivery paths are not. Today secrets reach a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -138,15 +138,18 @@ Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in th
 | --- | --- |
 | `kunj secret set NAME [--branch b] [--global] [--targets host,container] [--file .env] [--no-env]` | Value from a hidden prompt, or stdin when piped; never argv (visible in `ps` and shell history) |
 | `kunj secret import <file> [--branch b] [--global] [--targets …] [--file …] [--delete] [--yes]` | Import a `.env` file (see below) |
-| `kunj secret list [--branch b] [--global] [--json]` | Names, scope, targets, delivery; never values |
+| `kunj secret list [--branch b] [--global] [--json]` | Names, scope, targets, delivery; never values. Every scope by default; `--global` only the global store, `--branch` only that branch's entries |
 | `kunj secret get NAME [--branch b]` | One value on stdout for scripts; refused with `--json` |
 | `kunj secret rm NAME [--branch b] [--global]` | Remove one |
-| `kunj secret env [--branch b] [--target host]` | Resolved secrets as `export NAME='…'` lines for `eval` |
-| `kunj secret apply [-a]` | Render file deliveries into this worktree (or all), like `keep apply` |
+| `kunj secret env [--branch b] [--target host]` | Resolved secrets as `export NAME='…'` lines for `eval`; refused with `--json` |
+| `kunj secret apply [-a] [--force]` | Render file deliveries into this worktree (or all, each with its own branch), like `keep apply`; the vault is opened once |
 | `kunj run [--branch b] -- <cmd…>` | Run a host command with the host secrets in its environment, file deliveries rendered first |
 
-`secret` and `run` are on the fast path (no AWS, LangChain or inquirer at top level). The branch
-defaults to the current one.
+`secret` and `run` are on the fast path (no AWS, LangChain or inquirer at top level). Writes (`set`,
+`import`, `rm`) go to repo scope unless `--global` or `--branch` is given (`--branch` without a name is the
+current branch); reads (`get`, `env`, `apply`) resolve with the current branch unless `--branch` names
+another. `--json` output of `set`, `rm`, `import` and `apply` is `SecretWriteJson`, `SecretImportJson` and
+`SecretApplyJson` (json-types.ts); none holds a value.
 
 **`.env` import.** Standard dotenv syntax: `KEY=value`, single and double quotes, `export KEY=`,
 comments, blank lines, multi-line values in quotes (double: `\n`, `\"`, `\\` escapes, any other
@@ -202,9 +205,8 @@ file it is removed from the keep store too.
   value, and a snapshot image's `Config.Env` holds neither.
 
 **Code map:** built: `src/lib/secrets/{dotenv,vault,errors,keyprovider,resolve,deliver}.ts`, `secrets.*` settings in
-`src/settings/secrets.ts`. Planned:
-`src/commands/secret.ts`, `src/commands/run.ts`,
-`SecretListJson` in `src/lib/json-types.ts`; container delivery hooks into `src/lib/container/env.ts`
+`src/settings/secrets.ts`, `src/commands/secret.ts` with `SecretListJson` (and the write/import/apply
+shapes) in `src/lib/json-types.ts`. Planned: `src/commands/run.ts`; container delivery hooks into `src/lib/container/env.ts`
 and `lifecycle.ts`.
 
 ## Roadmap

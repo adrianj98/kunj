@@ -847,6 +847,71 @@
     "helpText": "Actions:\n  list (default)   Known repositories, most recently used first\n  add [path]       Add the repository containing path (default: current directory)\n  remove <path>    Hide a repository; it stays hidden until added again\n  prune            Forget repositories whose directory no longer exists\n\nRepositories are recorded as kunj runs in them, in ~/.kunj/repos.json"
   },
   {
+    "name": "secret",
+    "usage": "secret [action] [args...]",
+    "description": "Manage encrypted secrets and where they are delivered",
+    "arguments": "[action] [args...]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--branch [branch]",
+        "description": "Branch scope (without a name: the current branch)",
+        "default": null
+      },
+      {
+        "flags": "--global",
+        "description": "The global store (environment variables only)",
+        "default": null
+      },
+      {
+        "flags": "--targets <list>",
+        "description": "[set, import] host, container or host,container (default both)",
+        "default": null
+      },
+      {
+        "flags": "--file <path>",
+        "description": "[set, import] Also render into this file, relative to the worktree (import: default .env)",
+        "default": null
+      },
+      {
+        "flags": "--no-env",
+        "description": "[set, import] Do not deliver as an environment variable",
+        "default": null
+      },
+      {
+        "flags": "--target <target>",
+        "description": "[env] host (default) or container",
+        "default": null
+      },
+      {
+        "flags": "--yes",
+        "description": "[import] Do not ask for confirmation",
+        "default": null
+      },
+      {
+        "flags": "--delete",
+        "description": "[import] Delete the source file (and its keep copy) afterwards",
+        "default": null
+      },
+      {
+        "flags": "-a, --all",
+        "description": "[apply] Render into every worktree",
+        "default": null
+      },
+      {
+        "flags": "--force",
+        "description": "[apply] Write files that git does not ignore",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Actions:\n  set NAME           store a value (hidden prompt, or stdin when piped; never an argument)\n  import <file>      import a .env file (default: repo scope, host and container, env plus .env)\n  list               names, scope, targets and delivery; never values\n  get NAME           print one value (refused with --json)\n  rm NAME            remove one (of the scope given by --global / --branch)\n  env                resolved secrets as export lines, for eval (refused with --json)\n  apply [-a]         render file deliveries into this worktree (or every one)\n\nSecrets are stored at repo scope unless --global or --branch is given. Reads (get, env, apply)\nresolve global, then repo, then the branch (the current one unless --branch names another)."
+  },
+  {
     "name": "setup",
     "usage": "setup",
     "description": "Set up kunj aliases and shell configuration",

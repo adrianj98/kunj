@@ -42,11 +42,18 @@ export interface LoadSecretsOptions {
 }
 
 export async function loadSecrets(opts: LoadSecretsOptions): Promise<SecretEntry[]> {
+  const { global, repo } = await openVaults(opts);
+  return resolveSecrets(global, repo, opts.branch, opts.target);
+}
+
+// Both vaults' entries, unresolved: what `kunj secret list` and `get` need, and what a caller resolving
+// for several branches (`secret apply -a`) opens once. Nothing is unlocked when no file exists.
+export async function openVaults(opts: Omit<LoadSecretsOptions, 'branch' | 'target'>): Promise<{ global: SecretEntry[]; repo: SecretEntry[] }> {
   const files = vaultFiles(opts.kunjDir ?? getKunjDir(), opts.globalDir ?? getGlobalKunjDir());
   // Read both kinds first, so a corrupt file is reported before anything is unlocked.
   const globalKdf = vaultKdf(files.global);
   const repoKdf = vaultKdf(files.repo);
-  if (!globalKdf && !repoKdf) return [];
+  if (!globalKdf && !repoKdf) return { global: [], repo: [] };
 
   const mode = opts.mode ?? (await configuredMode());
   // One Unlock per kdf, shared by both files, so a passphrase or the keychain is asked once.
@@ -71,10 +78,11 @@ export async function loadSecrets(opts: LoadSecretsOptions): Promise<SecretEntry
 
   const global = globalKdf ? await readVault(files.global, await unlockFor(globalKdf)) : [];
   const repo = repoKdf ? await readVault(files.repo, await unlockFor(repoKdf)) : [];
-  return resolveSecrets(global, repo, opts.branch, opts.target);
+  return { global, repo };
 }
 
-async function configuredMode(): Promise<KeyProviderMode> {
+// secrets.keyProvider from the resolved config; an unknown value is auto.
+export async function configuredMode(): Promise<KeyProviderMode> {
   const config = (await loadResolvedConfig()) as { secrets?: { keyProvider?: string } };
   const mode = config.secrets?.keyProvider;
   return MODES.includes(mode as KeyProviderMode) ? (mode as KeyProviderMode) : 'auto';

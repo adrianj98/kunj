@@ -200,3 +200,34 @@ export type EventJson = { at: string } & (
   | { type: 'agent'; session: string; running: boolean; state?: 'running' | 'waiting' | null; repo?: { name: string; root: string } }
   | { type: 'backend'; status: 'available' | 'unavailable'; message?: string }
 );
+
+/** `kunj secret list --json`: names, scope, targets and delivery of the stored secrets; never a value. */
+export interface SecretListJson {
+  secrets: Array<{
+    name: string;
+    scope: 'global' | 'repo' | 'branch';
+    /** Present when scope is 'branch' */
+    branch?: string;
+    targets: Array<'host' | 'container'>;
+    delivery: { env: boolean; file?: string };
+    updatedAt: string;
+  }>;
+}
+
+/** `kunj secret set|rm --json`: the entry written or removed (never its value). */
+export interface SecretWriteJson {
+  success: true;
+  name: string;
+  scope: 'global' | 'repo' | 'branch';
+  branch?: string;
+}
+
+/** `kunj secret import --json`: the names imported (never values). */
+export interface SecretImportJson {
+  imported: string[];
+}
+
+/** `kunj secret apply --json`: worktree path -> the files rendered into it. */
+export interface SecretApplyJson {
+  applied: Record<string, string[]>;
+}

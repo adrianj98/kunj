@@ -171,6 +171,8 @@
 
 ### Task 5: `kunj secret` command
 
+**Status: done** in the commit "kunj secret: set, import, list, get, rm, env, apply". Rulings in the ledger.
+
 **Files:**
 - Create: `src/commands/secret.ts`
 - Modify: `src/commands/fast.ts` (add `secret`), `src/commands/index.ts`, `src/lib/json-types.ts` (`SecretListJson`), `src/lib/keep.ts` (only if `deleteKeptFile` needs exporting for `--delete`)
@@ -181,11 +183,12 @@
 - Produces:
   - `export interface SecretListJson { secrets: Array<{ name: string; scope: 'global'|'repo'|'branch'; branch?: string; targets: Array<'host'|'container'>; delivery: { env: boolean; file?: string }; updatedAt: string }> }`
   - Subcommands per the spec table: `set`, `import`, `list`, `get`, `rm`, `env`, `apply [-a]`.
+  - As built: `SecretCommand(deps?: SecretCommandDeps)`; the seams are `unlock` (getUnlock's `mode`/`env`/`platform`/`run`/`prompt`/`tty`), `isTTY`, `stdin`, `hiddenPrompt`, `confirm`, `currentBranch`, `worktreeRoot`, `worktrees`, `cwd`; tests use `KUNJ_SECRETS_KEY` and a runner that throws, so no keychain is reached. `openVaults(opts)` (both vaults' entries, unresolved, nothing unlocked without a file) and `configuredMode()` are now exported from resolve.ts; `loadSecrets` is `resolveSecrets(openVaults(...))`. `get`, `env` and `apply` read through `openVaults` + `resolveSecrets` (apply -a opens once and resolves per worktree branch). Also in json-types.ts: `SecretWriteJson` (set, rm), `SecretImportJson`, `SecretApplyJson`. `env --json` is refused like `get --json`. `apply` takes `--force`. `list` shows every scope; `--global`/`--branch` narrow it.
 
 - Reads (`get`, `env`, `apply`) go through `loadSecrets({ branch, target, … })` (Task 4) and must pass the current branch themselves: `branch` undefined means no branch layer. `apply` writes through `renderFiles` + `writeHostFiles(root, files, { force })`; a bad path is a plain `Error` (prints `{ error: "<message>" }` in `--json`), `not-ignored` is a `SecretError`. `get`/`list` read the raw files with `vaultKdf` + `getUnlock` + `readVault`, not `resolveSecrets`, when they need every scope (resolution keeps one branch and drops overridden entries).
 - Write paths (`set`, `import`, `rm`) call `getUnlock` with `create: true` and `existingKdf` from `vaultKdf` of both files (Task 4); only when neither file exists may a new key be made.
 
-- [ ] **Step 1: Write the failing tests.** Inject `Unlock` (or `getUnlock`'s `run`/`prompt`) through a test seam on the command, the way `repoId` is a seam in events, and use a temp HOME.
+- [x] **Step 1: Write the failing tests.** Inject `Unlock` (or `getUnlock`'s `run`/`prompt`) through a test seam on the command, the way `repoId` is a seam in events, and use a temp HOME.
   - `set FOO` with the value on stdin stores `targets: ['host','container']` and env.
   - `set FOO --global --file .env` is refused (globals are env only).
   - `set 1BAD` gives `bad-name`.
@@ -196,8 +199,8 @@
   - `env` prints `export FOO='v'` with `'` escaped as `'\''`.
   - `import fixture.env --yes` adds its names with the defaults (repo scope, host and container, env plus `.env`). `--json` prints the names only. `--delete` removes the source, and the keep copy too when the source is the keep file.
   - `apply` renders into the current worktree, and `-a` into every worktree.
-- [ ] **Step 2:** Run the tests. Expected: FAIL.
-- [ ] **Step 3: Implement.**
+- [x] **Step 2:** Run the tests. Expected: FAIL.
+- [x] **Step 3: Implement.**
   - Read the `set` value from a hidden prompt on a TTY, otherwise from stdin, stripping one trailing newline.
   - The import confirmation lists the names and their add or replace status.
   - A `parseDotenv` error is rethrown as `SecretError('<file>: line N: …', 'bad-dotenv')` (no stack trace, never the file's text). Add a test.
@@ -205,8 +208,8 @@
     - Targets: `host,container`.
     - Delivery: env.
     - Branch: the current branch, only with `--branch`. A plain `set` stores at repo scope.
-- [ ] **Step 4:** Run the tests and `npm run lint`. Expected: PASS.
-- [ ] **Step 5:** Commit: `git commit -m "kunj secret: set, import, list, get, rm, env, apply"`.
+- [x] **Step 4:** Run the tests and `npm run lint`. Expected: PASS.
+- [x] **Step 5:** Commit: `git commit -m "kunj secret: set, import, list, get, rm, env, apply"`.
 
 ### Task 6: Host delivery: `kunj run`, `kunj agent` and `worktree add`
 

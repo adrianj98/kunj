@@ -52,7 +52,7 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Plan `docs/superpowers/plans/2026-10-23-secret-manager.md`. Task 1 (dotenv parser, rulings in the spec), Task 2 (encrypted vault), Task 3 (key providers) and Task 4 (resolution, host file rendering; 009958c + review fix) done; Tasks 5–8 left |
+| Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Plan `docs/superpowers/plans/2026-10-23-secret-manager.md`. Task 1 (dotenv parser, rulings in the spec), Task 2 (encrypted vault), Task 3 (key providers) and Task 4 (resolution, host file rendering; 009958c + review fix) and Task 5 (`kunj secret`) done; Tasks 6–8 left |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
 
 ## To do
