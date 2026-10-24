@@ -11,6 +11,7 @@ import { hostSecrets, runAttached, UnlockSeam } from '../lib/secrets/host';
 interface RunOptions {
   json?: boolean;
   branch?: string;
+  hold?: boolean;
 }
 
 // Test seams; each defaults to git and the key provider settings.
@@ -19,6 +20,20 @@ export interface RunCommandDeps {
   currentBranch?: () => Promise<string>;
   // null: not in a git worktree (no file is rendered)
   worktreeRoot?: () => Promise<string | null>;
+  // --hold: resolves when the user presses Enter (default: a line on stdin, at once without a terminal)
+  waitForEnter?: () => Promise<void>;
+}
+
+// One line on stdin; nothing to wait for when stdin is not a terminal
+function waitForEnter(): Promise<void> {
+  if (!process.stdin.isTTY) return Promise.resolve();
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const readline = require('readline') as typeof import('readline');
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, terminal: false });
+    rl.once('line', () => rl.close());
+    rl.once('close', () => resolve());
+  });
 }
 
 export class RunCommand extends BaseCommand {
@@ -27,7 +42,10 @@ export class RunCommand extends BaseCommand {
       name: 'run',
       description: 'Run a command with the host secrets in its environment',
       arguments: '<command...>',
-      options: [{ flags: '--branch <branch>', description: 'Resolve the secrets of this branch (default: the current one)' }],
+      options: [
+        { flags: '--branch <branch>', description: 'Resolve the secrets of this branch (default: the current one)' },
+        { flags: '--hold', description: 'On an error before the command starts, wait for Enter (tmux panes close with the process)' },
+      ],
       helpText: [
         'Put -- before the command so its own options are not read as kunj\'s:',
         '  kunj run -- npm run dev',
@@ -47,12 +65,23 @@ export class RunCommand extends BaseCommand {
 
     const branch = opts.branch || (await (this.deps.currentBranch ?? getCurrentBranch)()) || undefined;
     const root = await (this.deps.worktreeRoot ?? (() => getCurrentWorktreePath()))();
-    const { env } = await hostSecrets({
-      branch,
-      root,
-      unlock: this.deps.unlock,
-      warn: (message) => process.stderr.write(`⚠ ${message}\n`),
-    });
+    let env: Record<string, string>;
+    try {
+      ({ env } = await hostSecrets({
+        branch,
+        root,
+        unlock: this.deps.unlock,
+        warn: (message) => process.stderr.write(`⚠ ${message}\n`),
+      }));
+    } catch (error) {
+      // `kunj agent` and `kunj worktree shell` run this as a tmux pane's process: without the wait the
+      // pane, and the message with it, would close at once and leave only "[exited]".
+      if (opts.hold) {
+        process.stderr.write(`✗ ${error instanceof Error ? error.message : String(error)}\nPress Enter to close.\n`);
+        await (this.deps.waitForEnter ?? waitForEnter)();
+      }
+      throw error;
+    }
     process.exitCode = await runAttached(argv, { ...process.env, ...env });
   }
 }

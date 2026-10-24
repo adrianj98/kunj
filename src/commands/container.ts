@@ -49,6 +49,7 @@ import {
   StartError,
   StartOptions,
   StartResult,
+  checkSecrets,
   containerStatus,
   inspectForRemove,
   needsResume,
@@ -456,7 +457,8 @@ export class ContainerCommand extends BaseCommand {
     const willCreate = !!options.rebuild || (await ctx.backend.inspectLabels(names.container)) === null;
     // Docker-in-Docker that cannot or must not run here is refused before the hook, the snapshot and the push
     if (willCreate) await precheckDind(ctx.backend, config.container, { imageOverride: options.image });
-    // A locked or corrupt vault fails the start before the hook, the snapshot and anything created
+    // A locked or corrupt vault, a multi-line env value or a bad file path fails the start before the
+  // hook, the snapshot and anything created
     const secrets = await this.containerSecrets(branch);
     if (willCreate) await runActionHook('pre-container-create', { branch, container: names.container, image: '' }, hookOptions);
 
@@ -524,7 +526,9 @@ export class ContainerCommand extends BaseCommand {
     const { envOf, loadSecrets } = await import('../lib/secrets/resolve');
     const { renderFiles } = await import('../lib/secrets/deliver');
     const entries = await loadSecrets({ branch, target: 'container', ...this.secretsUnlock });
-    return { env: envOf(entries), files: renderFiles(entries), stamp };
+    const secrets = { env: envOf(entries), files: renderFiles(entries), stamp };
+    checkSecrets(secrets);
+    return secrets;
   }
 
   /** Builds a missing or stale snapshot before a start; true when the start's hints are covered. */

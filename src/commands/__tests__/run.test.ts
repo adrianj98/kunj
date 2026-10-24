@@ -148,6 +148,29 @@ test('a vault that cannot be unlocked fails the run, without starting the comman
   expect(fs.existsSync(marker)).toBe(false);
 });
 
+// In a tmux pane (hostRunArgv passes --hold) the pane closes with the process, taking the message with it
+test('with --hold, a vault that cannot be unlocked shows the error and waits for Enter before failing', async () => {
+  await repoVault([entry('FOO', 'v')]);
+  const missingItem = jest.fn(async () => ({ code: 44, stdout: '' }));
+  const waitForEnter = jest.fn(async () => {
+    expect(stderr.join('')).toMatch(/No secrets key/);
+  });
+  await expect(
+    runNode('process.exit(0)', { hold: true }, { unlock: { ...unlockSeam, env: {}, run: missingItem, tty: false }, waitForEnter }),
+  ).rejects.toMatchObject({ jsonCode: 'secrets-locked' });
+  expect(waitForEnter).toHaveBeenCalledTimes(1);
+  expect(stderr.join('')).toMatch(/Press Enter/);
+});
+
+test('without --hold a failed unlock does not wait, and --hold does not wait when the command runs', async () => {
+  await repoVault([entry('FOO', 'v')]);
+  const missingItem = jest.fn(async () => ({ code: 44, stdout: '' }));
+  const waitForEnter = jest.fn(async () => undefined);
+  await expect(runNode('process.exit(0)', {}, { unlock: { ...unlockSeam, env: {}, run: missingItem, tty: false }, waitForEnter })).rejects.toMatchObject({ jsonCode: 'secrets-locked' });
+  expect(await runNode('process.exit(4)', { hold: true }, { waitForEnter })).toBe(4);
+  expect(waitForEnter).not.toHaveBeenCalled();
+});
+
 describe('worktree add', () => {
   test('renders the new branch\'s file deliveries into the new worktree', async () => {
     git(root, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init');

@@ -261,7 +261,7 @@ describe('kunjSelf and hostRunArgv', () => {
     const argv = agentArgv('kunj-x', '/wt', hostRunArgv('feature/x', ['/bin/zsh', '-lc', 'claude']), { KUNJ_BRANCH: 'feature/x' });
     expect(argv).toEqual([
       'tmux', '-u', 'new-session', '-A', '-s', 'kunj-x', '-c', '/wt', '-e', 'KUNJ_BRANCH=feature/x',
-      process.execPath, '/k/dist/index.js', 'run', '--branch', 'feature/x', '--', '/bin/zsh', '-lc', 'claude',
+      process.execPath, '/k/dist/index.js', 'run', '--hold', '--branch', 'feature/x', '--', '/bin/zsh', '-lc', 'claude',
       ';', 'set-option', '-t', 'kunj-x', 'window-size', 'latest', ';', 'set-option', '-t', 'kunj-x', 'status', 'off',
     ]);
     expect(argv.some((a) => a.includes('FOO='))).toBe(false);
@@ -269,6 +269,6 @@ describe('kunjSelf and hostRunArgv', () => {
 
   test('hostRunArgv without a branch lets run use the worktree\'s current branch', () => {
     process.argv[1] = '/k/dist/index.js';
-    expect(hostRunArgv(undefined, ['/bin/zsh', '-l'])).toEqual([process.execPath, '/k/dist/index.js', 'run', '--', '/bin/zsh', '-l']);
+    expect(hostRunArgv(undefined, ['/bin/zsh', '-l'])).toEqual([process.execPath, '/k/dist/index.js', 'run', '--hold', '--', '/bin/zsh', '-l']);
   });
 });

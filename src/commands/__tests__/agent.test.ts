@@ -101,7 +101,7 @@ test('start under tmux runs the agent through kunj run for the branch; no secret
   await new AgentCommand().execute('start', 'feature-a', {});
   const [argv, , env] = (runTmux as jest.Mock).mock.calls[0];
   const i = argv.indexOf('run');
-  expect(argv.slice(i, i + 4)).toEqual(['run', '--branch', 'feature-a', '--']);
+  expect(argv.slice(i, i + 5)).toEqual(['run', '--hold', '--branch', 'feature-a', '--']);
   expect(argv.some((a: string) => a.includes('s3cret-value') || a.includes('FOO='))).toBe(false);
   expect(env).not.toHaveProperty('FOO');
   expect(hostSecrets).not.toHaveBeenCalled();

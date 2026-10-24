@@ -42,7 +42,9 @@ kunj run --branch fix/login -- $SHELL -l
 ```
 
 `kunj run` passes on the command's exit code. A file that git does not ignore is not written, with a
-warning, and the command still runs.
+warning, and the command still runs. When the secret store cannot be opened (the Keychain item is
+missing, or a wrong passphrase three times), the command does not start; in an agent or shell tmux
+session the error stays on screen until you press Enter.
 
 ## Several agents in one worktree
 

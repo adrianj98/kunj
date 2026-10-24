@@ -658,18 +658,27 @@ type StartSecrets = NonNullable<StartOptions['secrets']>;
  */
 function checkedSecrets(options: StartOptions): StartSecrets | undefined {
   if (options.namesFor !== undefined || !options.secrets) return undefined;
-  for (const [name, value] of Object.entries(options.secrets.env)) {
+  checkSecrets(options.secrets);
+  return options.secrets;
+}
+
+/** Refuses what a container cannot take; `kunj ct start` calls it before the create hook and the snapshot. */
+export function checkSecrets(secrets: StartSecrets): void {
+  for (const [name, value] of Object.entries(secrets.env)) {
     if (/[\r\n]/.test(value)) {
       throw new StartError(`Secret ${name} has more than one line, which a container's environment cannot hold; deliver it as a file instead`, 'docker');
     }
   }
-  for (const rel of options.secrets.files.keys()) secretFilePath(rel);
-  return options.secrets;
+  for (const rel of secrets.files.keys()) secretFilePath(rel);
 }
 
-/** A secret file's path relative to /workspace, normalized; refused (bad-path) outside it or inside .git. */
+/** A secret file's path relative to /workspace, normalized; refused (bad-path) outside it, inside .git or with a control character. */
 export function secretFilePath(rel: string): string {
   const norm = path.posix.normalize(rel);
+  // A control character would split the .git/info/exclude line and leave the file committable
+  if (/[\x00-\x1f\x7f]/.test(rel)) {
+    throw new ContainerError(`Secret file path must not contain control characters: ${JSON.stringify(rel)}`, 'bad-path');
+  }
   if (!rel || path.posix.isAbsolute(rel) || norm === '.' || norm === '..' || norm.startsWith('../')) {
     throw new ContainerError(`Secret file path must be inside /workspace: ${JSON.stringify(rel)}`, 'bad-path');
   }

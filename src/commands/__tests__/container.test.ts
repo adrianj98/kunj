@@ -16,6 +16,7 @@ jest.mock('../../lib/container/lifecycle', () => {
     stopContainer: jest.fn(),
     inspectForRemove: jest.fn(),
     needsResume: actual.needsResume,
+    checkSecrets: actual.checkSecrets,
     removeContainer: jest.fn(),
     containerStatus: jest.fn(),
   };
@@ -1922,6 +1923,26 @@ describe('ct secrets', () => {
     expect(lifecycle.startContainer).not.toHaveBeenCalled();
     expect(runActionHook).not.toHaveBeenCalled();
     expect(JSON.parse(stdout.join('')).error.code).toBe('secrets-locked');
+  });
+
+  it('a multi-line env secret or a bad file path is refused before the create hook and the snapshot', async () => {
+    const files = vaultFiles(repoDir(), globalDir());
+    for (const bad of [entry('MULTI', 'line1\nline2'), entry('F', 'v', { delivery: { env: false, file: '../outside' } })]) {
+      await writeVault(files.repo, [bad], fixed);
+      (lifecycle.startContainer as jest.Mock).mockClear();
+      (runActionHook as jest.Mock).mockClear();
+      stdout.length = 0;
+      const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      try {
+        await new ContainerCommand({ secretsUnlock: unlock }).execute('start', 'feat', { json: true });
+      } finally {
+        exit.mockRestore();
+      }
+      expect(lifecycle.startContainer).not.toHaveBeenCalled();
+      expect(runActionHook).not.toHaveBeenCalled();
+      expect(stdout.join('')).not.toContain('line1');
+      expect(JSON.parse(stdout.join('')).error.code).toBe(bad.name === 'MULTI' ? 'docker' : 'bad-path');
+    }
   });
 
   it('list --json reports secretsChanged from the vault stamp without unlocking', async () => {

@@ -2018,7 +2018,8 @@ describe('secrets', () => {
   });
 
   it('refuses a file path outside /workspace or inside .git, and a multi-line env value, before creating anything', async () => {
-    for (const bad of ['../x', '/etc/x', '.git/config', 'a/.GIT/hooks/x', '', 'a/../../x']) {
+    // A control character would split the .git/info/exclude line, leaving the file committable
+    for (const bad of ['../x', '/etc/x', '.git/config', 'a/.GIT/hooks/x', '', 'a/../../x', '.env\n!x', 'a\tb', 'a\x7fb']) {
       const b = backend();
       await expect(startContainer(b, options({ secrets: secrets({ files: new Map([[bad, 'X="1"\n']]) }) }))).rejects.toMatchObject({ code: 'bad-path' });
       expect(b.methods()).not.toContain('run');

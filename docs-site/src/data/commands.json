@@ -859,6 +859,11 @@
         "default": null
       },
       {
+        "flags": "--hold",
+        "description": "On an error before the command starts, wait for Enter (tmux panes close with the process)",
+        "default": null
+      },
+      {
         "flags": "--json",
         "description": "Output result as JSON",
         "default": null

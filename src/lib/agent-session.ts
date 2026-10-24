@@ -153,8 +153,9 @@ export function kunjSelf(): string[] {
 // `argv` under `kunj run`, which unlocks the vault and puts the host secrets in argv's environment.
 // tmux sessions start agents and shells this way: `new-session -e` would put the values in argv.
 // Without a branch, run resolves with the branch checked out where it runs (the session's -c).
+// --hold keeps the pane open on a failed unlock, so its message is not lost with the pane.
 export function hostRunArgv(branch: string | undefined, argv: string[]): string[] {
-  return [...kunjSelf(), 'run', ...(branch ? ['--branch', branch] : []), '--', ...argv];
+  return [...kunjSelf(), 'run', '--hold', ...(branch ? ['--branch', branch] : []), '--', ...argv];
 }
 
 // The branch's host secrets for a process started here without tmux (`kunj agent`, `kunj worktree shell`),
