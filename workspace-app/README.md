@@ -50,7 +50,8 @@ Environment variables:
 - `SDKROOT`: force an SDK. Otherwise both scripts try the default SDK, then the installed Command
   Line Tools SDKs newest first (some lack the plugins the toolchain needs), and remember the one that
   worked in `<scratch>/.kunj-sdk`. A build failing with "plugin for module 'TestingMacros' not
-  found" after an interrupted compile is retried once with the module caches cleared.
+  found" after an interrupted compile is retried once with the module caches cleared. If it still fails
+  on every SDK, `rm -rf <scratch>/out` and run again.
 
 `build/` is shared: two agents bundling at once overwrite each other's app. Take a screenshot right
 after your own bundle.
@@ -64,7 +65,10 @@ open "build/Kunj Workspace.app"
 
 `--screenshot <png>` renders the window after its first layout, writes the PNG (sRGB, 2x) and
 quits; compare it with `docs/workspace-app/design/mockups/warm.png`. On launch the app logs to
-stderr whether the bundled fonts registered (they only do inside the `.app`). Not notarized: if
+stderr whether the bundled fonts registered (they only do inside the `.app`). It runs kunj as the
+`kunjCommand` default (`defaults write <bundle id> kunjCommand "node /path/dist/index.js"`, or
+`-kunjCommand "…"` after the executable for one run), else `kunj` on the login shell's PATH, and
+shows its version at the sidebar's foot or the error in red on the status bar. Not notarized: if
 macOS refuses to open it, right-click > Open, or
 `xattr -dr com.apple.quarantine "/Applications/Kunj Workspace.app"`.
 
@@ -73,7 +77,9 @@ macOS refuses to open it, right-click > Open, or
 `KunjWorkspaceCoreTests` use Swift Testing (`import Testing`, `@Test`), which the Command Line
 Tools ship (XCTest is not always there). Shared helpers are in
 `Tests/KunjWorkspaceCoreTests/Support.swift`: `appRoot`, `repoRoot`, `fixturesDir`,
-`responsesDir`, `fakeKunjPath`, `fakeKunjResponseName(_:)`, `tempDirectory()` and `runFakeKunj(_:)`.
+`responsesDir`, `fakeKunjPath`, `fakeKunjResponseName(_:)`, `tempDirectory()`, `runFakeKunj(_:)`,
+and `fakeKunjCLI(environment:path:)`, a `KunjCLI` running fake-kunj through `env K=V …` so the test
+process's environment is never changed (values cannot contain `"`).
 
 `Tests/Fixtures/fake-kunj` answers `kunj <args>` by printing `responses/<name>.json`, where
 `<name>` is the arguments with `--json` dropped, a leading `--` stripped from the others, `/`

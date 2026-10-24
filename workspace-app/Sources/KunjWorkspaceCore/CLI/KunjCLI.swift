@@ -74,9 +74,7 @@ public final class KunjCLI: @unchecked Sendable {
         let cli = KunjCLI(command: command, path: path)
         let raw = try await cli.runRaw(["-V"], cwd: NSHomeDirectory(), stdin: nil, timeout: 30)
         let program = cli.commandParts[0]
-        if raw.exit == 127 || raw.exit == 126 {
-            throw KunjCLIError(code: .notFound, message: "kunj not found on your PATH: npm install -g kunj")
-        }
+        if raw.exit == 127 || raw.exit == 126 { throw cli.startFailure(stderr: raw.stderr) }
         let printed = lastLine(String(decoding: raw.stdout, as: UTF8.self)) ?? ""
         guard raw.exit == 0 else {
             throw KunjCLIError(code: .commandFailed,
@@ -99,9 +97,7 @@ public final class KunjCLI: @unchecked Sendable {
         _ args: [String], cwd: String, stdin: Data? = nil, timeout: TimeInterval = 120
     ) async throws -> T {
         let raw = try await runRaw(args + ["--json"], cwd: cwd, stdin: stdin, timeout: timeout)
-        if raw.exit == 127 {
-            throw KunjCLIError(code: .notFound, message: "kunj not found on your PATH: npm install -g kunj")
-        }
+        if raw.exit == 127 { throw startFailure(stderr: raw.stderr) }
         let payload = Self.extractJSON(raw.stdout)
         if let payload, let error = Self.errorDocument(payload) {
             throw error
@@ -147,6 +143,17 @@ public final class KunjCLI: @unchecked Sendable {
     public func spawnSpec(_ args: [String], cwd: String) -> SpawnSpec {
         SpawnSpec(executable: "/usr/bin/env", arguments: commandParts + args, cwd: cwd,
                   environment: ShellEnvironment.terminalEnvironment(path: path))
+    }
+
+    /// env exited 126/127. It is `notFound` when env could not run the command itself
+    /// (`env: kunj: No such file or directory`); otherwise kunj was found but what its `#!` names
+    /// was not (`env: node: …`, nvm not loaded by the login shell), and installing kunj would not help.
+    func startFailure(stderr: String) -> KunjCLIError {
+        let program = commandParts[0]
+        guard let line = lastLine(stderr), line.hasPrefix("env: "), !line.hasPrefix("env: \(program):") else {
+            return KunjCLIError(code: .notFound, message: "kunj not found on your PATH: npm install -g kunj")
+        }
+        return KunjCLIError(code: .commandFailed, message: "kunj could not start: \(line)")
     }
 
     /// The program on `path` (or as given when it has a `/`), with any further command parts.

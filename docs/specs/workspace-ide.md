@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41 |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -86,8 +86,13 @@ runs kunj subprocesses and never imports `src/lib/**` or `dist/lib/**` at runtim
 JSON types (`import type … from "kunj"`). Importing the library would bundle a second kunj at its own
 version, with its own config loading and hooks, and the GUI would soon do things the CLI cannot.
 
-- **Binary:** resolved from a login-shell `PATH` (as `macos-app/` does); `kunj -V` must meet a minimum
-  version, and `1.0.0` (an `npm link`ed dev build) is accepted with a warning.
+- **Binary:** the `kunjCommand` default (`kunj`, or a command line such as `node /path/dist/index.js`;
+  `-kunjCommand "…"` on the command line for one run) started through `/usr/bin/env` on a login-shell
+  `PATH` (as `macos-app/` does); `kunj -V` must meet `MIN_KUNJ_VERSION`, and `1.0.0` (an `npm link`ed
+  dev build) is accepted and labelled `dev`. env exiting 127 for kunj itself is `not-found`
+  (`npm install -g kunj`); for what kunj's `#!` names (`env: node: …`, nvm not loaded) it is
+  `command-failed` with that line, because installing kunj would not help. The version shows at the
+  sidebar's foot (`kunj 1.0.0 dev`).
 - **cwd is the repo argument:** every call runs with `cwd` set to the repository's `root` from
   `kunj repos --json` (the git dir for a bare repo) and names the branch explicitly.
 - **State** comes from `kunj repos --json`, `kunj worktree list --json` and `kunj ct list --json`,
@@ -241,7 +246,8 @@ turn (4 ms for all hidden tabs together), so a flood in a background environment
 catch-up instead of the UI. Nothing is ever dropped: cutting the stream can split an escape sequence
 and leave the terminal in the wrong mode. A shown tab is fed at once. The environment of every PTY: `TERM=xterm-256color`, `COLORTERM=truecolor`, `LANG`
 (user's or `en_US.UTF-8`), PATH from the login shell (resolved once, off the main thread, 5 s cap),
-the Claude Code and terminal-program markers removed. The theme's `term*` tokens are the terminal
+the Claude Code and terminal-program markers removed; kunj's own `--json` calls get the same
+environment, so nothing kunj spawns inherits the markers. The theme's `term*` tokens are the terminal
 colours (`termMuted` as bright black, `termAccent` as blue).
 
 **Changes column.** `DiffService` lists `ChangedFile`s (`status A/M/D/R`, `added`, `deleted`) for the
@@ -362,6 +368,13 @@ From the scaffold (Task 2):
   the window. Task 6 decides: tune the alpha, or drop the vibrancy so the sidebar is exactly `side`.
 - [ ] The skeleton's status bar label uses the system monospaced font; Task 6's `Theme` must route
   every font through the bundled Inter/JetBrains Mono (`DesignTokens.Fonts` are PostScript prefixes).
+
+From `KunjCLI` (Task 3):
+
+- [ ] The login PATH is read with `printf … "$PATH"` in `$SHELL -l -i -c`, as `macos-app/` does; fish
+  expands a quoted `$PATH` with spaces, so a fish user gets only the fallback directories. Reading
+  `/usr/bin/printenv PATH` between two marker lines would work in every shell.
+- [ ] Until Task 6's error state, a discovery error shows only as red text on the status bar's right.
 
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).

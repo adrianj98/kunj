@@ -53,6 +53,19 @@ private func code(of body: () async throws -> Void) async -> KunjCLIError? {
         #expect(e?.code == .notFound)
     }
 
+    @Test func discoverNamesAMissingInterpreter() async throws {
+        // kunj is installed but its `#!/usr/bin/env node` finds no node on the login PATH (nvm
+        // not loaded): env exits 127 too, but "install kunj" would be the wrong advice.
+        let dir = try tempDirectory()
+        let script = dir.appendingPathComponent("kunj")
+        try "#!/usr/bin/env kunj-test-missing-node\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let e = await code { _ = try await KunjCLI.discover(command: "kunj", path: dir.path + ":/usr/bin:/bin") }
+        #expect(e?.code == .commandFailed)
+        #expect(e?.message.contains("kunj-test-missing-node") == true)
+        #expect(e?.message.contains("npm install -g kunj") == false)
+    }
+
     @Test func discoverTooOld() async throws {
         let e = await code {
             _ = try await KunjCLI.discover(
