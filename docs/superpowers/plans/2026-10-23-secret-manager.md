@@ -270,7 +270,7 @@
 
 ### Task 8: Migration prompts and docs
 
-**Status: done** (3bbe9af). Rulings in the ledger. As built: `keptEnvImportCommand(home?)` (exported from secret.ts, `~` for the home directory) is shared by the `list` hint and `SetupCommand.offerSecretImport()`; the hint shows when the repo vault has no entries (global secrets do not hide it), also under `No secrets`; setup asks only when the repo has no `secrets.enc` (no unlock to decide), runs `kunj secret import <keep>/.env --delete` (which asks again with the names), prints the command on no and warns on a failed import. User docs: `docs-site/src/content/docs/configuration/secrets.mdx`, plus links from agent, keep files, setup, files-and-data and container security pages.
+**Status: done** (3bbe9af, hash named in 1f2c6b3); review fix (the printed command single-quotes a path the shell would split, e.g. a repo directory with a space) in the Review 8 commit. Rulings in the ledger. No later task: the plan is complete. As built: `keptEnvImportCommand(home?)` (exported from secret.ts, `~/` for the home directory, the rest shell-quoted via `shellQuote()` from config-vars.ts when it holds a character outside `[\w@%+=:,./-]`) is shared by the `list` hint and `SetupCommand.offerSecretImport()`; the hint shows when the repo vault has no entries (global secrets do not hide it), also under `No secrets`; setup asks only when the repo has no `secrets.enc` (no unlock to decide), runs `kunj secret import <keep>/.env --delete` (which asks again with the names), prints the command on no and warns on a failed import. User docs: `docs-site/src/content/docs/configuration/secrets.mdx`, plus links from agent, keep files, setup, files-and-data and container security pages.
 
 **Files:**
 - Modify:

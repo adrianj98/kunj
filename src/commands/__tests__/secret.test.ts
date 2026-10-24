@@ -208,6 +208,13 @@ describe('list', () => {
       expect(out()).toContain('Found a kept .env: kunj secret import ~/.kunj/app/keep/.env --delete');
     });
 
+    test('a path with a space is shell-quoted so the printed command pastes', async () => {
+      dirs.kunj = path.join(dirs.global, 'my app');
+      keepEnv();
+      await cmd({ home: () => dirs.home }).execute('list', [], {});
+      expect(out()).toContain(`Found a kept .env: kunj secret import ~/'.kunj/my app/keep/.env' --delete`);
+    });
+
     test('--json prints only the bare SecretListJson', async () => {
       keepEnv();
       await cmd().execute('list', [], { json: true });

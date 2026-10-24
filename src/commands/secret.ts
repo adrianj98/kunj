@@ -8,6 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { getGlobalKunjDir, getKunjDir } from '../lib/config';
+import { shellQuote } from '../lib/config-vars';
 import { getCurrentBranch } from '../lib/git';
 import { getCurrentWorktreePath, listWorktrees } from '../lib/worktree';
 import { deleteKeptFile, getKeepDir, hasKeptFile } from '../lib/keep';
@@ -34,11 +35,13 @@ interface SecretOptions {
 }
 
 // The import that moves this repository's kept .env into the vault (`~` for the home directory),
-// or undefined when there is no kept .env. Shared with `kunj setup`.
+// or undefined when there is no kept .env. Shared with `kunj setup`. It is printed to be pasted, so
+// a path the shell would split (a repo directory with a space) is quoted.
 export function keptEnvImportCommand(home: string = os.homedir()): string | undefined {
   if (!hasKeptFile('.env')) return undefined;
   const kept = path.join(getKeepDir(), '.env');
-  const shown = kept.startsWith(home + path.sep) ? '~' + kept.slice(home.length) : kept;
+  const quote = (p: string) => (/^[\w@%+=:,./-]+$/.test(p) ? p : shellQuote(p));
+  const shown = kept.startsWith(home + path.sep) ? '~/' + quote(kept.slice(home.length + 1)) : quote(kept);
   return `kunj secret import ${shown} --delete`;
 }
 
