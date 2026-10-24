@@ -24,7 +24,7 @@
 - Error codes (`jsonCode` on a `SecretError`, printed without a stack trace like `AgentError`): `secrets-locked`, `secrets-corrupt`, `secret-not-found`, `bad-name`, `not-ignored`, `bad-dotenv` (added in Review 1: a malformed line in an imported `.env`).
 - The vault is unlocked only by commands that deliver or manage secrets, and only when a `secrets.enc` file exists. Listings (`worktree list`, `ct list`, `events`) never unlock it.
 - `secret` and `run` are fast-path commands (`src/commands/fast.ts`): no AWS, LangChain or top-level inquirer imports. Load inquirer lazily if it is used at all.
-- Tests never touch the real Keychain. Every test uses an injected `KeyProvider`.
+- Tests never touch the real Keychain. Every test injects a fake `Runner` and `prompt` into `getUnlock` (Task 3), or passes a fixed-key `Unlock` straight to the vault.
 
 ## Rulings (corrections to the spec, written back in Task 1)
 
@@ -90,7 +90,7 @@
 - Produces:
   - `class SecretError extends Error { constructor(message: string, readonly jsonCode: 'secrets-locked'|'secrets-corrupt'|'secret-not-found'|'bad-name'|'not-ignored'|'bad-dotenv') }`. Add `SecretError` to BaseCommand's no-stack list.
   - `interface SecretEntry { name: string; value: string; scope?: { branch?: string }; targets: Array<'host'|'container'>; delivery: { env: boolean; file?: string }; updatedAt: string }`
-  - `interface Unlock { kdf: 'keychain'|'passphrase'; keyFor(salt: Buffer): Promise<Buffer> }` (the keychain kdf ignores the salt).
+  - `interface Unlock { kdf: 'keychain'|'passphrase'; attempts?: number; keyFor(salt: Buffer, attempt?: number): Promise<Buffer> }` (the keychain kdf ignores the salt; `attempts` and `attempt` added in Task 3).
   - `readVault(file: string, unlock: Unlock): Promise<SecretEntry[]>` returns `[]` when the file is missing.
   - `writeVault(file: string, entries: SecretEntry[], unlock: Unlock): Promise<void>` keeps the existing salt and kdf when the file exists.
   - `vaultFiles(kunjDir: string, globalDir: string): { global: string; repo: string }`
@@ -113,7 +113,7 @@
 
 ### Task 3: Key providers
 
-**Status: done** (commit: "Secrets: keychain, libsecret and passphrase key providers"). Rulings in the ledger.
+**Status: done** in 8901b6b; review fix (the hidden prompt refuses on Ctrl-C or end of input instead of never settling) in the Review 3 commit. Rulings in the ledger.
 
 **Files:**
 - Create: `src/lib/secrets/keyprovider.ts`, `src/settings/secrets.ts` (register in `src/settings/index.ts`)
@@ -125,6 +125,7 @@
   - `type Runner = (cmd: string, args: string[], input?: string) => Promise<{ code: number; stdout: string }>`, which defaults to `child_process.spawn`.
   - `getUnlock(opts: { mode: 'auto'|'keychain'|'libsecret'|'passphrase'; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; run?: Runner; prompt?: (msg: string) => Promise<string>; existingKdf?: 'keychain'|'passphrase'; create: boolean }): Promise<Unlock>`
   - As built: `getUnlock` also takes `tty?: boolean` (whether a hidden prompt may be shown without `prompt`; default stdin and stderr are TTYs). `Unlock` gained `attempts?: number` and `keyFor(salt, attempt?)`: `readVault`/`writeVault` call `keyFor` with the next attempt number while the GCM check fails (never for a malformed envelope), and give `secrets-locked` once `attempts` (> 1) are used up; the passphrase `Unlock` sets 3, others keep 1 (plain `secrets-corrupt`). An `existingKdf: 'passphrase'` always opens with the passphrase; `KUNJ_SECRETS_KEY` is used only for a keychain-kdf file or a new vault with a mode other than `passphrase`. A new key is made only when `create` and no file exists; a Keychain read failing with anything but exit 44 is `secrets-locked`, never a miss; `add-generic-password` has no `-U` and the key is read back before use. `auto` falls back to the passphrase only when the tool is not installed (exit 127 / ENOENT) and no keychain file exists. A new passphrase is asked twice.
+  - Also exported: `hiddenPrompt(msg, io?: { input; output }): Promise<string>` (readline, echo muted, prompt on stderr; Ctrl-C or end of input gives `secrets-locked`), `KeyProviderMode`, `GetUnlockOptions`, `PASSPHRASE_TRIES`, `defaultRunner`. Task 5's `set` reuses `hiddenPrompt` for the value (no inquirer).
   - The setting is `secrets.keyProvider` (string, default `auto`, values `auto|keychain|libsecret|passphrase`, category `secrets`).
 
 - [x] **Step 1: Write the failing tests** with a recording `run` fake.
@@ -153,6 +154,7 @@
   - `renderFiles(entries: SecretEntry[]): Map<string, string>` maps the relative file to `NAME=value` lines. Values are double-quoted with `\\`, `"` and newline escaped (`\n`) so `parseDotenv` reads them back, sorted by name. `parseDotenv` turns a raw CR into LF and has no `\r` escape, so a value containing `\r` does not round-trip; `set`/`import` keep it in the vault as given, and only the rendered file loses it.
   - `writeHostFiles(worktreeRoot: string, files: Map<string,string>, opts: { force?: boolean }): Promise<string[]>` checks `git check-ignore -q` per file and throws `SecretError('… is not ignored by git', 'not-ignored')` before writing anything. It writes with mode 0600 and refuses paths outside the root (`..`, absolute).
   - `loadSecrets(opts: { branch?: string; target: 'host'|'container'; create?: false }): Promise<SecretEntry[]>` does the glue: config, `getKunjDir`, `getUnlock`, both `readVault`s and `resolveSecrets`. It returns `[]` without unlocking when no `secrets.enc` exists.
+  - Add `vaultKdf(file: string): Kdf | undefined` to vault.ts (reads the envelope's `kdf` without decrypting; `undefined` when missing; `secrets-corrupt` when not a v1 envelope) so the caller can pass `getUnlock` its `existingKdf`. Rules from Task 3 the glue must keep: `mode` is `secrets.keyProvider` from the resolved config; `existingKdf` is the kdf of whichever vault file exists, so a new repo vault next to a keychain global one reuses the same key instead of minting one; when the global and repo files have different kdfs, call `getUnlock` once per kdf and open each file with its own `Unlock`; reads pass `create: false`. Pass one `Unlock` (per kdf) to both files so a passphrase is asked once per command. Test with a fake `Runner`/`prompt`, never the real Keychain.
 - [ ] **Step 1: Write the failing tests.**
   - A branch entry `X` overrides repo `X` for `feature/x` only. `main` still gets the repo value.
   - A host-only entry is absent for `target: 'container'`.
@@ -177,7 +179,9 @@
   - `export interface SecretListJson { secrets: Array<{ name: string; scope: 'global'|'repo'|'branch'; branch?: string; targets: Array<'host'|'container'>; delivery: { env: boolean; file?: string }; updatedAt: string }> }`
   - Subcommands per the spec table: `set`, `import`, `list`, `get`, `rm`, `env`, `apply [-a]`.
 
-- [ ] **Step 1: Write the failing tests.** Inject `Unlock` through a test seam on the command, the way `repoId` is a seam in events, and use a temp HOME.
+- Write paths (`set`, `import`, `rm`) call `getUnlock` with `create: true` and `existingKdf` from `vaultKdf` of both files (Task 4); only when neither file exists may a new key be made.
+
+- [ ] **Step 1: Write the failing tests.** Inject `Unlock` (or `getUnlock`'s `run`/`prompt`) through a test seam on the command, the way `repoId` is a seam in events, and use a temp HOME.
   - `set FOO` with the value on stdin stores `targets: ['host','container']` and env.
   - `set FOO --global --file .env` is refused (globals are env only).
   - `set 1BAD` gives `bad-name`.

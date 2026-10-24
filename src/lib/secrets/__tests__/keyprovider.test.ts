@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { SecretError } from '../errors';
-import { getUnlock, Runner } from '../keyprovider';
+import { getUnlock, hiddenPrompt, Runner } from '../keyprovider';
 import { readVault, writeVault, SecretEntry } from '../vault';
 
 // Tests never touch the real Keychain: every call goes through a recording Runner fake.
@@ -272,5 +272,34 @@ describe('secrets.keyProvider setting', () => {
     for (const v of ['auto', 'keychain', 'libsecret', 'passphrase']) expect(s.validate(v)).toBe(true);
     expect(s.validate('vault')).toBe(false);
     expect(settingsRegistry.getDefaultConfig().secrets).toEqual({ keyProvider: 'auto' });
+  });
+});
+
+describe('hidden prompt', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { PassThrough } = require('stream') as typeof import('stream');
+
+  function io() {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let shown = '';
+    output.on('data', (d: Buffer) => (shown += d.toString('utf8')));
+    return { input, output, shown: () => shown };
+  }
+
+  it('returns the typed line without echoing it', async () => {
+    const t = io();
+    const answer = hiddenPrompt('Secrets passphrase: ', t);
+    t.input.write('s3cret-pass\n');
+    await expect(answer).resolves.toBe('s3cret-pass');
+    expect(t.shown()).toContain('Secrets passphrase: ');
+    expect(t.shown()).not.toContain('s3cret-pass');
+  });
+
+  it('gives secrets-locked when input ends before a line (Ctrl-D), instead of hanging', async () => {
+    const t = io();
+    const answer = hiddenPrompt('Secrets passphrase: ', t);
+    t.input.end();
+    await locked(answer);
   });
 });

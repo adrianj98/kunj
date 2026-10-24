@@ -167,23 +167,32 @@ function scrypt(passphrase: string, salt: Buffer): Promise<Buffer> {
 }
 
 // A prompt on stderr whose typing is not echoed: readline writes the echo to a muted stream.
-function hiddenPrompt(msg: string): Promise<string> {
+// `io` is a test seam (defaults to the process's stdin and stderr).
+export function hiddenPrompt(
+  msg: string,
+  io: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream } = { input: process.stdin, output: process.stderr },
+): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const readline = require('readline') as typeof import('readline');
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { Writable } = require('stream') as typeof import('stream');
   const muted = new Writable({ write: (_chunk, _enc, cb) => cb() });
-  process.stderr.write(msg);
+  io.output.write(msg);
   return new Promise((resolve, reject) => {
-    const rl = readline.createInterface({ input: process.stdin, output: muted, terminal: true });
-    rl.on('SIGINT', () => {
-      rl.close();
-      process.stderr.write('\n');
+    const rl = readline.createInterface({ input: io.input, output: muted, terminal: true });
+    let answered = false;
+    // Ctrl-C, or input ending before a line (Ctrl-D), refuses; otherwise the promise would never
+    // settle and kunj would exit 0 having done nothing.
+    rl.on('SIGINT', () => rl.close());
+    rl.on('close', () => {
+      if (answered) return;
+      io.output.write('\n');
       reject(locked('No passphrase given'));
     });
     rl.question('', (answer) => {
+      answered = true;
       rl.close();
-      process.stderr.write('\n');
+      io.output.write('\n');
       resolve(answer);
     });
   });

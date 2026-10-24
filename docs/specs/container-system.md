@@ -69,7 +69,7 @@ itself when Docker is unavailable.
 
 *Designed 2026-10-23; in progress.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`); the commands and delivery are not. Today secrets reach a container only as host environment variables
+(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b); the commands and delivery are not. Today secrets reach a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -114,15 +114,16 @@ Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in th
   `add-generic-password` command from stdin, and `secret-tool store` reads the secret from stdin.
   Without either: the `passphrase` kdf, `scrypt(passphrase, salt, 32, N=2^15, r=8, p=1)` with a 16-byte
   random salt per file, prompted once per command (a new vault asks twice to confirm; a file that does not
-  decrypt asks again, and after three tries it is `secrets-locked`, the file untouched; an empty passphrase is
-  refused). `KUNJ_SECRETS_KEY` (64 hex chars) supplies the raw key
+  decrypt asks again, and after three tries it is `secrets-locked`, the file untouched; an empty passphrase,
+  Ctrl-C or end of input at the hidden prompt is `secrets-locked`). `KUNJ_SECRETS_KEY` (64 hex chars) supplies the raw key
   for CI and scripts and overrides the keychain; it opens `keychain`-kdf files only. A new key is
   made only when no vault file exists yet: a keychain-kdf file whose item is missing stays `secrets-locked`, and a
   read that fails for any reason other than "not found" (access denied, locked keychain) never makes a new
   key; the item is added without `-U` and read back before use. The setting
   `secrets.keyProvider` (`auto|keychain|libsecret|passphrase`, default `auto`) picks the provider
   for a new vault (`auto`: Keychain on macOS, else libsecret, else the passphrase when `secret-tool` is not
-  installed); an existing file's kdf decides how it is opened.
+  installed); an existing file's kdf decides how it is opened, and a new repo vault next to an existing global
+  one takes that file's kdf and key (a global and a repo file of different kdfs are opened with one key each).
   The vault is only unlocked by commands that deliver or manage secrets, and only when a `secrets.enc`
   exists, never by listings (`worktree list`, `ct list`, `events`), so the fast path does not change.
 - **Stamp.** A container records the label `kunj.secrets`: the first 12 hex chars of the sha256 of the
