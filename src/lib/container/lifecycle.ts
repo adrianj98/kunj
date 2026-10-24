@@ -36,7 +36,7 @@ import { getKeepDir, listKeptFiles } from '../keep';
 import { getGlobalKunjDir, getKunjDir } from '../config';
 import { ConfigVariables, expandVariables } from '../config-vars';
 import { KunjConfig } from '../../types';
-import { StartError, StartErrorCode } from './errors';
+import { ContainerError, StartError, StartErrorCode } from './errors';
 import { installMcpConfig, mcpServers, readBridges } from './mcpbridge';
 import { readForwards, recordIsFor } from './autoforward';
 import { DIND_DATA, DIND_DOMAINS, DindMode, checkDind, checkRecordedDind, composeHint, dindHostInfo, dindMode, dindSource, startDockerd } from './dind';
@@ -108,6 +108,10 @@ export interface StartOptions {
   tokenLookup?: TokenLookup;
   /** The forwarder and bridge registries (tests); default ~/.kunj/container-{forwards,bridges}.json */
   registryFiles?: { forwards?: string; bridges?: string };
+  /** Container-targeted secrets (kunj ct start): `env` joins the env-file over container.env and the
+   * gh fallback, `files` (relative to /workspace) are rendered on create and resume, `stamp` is
+   * recorded as kunj.secrets. Ignored for a snapshot build (namesFor). */
+  secrets?: { env: Record<string, string>; files: Map<string, string>; stamp: string };
 }
 
 export interface StartResult {
@@ -645,6 +649,67 @@ async function copyFiles(
   return { keptFiles, copiedFiles };
 }
 
+type StartSecrets = NonNullable<StartOptions['secrets']>;
+
+/**
+ * The secrets a start delivers, checked before anything is created: none for a snapshot build (its
+ * image must hold nothing private); file paths inside /workspace and outside .git; env values on one
+ * line (the env-file is line based). Errors name the variable or path, never a value.
+ */
+function checkedSecrets(options: StartOptions): StartSecrets | undefined {
+  if (options.namesFor !== undefined || !options.secrets) return undefined;
+  for (const [name, value] of Object.entries(options.secrets.env)) {
+    if (/[\r\n]/.test(value)) {
+      throw new StartError(`Secret ${name} has more than one line, which a container's environment cannot hold; deliver it as a file instead`, 'docker');
+    }
+  }
+  for (const rel of options.secrets.files.keys()) secretFilePath(rel);
+  return options.secrets;
+}
+
+/** A secret file's path relative to /workspace, normalized; refused (bad-path) outside it or inside .git. */
+export function secretFilePath(rel: string): string {
+  const norm = path.posix.normalize(rel);
+  if (!rel || path.posix.isAbsolute(rel) || norm === '.' || norm === '..' || norm.startsWith('../')) {
+    throw new ContainerError(`Secret file path must be inside /workspace: ${JSON.stringify(rel)}`, 'bad-path');
+  }
+  if (norm.split('/').some(part => part.toLowerCase() === '.git')) {
+    throw new ContainerError(`Secret file path must not be inside a .git directory: ${JSON.stringify(rel)}`, 'bad-path');
+  }
+  return norm;
+}
+
+/** A gitignore pattern for exactly this path from the repository root. */
+function excludePattern(rel: string): string {
+  return '/' + rel.replace(/[\\*?[\]!#]/g, c => `\\${c}`).replace(/ +$/, m => m.replace(/ /g, '\\ '));
+}
+
+/**
+ * Renders file deliveries into /workspace as the user, mode 0600, through the tar stream (values never
+ * in argv or exec env). Each path is added to .git/info/exclude first, so the agent cannot commit it.
+ */
+async function renderSecretFiles(backend: ContainerBackend, id: string, user: string, files: Map<string, string>): Promise<string[]> {
+  if (!files.size) return [];
+  const rels = [...files.keys()].map(secretFilePath);
+  const tar = tarEntries([...files].map(([rel, content]) => ({ path: secretFilePath(rel), content, mode: 0o600 })));
+  const script =
+    'cd "$1" && test -d .git || exit 3; shift; mkdir -p .git/info && touch .git/info/exclude || exit 4; ' +
+    'for p; do grep -qxF -- "$p" .git/info/exclude || printf \'%s\\n\' "$p" >> .git/info/exclude || exit 4; done; ' +
+    'tar -xf - -C /workspace';
+  const r = await backend.exec(id, ['sh', '-c', script, 'sh', WORKSPACE, ...rels.map(excludePattern)], {
+    user: user || undefined,
+    stdin: tar,
+  });
+  if (r.exitCode === 3) throw new Error('Secret files not rendered: /workspace has no git checkout yet');
+  if (r.exitCode !== 0) throw new Error(`Rendering secret files into /workspace failed (exit ${r.exitCode})`);
+  return rels;
+}
+
+/** Shown on a resume whose container was created with other secrets: env reaches it only on recreate. */
+export function secretsRebuildHint(container: string, branch: string): string {
+  return `Secrets changed since ${container} was created; environment secrets reach it only when it is recreated: kunj ct start ${branch} --rebuild`;
+}
+
 /** How setup, maintain and the devcontainer commands run: in the workspace, as the user. */
 function commandIO(user: string, jsonMode: boolean): ExecIO {
   return { user: user || undefined, workdir: WORKSPACE, ...outputIO(jsonMode) };
@@ -736,7 +801,9 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   if (!origin.originHost) {
     throw new StartError('Origin has no host; a container can only clone from a remote origin', 'origin');
   }
-  const hostEnv = forwardedEnv(cfg, options.hostEnv, vars);
+  const secrets = checkedSecrets(options);
+  // A stored secret wins over container.env, and a stored token means gh is never asked
+  const hostEnv = { ...forwardedEnv(cfg, options.hostEnv, vars), ...secrets?.env };
   // gh is asked only when a token is needed: a new container's env-file, or seeding a resumed one
   const withTokens = once(async () => (await withHostTokens(hostEnv, cfg, origin.originHost, options.tokenLookup)).env)!;
 
@@ -745,7 +812,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       const env = await withTokens();
       return TOKEN_KEYS.some(k => env[k]);
     };
-    return resume(backend, options, names, origin, hostEnv, hasToken, engine.runtimes);
+    return resume(backend, options, names, origin, hostEnv, hasToken, engine.runtimes, secrets);
   }
   const env = await withTokens();
   const hasToken = TOKEN_KEYS.some(k => env[k]);
@@ -882,6 +949,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
           dind: dind === 'off' ? undefined : dind,
         }),
         [LABEL.role]: 'main',
+        ...(secrets ? { [LABEL.secrets]: secrets.stamp } : {}),
       }),
       // The devcontainer comes from the branch: it must not override the credential host or secrets
       env: { ...(source.spec?.containerEnv ?? {}), ...env,
@@ -935,6 +1003,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
 
     // 9. Files
     const files = await step('docker', () => copyFiles(backend, id, user, home, options, vars));
+    if (secrets) await step('docker', () => renderSecretFiles(backend, id, user, secrets.files));
     await mcpConfig(backend, id, user, options);
 
     // 10. Blueprint: presets and setup once (a snapshot already holds them), maintain every later start
@@ -1061,7 +1130,8 @@ async function resume(
   origin: { originUrl: string; originHost: string },
   env: Record<string, string>,
   hasToken: () => Promise<boolean>,
-  runtimes: string[]
+  runtimes: string[],
+  secrets: StartSecrets | undefined
 ): Promise<StartResult> {
   const { repo, warn } = options;
   const labelBranch = options.namesFor ?? options.branch;
@@ -1072,6 +1142,10 @@ async function resume(
   const services = servicesOf(found, names.container, { repoId: repo.id, branch: labelBranch });
   const firewall = firewallMode(options.config.container);
   const recorded = parseOptionsLabel(main.labels);
+  // docker start keeps the env of docker run: changed env secrets need a recreate
+  if (secrets && Object.keys(secrets.env).length && (main.labels[LABEL.secrets] ?? '') !== secrets.stamp) {
+    warn(secretsRebuildHint(names.container, options.branch));
+  }
   const dind = recorded.dind ?? 'off';
   // Refused before anything starts: the container keeps the run options it was created with
   checkRecordedDind(dind, { allowPrivileged: options.config.container?.allowPrivileged === true }, runtimes, names.container);
@@ -1134,14 +1208,24 @@ async function resume(
         keepHelper = true;
       }
     }
-    if (mainWasRunning && keepHelper) return result;
+    // File deliveries are rendered again on every start, the running container's included
+    const renderSecrets = async (user: string) => {
+      if (secrets) await step('docker', () => renderSecretFiles(backend, main.id, user, secrets.files));
+    };
+    if (mainWasRunning && keepHelper) {
+      await renderSecrets(recorded.user ?? '');
+      return result;
+    }
 
     if (mainWasRunning) stopHelperUsers(main, warn, options.registryFiles);
     helperStep = true;
     await bringUp(backend, names, main, helperEnv(options, origin, env, dind !== 'off'), options.kunjVersion, warn, state);
     ready = true;
     // A running container whose helper was only out of date: nothing else to do
-    if (mainWasRunning && helperRunning) return result;
+    if (mainWasRunning && helperRunning) {
+      await renderSecrets(recorded.user ?? '');
+      return result;
+    }
     if (dind !== 'off') await startDockerd(backend, main.id, warn);
 
     const user = recorded.user ?? '';
@@ -1154,6 +1238,7 @@ async function resume(
     if (result.seeded) {
       Object.assign(result, await step('docker', () => copyFiles(backend, main.id, user, home, options, variables(options))));
     }
+    await renderSecrets(user);
     await mcpConfig(backend, main.id, user, options);
     if (blueprintError !== undefined) warn(`Blueprint not loaded, maintain skipped: ${message(blueprintError)}`);
     if (resolved) {

@@ -1937,3 +1937,141 @@ describe('docker in docker', () => {
     expect((b.callsOf('remove')[0][0] as { volumes: string[] }).volumes).toContain(names.dockerVolume);
   });
 });
+
+describe('secrets', () => {
+  const VALUE = 'sekret-value-123';
+  const FILE_VALUE = 'file-value-456';
+
+  function secrets(over: Partial<NonNullable<StartOptions['secrets']>> = {}): NonNullable<StartOptions['secrets']> {
+    return { env: { FOO: VALUE }, files: new Map([['.env', `DB="${FILE_VALUE}"\n`]]), stamp: 'abc123abc123', ...over };
+  }
+
+  /** The exec that renders secret files: its argv, user and the tar it streamed. */
+  function renderCalls(b: FakeBackend): Array<{ argv: string[]; io: ExecIO; tar: string }> {
+    const out: Array<{ argv: string[]; io: ExecIO; tar: string }> = [];
+    b.callsOf('exec').forEach((a, i) => {
+      const argv = a[1] as string[];
+      if (argv[2]?.includes('.git/info/exclude') && argv[2].includes('tar -xf')) out.push({ argv, io: a[2] as ExecIO, tar: b.stdinData[i] ?? '' });
+    });
+    return out;
+  }
+
+  function tarMode(tar: string, name: string): string {
+    const at = tar.indexOf(`${name}\0`);
+    expect(at % 512).toBe(0);
+    return tar.slice(at + 100, at + 107);
+  }
+
+  it('puts env secrets in the env file of run only: no exec env or argv, no label, not the helper', async () => {
+    const b = backend();
+    await startContainer(b, options({ secrets: secrets() }));
+    const [main, helper] = runSpecs(b);
+    expect(main.env.FOO).toBe(VALUE);
+    expect(JSON.stringify(main.labels)).not.toContain(VALUE);
+    expect(JSON.stringify(helper)).not.toContain(VALUE);
+    for (const a of b.callsOf('exec')) {
+      expect(JSON.stringify(a[1])).not.toContain(VALUE);
+      expect(JSON.stringify((a[2] as ExecIO).env ?? {})).not.toContain(VALUE);
+    }
+    expect(b.stdinData.join('')).not.toContain(VALUE);
+  });
+
+  it('a stored secret overrides container.env and the gh fallback', async () => {
+    const tokens = noTokens('gho_from_gh');
+    const b = backend();
+    await startContainer(b, options({
+      hostEnv: { GH_TOKEN: 'from-host', CLAUDE_CODE_OAUTH_TOKEN: 'host-oauth' },
+      config: { container: { env: ['GH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'] } } as KunjConfig,
+      tokenLookup: tokens,
+      secrets: secrets({ env: { GH_TOKEN: 'stored-gh', CLAUDE_CODE_OAUTH_TOKEN: 'stored-oauth' }, files: new Map() }),
+    }));
+    expect(runSpecs(b)[0].env).toMatchObject({ GH_TOKEN: 'stored-gh', CLAUDE_CODE_OAUTH_TOKEN: 'stored-oauth' });
+
+    // Without a host token, a stored GH_TOKEN means gh is never asked
+    const b2 = backend();
+    await startContainer(b2, options({ hostEnv: {}, tokenLookup: tokens, secrets: secrets({ env: { GH_TOKEN: 'stored-gh' }, files: new Map() }) }));
+    expect(tokens.gh).not.toHaveBeenCalled();
+    expect(runSpecs(b2)[0].env.GH_TOKEN).toBe('stored-gh');
+  });
+
+  it('renders file deliveries into /workspace as the user, mode 0600, excluded from git, after the seed', async () => {
+    const b = backend();
+    await startContainer(b, options({ secrets: secrets({ files: new Map([['.env', `DB="${FILE_VALUE}"\n`], ['config/app.env', 'X="1"\n']]) }) }));
+    const [render] = renderCalls(b);
+    expect(render).toBeDefined();
+    expect(render.io.user).toBe('dev');
+    expect(render.argv).toEqual(expect.arrayContaining(['/workspace', '/.env', '/config/app.env']));
+    expect(render.argv.join(' ')).not.toContain(FILE_VALUE);
+    expect(render.tar).toContain(FILE_VALUE);
+    expect(tarMode(render.tar, '.env')).toBe('0000600');
+    expect(tarMode(render.tar, 'config/app.env')).toBe('0000600');
+    const cmds = execCmds(b);
+    const seedAt = cmds.findIndex(c => c.includes('set -e'));
+    expect(seedAt).toBeGreaterThan(-1);
+    expect(cmds.findIndex(c => c.includes('.git/info/exclude') && c.includes('tar -xf'))).toBeGreaterThan(seedAt);
+  });
+
+  it('records the stamp as the kunj.secrets label on create', async () => {
+    const b = backend();
+    await startContainer(b, options({ secrets: secrets() }));
+    expect(runSpecs(b)[0].labels[LABEL.secrets]).toBe('abc123abc123');
+  });
+
+  it('refuses a file path outside /workspace or inside .git, and a multi-line env value, before creating anything', async () => {
+    for (const bad of ['../x', '/etc/x', '.git/config', 'a/.GIT/hooks/x', '', 'a/../../x']) {
+      const b = backend();
+      await expect(startContainer(b, options({ secrets: secrets({ files: new Map([[bad, 'X="1"\n']]) }) }))).rejects.toMatchObject({ code: 'bad-path' });
+      expect(b.methods()).not.toContain('run');
+    }
+    const b = backend();
+    const err = startContainer(b, options({ secrets: secrets({ env: { FOO: 'a\nb' } }) }));
+    await expect(err).rejects.toThrow(/FOO/);
+    await expect(err).rejects.not.toThrow(/a\nb/);
+    expect(b.methods()).not.toContain('run');
+  });
+
+  it('resume re-renders the files and leaves env alone; a changed stamp with env secrets hints at --rebuild', async () => {
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.existing = [info({ state: 'exited', labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main', [LABEL.secrets]: 'old000old000' }) })];
+    const warnings: string[] = [];
+    const result = await startContainer(b, options({ secrets: secrets(), warn: m => warnings.push(m) }));
+    expect(result.created).toBe(false);
+    // Only the helper is run again; the main container keeps its env
+    expect(runSpecs(b).map(s => s.name)).toEqual([names.helper]);
+    expect(JSON.stringify(runSpecs(b))).not.toContain(VALUE);
+    expect(renderCalls(b)).toHaveLength(1);
+    expect(renderCalls(b)[0].tar).toContain(FILE_VALUE);
+    expect(warnings.filter(w => w.includes('--rebuild') && w.includes('ecret'))).toHaveLength(1);
+  });
+
+  it('no hint when the stamp matches, or when there are no env secrets', async () => {
+    for (const [label, env] of [['abc123abc123', { FOO: VALUE }], ['old000old000', {}]] as const) {
+      const b = backend();
+      b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+      b.existing = [info({ state: 'exited', labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'main', [LABEL.secrets]: label }) })];
+      const warnings: string[] = [];
+      await startContainer(b, options({ secrets: secrets({ env }), warn: m => warnings.push(m) }));
+      expect(warnings.filter(w => w.includes('ecret'))).toEqual([]);
+    }
+  });
+
+  it('a running container (start again) gets its files re-rendered too', async () => {
+    const b = backend();
+    b.existing = [info({}), helperInfo()];
+    await startContainer(b, options({ secrets: secrets() }));
+    expect(renderCalls(b)).toHaveLength(1);
+    expect(b.methods().filter(m => ['run', 'remove', 'stop', 'start'].includes(m))).toEqual([]);
+  });
+
+  it('a snapshot start (namesFor) gets no secrets: no env, no files, no label', async () => {
+    const b = backend();
+    await startContainer(b, options({ namesFor: `${BRANCH}:snapshot`, secrets: secrets() }));
+    const [main] = runSpecs(b);
+    expect(main.env.FOO).toBeUndefined();
+    expect(main.labels[LABEL.secrets]).toBeUndefined();
+    expect(renderCalls(b)).toEqual([]);
+    expect(JSON.stringify(b.calls)).not.toContain(VALUE);
+    expect(b.stdinData.join('')).not.toContain(FILE_VALUE);
+  });
+});

@@ -119,6 +119,10 @@ export interface ContainerJson {
   services: ServiceState[];
   /** Host MCP servers bridged into the container (kunj ct mcp, started by kunj ct agent) */
   bridges: Array<{ name: string; pid: number }>;
+  /** The vault changed since the container was created (its kunj.secrets label differs from the files'
+   * stamp; read without unlocking): env secrets reach it on `kunj ct start --rebuild`. This repository's
+   * containers only */
+  secretsChanged?: boolean;
 }
 
 export interface ContainerListJson {

@@ -241,6 +241,8 @@
 
 ### Task 7: Container delivery
 
+**Status: done** (Task 7 commit). Rulings in the ledger. As built: `checkedSecrets()` drops `secrets` for any `namesFor` start (the snapshot) and refuses, before anything is created, a file path outside `/workspace` or with a `.git` component (`ContainerError` `bad-path`, `secretFilePath()` exported) and a multi-line env value (`StartError` `docker`, names the variable only). The env merge is `{ ...forwardedEnv(...), ...secrets.env }` before `withHostTokens`, so a stored `GH_TOKEN` also skips `gh auth token`. Files are rendered by `renderSecretFiles()` in one exec as the user: `.git/info/exclude` gains `/<path>` (anchored, gitignore-escaped) first, then the tar (mode 0600) is extracted into `/workspace`; it runs after `copyFiles` on create and on every resume path, the running-container ones included (not inside `copyFiles`, which a resume runs only after a fresh seed). `kunj ct start` loads secrets in `startOrResume()` (`containerSecrets()`, lazy imports of resolve/deliver) before the create hook and the snapshot; `ContainerCommand` takes `{ secretsUnlock }` as the test seam. `list` compares the label with `vaultStamp([global, repo])` for this repository's containers only.
+
 **Files:**
 - Modify:
   - `src/lib/container/lifecycle.ts`: `StartOptions.secrets?: { env: Record<string,string>; files: Map<string,string>; stamp: string }`. Merge `env` over `forwardedEnv(...)` at line 736. Render `files` in `copyFiles` (create and resume) under `/workspace`, mode 0600, plus a `.git/info/exclude` line each. Set the label `kunj.secrets` = `stamp` on create. On resume, warn with the `--rebuild` hint when the label differs and `env` is non-empty.
@@ -253,18 +255,18 @@
 - Consumes: `loadSecrets({ branch, target: 'container' })` (pass the branch: undefined means no branch layer), `envOf`, `renderFiles`, `vaultStamp`. `writeHostFiles` is host only; the container render must apply its own path rules (inside `/workspace`, no `.git` component).
 - Produces: `ContainerJson.secretsChanged`.
 
-- [ ] **Step 1: Write the failing FakeBackend tests.**
+- [x] **Step 1: Write the failing FakeBackend tests.**
   - A secret env `FOO` lands in the env file passed to `run`, and is in no exec's `env` or argv and no label.
   - A secret overrides a `container.env` value of the same name.
   - A file delivery is extracted at `/workspace/.env` with mode 0600, and `.git/info/exclude` gains `.env`.
   - Resume re-extracts the files and does not touch env.
   - The label `kunj.secrets` equals the stamp, and a changed stamp on resume prints the `--rebuild` hint.
   - `namesFor: '<b>:snapshot'` starts get no secrets.
-- [ ] **Step 2: Docker test (add to `integration.docker.test.ts`).** A container-targeted `FOO` is visible through `exec env`. A host-only `BAR` is not. BAR's value appears nowhere in `docker inspect`, and no label contains FOO's value (FOO is in `Config.Env`, as env-file variables always are; see Ruling 6). The snapshot image's `Config.Env` contains neither.
-- [ ] **Step 3:** Run `npx jest src/lib/container/__tests__/lifecycle.test.ts`. Expected: FAIL.
-- [ ] **Step 4:** Implement.
-- [ ] **Step 5:** Run `npm test`, `npm run lint`, and `npm run test:docker` (it skips itself without Docker). Expected: PASS.
-- [ ] **Step 6:** Commit: `git commit -m "Secrets in branch containers: env file, rendered files, secretsChanged"`.
+- [x] **Step 2: Docker test (add to `integration.docker.test.ts`).** A container-targeted `FOO` is visible through `exec env`. A host-only `BAR` is not. BAR's value appears nowhere in `docker inspect`, and no label contains FOO's value (FOO is in `Config.Env`, as env-file variables always are; see Ruling 6). The snapshot image's `Config.Env` contains neither.
+- [x] **Step 3:** Run `npx jest src/lib/container/__tests__/lifecycle.test.ts`. Expected: FAIL.
+- [x] **Step 4:** Implement.
+- [x] **Step 5:** Run `npm test`, `npm run lint`, and `npm run test:docker` (it skips itself without Docker). Expected: PASS.
+- [x] **Step 6:** Commit: `git commit -m "Secrets in branch containers: env file, rendered files, secretsChanged"`.
 
 ### Task 8: Migration prompts and docs
 

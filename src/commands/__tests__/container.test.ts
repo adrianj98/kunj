@@ -164,6 +164,7 @@ import { runActionHook } from '../../lib/hooks';
 import inquirer from 'inquirer';
 import { NETHELPER_IMAGE } from '../../lib/container/image';
 import { getVersion } from '../../lib/version';
+import { SecretEntry, vaultFiles, vaultStamp, writeVault } from '../../lib/secrets/vault';
 
 const REPO_ID = repoIdFromUrl('https://github.com/acme/app.git');
 
@@ -862,6 +863,7 @@ describe('ContainerCommand', () => {
           status: 'ok',
           services: [],
           bridges: [],
+          secretsChanged: false,
         },
       ],
       orphans: [],
@@ -1835,5 +1837,107 @@ describe('ct file', () => {
     await new ContainerCommand().execute('file', 'frob', ['a'], {});
     await new ContainerCommand().execute('file', 'read', [], {});
     expect(errors).toEqual(["✗ Unknown file action 'frob'. Expected one of: read, write", '✗ Usage: kunj ct file read [branch] <path>']);
+  });
+});
+
+describe('ct secrets', () => {
+  // A fixed raw key: KUNJ_SECRETS_KEY opens keychain-kdf vaults, so nothing reaches a real keychain
+  const KEY = 'cd'.repeat(32);
+  const fixed = { kdf: 'keychain' as const, keyFor: async () => Buffer.from(KEY, 'hex') };
+  const keychainRun = jest.fn(async () => {
+    throw new Error('the real keychain must not be touched');
+  });
+  const unlock = { mode: 'auto' as const, env: { KUNJ_SECRETS_KEY: KEY }, platform: 'darwin' as const, run: keychainRun };
+  let home: string;
+  const globalDir = () => path.join(home, '.kunj');
+  const repoDir = () => path.join(home, '.kunj', 'app');
+  const getGlobal = config.getGlobalKunjDir as jest.Mock;
+
+  function entry(name: string, value: string, over: Partial<SecretEntry> = {}): SecretEntry {
+    return { name, value, targets: ['host', 'container'], delivery: { env: true }, updatedAt: '2026-10-24T00:00:00Z', ...over };
+  }
+
+  const started = () => ({
+    names: containerNames('app', REPO_ID, 'feat'),
+    containerId: 'cid-9',
+    image: 'kunj-sandbox:1',
+    user: 'dev',
+    created: true,
+    seeded: true,
+    keptFiles: [],
+    copiedFiles: [],
+    publish: [],
+    firewall: 'default',
+  });
+
+  beforeEach(() => {
+    home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-ct-secrets-')));
+    mockKunjDir = repoDir();
+    getGlobal.mockImplementation(() => globalDir());
+    (lifecycle.startContainer as jest.Mock).mockResolvedValue(started());
+  });
+
+  afterEach(() => {
+    mockKunjDir = '/kunj/app';
+    getGlobal.mockImplementation(() => '/kunj');
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('start loads container-targeted secrets for the branch, renders files and passes the vault stamp', async () => {
+    const files = vaultFiles(repoDir(), globalDir());
+    await writeVault(files.global, [entry('GLOBAL_TOKEN', 'g-val')], fixed);
+    await writeVault(files.repo, [
+      entry('GH_TOKEN', 'repo-gh'),
+      entry('HOST_ONLY', 'h-val', { targets: ['host'] }),
+      entry('DB', 'repo-db', { delivery: { env: false, file: '.env' } }),
+      entry('DB', 'feat-db', { scope: { branch: 'feat' }, delivery: { env: false, file: '.env' } }),
+      entry('OTHER_BRANCH', 'o-val', { scope: { branch: 'other' } }),
+    ], fixed);
+    await new ContainerCommand({ secretsUnlock: unlock }).execute('start', 'feat', {});
+    const opts = (lifecycle.startContainer as jest.Mock).mock.calls[0][1];
+    expect(opts.secrets.env).toEqual({ GH_TOKEN: 'repo-gh', GLOBAL_TOKEN: 'g-val' });
+    expect([...opts.secrets.files]).toEqual([['.env', 'DB="feat-db"\n']]);
+    expect(opts.secrets.stamp).toBe(vaultStamp([files.global, files.repo]));
+    expect(opts.secrets.stamp).toMatch(/^[0-9a-f]{12}$/);
+    expect(keychainRun).not.toHaveBeenCalled();
+  });
+
+  it('start without a vault unlocks nothing and passes an empty stamp', async () => {
+    await new ContainerCommand({ secretsUnlock: { ...unlock, env: {} } }).execute('start', 'feat', {});
+    const opts = (lifecycle.startContainer as jest.Mock).mock.calls[0][1];
+    expect(opts.secrets).toEqual({ env: {}, files: new Map(), stamp: '' });
+    expect(keychainRun).not.toHaveBeenCalled();
+  });
+
+  it('a locked vault fails the start before anything is created or any hook runs', async () => {
+    const files = vaultFiles(repoDir(), globalDir());
+    // A passphrase vault and no terminal to ask on: secrets-locked
+    await writeVault(files.repo, [entry('A', 'a')], { kdf: 'passphrase', keyFor: fixed.keyFor });
+    const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    try {
+      await new ContainerCommand({ secretsUnlock: { ...unlock, env: {}, tty: false } }).execute('start', 'feat', { json: true });
+    } finally {
+      exit.mockRestore();
+    }
+    expect(lifecycle.startContainer).not.toHaveBeenCalled();
+    expect(runActionHook).not.toHaveBeenCalled();
+    expect(JSON.parse(stdout.join('')).error.code).toBe('secrets-locked');
+  });
+
+  it('list --json reports secretsChanged from the vault stamp without unlocking', async () => {
+    const files = vaultFiles(repoDir(), globalDir());
+    await writeVault(files.repo, [entry('A', 'a')], fixed);
+    const stamp = vaultStamp([files.global, files.repo]);
+    const withLabel = (branch: string, label?: string) => {
+      const c = mainContainer(branch, { id: `cid-${branch}`, state: 'exited' });
+      if (label !== undefined) c.labels = { ...c.labels, 'kunj.secrets': label };
+      return c;
+    };
+    backend.existing = [withLabel('same', stamp), withLabel('old', 'aaaaaaaaaaaa'), withLabel('none')];
+    await new ContainerCommand({ secretsUnlock: { ...unlock, env: {} } }).execute('list', { json: true });
+    const json = JSON.parse(stdout.join(''));
+    const changed = Object.fromEntries(json.containers.map((c: { branch: string; secretsChanged?: boolean }) => [c.branch, c.secretsChanged]));
+    expect(changed).toEqual({ same: false, old: true, none: true });
+    expect(keychainRun).not.toHaveBeenCalled();
   });
 });

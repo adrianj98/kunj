@@ -24,6 +24,9 @@ import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint } from
 import { KEPT_VOLUME, ORPHAN_GRACE_MS, PruneContext, applyPrune, parseLsRemoteHeads, planPrune } from '../prune';
 import { isDockerDesktop } from '../dind';
 import { KunjConfig } from '../../../types';
+import { envOf, resolveSecrets } from '../../secrets/resolve';
+import { renderFiles } from '../../secrets/deliver';
+import type { SecretEntry } from '../../secrets/vault';
 import { canConnect, containerOriginUrl, docker, freePort, git, startGitDaemon, waitFor, writeGitProxy } from './git-origin';
 
 let dockerUp = false;
@@ -117,6 +120,7 @@ async function inside(id: string, script: string, env?: Record<string, string>):
 const BRANCH_A = 'it-a';
 const BRANCH_GW = 'it-gw';
 const BRANCH_ALLOW = 'it-allow';
+const BRANCH_SECRETS = 'it-secrets';
 
 (dockerUp ? describe : describe.skip)('kunj container against Docker', () => {
   beforeAll(async () => {
@@ -131,7 +135,7 @@ const BRANCH_ALLOW = 'it-allow';
     fs.writeFileSync(path.join(work, 'README.md'), 'integration\n');
     git(['add', '.'], work);
     git(['commit', '-m', 'initial'], work);
-    git(['push', 'origin', 'HEAD:main', `HEAD:${BRANCH_A}`, `HEAD:${BRANCH_GW}`, `HEAD:${BRANCH_ALLOW}`], work);
+    git(['push', 'origin', 'HEAD:main', `HEAD:${BRANCH_A}`, `HEAD:${BRANCH_GW}`, `HEAD:${BRANCH_ALLOW}`, `HEAD:${BRANCH_SECRETS}`], work);
 
     ({ port, daemon } = await startGitDaemon(tmp));
 
@@ -141,7 +145,7 @@ const BRANCH_ALLOW = 'it-allow';
     // The cwd for startContainer: a clone whose origin is the URL the container uses
     hostClone = path.join(tmp, 'host');
     git(['clone', bare, hostClone], tmp);
-    for (const b of [BRANCH_A, BRANCH_GW, BRANCH_ALLOW]) git(['branch', b, `origin/${b}`], hostClone);
+    for (const b of [BRANCH_A, BRANCH_GW, BRANCH_ALLOW, BRANCH_SECRETS]) git(['branch', b, `origin/${b}`], hostClone);
     git(['remote', 'set-url', 'origin', originUrl], hostClone);
     git(['config', 'user.name', 'kunj test'], hostClone);
     git(['config', 'user.email', 'test@kunj.invalid'], hostClone);
@@ -195,6 +199,56 @@ const BRANCH_ALLOW = 'it-allow';
     expect(second.created).toBe(false);
     expect(second.seeded).toBe(false);
     expect(second.containerId).toBe(idA);
+  });
+
+  it('secrets: a container-targeted env secret is in the container, a host-only one nowhere; files 0600, excluded, re-rendered on resume', async () => {
+    const FOO = 'foo-container-secret-7f3a';
+    const BAR = 'bar-host-only-secret-91c2';
+    const FILE_VALUE = 'file-secret-5d8e';
+    const entry = (name: string, value: string, over: Partial<SecretEntry> = {}): SecretEntry =>
+      ({ name, value, targets: ['container'], delivery: { env: true }, updatedAt: '2026-10-24T00:00:00Z', ...over });
+    // What kunj ct start passes: the repo's entries resolved for the container target
+    const secretsFor = (fileValue: string, stamp: string) => {
+      const entries = resolveSecrets([], [
+        entry('FOO', FOO),
+        entry('BAR', BAR, { targets: ['host'] }),
+        entry('DB', fileValue, { delivery: { env: false, file: '.env' } }),
+      ], BRANCH_SECRETS, 'container');
+      return { env: envOf(entries), files: renderFiles(entries), stamp };
+    };
+    const r = await startContainer(backend, { ...startOptions(BRANCH_SECRETS, config({ allowHost: true }, TOKEN_ENV)), secrets: secretsFor(FILE_VALUE, 'feedfacecafe') });
+    const id = r.containerId;
+    const env = (await inside(id, 'env')).stdout;
+    expect(env).toContain(`FOO=${FOO}`);
+    expect(env).not.toContain(BAR);
+
+    // BAR nowhere in docker inspect; no label holds FOO (FOO is in Config.Env, as env-file variables are)
+    const inspected = docker(['inspect', id]);
+    expect(inspected).not.toContain(BAR);
+    const labels = JSON.parse(docker(['inspect', '--format', '{{json .Config.Labels}}', id]));
+    expect(JSON.stringify(labels)).not.toContain(FOO);
+    expect(JSON.stringify(labels)).not.toContain(FILE_VALUE);
+    expect(labels[LABEL.secrets]).toBe('feedfacecafe');
+
+    const file = await inside(id, 'stat -c %a .env && cat .env && git check-ignore -q .env && echo ignored && git status --porcelain');
+    expect(file.stdout.split('\n')).toEqual(['600', `DB="${FILE_VALUE}"`, 'ignored', '']);
+
+    // Resume re-renders the file, keeps the env and hints at --rebuild for the changed stamp
+    docker(['stop', '-t', '1', id]);
+    const warnings: string[] = [];
+    const resumed = await startContainer(backend, {
+      ...startOptions(BRANCH_SECRETS, config({ allowHost: true }, TOKEN_ENV)),
+      secrets: secretsFor('file-secret-rotated', 'abad1deaabad'),
+      warn: m => warnings.push(m),
+    });
+    expect(resumed.created).toBe(false);
+    const again = await inside(id, 'stat -c %a .env && cat .env && grep -c "^/.env$" .git/info/exclude');
+    expect(again.stdout.split('\n')).toEqual(['600', 'DB="file-secret-rotated"', '1', '']);
+    expect(warnings.some(w => w.includes('--rebuild'))).toBe(true);
+
+    // Later tests expect nothing of this repository left behind
+    await removeContainer(backend, containerNames(REPO_NAME, repoId, BRANCH_SECRETS), { force: true, keepVolumes: false, user: USER, kunjVersion: VERSION });
+    expect(labelledFor(BRANCH_SECRETS)).toEqual([]);
   });
 
   it('push from inside without -u reaches origin', async () => {
@@ -552,7 +606,7 @@ const BRANCH_ALLOW = 'it-allow';
 
       // apt writes no /etc/kunj/env, and nothing secret is baked into the image
       const env: string[] = JSON.parse(docker(['image', 'inspect', '--format', '{{json .Config.Env}}', tag])) ?? [];
-      expect(env.filter(e => /GH_TOKEN|GITHUB_TOKEN|GITLAB_TOKEN|ANTHROPIC/.test(e))).toEqual([]);
+      expect(env.filter(e => /GH_TOKEN|GITHUB_TOKEN|GITLAB_TOKEN|ANTHROPIC|^FOO=|^BAR=|-secret-/.test(e))).toEqual([]);
       // The temporary container is gone
       expect(labelled()).toEqual({ containers: [], volumes: [], networks: [] });
     });

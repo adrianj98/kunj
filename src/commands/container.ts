@@ -26,7 +26,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
-import { getKunjDir, getOriginUrl, getRepoCommonDir, getRepoCommonRoot, getRepoName, loadConfig, loadResolvedConfig, resetRepoCache } from '../lib/config';
+import { getGlobalKunjDir, getKunjDir, getOriginUrl, getRepoCommonDir, getRepoCommonRoot, getRepoName, loadConfig, loadResolvedConfig, resetRepoCache } from '../lib/config';
 import { getCurrentBranch, getGitRoot } from '../lib/git';
 import { HookError, runActionHook } from '../lib/hooks';
 import { listRepos, recordRepo } from '../lib/repos';
@@ -47,6 +47,7 @@ import { readWorkspaceFile, validateWorkspacePath, writeWorkspaceFile } from '..
 import { ContainerNames, LABEL, containerNames, isMain, optionsLabel, repoIdFromUrl } from '../lib/container/names';
 import {
   StartError,
+  StartOptions,
   StartResult,
   containerStatus,
   inspectForRemove,
@@ -64,6 +65,8 @@ import { precheckDind } from '../lib/container/dind';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
 import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount } from '../lib/container/prune';
 import { KunjConfig } from '../types';
+import type { LoadSecretsOptions } from '../lib/secrets/resolve';
+import { vaultFiles, vaultStamp } from '../lib/secrets/vault';
 import type { ContainerJson, ContainerListJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, ShellKillJson } from '../lib/json-types';
 
 interface ContainerOptions {
@@ -116,10 +119,14 @@ const isForwardSpec = (t: string | undefined): t is string => !!t && (PORT_SPEC.
 // 'skipped' is --no-status on a running container
 type ListStatus = Omit<ContainerStatus, 'status'> & { status: ContainerStatus['status'] | 'skipped' };
 
+/** How `start` unlocks the vault (tests pass a fixed key and a runner that never reaches a keychain). */
+export type SecretsUnlock = Partial<Pick<LoadSecretsOptions, 'mode' | 'env' | 'platform' | 'run' | 'prompt' | 'tty'>>;
+
 export class ContainerCommand extends BaseCommand {
   private backend?: ContainerBackend;
+  private readonly secretsUnlock: SecretsUnlock;
 
-  constructor() {
+  constructor(deps: { secretsUnlock?: SecretsUnlock } = {}) {
     super({
       name: 'container',
       aliases: ['ct'],
@@ -201,6 +208,7 @@ export class ContainerCommand extends BaseCommand {
         '[branch] defaults to the current branch. `ct` is short for `container`.',
       ].join('\n'),
     });
+    this.secretsUnlock = deps.secretsUnlock ?? {};
   }
 
   async execute(action?: any, target?: any, extra?: any, options: ContainerOptions = {}): Promise<void> {
@@ -448,6 +456,8 @@ export class ContainerCommand extends BaseCommand {
     const willCreate = !!options.rebuild || (await ctx.backend.inspectLabels(names.container)) === null;
     // Docker-in-Docker that cannot or must not run here is refused before the hook, the snapshot and the push
     if (willCreate) await precheckDind(ctx.backend, config.container, { imageOverride: options.image });
+    // A locked or corrupt vault fails the start before the hook, the snapshot and anything created
+    const secrets = await this.containerSecrets(branch);
     if (willCreate) await runActionHook('pre-container-create', { branch, container: names.container, image: '' }, hookOptions);
 
     // Asked here (the snapshot) and by startContainer (the hash, a devcontainer build): one git call
@@ -494,12 +504,27 @@ export class ContainerCommand extends BaseCommand {
       snapshotHandled,
       worktreeRoot,
       ...(blueprint !== undefined ? { blueprint } : {}),
+      secrets,
     });
 
     if (result.created) {
       await runActionHook('post-container-create', { branch, container: names.container, image: result.image }, hookOptions);
     }
     return result;
+  }
+
+  /**
+   * The branch's container-targeted secrets: env values, rendered files and the stamp of the vault files
+   * they came from. Nothing is unlocked when no vault file exists.
+   */
+  private async containerSecrets(branch: string): Promise<NonNullable<StartOptions['secrets']>> {
+    const files = vaultFiles(getKunjDir(), getGlobalKunjDir());
+    const stamp = vaultStamp([files.global, files.repo]);
+    // Lazy: only start needs the key providers
+    const { envOf, loadSecrets } = await import('../lib/secrets/resolve');
+    const { renderFiles } = await import('../lib/secrets/deliver');
+    const entries = await loadSecrets({ branch, target: 'container', ...this.secretsUnlock });
+    return { env: envOf(entries), files: renderFiles(entries), stamp };
   }
 
   /** Builds a missing or stale snapshot before a start; true when the start's hints are covered. */
@@ -1110,6 +1135,9 @@ export class ContainerCommand extends BaseCommand {
     const orphans = findOrphans(all, volumes, networks);
     const forwards = readForwards().filter(r => r.port > 0);
     const bridges = readBridges();
+    // Ruling 2: compared with the files' stamp, never unlocked; only this repository's vault is known
+    const vault = vaultFiles(getKunjDir(), getGlobalKunjDir());
+    const stamp = vaultStamp([vault.global, vault.repo]);
     const containers: ContainerJson[] = mains.map((c, i) => {
       const s = statuses[i];
       const recorded = this.recordedOptions(c);
@@ -1134,6 +1162,7 @@ export class ContainerCommand extends BaseCommand {
         status: s.status,
         services: describeServices(servicesOf(all, c.name, { repoId: c.labels[LABEL.repo] ?? '', branch: c.labels[LABEL.branch] ?? '' })),
         bridges: bridges.filter(b => b.container === c.name).map(b => ({ name: b.name, pid: b.pid })),
+        ...(c.labels[LABEL.repo] === ctx.repo.id ? { secretsChanged: (c.labels[LABEL.secrets] ?? '') !== stamp } : {}),
       };
     });
 

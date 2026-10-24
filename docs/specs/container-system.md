@@ -69,7 +69,7 @@ itself when Docker is unavailable.
 
 *Designed 2026-10-23; in progress.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, 6c08cd1 and its review fix) and host delivery (`kunj run`, `kunj agent` and `kunj worktree shell` under `kunj run`, file deliveries on `worktree add`; `src/commands/run.ts`, `src/lib/secrets/host.ts`, Task 6); the container delivery path is not. Today secrets reach a container only as host environment variables
+(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, 6c08cd1 and its review fix) and host delivery (`kunj run`, `kunj agent` and `kunj worktree shell` under `kunj run`, file deliveries on `worktree add`; `src/commands/run.ts`, `src/lib/secrets/host.ts`, Task 6) and container delivery (`StartOptions.secrets` in `src/lib/container/lifecycle.ts`, the `kunj.secrets` label, `secretsChanged` in `kunj ct list --json`, Task 7); the migration hint and user docs (Task 8) are not. Today secrets reach a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -168,12 +168,20 @@ or links to, a keep file it is removed from the keep store too, as is the keep c
 - **Containers** (`kunj ct start`, on create and resume): container-targeted `env` secrets join the
   existing `docker run` env file, so the container rules hold (never `docker exec -e`, never a label,
   never a snapshot; snapshot builds get no secrets). A stored secret overrides a `container.env` entry
-  of the same name. `file` deliveries render into `/workspace/<file>` as the sandbox user, mode 0600,
-  added to `.git/info/exclude` so the agent cannot commit them. `docker start` keeps the environment
+  of the same name, and a stored `GH_TOKEN` (or `CLAUDE_CODE_OAUTH_TOKEN`) wins over the `gh auth token`
+  fallback, which is then not asked. An env value with a newline is refused before anything is created
+  (the env file is line based; deliver it as a file). `file` deliveries render into `/workspace/<file>`
+  as the sandbox user, mode 0600, through the tar stream, after the seed and after `/<file>` (anchored,
+  gitignore-escaped) is added to `.git/info/exclude` so the agent cannot commit them; a path outside
+  `/workspace` or with a `.git` component is refused (`bad-path`) before anything is created. `docker start` keeps the environment
   of `docker run`, and the env file is the only allowed channel, so a changed `env` secret reaches a
   container only when it is recreated (`ct start --rebuild`); `start` and resume re-render `file`
-  deliveries, and the start output hints at `--rebuild` when the stamp differs and the container has
-  env secrets. `ct list --json` shows `secretsChanged: true` while the label differs from the stamp.
+  deliveries (also on a running container), and the start output hints at `--rebuild` when the stamp
+  differs and the branch has container env secrets. `ct list --json` shows `secretsChanged` for this
+  repository's containers: `true` while the label (absent counts as `''`) differs from the stamp.
+  `kunj ct start` loads the secrets (and fails on a locked vault) before the create hook, the snapshot
+  and anything created; `kunj ct open` loads them only when it resumes; `kunj ct agent` never starts a
+  container and loads none.
   `docker inspect` shows env-file variables in `Config.Env`, as it does for forwarded tokens today, so
   "not in `docker inspect`" means not in a label and not for host-only secrets; anyone who can run
   `docker inspect` already has root on the daemon.
@@ -213,8 +221,9 @@ or links to, a keep file it is removed from the keep store too, as is the keep c
 `src/settings/secrets.ts`, `src/commands/secret.ts` with `SecretListJson` (and the write/import/apply
 shapes) in `src/lib/json-types.ts`, `src/commands/run.ts` with `src/lib/secrets/host.ts` (`hostSecrets`,
 `runAttached`), `kunjSelf`/`hostRunArgv`/`hostSecretEnv` in `src/lib/agent-session.ts` and `kunjEntry` in
-`src/lib/self.ts`. Planned: container delivery hooks into `src/lib/container/env.ts`
-and `lifecycle.ts`.
+`src/lib/self.ts`, container delivery in `src/lib/container/lifecycle.ts` (`StartOptions.secrets`,
+`secretFilePath`, `renderSecretFiles`, `secretsRebuildHint`), `LABEL.secrets` in `names.ts` and
+`containerSecrets()`/`secretsChanged` in `src/commands/container.ts`.
 
 ## Roadmap
 

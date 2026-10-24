@@ -64,6 +64,8 @@ export const LABEL = {
   blueprintBase: 'kunj.blueprint.base',
   blueprintUser: 'kunj.blueprint.user',
   blueprintCreatedAt: 'kunj.blueprint.createdAt',
+  // The vault stamp (vaultStamp) when the container was created: a hash of ciphertext, never a value
+  secrets: 'kunj.secrets',
 } as const;
 
 export function labelsFor(repoId: string, branch: string, extra: Record<string, string> = {}): Record<string, string> {
