@@ -5,7 +5,7 @@ import KunjWorkspaceCore
 /// repository (`sidebarGroups`: tabs in the app or saved, a running agent, the selection), each
 /// group ending in `N more…` (11 px `faint`, as the design's more row) that lists the others too
 /// (`Show fewer` closes it); a search lists every match. At the foot `+ New session ⌘N` over
-/// `N agents running · kunj <version>`. A row's menu has Close Session. The rows are rebuilt on
+/// `N agents running · kunj <version>`. A row's right-click menu is `ActionRunner.rowMenu`. The rows are rebuilt on
 /// every change (a few dozen at most).
 final class SidebarView: NSView {
     var repos: [RepoEnvironments] = [] { didSet { reload() } }
@@ -14,8 +14,8 @@ final class SidebarView: NSView {
     var onNewSession: () -> Void = {}
     /// Whether an environment is an open session (the window adds the selection).
     var isOpen: (Environment) -> Bool = { _ in true } { didSet { reload() } }
-    /// A row's Close Session.
-    var onCloseSession: (String) -> Void = { _ in }
+    /// A row's right-click menu.
+    var rowMenu: (Environment) -> NSMenu? = { _ in nil }
     /// Repository roots whose `N more…` row is expanded (for this run).
     private var expanded: Set<String> = []
     /// When the environment was last active (Task 8 persists it); nil shows no time.
@@ -82,7 +82,7 @@ final class SidebarView: NSView {
             version.leadingAnchor.constraint(greaterThanOrEqualTo: agents.trailingAnchor, constant: 8),
         ])
         list.onSelect = { [weak self] id in self?.onSelect(id) }
-        list.onCloseSession = { [weak self] id in self?.onCloseSession(id) }
+        list.rowMenu = { [weak self] env in self?.rowMenu(env) }
         list.onToggleMore = { [weak self] root in
             guard let self else { return }
             if self.expanded.contains(root) { self.expanded.remove(root) } else { self.expanded.insert(root) }
@@ -138,7 +138,7 @@ private final class SidebarListView: NSView {
         didSet { rows.forEach { $0.theme = theme }; moreRows.values.forEach { $0.theme = theme }; needsDisplay = true }
     }
     var onSelect: (String) -> Void = { _ in }
-    var onCloseSession: (String) -> Void = { _ in }
+    var rowMenu: (Environment) -> NSMenu? = { _ in nil }
     var onToggleMore: (String) -> Void = { _ in }
     private(set) var rows: [SidebarRowView] = []
     private var moreRows: [String: MoreRowView] = [:]
@@ -163,7 +163,7 @@ private final class SidebarListView: NSView {
             g.environments.map { e in
                 let r = SidebarRowView(environment: e, time: time(e.id), selected: e.id == selectedId, theme: theme)
                 r.onSelect = { [weak self] id in self?.onSelect(id) }
-                r.onCloseSession = { [weak self] id in self?.onCloseSession(id) }
+                r.rowMenu = { [weak self] env in self?.rowMenu(env) }
                 return r
             }
         }

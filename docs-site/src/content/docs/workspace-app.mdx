@@ -70,8 +70,10 @@ is slow to start, the window shows a spinner with "Loading sessions…" and the 
 - **Sidebar.** The repositories in [`kunj repos`](../worktrees/macos-app/#kunj-repos), each with its
   open sessions: the worktrees and containers you have tabs in, or where an agent runs. **N more…**
   under a repository lists the others; click one to open it, or find it with ⌘K, which searches
-  them all. To close a session, right-click its row or press ⌘⇧W: its tabs close and all its tmux
-  sessions, shells and agents, end. A row shows the branch, when you last did something in it, the kind
+  them all. Right-click a row for the same actions as the menu bar app (open it, a new shell or
+  agent, VS Code, the pull request, container start/stop, copy path or branch) plus **Close
+  Session** and **Delete Worktree…** / **Delete Container…**. Closing a session (also ⌘⇧W) closes
+  its tabs and ends all its tmux sessions, shells and agents. A row shows the branch, when you last did something in it, the kind
   (worktree or container) and its state: *Waiting for input*, *Running* (the agent), *Merged #398*,
   *PR #412 open*, *3 changed files*, *↑2 unpushed*, *Clean*, or *Stopped* / *Missing*. The dot is
   green while an agent works, amber when it waits for you. A worktree and a container on the same

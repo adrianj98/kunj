@@ -20,6 +20,9 @@ final class ActionRunner {
     var select: (String) -> Void = { _ in }
     /// Opens the agent in an environment (New session with "Start an agent").
     var openAgent: (Environment) -> Void = { _ in }
+    /// The sidebar row menu's New Shell and Close Session.
+    var openShell: (Environment) -> Void = { _ in }
+    var closeSession: (Environment) -> Void = { _ in }
     /// The window alerts are attached to.
     var window: () -> NSWindow? = { nil }
 
@@ -231,6 +234,51 @@ final class ActionRunner {
                 menu.addItem(item)
             }
         }
+        return menu
+    }
+}
+
+extension ActionRunner {
+    /// A sidebar row's menu: the menu bar app's row actions, opening into the panel (Open selects
+    /// the environment; New Shell and New Agent open tabs in it), then Close Session and Delete.
+    func rowMenu(env: Environment) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        func add(_ title: String, _ run: @escaping () -> Void) { menu.addItem(MenuAction(title: title, run: run)) }
+        func add(_ title: String, _ action: EnvAction) {
+            let p = plan(action, env)
+            if case .disabled(let reason) = p, reason == "Only for a container" || reason == "Only for a worktree" { return }
+            let item = MenuAction(title: title) { [weak self] in self?.perform(action, env: env) }
+            if case .disabled(let reason) = p { item.isEnabled = false; item.toolTip = reason }
+            menu.addItem(item)
+        }
+        add("Open") { [weak self] in self?.select(env.id) }
+        add("New Shell") { [weak self] in self?.select(env.id); self?.openShell(env) }
+        add("New Agent") { [weak self] in self?.openAgent(env) }
+        menu.addItem(.separator())
+        add("Open in VS Code", env.kind == .container ? .ctOpen : .worktreeOpen)
+        add("Open in New VS Code Window", .worktreeOpenNewWindow)
+        menu.addItem(.separator())
+        if let pr = env.pullRequest {
+            add("Open Pull Request #\(pr.number)") { if let u = URL(string: pr.url) { NSWorkspace.shared.open(u) } }
+            add("Copy Pull Request URL") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(pr.url, forType: .string)
+            }
+        } else {
+            add("Create Pull Request…", .createPR)
+        }
+        menu.addItem(.separator())
+        add("Start Container", .ctStart)
+        add("Stop Container", .ctStop)
+        add("Rebuild Container", .ctRebuild)
+        if env.kind == .worktree { add("Reveal in Finder", .revealInFinder) }
+        add(env.kind == .container ? "Copy Container Name" : "Copy Path", .copyPath)
+        add("Copy Branch Name", .copyBranch)
+        menu.addItem(.separator())
+        add("Close Session") { [weak self] in self?.closeSession(env) }
+        add(env.kind == .container ? "Delete Container…" : "Delete Worktree…",
+            env.kind == .container ? .ctRemove(force: false) : .worktreeRemove(force: false))
         return menu
     }
 }

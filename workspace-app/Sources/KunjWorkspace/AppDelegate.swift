@@ -68,12 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.terminalColumn.onNewTab = { [weak self] in self?.openTab(.shell) }
         wireEditors()
         windowController.onNewSession = { [weak self] in self?.newSession(nil) }
-        windowController.onCloseSession = { [weak self] id in
-            guard let self, let env = self.store?.environment(id: id) else { return }
-            let item = NSMenuItem()
-            item.representedObject = env
-            self.closeSession(item)
-        }
+        windowController.sidebar.rowMenu = { [weak self] env in self?.runner.rowMenu(env: env) }
         windowController.onToggleChanges = { [weak self] in self?.toggleChanges(nil) }
         windowController.sidebar.search.onEscape = { [weak self] in self?.windowController.terminalColumn.focusActive() }
         // --demo renders the mockup, which shows the column; otherwise the saved setting (closed by default)
@@ -332,6 +327,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         runner.showMessage = { [weak self] text in self?.windowController.terminalColumn.showMessage(text) }
         runner.select = { [weak self] id in self?.windowController.select(id) }
+        runner.openShell = { [weak self] env in
+            self?.windowController.select(env.id)
+            self?.openTab(.shell)
+        }
+        runner.closeSession = { [weak self] env in
+            let item = NSMenuItem()
+            item.representedObject = env
+            self?.closeSession(item)
+        }
         runner.openAgent = { [weak self] env in
             self?.windowController.select(env.id)
             self?.openTab(.agent)

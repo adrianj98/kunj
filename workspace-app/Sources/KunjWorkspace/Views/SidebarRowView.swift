@@ -13,8 +13,8 @@ final class SidebarRowView: NSView {
     var selected: Bool { didSet { needsDisplay = true; setAccessibilitySelected(selected) } }
     var theme: Theme { didSet { needsDisplay = true } }
     var onSelect: ((String) -> Void)?
-    /// The row's menu: Close Session (all its tabs and tmux sessions).
-    var onCloseSession: ((String) -> Void)?
+    /// The row's right-click menu (the runner's `rowMenu`).
+    var rowMenu: ((Environment) -> NSMenu?)?
     private var hovering = false { didSet { needsDisplay = true } }
 
     init(environment: Environment, time: String, selected: Bool, theme: Theme) {
@@ -36,14 +36,7 @@ final class SidebarRowView: NSView {
     override func mouseEntered(with event: NSEvent) { hovering = true }
     override func mouseExited(with event: NSEvent) { hovering = false }
     override func mouseDown(with event: NSEvent) { onSelect?(environment.id) }
-    override func menu(for event: NSEvent) -> NSMenu? {
-        let menu = NSMenu()
-        let item = NSMenuItem(title: "Close Session", action: #selector(closeSession), keyEquivalent: "")
-        item.target = self
-        menu.addItem(item)
-        return menu
-    }
-    @objc private func closeSession() { onCloseSession?(environment.id) }
+    override func menu(for event: NSEvent) -> NSMenu? { rowMenu?(environment) }
     override func accessibilityPerformPress() -> Bool { onSelect?(environment.id); return true }
 
     override func draw(_ dirtyRect: NSRect) {

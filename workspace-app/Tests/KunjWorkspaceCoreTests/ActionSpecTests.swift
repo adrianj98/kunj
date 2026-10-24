@@ -22,6 +22,18 @@ import Testing
         #expect(actionPlan(.copyPath, env: box, worktreeOfSameBranch: nil) == .local("kunj-app-feature-x-1a2b"))
     }
 
+    /// The sidebar row menu's extras (as the menu bar app's): a new VS Code window, the branch name,
+    /// the pull request's link
+    @Test func rowMenuPlans() {
+        let wt = testWorktree()
+        #expect(actionPlan(.worktreeOpenNewWindow, env: wt, worktreeOfSameBranch: nil)
+            == .run(args: ["worktree", "open", "/w/feat", "--new-window"]))
+        #expect(actionPlan(.worktreeOpenNewWindow, env: testContainer(), worktreeOfSameBranch: nil)
+            == .disabled(reason: "Only for a worktree"))
+        #expect(actionPlan(.copyBranch, env: wt, worktreeOfSameBranch: nil) == .local("feature/x"))
+        #expect(actionPlan(.copyBranch, env: testContainer(), worktreeOfSameBranch: nil) == .local("feature/x"))
+    }
+
     @Test func containerStateGatesStartAndStop() {
         #expect(actionPlan(.ctStart, env: testContainer(), worktreeOfSameBranch: nil)
             == .disabled(reason: "The container is running"))

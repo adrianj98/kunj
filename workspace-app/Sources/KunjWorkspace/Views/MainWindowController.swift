@@ -21,8 +21,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     var onSelect: (Environment?) -> Void = { _ in }
     var onHeaderAction: (HeaderAction, Environment) -> Void = { _, _ in }
     var onNewSession: () -> Void = {}
-    /// A sidebar row's Close Session.
-    var onCloseSession: (String) -> Void = { _ in }
     var lastActivity: (String) -> Date? = { _ in nil } { didSet { sidebar.lastActivity = lastActivity } }
     /// The tab bar's Changes pill was pressed (the app toggles the column and saves it).
     var onToggleChanges: () -> Void = {}
@@ -80,7 +78,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         buildLayout()
         sidebar.onSelect = { [weak self] id in self?.select(id) }
         sidebar.onNewSession = { [weak self] in self?.onNewSession() }
-        sidebar.onCloseSession = { [weak self] id in self?.onCloseSession(id) }
         header.onAction = { [weak self] action in
             guard let self, let env = self.selectedEnvironment else { return }
             self.onHeaderAction(action, env)

@@ -64,7 +64,12 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   sessions** are listed (`sidebarGroups`): environments with tabs in the app or saved in the layout
   file, a running or waiting agent, and the selection; each repository ends in an `N more…` row
   (11 px `faint`) that lists the rest too (`Show fewer`), and a search lists every match, so any
-  environment can be opened. A row's menu and Environment > Close Session ⌘⇧W close the session:
+  environment can be opened. A row's right-click menu (`ActionRunner.rowMenu`) has the menu bar app's
+  row actions, opening into the panel: Open, New Shell, New Agent, Open in VS Code (and in a new
+  window for a worktree), Open / Copy Pull Request URL or Create Pull Request…, Start / Stop / Rebuild
+  Container, Reveal in Finder, Copy Path (Container Name), Copy Branch Name, Close Session, and Delete
+  Worktree… / Delete Container… (the same confirmation, with Force, as the overflow menu). The row
+  menu and Environment > Close Session ⌘⇧W close the session:
   every tab (an unsaved editor asks), then `kunj worktree shell <b> --kill` and `kunj agent stop <b>
   --all` (containers: `kunj ct shell <b> --kill`, `kunj ct agent <b> --kill`), so its tmux sessions
   end too, the ones started outside the app included; its saved tabs are cleared.

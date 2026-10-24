@@ -3,8 +3,8 @@ import Foundation
 /// What the header's buttons, the overflow menu and the port links can do to an environment.
 public enum EnvAction: Equatable, Sendable {
     case ctStart, ctStop, ctRemove(force: Bool), ctRebuild, ctOpen
-    case worktreeOpen, worktreeRemove(force: Bool)
-    case createPR, prune, copyPath, revealInFinder, openPort(Int)
+    case worktreeOpen, worktreeOpenNewWindow, worktreeRemove(force: Bool)
+    case createPR, prune, copyPath, copyBranch, revealInFinder, openPort(Int)
 }
 
 /// How `ActionRunner` carries out an action: `terminal` runs `kunj <args>` in an action tab (in
@@ -55,6 +55,10 @@ public func actionPlan(_ action: EnvAction, env: Environment, worktreeOfSameBran
         guard !isContainer, let path = env.path else { return worktreeOnly }
         guard env.exists else { return missing }
         return .run(args: ["worktree", "open", path])
+    case .worktreeOpenNewWindow:
+        guard !isContainer, let path = env.path else { return worktreeOnly }
+        guard env.exists else { return missing }
+        return .run(args: ["worktree", "open", path, "--new-window"])
     case .worktreeRemove(let force):
         guard !isContainer, let path = env.path else { return worktreeOnly }
         if env.isMain { return .disabled(reason: "The main worktree cannot be removed") }
@@ -71,6 +75,8 @@ public func actionPlan(_ action: EnvAction, env: Environment, worktreeOfSameBran
     case .copyPath:
         if isContainer { return env.containerName.map(ActionPlan.local) ?? containerOnly }
         return env.path.map(ActionPlan.local) ?? worktreeOnly
+    case .copyBranch:
+        return .local(branch)
     case .revealInFinder:
         guard !isContainer, let path = env.path else {
             return .disabled(reason: "A container has no folder on this Mac")
