@@ -45,9 +45,16 @@ Finder don't get one otherwise); if it can't find it, set the command in Setting
   the front. Hover a row for buttons to open in a new window, open a terminal, or remove it.
   Right-click for the rest: open or copy the pull request, create one (runs `kunj pr` in a
   terminal), reveal in Finder, copy the path or the branch name.
+- **Branch containers** are listed with the worktrees and work like them: a branch with both has
+  two rows, the container's (box icon, `container`) right below the worktree's. Click a container to
+  open your editor attached to it (`kunj ct open`, which starts a stopped one). Hover for new window,
+  terminal (`kunj ct shell`) or start, and remove; right-click to start the agent, stop, rebuild,
+  forward ports, open a port in the browser or open the pull request. Start, rebuild, remove and the
+  agent run in your terminal app. **Prune Containers…** is in the repository's ⋯ menu.
 - **New Worktree…** opens a window to check out an existing branch or create a new one from the
   repository default or any base, fetched from origin unless you untick **Fetch the base from
-  origin**. Leave the folder empty for the default location (`worktree.baseDir`).
+  origin**. Leave the folder empty for the default location (`worktree.baseDir`). Choose
+  **Container** at the top to put the branch in a container instead (`kunj ct start`, in a terminal).
 - **Remove** asks for confirmation and offers to force it when the worktree has uncommitted changes
   or is open somewhere, like the extension. **Prune Stale Worktrees** is in each repository's ⋯ menu.
 - **Filter** worktrees by typing, or switch on **Open only** to see just the ones open in an editor.
@@ -70,7 +77,7 @@ Open **Settings…** from the ⚙ menu:
 | Section | Settings |
 | --- | --- |
 | kunj CLI | The command to run |
-| Worktrees | Refresh interval, show changes and ahead/behind, show pull requests, show paths, terminal app |
+| Worktrees | Refresh interval, show changes and ahead/behind, show pull requests, show paths, show branch containers, terminal app |
 | Open worktree switcher | Turn the global shortcut on or off and record a different one |
 | Organize | Screen, layout (editor left, editor right, editor above), whether editor and terminal windows take part, and whether to remove empty desktops afterwards |
 | Pull requests | Notifications and the failing-checks count in the menu bar |

@@ -163,10 +163,19 @@ final class KunjCLI: @unchecked Sendable {
                 }
 
                 var message = Self.lastLine(stderr) ?? Self.lastLine(String(decoding: stdoutData, as: UTF8.self)) ?? "kunj exited with code \(status)"
+                // `{ error: "…" }`, or `{ error: { code, message } }` from kunj ct
                 if let payload,
-                   let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
-                   let error = object["error"] as? String {
-                    message = error
+                   let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] {
+                    if let error = object["error"] as? String {
+                        message = error
+                    } else if let error = object["error"] as? [String: Any], let text = error["message"] as? String {
+                        message = text
+                    }
+                }
+                // A CLI older than an option says so on some stderr line, not always the last one
+                if stderr.range(of: "unknown option", options: .caseInsensitive) != nil,
+                   let line = stderr.split(separator: "\n").first(where: { $0.range(of: "unknown option", options: .caseInsensitive) != nil }) {
+                    message = String(line).trimmingCharacters(in: .whitespaces)
                 }
                 self.log("  ! \(message)")
                 let notARepo = message.range(of: "not (a|in a) git repository", options: [.regularExpression, .caseInsensitive]) != nil
@@ -210,12 +219,30 @@ final class KunjCLI: @unchecked Sendable {
 
     // ---- worktrees ----------------------------------------------------------
 
-    func listWorktrees(repo: String, includeStatus: Bool, includePullRequests: Bool, fresh: Bool) async throws -> WorktreeListResult {
+    func listWorktrees(repo: String, includeStatus: Bool, includePullRequests: Bool, fresh: Bool, includeContainers: Bool = false) async throws -> WorktreeListResult {
         var args = ["worktree", "list"]
         if !includeStatus { args.append("--no-status") }
         if !includePullRequests { args.append("--no-pr") }
         if fresh { args.append("--fresh") }
+        if includeContainers { args.append("--containers") }
         return try await run(args, cwd: repo)
+    }
+
+    // ---- containers (kunj ct) ---------------------------------------------------
+
+    func stopContainer(repo: String, branch: String) async throws {
+        let _: SuccessResult = try await run(["ct", "stop", branch], cwd: repo, timeout: 120)
+    }
+
+    // Starts a stopped container first, then launches the editor attached to it
+    func openContainer(repo: String, branch: String, newWindow: Bool) async throws -> ContainerOpenResult {
+        var args = ["ct", "open", branch]
+        if newWindow { args.append("--new-window") }
+        return try await run(args, cwd: repo, timeout: 600)
+    }
+
+    func autoForward(repo: String, branch: String) async throws {
+        let _: SuccessResult = try await run(["ct", "forward", branch, "--auto", "--detach"], cwd: repo, timeout: 60)
     }
 
     func getPullRequest(repo: String, worktreePath: String) async throws -> PullRequest? {

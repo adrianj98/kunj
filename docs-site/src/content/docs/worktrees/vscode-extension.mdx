@@ -65,6 +65,22 @@ this with `kunj.worktrees.clickAction`.
 
 The status bar shows the worktree of the current window; click it for a quick pick of all worktrees.
 
+### Branch containers
+
+The repository's [branch containers](../../containers/overview/) are listed with the worktrees, and
+they work the same way: a container is just another place a branch lives. A branch with both a
+worktree and a container has two rows, the container's right below the worktree's; a branch that
+only has a container is listed after the worktrees. A container row shows `container` (or
+`container · stopped`), `agent` or `agent waiting`, `✎` for uncommitted changes, `↑2` for commits
+not on origin and the pull request badge. The box icon is green while it runs and yellow when the
+agent waits for you.
+
+Click a container to open VS Code attached to it (`kunj ct open`; a stopped container is started
+first, and you need the Dev Containers extension). Running containers list their ports below them:
+click `localhost:3000` to open it in the browser. Turn the containers off with
+`kunj.worktrees.showContainers`. Without Docker, or with a kunj older than
+`kunj worktree list --containers`, the view just shows the worktrees.
+
 ### How "open in other windows" works
 
 Each window registers its folders with `kunj worktree session start` when the extension starts,
@@ -98,7 +114,21 @@ From a worktree's context menu (some also as inline buttons on hover):
 | Reveal Worktree in File Manager, Copy Worktree Path | |
 | Open Pull Request, Copy Pull Request URL | When the worktree has a pull request |
 | Create Pull Request… | When it has none: runs [`kunj pr`](../../reference/commands/) in a terminal in that worktree |
+| Start Agent in Worktree | Runs [`kunj agent`](../agent/) in a terminal |
 | Remove Worktree… | Remove it, after a confirmation |
+
+From a container's context menu:
+
+| Command | What it does |
+| --- | --- |
+| Open Container / in New Window / in Current Window | `kunj ct open`: VS Code attached to the container |
+| Open Terminal in Container, Start Agent in Container | `kunj ct shell`, `kunj ct agent` in a terminal |
+| Forward Port…, Forward Ports Automatically | `kunj ct forward <branch> <port>` in a terminal, or `--auto --detach` in the background |
+| Start, Stop, Rebuild…, Remove Container… | `kunj ct start`, `stop`, `start --rebuild`, `remove`. Start, rebuild and remove run in a terminal that closes when they succeed; `remove` asks there when the container has unpushed work |
+| Open Pull Request, Copy Pull Request URL, Create Pull Request… | Create runs `gh pr create --web --head <branch>` |
+| Copy Container Name | |
+
+**Prune Containers…** in the view's `…` menu runs `kunj ct prune` in a terminal.
 
 Removing asks first and tells you when a worktree has uncommitted changes or is open in another
 window; in that case the button reads **Force Remove** and the worktree is removed with `--force`,
@@ -114,8 +144,10 @@ worktree and the worktree open in the current window are never removed.
 3. For a new branch, pick its base: one of your branches, or **HEAD** to use kunj's default base
    (the same as `kunj worktree add -b` without `--base`, see
    [New branches](../../branches/create-and-switch/)).
-4. Enter a folder, or leave it empty for the default location (`worktree.baseDir`).
-5. Choose **Open in New Window**, **Open Here** or **Add to Workspace**.
+4. Choose **Worktree** or **Container** (asked when containers are shown). A container is created
+   with `kunj ct start <branch>` (`-c` for a new branch) in a terminal, and appears in the view.
+5. Enter a folder, or leave it empty for the default location (`worktree.baseDir`).
+6. Choose **Open in New Window**, **Open Here** or **Add to Workspace**.
 
 </Steps>
 
@@ -134,6 +166,7 @@ Keep files are copied in and the `post-worktree-create` hook runs, exactly as wi
 | `kunj.worktrees.showPath` | `true` | Show the path next to the branch |
 | `kunj.worktrees.showStatusBar` | `true` | Show the current worktree in the status bar |
 | `kunj.worktrees.trackSessions` | `true` | Register this window so other windows and the CLI can see what it has open |
+| `kunj.worktrees.showContainers` | `true` | List the branch containers too (`kunj worktree list --containers`) |
 
 The view also refreshes when the window regains focus. Pull requests come from a 60-second cache, so
 the periodic refresh never waits on the network; the Refresh button bypasses it.

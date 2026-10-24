@@ -10,7 +10,7 @@ has them ([workspace-ide.md](workspace-ide.md)).
 | --- | --- |
 | CLI: `kunj worktree list --json --containers` | Shipped |
 | VS Code extension: container rows and actions | Shipped (not yet tried against a live container) |
-| macOS app: container rows and actions | In progress |
+| macOS app: container rows and actions | Shipped (not yet tried against a live container) |
 | Refresh on `kunj events` | Not started |
 
 ## Principle

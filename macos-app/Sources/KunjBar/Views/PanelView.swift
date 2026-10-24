@@ -2,6 +2,7 @@
 // footer with add/refresh/settings.
 
 import AppKit
+import KunjBarCore
 import SwiftUI
 
 struct PanelView: View {
@@ -98,7 +99,8 @@ struct PanelView: View {
 
     @ViewBuilder private func repoSection(_ state: RepoState) -> some View {
         let worktrees = filtered(state.worktrees)
-        if !isFiltering || !worktrees.isEmpty {
+        let containers = filtered(state.containers)
+        if !isFiltering || !worktrees.isEmpty || !containers.isEmpty {
             let collapsed = isCollapsed(state.repo) && !isFiltering
             HStack(spacing: 6) {
                 Image(systemName: collapsed ? "chevron.right" : "chevron.down")
@@ -137,8 +139,11 @@ struct PanelView: View {
                         .padding(.horizontal, 26)
                         .padding(.bottom, 4)
                 }
-                ForEach(worktrees) { worktree in
-                    WorktreeRow(worktree: worktree, repo: state.repo)
+                ForEach(places(worktrees, containers)) { place in
+                    switch place {
+                    case .worktree(let worktree): WorktreeRow(worktree: worktree, repo: state.repo)
+                    case .container(let container): ContainerRow(container: container, repo: state.repo)
+                    }
                 }
             }
         }
@@ -151,6 +156,9 @@ struct PanelView: View {
         Button("Copy Path") { Launcher.copy(repo.root) }
         Divider()
         Button("Prune Stale Worktrees") { store.prune(repo) }
+        if UserDefaults.standard.kunjShowContainers {
+            Button("Prune Containers…") { store.runContainerCommand(["ct", "prune"], in: repo, title: "kunj-ct-prune-\(repo.name)") }
+        }
         Divider()
         Button("Remove from List") { store.hideRepository(repo) }
     }
@@ -261,6 +269,26 @@ struct PanelView: View {
         }
     }
 
+    // Containers have no editor sessions, so "Open only" hides them
+    private func filtered(_ containers: [BranchContainer]) -> [BranchContainer] {
+        guard !onlyOpen else { return [] }
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return containers }
+        return containers.filter { c in
+            [c.branch, c.name, "container", c.pullRequest?.title ?? "", c.pullRequest.map { "#\($0.number)" } ?? ""]
+                .contains { $0.lowercased().contains(needle) }
+        }
+    }
+
+    private func places(_ worktrees: [Worktree], _ containers: [BranchContainer]) -> [PanelPlace] {
+        interleavePlaces(worktrees: worktrees, branchOf: \.branch, containers: containers, containerBranch: \.branch).map {
+            switch $0 {
+            case .worktree(let w): return .worktree(w)
+            case .container(let c): return .container(c)
+            }
+        }
+    }
+
     private var collapsed: Set<String> {
         Set(collapsedRaw.split(separator: "\n").map(String.init))
     }
@@ -293,6 +321,19 @@ struct PanelView: View {
         panel.message = "Choose git repositories (or any folder inside one)"
         if panel.runModal() == .OK {
             for url in panel.urls { store.addRepository(path: url.path) }
+        }
+    }
+}
+
+// One row of a repository: a worktree or a branch container
+private enum PanelPlace: Identifiable {
+    case worktree(Worktree)
+    case container(BranchContainer)
+
+    var id: String {
+        switch self {
+        case .worktree(let w): return "wt:" + w.path
+        case .container(let c): return "ct:" + c.name
         }
     }
 }

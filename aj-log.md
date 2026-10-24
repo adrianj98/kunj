@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-24 — macOS menu bar app: containers as rows
+
+- Container rows (`ContainerRow`) next to the worktrees, ordered by `interleavePlaces()` in KunjBarCore (tested): a
+  branch's container right after its worktree, the rest by name. Open attached (`kunj ct open`), stop and auto-forward
+  through the CLI's JSON; start, rebuild, remove, shell, agent and prune in the terminal app. New Worktree window has a
+  Worktree/Container choice; Settings has Show branch containers. Old CLIs without `--containers` are retried without.
+  Why: same design as the extension, containers feel like local worktrees.
+- User docs for both apps updated (docs-site worktrees/vscode-extension and macos-app pages).
+
 ## 2026-10-24 — VS Code extension: containers as rows
 
 - The Worktrees view lists containers from `worktree list --containers` next to the worktrees (a branch's container

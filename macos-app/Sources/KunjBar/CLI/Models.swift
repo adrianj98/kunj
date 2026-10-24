@@ -96,12 +96,76 @@ struct Worktree: Codable, Hashable, Identifiable {
     var isActive: Bool { !sessions.isEmpty }
 }
 
+// A branch container (`kunj ct`) as `kunj worktree list --containers` reports it
+struct ContainerPort: Codable, Hashable {
+    let container: Int
+    let host: Int
+    let kind: String // publish | forward
+    let service: String?
+
+    var label: String {
+        "localhost:\(host) → \(service.map { "\($0):\(container)" } ?? String(container))"
+    }
+}
+
+struct BranchContainer: Codable, Hashable, Identifiable {
+    struct Agent: Codable, Hashable {
+        let running: Bool?
+        let state: String? // running | waiting
+    }
+    struct Workspace: Codable, Hashable {
+        let head: String?
+        let ahead: Int?
+        let dirty: Bool?
+    }
+    struct Service: Codable, Hashable {
+        let name: String
+        let state: String
+    }
+    struct Blueprint: Codable, Hashable {
+        let stale: Bool?
+    }
+
+    let branch: String
+    let name: String
+    let state: String
+    let image: String
+    let firewall: String?
+    let dind: String?
+    let ports: [ContainerPort]
+    let agent: Agent
+    let workspace: Workspace
+    let status: String?
+    let services: [Service]
+    let blueprint: Blueprint?
+    let pullRequest: PullRequest?
+
+    var id: String { name }
+    var isRunning: Bool { state == "running" }
+    var agentWaiting: Bool { agent.running == true && agent.state == "waiting" }
+}
+
+struct ContainerListing: Codable {
+    let available: Bool
+    let message: String?
+    let items: [BranchContainer]
+}
+
 struct WorktreeListResult: Codable {
     let repoRoot: String
     let currentPath: String?
     let pullRequestLookup: String?
     let pullRequestsFromCache: Bool?
     let worktrees: [Worktree]
+    // Only with --containers
+    let containers: ContainerListing?
+}
+
+struct ContainerOpenResult: Codable {
+    let success: Bool
+    let uri: String?
+    let warning: String?
+    let exec: String?
 }
 
 struct BranchListResult: Codable {

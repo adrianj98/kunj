@@ -52,7 +52,7 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI `--containers`, then the extension, then the macOS app |
+| Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
 
 ## To do
 

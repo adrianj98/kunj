@@ -1,6 +1,6 @@
-// App state: the known repositories (`kunj repos`) and each one's worktrees
-// (`kunj worktree list`), refreshed on a timer, when the panel opens, and
-// when ~/.kunj/worktree-sessions.json or repos.json change.
+// App state: the known repositories (`kunj repos`) and each one's worktrees and
+// branch containers (`kunj worktree list --containers`), refreshed on a timer, when
+// the panel opens, and when ~/.kunj/worktree-sessions.json or repos.json change.
 
 import AppKit
 import KunjBarCore
@@ -13,6 +13,7 @@ struct RepoState: Identifiable {
 
     var id: String { repo.root }
     var worktrees: [Worktree] { listing?.worktrees ?? [] }
+    var containers: [BranchContainer] { listing?.containers?.items ?? [] }
 }
 
 enum CLIState: Equatable {
@@ -33,6 +34,8 @@ final class AppStore {
     var flash: String?
     // Worktree paths with an action in flight, so their row can show it
     private(set) var busyWorktrees: Set<String> = []
+    // Container names with an action in flight (open, stop, forward)
+    private(set) var busyContainers: Set<String> = []
     private(set) var isOrganizing = false
     private(set) var removingWorktrees: Set<String> = []
     // Selection mode: rows show checkboxes and the footer offers removing the checked worktrees
@@ -48,6 +51,9 @@ final class AppStore {
     @ObservationIgnored private var pendingFresh = false
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var defaultsObserver: NSObjectProtocol?
+    // Set when the CLI refuses --containers (older than the option): list without it from then on
+    @ObservationIgnored private var containersUnsupported = false
+    @ObservationIgnored private var credentialsWarned = false
 
     init() {
         Pref.register()
@@ -78,12 +84,17 @@ final class AppStore {
 
     private var lastCliPath = UserDefaults.standard.kunjCliPath
     private var lastInterval = UserDefaults.standard.kunjRefreshInterval
+    private var lastShowContainers = UserDefaults.standard.kunjShowContainers
 
     private func defaultsChanged() {
         let defaults = UserDefaults.standard
         if defaults.kunjCliPath != lastCliPath {
             lastCliPath = defaults.kunjCliPath
             cli.command = lastCliPath
+            refresh()
+        }
+        if defaults.kunjShowContainers != lastShowContainers {
+            lastShowContainers = defaults.kunjShowContainers
             refresh()
         }
         if defaults.kunjRefreshInterval != lastInterval {
@@ -152,6 +163,7 @@ final class AppStore {
         let defaults = UserDefaults.standard
         let includeStatus = defaults.kunjShowStatus
         let includePRs = defaults.kunjShowPullRequests
+        let includeContainers = defaults.kunjShowContainers && !containersUnsupported
         let cli = self.cli
         let previous = Dictionary(uniqueKeysWithValues: repos.map { ($0.id, $0) })
 
@@ -163,7 +175,13 @@ final class AppStore {
                         return (index, RepoState(repo: repo, listing: nil, error: "Repository is missing"))
                     }
                     do {
-                        let listing = try await cli.listWorktrees(repo: repo.root, includeStatus: includeStatus, includePullRequests: includePRs, fresh: fresh)
+                        let listing: WorktreeListResult
+                        do {
+                            listing = try await cli.listWorktrees(repo: repo.root, includeStatus: includeStatus, includePullRequests: includePRs, fresh: fresh, includeContainers: includeContainers)
+                        } catch let error as KunjCLIError where includeContainers && error.message.range(of: "unknown option.*--containers", options: [.regularExpression, .caseInsensitive]) != nil {
+                            await MainActor.run { self.containersUnsupported = true }
+                            listing = try await cli.listWorktrees(repo: repo.root, includeStatus: includeStatus, includePullRequests: includePRs, fresh: fresh)
+                        }
                         return (index, RepoState(repo: repo, listing: listing, error: nil))
                     } catch {
                         return (index, RepoState(repo: repo, listing: nil, error: error.localizedDescription))
@@ -302,6 +320,60 @@ final class AppStore {
             } catch {
                 flash = error.localizedDescription
             }
+        }
+    }
+
+    // MARK: - Containers
+
+    // Long or interactive `kunj ct` commands (start, remove, prune, a foreground forward) run in a
+    // terminal, like `kunj pr`; the listing picks the result up on the next refresh
+    func runContainerCommand(_ args: [String], in repo: KnownRepo, title: String) {
+        let line = ([cli.shellCommand] + args.map(shellQuote)).joined(separator: " ")
+        Launcher.runInTerminal(line, cwd: repo.root, title: title)
+    }
+
+    func openContainer(_ container: BranchContainer, in repo: KnownRepo, newWindow: Bool = false) {
+        guard !busyContainers.contains(container.name) else { return }
+        busyContainers.insert(container.name)
+        let started = Date()
+        Task {
+            do {
+                let result = try await cli.openContainer(repo: repo.root, branch: container.branch, newWindow: newWindow)
+                if result.exec != nil {
+                    // worktree.editorCommand cannot attach to a container: a shell in it instead
+                    runContainerCommand(["ct", "shell", container.branch], in: repo, title: "kunj-ct-\(container.branch)")
+                } else if let warning = result.warning, !credentialsWarned {
+                    credentialsWarned = true
+                    flash = warning
+                }
+            } catch {
+                flash = "Opening the container of \(container.branch) failed: \(error.localizedDescription)"
+            }
+            let remaining = 0.6 - Date().timeIntervalSince(started)
+            if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+            busyContainers.remove(container.name)
+            refresh()
+        }
+    }
+
+    func stopContainer(_ container: BranchContainer, in repo: KnownRepo) {
+        guard !busyContainers.contains(container.name) else { return }
+        busyContainers.insert(container.name)
+        Task {
+            do {
+                try await cli.stopContainer(repo: repo.root, branch: container.branch)
+            } catch {
+                flash = "Stopping \(container.branch) failed: \(error.localizedDescription)"
+            }
+            busyContainers.remove(container.name)
+            refresh()
+        }
+    }
+
+    func autoForward(_ container: BranchContainer, in repo: KnownRepo) {
+        perform("Forwarding the ports of \(container.branch)") { [weak self, cli] in
+            try await cli.autoForward(repo: repo.root, branch: container.branch)
+            await MainActor.run { self?.flash = "Forwarding the ports of \(container.branch) as they appear" }
         }
     }
 

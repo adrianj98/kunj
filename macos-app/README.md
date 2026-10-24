@@ -9,8 +9,11 @@ repository kunj knows about rather than one editor window:
   open VS Code window is focused). Hover for new window, terminal and remove buttons; right-click for
   the rest: open/copy the pull request, create one (`kunj pr` in a terminal), reveal in Finder, copy
   the path or branch
+- Branch containers (`kunj ct`, from `kunj worktree list --containers`) as rows like worktrees, a
+  branch's container right after its worktree: click opens the editor attached (`kunj ct open`);
+  terminal, agent, start/stop/rebuild/remove, ports and the pull request from the row
 - New Worktree window: check out an existing branch or create one from the repository default
-  (fetched from origin) or any base
+  (fetched from origin) or any base, as a worktree or a container
 - Remove with the same force confirmation as the extension, prune stale worktrees
 - Notifications when a pull request's checks fail or pass, or it is approved or merged; failing
   checks count in the menu bar

@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage(Pref.showStatus) private var showStatus = true
     @AppStorage(Pref.showPullRequests) private var showPullRequests = true
     @AppStorage(Pref.showPath) private var showPath = false
+    @AppStorage(Pref.showContainers) private var showContainers = true
     @AppStorage(Pref.terminalApp) private var terminalApp = "Terminal"
     @AppStorage(Pref.notifyPullRequests) private var notifyPullRequests = true
     @AppStorage(Pref.badgeFailingChecks) private var badgeFailingChecks = true
@@ -41,6 +42,7 @@ struct SettingsView: View {
                 Toggle("Show uncommitted changes and ahead/behind", isOn: $showStatus)
                 Toggle("Show pull requests (gh / glab)", isOn: $showPullRequests)
                 Toggle("Show worktree paths", isOn: $showPath)
+                Toggle("Show branch containers (kunj ct)", isOn: $showContainers)
                 Picker("Terminal", selection: $terminalApp) {
                     ForEach(Launcher.terminalApps, id: \.self) { Text($0).tag($0) }
                 }

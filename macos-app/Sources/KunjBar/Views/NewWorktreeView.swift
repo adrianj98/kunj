@@ -1,6 +1,7 @@
 // "New Worktree" window: check out an existing branch or create a new one
 // (from the repo default, fetched from origin, unless told otherwise), then
-// optionally open it in the editor.
+// optionally open it in the editor. With containers shown, it can instead put
+// the branch in a container (`kunj ct start`, run in a terminal).
 
 import SwiftUI
 
@@ -10,8 +11,11 @@ struct NewWorktreeView: View {
     @Environment(\.dismiss) private var dismiss
 
     enum Mode: String, CaseIterable { case new = "New branch", existing = "Existing branch" }
+    enum Place: String, CaseIterable { case worktree = "Worktree", container = "Container" }
 
     @State private var mode: Mode = .new
+    @State private var place: Place = .worktree
+    @AppStorage(Pref.showContainers) private var showContainers = true
     @State private var branches: [BranchListResult.Branch] = []
     @State private var loadingBranches = true
     @State private var newBranch = ""
@@ -28,10 +32,12 @@ struct NewWorktreeView: View {
     private var repoState: RepoState? { store.repos.first { $0.repo.root == repoRoot } }
     private var repoName: String { repoState?.repo.name ?? (repoRoot as NSString).lastPathComponent }
 
-    // Branches that are not already checked out in a worktree
+    // Branches that do not have a worktree (or, for a container, a container) yet
     private var availableBranches: [BranchListResult.Branch] {
-        let checkedOut = Set(repoState?.worktrees.compactMap(\.branch) ?? [])
-        return branches.filter { !checkedOut.contains($0.name) }
+        let taken = place == .container
+            ? Set(repoState?.containers.map(\.branch) ?? [])
+            : Set(repoState?.worktrees.compactMap(\.branch) ?? [])
+        return branches.filter { !taken.contains($0.name) }
     }
 
     private var branchName: String {
@@ -53,7 +59,15 @@ struct NewWorktreeView: View {
 
     private var form: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New worktree in \(repoName)").font(.title3.weight(.semibold))
+            Text(place == .container ? "New container in \(repoName)" : "New worktree in \(repoName)").font(.title3.weight(.semibold))
+
+            if showContainers {
+                Picker("Where", selection: $place) {
+                    ForEach(Place.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("A worktree is a checkout on this Mac; a container is a sandboxed clone in Docker")
+            }
 
             Picker("", selection: $mode) {
                 ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -68,18 +82,22 @@ struct NewWorktreeView: View {
                         Text("Repository default").tag("")
                         ForEach(branches, id: \.name) { Text($0.name).tag($0.name) }
                     }
-                    Toggle("Fetch the base from origin", isOn: $fromOrigin)
+                    if place == .worktree {
+                        Toggle("Fetch the base from origin", isOn: $fromOrigin)
+                    }
                 } else {
                     Picker("Branch", selection: $existingBranch) {
                         if availableBranches.isEmpty {
-                            Text(loadingBranches ? "Loading…" : "No branches without a worktree").tag("")
+                            Text(loadingBranches ? "Loading…" : place == .container ? "No branches without a container" : "No branches without a worktree").tag("")
                         }
                         ForEach(availableBranches, id: \.name) { branch in
                             Text(branch.lastActivity.map { "\(branch.name)  (\($0))" } ?? branch.name).tag(branch.name)
                         }
                     }
                 }
-                TextField("Folder", text: $customPath, prompt: Text("Default location"))
+                if place == .worktree {
+                    TextField("Folder", text: $customPath, prompt: Text("Default location"))
+                }
             }
             .formStyle(.columns)
 
@@ -151,6 +169,17 @@ struct NewWorktreeView: View {
     }
 
     private func create() async {
+        if place == .container, let repo = repoState?.repo {
+            // Building the image and seeding the clone takes a while: kunj ct start in a terminal
+            var args = ["ct", "start", branchName]
+            if mode == .new {
+                args.append("-c")
+                if !base.isEmpty { args += ["--base", base] }
+            }
+            store.runContainerCommand(args, in: repo, title: "kunj-ct-start-\(branchName)")
+            dismiss()
+            return
+        }
         working = true
         error = nil
         output = "$ kunj worktree add \(branchName)\n"

@@ -10,6 +10,7 @@ enum Pref {
     static let showStatus = "showStatus"
     static let showPullRequests = "showPullRequests"
     static let showPath = "showPath"
+    static let showContainers = "showContainers"
     static let terminalApp = "terminalApp"
     static let notifyPullRequests = "notifyPullRequests"
     static let badgeFailingChecks = "badgeFailingChecks"
@@ -34,6 +35,7 @@ enum Pref {
             showStatus: true,
             showPullRequests: true,
             showPath: false,
+            showContainers: true,
             terminalApp: "Terminal",
             notifyPullRequests: true,
             badgeFailingChecks: true,
@@ -54,6 +56,7 @@ extension UserDefaults {
     var kunjRefreshInterval: TimeInterval { double(forKey: Pref.refreshInterval) }
     var kunjShowStatus: Bool { bool(forKey: Pref.showStatus) }
     var kunjShowPullRequests: Bool { bool(forKey: Pref.showPullRequests) }
+    var kunjShowContainers: Bool { bool(forKey: Pref.showContainers) }
     var kunjTerminalApp: String { string(forKey: Pref.terminalApp) ?? "Terminal" }
     var kunjNotifyPullRequests: Bool { bool(forKey: Pref.notifyPullRequests) }
     var kunjOrganizeScreen: String { string(forKey: Pref.organizeScreen) ?? "" }
