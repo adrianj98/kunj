@@ -314,6 +314,16 @@
         "default": null
       },
       {
+        "flags": "--session <id>",
+        "description": "[shell] Keep the shell in the container's tmux session sh-<id> (letters, digits, _ and -; up to 32), reattaching when it exists",
+        "default": null
+      },
+      {
+        "flags": "--kill",
+        "description": "[shell --session] End that tmux session (exit 0 whether or not it existed, or the container runs)",
+        "default": null
+      },
+      {
         "flags": "--context <name>",
         "description": "Docker context (default: container.dockerContext)",
         "default": null
@@ -324,7 +334,7 @@
         "default": null
       }
     ],
-    "helpText": "Actions:\n  start [branch]                       create or resume the branch's container\n  shell [branch]                       login shell in /workspace\n  exec [branch] -- <cmd...>            run a command in the container\n  agent [branch] [-- <args>]           start or reattach the agent's tmux session\n  attach [branch]                      reattach to the agent's tmux session\n  open [branch] [--new-window]         attach the editor (worktree.editorCommand), starting it if stopped\n  forward [branch] <port>|<host>:<port>...  forward localhost ports into the container\n  forward [branch] <service>:<port>    forward a sidecar service's port (e.g. postgres:5432)\n  forward [branch] --auto [--detach]   forward each port the container listens on, as it appears\n  mcp [branch]                         bridge the host MCP servers of container.mcp (foreground)\n  logs [branch] [service] [--follow]   output of the container, or of one of its services\n  list                                 containers of this repository (the default)\n  stop [branch]                        stop, keeping the workspace\n  remove [branch]                      remove, refusing while work is unpushed\n  prune [--all] [--dry-run]            remove containers of branches gone from origin, orphans and old images\n  file read [branch] <path>            print a file of /workspace\n  file write [branch] <path>           write stdin to a file of /workspace (content on stdin)\n\nBlueprint (how a new container is set up: tools, setup and maintain commands):\n  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json\n  blueprint snapshot [--base <ref>]    optional: build the snapshot ahead of time (--rebuild forces it)\n  blueprint status                     which blueprint, its hash and snapshot, stale or not\n  blueprint remove                     delete this repository's snapshot images\n\nThe blueprint is read from .kunj/blueprint.json in this working tree, else\norigin/<default branch>:.kunj/blueprint.json, else ~/.kunj/<repo>/blueprint.json. A new\ncontainer starts from its snapshot; start builds the snapshot first when there is none or the\nblueprint changed (the first start runs setup once), and falls back to running setup in the\ncontainer if that fails. --no-snapshot skips the snapshot.\n\nServices (Postgres, Redis, ...) are declared in the blueprint's \"services\", container.services\nor the devcontainer's compose file; each runs next to the branch container on its own network\nand is reached by its name (postgres:5432). They are stopped and removed with the container.\n\nagent also starts a background forward --auto for the container (container.forward.auto: false\nturns that off). Forwards only ever listen on 127.0.0.1. With container.mcp set (host config,\ne.g. {\"chrome\": {}}), agent also bridges a browser MCP server on this machine into the\ncontainer's Claude Code: a fixed set of browser tools, no file paths, downloads refused, and\nnavigation only to the container's forwarded ports (or container.mcp.chrome.allowOrigins).\n\n[branch] defaults to the current branch. `ct` is short for `container`."
+    "helpText": "Actions:\n  start [branch]                       create or resume the branch's container\n  shell [branch] [--session <id>]      login shell in /workspace (kept in tmux session sh-<id>; --kill ends it)\n  exec [branch] -- <cmd...>            run a command in the container\n  agent [branch] [-- <args>]           start or reattach the agent's tmux session\n  attach [branch]                      reattach to the agent's tmux session\n  open [branch] [--new-window]         attach the editor (worktree.editorCommand), starting it if stopped\n  forward [branch] <port>|<host>:<port>...  forward localhost ports into the container\n  forward [branch] <service>:<port>    forward a sidecar service's port (e.g. postgres:5432)\n  forward [branch] --auto [--detach]   forward each port the container listens on, as it appears\n  mcp [branch]                         bridge the host MCP servers of container.mcp (foreground)\n  logs [branch] [service] [--follow]   output of the container, or of one of its services\n  list                                 containers of this repository (the default)\n  stop [branch]                        stop, keeping the workspace\n  remove [branch]                      remove, refusing while work is unpushed\n  prune [--all] [--dry-run]            remove containers of branches gone from origin, orphans and old images\n  file read [branch] <path>            print a file of /workspace\n  file write [branch] <path>           write stdin to a file of /workspace (content on stdin)\n\nBlueprint (how a new container is set up: tools, setup and maintain commands):\n  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json\n  blueprint snapshot [--base <ref>]    optional: build the snapshot ahead of time (--rebuild forces it)\n  blueprint status                     which blueprint, its hash and snapshot, stale or not\n  blueprint remove                     delete this repository's snapshot images\n\nThe blueprint is read from .kunj/blueprint.json in this working tree, else\norigin/<default branch>:.kunj/blueprint.json, else ~/.kunj/<repo>/blueprint.json. A new\ncontainer starts from its snapshot; start builds the snapshot first when there is none or the\nblueprint changed (the first start runs setup once), and falls back to running setup in the\ncontainer if that fails. --no-snapshot skips the snapshot.\n\nServices (Postgres, Redis, ...) are declared in the blueprint's \"services\", container.services\nor the devcontainer's compose file; each runs next to the branch container on its own network\nand is reached by its name (postgres:5432). They are stopped and removed with the container.\n\nagent also starts a background forward --auto for the container (container.forward.auto: false\nturns that off). Forwards only ever listen on 127.0.0.1. With container.mcp set (host config,\ne.g. {\"chrome\": {}}), agent also bridges a browser MCP server on this machine into the\ncontainer's Claude Code: a fixed set of browser tools, no file paths, downloads refused, and\nnavigation only to the container's forwarded ports (or container.mcp.chrome.allowOrigins).\n\n[branch] defaults to the current branch. `ct` is short for `container`."
   },
   {
     "name": "create",
@@ -1111,6 +1121,16 @@
       {
         "flags": "--id <id>",
         "description": "[session] Session id",
+        "default": null
+      },
+      {
+        "flags": "--session <id>",
+        "description": "[shell] Keep the shell in a tmux session with this id (letters, digits, _ and -; up to 32), reattaching when it exists",
+        "default": null
+      },
+      {
+        "flags": "--kill",
+        "description": "[shell --session] End that tmux session (exit 0 whether or not it existed)",
         "default": null
       },
       {

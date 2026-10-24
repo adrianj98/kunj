@@ -216,6 +216,24 @@ wcd() { cd "$(kunj worktree path "$1")" }
 
 With no target it prints the main worktree.
 
+### A shell that keeps running
+
+`kunj worktree shell [branch]` opens your login shell (`$SHELL -l`) in a worktree; with no branch, in
+the current one. With `--session <id>` it runs in a tmux session instead, and running the same
+command again reattaches to it, so the shell and whatever it runs survive closing the terminal (the
+[workspace app](../../workspace-app/) uses this for its shell tabs). The id is 1 to 32 letters,
+digits, `_` or `-`; the tmux session is named `kunjsh-<repo>-<branch>-<hash>-sh-<id>`.
+
+```bash
+kunj worktree shell fix/login-timeout --session tests     # start or reattach
+kunj worktree shell fix/login-timeout --session tests --kill
+```
+
+Without tmux, or with `agent.tmux` set to `false`, the shell runs directly in the terminal; like
+[agents](../agent/), `agent.tmuxStatus` turns on tmux's status line. `--kill` ends
+the session and exits 0 whether or not it existed; with `--json` it prints `{ "killed": true }` or
+`{ "killed": false }`.
+
 ## Pull request of a worktree
 
 ```bash

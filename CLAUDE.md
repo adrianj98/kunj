@@ -143,7 +143,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj delete <branch>` - Delete branch
 - `kunj completion` - Manage shell completion (--install/--uninstall)
 - `kunj prompt-info` - Output PR# for shell prompts
-- `kunj worktree [list|add|remove|prune|open|path|pr|session]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension)
+- `kunj worktree [list|add|remove|prune|open|path|pr|session|shell]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension); `shell [branch] --session <id> [--kill]` is a login shell kept in a host tmux session (see Worktree agents below)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 - `kunj agent [start|status|stop] [branch]` - Run an agent in a host tmux session for a worktree (see Worktree agents below)
 - `kunj container [start|shell|exec|agent|attach|open|forward|logs|list|stop|remove|prune|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
@@ -203,6 +203,13 @@ same `Promise.all` as the git calls, only with status) and sets `WorktreeInfo.ag
 (`{ running, session }`); `running` is null when tmux is not installed. Keep it one call, not one per
 worktree. `AgentError` prints without a stack trace (listed in BaseCommand). Repo name and id come from
 `repoIdentity()` (src/lib/repo-identity.ts).
+Persistent shells (the workspace app's shell tabs): `kunj worktree shell [branch] --session <id>` runs
+`$SHELL -l` (else `sh`) in the tmux session `shellSessionName()` = the agent name with `kunjsh-` for
+`kunj-` plus `-sh-<id>`, so `kunj events` and the listing, which match `kunj-`, never see it as an agent;
+`kunj ct shell --session <id>` uses the session `sh-<id>` in the container (tmux probed like `ct agent`).
+`<id>` is `[A-Za-z0-9_-]{1,32}` (`checkShellSessionId()`, `bad-session-id`). Without tmux or with
+`agent.tmux` false the shell runs directly; `agent.tmuxStatus` applies. `--kill` ends the session and
+always exits 0 (`{ killed }` with `--json`), also for a removed worktree or a stopped container.
 
 ## Branch Containers
 

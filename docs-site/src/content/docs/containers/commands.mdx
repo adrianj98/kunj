@@ -165,6 +165,22 @@ kunj ▸ feature/search /workspace ❯ git log --oneline -3
 
 The shell's exit code becomes kunj's exit code.
 
+### Keeping a shell running
+
+With `--session <id>` the shell runs in a tmux session named `sh-<id>` inside the container, and
+running the same command again reattaches to it, so the shell and whatever it runs survive closing
+the terminal (the [workspace app](../../workspace-app/) uses this for its shell tabs). The id is
+1 to 32 letters, digits, `_` or `-`. Without tmux in the image, or with `agent.tmux` set to `false`,
+it is the plain shell; `agent.tmuxStatus` turns on tmux's status line.
+
+```bash
+kunj ct shell feature/search --session build     # start or reattach
+kunj ct shell feature/search --session build --kill
+```
+
+`--kill` ends the session. It exits 0 whether or not the session existed, and also when the
+container is stopped or gone; with `--json` it prints `{ "killed": true }` or `{ "killed": false }`.
+
 ## exec
 
 Runs one command in `/workspace` and exits with its exit code. Put the command after `--`:
