@@ -16,8 +16,9 @@ jest.mock('../../lib/worktree', () => ({
 jest.mock('../../lib/repos', () => ({ recordRepo: jest.fn() }));
 
 const mockListJson = jest.fn();
+const mockAbort = jest.fn();
 jest.mock('../container', () => ({
-  ContainerCommand: jest.fn().mockImplementation(() => ({ listJson: mockListJson })),
+  ContainerCommand: jest.fn().mockImplementation(() => ({ listJson: mockListJson, abortDockerCalls: mockAbort })),
 }));
 
 const container = (branch: string) => ({
@@ -81,6 +82,21 @@ it('reports Docker being unavailable without failing the listing', async () => {
   const out = json();
   expect(out.worktrees).toHaveLength(1);
   expect(out.containers).toEqual({ available: false, message: 'Cannot connect to the Docker daemon', items: [] });
+});
+
+it('gives up on a Docker that never answers and kills its calls', async () => {
+  jest.useFakeTimers();
+  try {
+    mockListJson.mockReturnValue(new Promise(() => {}));
+    const done = list({ json: true, containers: true });
+    await jest.advanceTimersByTimeAsync(10_000);
+    await done;
+    expect(json().containers).toEqual({ available: false, message: 'Docker did not answer within 10s', items: [] });
+    expect(json().worktrees).toHaveLength(1);
+    expect(mockAbort).toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
 });
 
 it('passes --no-status on and leaves pullRequest out with --no-pr', async () => {

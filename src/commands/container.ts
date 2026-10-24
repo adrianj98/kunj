@@ -1064,7 +1064,14 @@ export class ContainerCommand extends BaseCommand {
 
   /** `kunj ct list --json` of this repository, for `kunj worktree list --containers` */
   async listJson(options: { status?: boolean; context?: string } = {}): Promise<ContainerListJson> {
+    // Its caller prints one JSON document: any progress or warning goes to stderr
+    this.jsonMode = true;
     return (await this.collectList(options)).json;
+  }
+
+  /** Kill docker calls still running (a wedged daemon), so the process can exit */
+  abortDockerCalls(): void {
+    if (this.backend instanceof LocalDockerBackend) this.backend.killChildren();
   }
 
   private async collectList(options: ContainerOptions): Promise<{ json: ContainerListJson; mains: ContainerInfo[]; helpers: Map<string, ContainerInfo> }> {

@@ -87,6 +87,9 @@ interface WorktreeOptions {
   kill?: boolean;
 }
 
+// `kunj worktree list --containers` stops waiting for Docker after this long
+const CONTAINER_LIST_TIMEOUT_MS = 10_000;
+
 const ACTIONS = ['list', 'add', 'remove', 'prune', 'open', 'session', 'path', 'pr', 'keep', 'shell'];
 
 export class WorktreeCommand extends BaseCommand {
@@ -312,12 +315,23 @@ export class WorktreeCommand extends BaseCommand {
   // This repository's containers as `kunj ct list --json` has them; Docker being down or missing
   // never fails the worktree listing
   private async listContainers(status: boolean): Promise<WorktreeListContainersJson> {
+    let timer: NodeJS.Timeout | undefined;
     try {
       const { ContainerCommand } = await import('./container');
-      const list = await new ContainerCommand().listJson({ status });
+      const command = new ContainerCommand();
+      // A wedged daemon accepts `docker ps` and never answers: give up on the containers, not the listing
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          command.abortDockerCalls();
+          reject(new Error(`Docker did not answer within ${CONTAINER_LIST_TIMEOUT_MS / 1000}s`));
+        }, CONTAINER_LIST_TIMEOUT_MS);
+      });
+      const list = await Promise.race([command.listJson({ status }), timeout]);
       return { available: true, items: list.containers.map(c => ({ ...c, prLabel: null })) };
     } catch (error) {
       return { available: false, message: error instanceof Error ? error.message : String(error), items: [] };
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
