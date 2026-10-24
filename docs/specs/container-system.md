@@ -27,7 +27,7 @@ the host).*
 | `kunj ct file read\|write` (workspace files for the IDE) | Shipped | [workspace-ide.md](workspace-ide.md) |
 | Host MCP bridge (a browser on the Mac for the agent) | Shipped | [container-phase-2.md](container-phase-2.md) |
 | Workspace IDE (phase 3) | CLI contract shipped; app proposed | [workspace-ide.md](workspace-ide.md) |
-| Containers in the VS Code extension and the macOS app | Not started | — |
+| Containers in the VS Code extension and the macOS app | In progress | [containers-in-apps.md](containers-in-apps.md) |
 | Remote Docker host (`kunj serve`) | Not started | — |
 | Secret manager (`kunj secret`, `kunj run`, delivery to containers and worktrees) | Designed, not started | [Secrets](#secrets) below |
 

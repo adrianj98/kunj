@@ -2,6 +2,12 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-24 — Containers in the VS Code extension and the macOS app: spec
+
+- Added `docs/specs/containers-in-apps.md` and moved the work to In progress in the tracker. Why: user asked
+  to start the roadmap item; agreed design: containers feel like local worktrees (same rows and actions, two
+  rows when a branch has both), the CLI provides both lists in one call.
+
 
 
 

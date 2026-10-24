@@ -18,6 +18,7 @@ page only says where each thing stands.
 | [blueprints.md](blueprints.md) | `.kunj/blueprint.json`, presets, `init`, snapshots built by `start`, host-made bundles | Shipped |
 | [container-phase-2.md](container-phase-2.md) | Sidecar services, `ct open`, `forward --auto`, `ct prune`, Docker-in-Docker, host MCP bridge | Shipped |
 | [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | Shipped (CLI contract and the native app v1) |
+| [containers-in-apps.md](containers-in-apps.md) | Containers shown and managed like worktrees in the VS Code extension and the macOS app | In progress |
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
 
 ## Done
@@ -51,6 +52,7 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
+| Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI `--containers`, then the extension, then the macOS app |
 
 ## To do
 
@@ -60,7 +62,6 @@ page only says where each thing stands.
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
 | Extra repos cloned next to the workspace | [container-system.md](container-system.md#roadmap) | — |
-| Containers in the VS Code extension and the macOS app | [container-system.md](container-system.md#roadmap) | — |
 | Remote Docker host (`kunj serve`) | [container-system.md](container-system.md#roadmap) | Later |
 | Phase 2 follow-ups left | [container-phase-2.md](container-phase-2.md) | `container.services` registered as a string setting (the registry has no object type); a snapshot copy reuses its own local branch on `ct start -c <same name>` (optional `switch -C`) |
 | MCP bridge follow-ups | [container-phase-2.md](container-phase-2.md#open-questions-and-roadmap) | Verify the download block in a visible browser |
