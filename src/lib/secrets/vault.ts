@@ -1,7 +1,7 @@
 // The encrypted secret store: a JSON envelope { version, kdf, salt, iv, ciphertext, tag } (base64
 // fields) around AES-256-GCM. The envelope's version, kdf and salt are bound as additional
 // authenticated data, so editing any of them fails like a flipped ciphertext byte. A file that does not
-// decrypt is never overwritten: it is reported as secrets-corrupt and left as it is.
+// decrypt with the given key is never overwritten: it is reported as secrets-corrupt and left as it is.
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -68,15 +68,7 @@ export async function readVault(file: string, unlock: Unlock): Promise<SecretEnt
   if (!env) return [];
   checkKdf(file, env, unlock);
   const key = await keyOf(unlock, Buffer.from(env.salt, 'base64'));
-  let plain: string;
-  try {
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(env.iv, 'base64'));
-    decipher.setAAD(aad(env.kdf, env.salt));
-    decipher.setAuthTag(Buffer.from(env.tag, 'base64'));
-    plain = Buffer.concat([decipher.update(Buffer.from(env.ciphertext, 'base64')), decipher.final()]).toString('utf8');
-  } catch {
-    throw corrupt(file, 'it does not decrypt (wrong key, or the file was modified)');
-  }
+  const plain = decrypt(file, env, key);
   let entries: unknown;
   try {
     entries = JSON.parse(plain);
@@ -87,7 +79,7 @@ export async function readVault(file: string, unlock: Unlock): Promise<SecretEnt
   return entries;
 }
 
-// Keeps the existing file's salt and kdf; refuses to replace a file that does not parse.
+// Keeps the existing file's salt and kdf; refuses to replace a file that does not parse or decrypt.
 export async function writeVault(file: string, entries: SecretEntry[], unlock: Unlock): Promise<void> {
   for (const e of entries) {
     if (!isSecretName(e.name)) throw new SecretError(`Invalid secret name ${JSON.stringify(e.name)}: names must match [A-Za-z_][A-Za-z0-9_]*`, 'bad-name');
@@ -97,6 +89,8 @@ export async function writeVault(file: string, entries: SecretEntry[], unlock: U
   const kdf = existing ? existing.kdf : unlock.kdf;
   const salt = existing ? existing.salt : crypto.randomBytes(SALT_BYTES).toString('base64');
   const key = await keyOf(unlock, Buffer.from(salt, 'base64'));
+  // A tampered file, or one under another key, has a valid envelope; replacing it would lose its secrets.
+  if (existing) decrypt(file, existing, key);
   const iv = crypto.randomBytes(IV_BYTES);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   cipher.setAAD(aad(kdf, salt));
@@ -119,6 +113,17 @@ export async function writeVault(file: string, entries: SecretEntry[], unlock: U
   } catch (err) {
     fs.rmSync(tmp, { force: true });
     throw err;
+  }
+}
+
+function decrypt(file: string, env: Envelope, key: Buffer): string {
+  try {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(env.iv, 'base64'));
+    decipher.setAAD(aad(env.kdf, env.salt));
+    decipher.setAuthTag(Buffer.from(env.tag, 'base64'));
+    return Buffer.concat([decipher.update(Buffer.from(env.ciphertext, 'base64')), decipher.final()]).toString('utf8');
+  } catch {
+    throw corrupt(file, 'it does not decrypt (wrong key, or the file was modified)');
   }
 }
 

@@ -188,6 +188,26 @@ describe('vault', () => {
     expect(fs.readFileSync(file).equals(before)).toBe(true);
   });
 
+  it('refuses to overwrite a tampered file (valid envelope, bad tag) and leaves it byte-identical', async () => {
+    const unlock = fixedKey();
+    await writeVault(file, entries, unlock);
+    const env = envelope();
+    const ct = Buffer.from(env.ciphertext as string, 'base64');
+    ct[0] ^= 0x01;
+    fs.writeFileSync(file, JSON.stringify({ ...env, ciphertext: ct.toString('base64') }));
+    const before = fs.readFileSync(file);
+    const err = await expectCode(writeVault(file, [], unlock), 'secrets-corrupt');
+    expect(err.message).toContain(file);
+    expect(fs.readFileSync(file).equals(before)).toBe(true);
+  });
+
+  it('refuses to overwrite a file encrypted under another key and leaves it byte-identical', async () => {
+    await writeVault(file, entries, fixedKey());
+    const before = fs.readFileSync(file);
+    await expectCode(writeVault(file, [], fixedKey()), 'secrets-corrupt');
+    expect(fs.readFileSync(file).equals(before)).toBe(true);
+  });
+
   it('refuses to write with a provider of another kdf than the file', async () => {
     await writeVault(file, entries, passphrase('pw'));
     const before = fs.readFileSync(file);

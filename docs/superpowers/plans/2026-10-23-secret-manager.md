@@ -79,7 +79,7 @@
 
 ### Task 2: Vault (envelope crypto and store)
 
-**Status: done** in the commit "Secrets: encrypted vault" (see the ledger for its hash and rulings).
+**Status: done** in 1429ed9; review fix (`writeVault` never replaces a file that does not decrypt with its key) in the Review 2 commit. Rulings in the ledger.
 
 **Files:**
 - Create: `src/lib/secrets/vault.ts`, `src/lib/secrets/errors.ts`
@@ -96,7 +96,7 @@
   - `vaultFiles(kunjDir: string, globalDir: string): { global: string; repo: string }`
   - `vaultStamp(files: string[]): string` (Ruling 2). Each existing file's bytes are hashed after a `<index>:<length>:` prefix.
   - Also exported: `type Kdf = 'keychain'|'passphrase'`, `SecretErrorCode` (errors.ts).
-  - As built: `version`, `kdf` and `salt` are GCM additional data (`kunj-secrets:1:<kdf>:<salt>`). `readVault` and `writeVault` give `secrets-locked` when `unlock.kdf` differs from the file's kdf or `keyFor` returns other than 32 bytes. `writeVault` gives `bad-name` before touching anything, and `secrets-corrupt` (file left byte-identical) when the existing file is not a v1 envelope. `readVault` gives `secrets-corrupt` when the decrypted content is not a list of well-formed entries. Task 3 note: its passphrase retry must catch `secrets-corrupt` from the decrypt step only, not from a malformed envelope.
+  - As built: `version`, `kdf` and `salt` are GCM additional data (`kunj-secrets:1:<kdf>:<salt>`). `readVault` and `writeVault` give `secrets-locked` when `unlock.kdf` differs from the file's kdf or `keyFor` returns other than 32 bytes. `writeVault` gives `bad-name` before touching anything, and `secrets-corrupt` (file left byte-identical) when the existing file is not a v1 envelope or does not decrypt with the key (tampered, or written under another key): it decrypts the existing file before replacing it. `readVault` gives `secrets-corrupt` when the decrypted content is not a list of well-formed entries. Task 3 note: its passphrase retry must catch `secrets-corrupt` from the decrypt step only (the message "it does not decrypt"; add a distinguishing field or a separate check rather than matching text), not from a malformed envelope, and it applies to `writeVault` as well as `readVault`, since both decrypt the existing file.
 
 - [x] **Step 1: Write the failing tests.** Use a fixed-key `Unlock` and a passphrase `Unlock` built on scrypt.
   - A round trip returns equal entries.
@@ -132,7 +132,7 @@
   - Passphrase: a `prompt` fake answering wrong three times gives `secrets-locked`. No prompt and no TTY gives `secrets-locked`.
   - An `existingKdf: 'passphrase'` file never touches the keychain.
 - [ ] **Step 2:** Run the test. Expected: FAIL.
-- [ ] **Step 3: Implement.** The passphrase check verifies by decrypting: return an `Unlock` whose `keyFor` re-prompts on a GCM failure, up to 3 tries. Expose the try count through `readVault` by having `readVault` call `keyFor` again on `secrets-corrupt` when `unlock.kdf === 'passphrase'`. Hidden prompt: `readline` with output muted (no inquirer).
+- [ ] **Step 3: Implement.** The passphrase check verifies by decrypting: return an `Unlock` whose `keyFor` re-prompts on a GCM failure, up to 3 tries. Expose the try count through the vault by having `readVault` and `writeVault` call `keyFor` again on a decrypt failure (not a malformed envelope) when `unlock.kdf === 'passphrase'`. Hidden prompt: `readline` with output muted (no inquirer).
 - [ ] **Step 4:** Run the test. Expected: PASS.
 - [ ] **Step 5:** Commit: `git commit -m "Secrets: keychain, libsecret and passphrase key providers"`.
 
