@@ -9,6 +9,10 @@ A Worktrees view for VS Code that is driven entirely by the [kunj](https://githu
 - Per-worktree status: uncommitted change count and ahead/behind of upstream.
 - The related pull request for each worktree: number, open/draft/merged/closed state and CI check result. Click the PR icon to open it in the browser, or create one with `kunj pr` from the context menu.
 - Status bar item showing the current worktree; click it to jump to another one.
+- **Branch containers** (`kunj ct`) next to the worktrees, as rows that work like them: click to open the
+  container in VS Code (attached; a stopped one is started), open a terminal or start the agent in it, see its
+  changes, commits not on origin, agent state and pull request, open its ports in the browser, start, stop,
+  rebuild or remove it. A branch with both a worktree and a container shows two rows, side by side.
 
 Everything the extension does is a `kunj worktree … --json` call. The extension never runs git itself, so the CLI stays the single source of truth and the same information is available from your terminal:
 
@@ -55,7 +59,7 @@ Remote workspaces (SSH, WSL, containers) work as long as `kunj` is installed on 
 | Command | Description |
 | --- | --- |
 | Kunj: Refresh Worktrees | Re-run `kunj worktree list` |
-| Kunj: Add Worktree… | Pick an existing branch or create a new one, choose a folder, then open it |
+| Kunj: Add Worktree… | Pick an existing branch or create a new one, choose a worktree or a container, then open it |
 | Kunj: Open Worktree… | Quick pick of all worktrees with their open state |
 | Kunj: Prune Stale Worktrees | `kunj worktree prune` |
 | Open Pull Request, Copy Pull Request URL | From `kunj worktree list --json`; a worktree without one gets Create Pull Request… which runs `kunj pr` in a terminal |
@@ -63,6 +67,13 @@ Remote workspaces (SSH, WSL, containers) work as long as `kunj` is installed on 
 | Add Worktree to Workspace | Adds the folder to the multi-root workspace |
 | Open Terminal in Worktree | Integrated terminal with the worktree as cwd |
 | Reveal Worktree in File Manager, Copy Worktree Path | Utilities |
+| Start Agent in Worktree | `kunj agent` in a terminal (the same tmux session the CLI and the workspace app use) |
+| Open Container / in New Window / in Current Window | `kunj ct open`: VS Code attached to the container (needs the Dev Containers extension) |
+| Open Terminal in Container, Start Agent in Container | `kunj ct shell`, `kunj ct agent` in a terminal |
+| Start, Stop, Rebuild, Remove Container | `kunj ct start`, `stop`, `start --rebuild`, `remove`; the long ones run in a terminal that closes itself when they succeed |
+| Forward Port…, Forward Ports Automatically | `kunj ct forward <branch> <port>` in a terminal; `forward --auto --detach` |
+| Open in Browser, Copy URL | On a port row under a running container |
+| Prune Containers… | `kunj ct prune` in a terminal |
 | Remove Worktree… | `kunj worktree remove`, offering `--force` when the CLI refuses because the worktree is open elsewhere or has uncommitted changes |
 
 ## Settings
@@ -77,6 +88,7 @@ Remote workspaces (SSH, WSL, containers) work as long as `kunj` is installed on 
 | `kunj.worktrees.showPath` | `true` | Show the worktree path next to its branch |
 | `kunj.worktrees.showStatusBar` | `true` | Show the current worktree in the status bar |
 | `kunj.worktrees.trackSessions` | `true` | Register this window so other windows can see it |
+| `kunj.worktrees.showContainers` | `true` | List branch containers too (`kunj worktree list --containers`); needs Docker |
 
 The CLI side has two settings of its own (`kunj config --set worktree.baseDir=…` and `worktree.editorCommand`) that control where new worktrees go and which editor `kunj worktree open` launches.
 

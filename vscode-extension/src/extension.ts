@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { KunjCli, KunjCliError, Worktree } from './kunjCli';
 import { SessionManager } from './sessionManager';
+import { kunjCommandLine, registerContainerCommands, runInTerminal, runToCompletion } from './containerCommands';
 import { RepoEntry, WorktreeNode, WorktreeProvider, describeSession, prBadge, samePath, shortenPath } from './worktreeProvider';
 
 let sessions: SessionManager | undefined;
@@ -186,6 +187,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ---- commands ----------------------------------------------------------
   const register = (id: string, handler: (...args: any[]) => unknown) =>
     context.subscriptions.push(vscode.commands.registerCommand(id, handler));
+
+  registerContainerCommands(context, { cli, provider, output, refresh });
+
+  // `kunj agent` in the worktree: the same host tmux session the workspace app and the CLI use
+  register('kunj.worktrees.agent', async (arg?: unknown) => {
+    const node = nodeFrom(arg) || (await pickWorktree('Select a worktree to run the agent in'));
+    if (!node || !node.worktree.exists) return;
+    runInTerminal(`kunj agent: ${node.worktree.name}`, node.worktree.path, kunjCommandLine(['agent']));
+  });
 
   register('kunj.worktrees.refresh', () => {
     void sessions?.sync();
@@ -381,6 +391,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       if (!basePick) return;
       base = basePick.label === 'HEAD' ? undefined : basePick.label;
+    }
+
+    const showContainers = vscode.workspace.getConfiguration('kunj.worktrees').get<boolean>('showContainers', true);
+    if (showContainers) {
+      const where = await vscode.window.showQuickPick(
+        [
+          { label: '$(folder) Worktree', description: 'a checkout on this machine', value: 'worktree' as const },
+          { label: '$(package) Container', description: 'a sandboxed clone in Docker (kunj ct start)', value: 'container' as const },
+        ],
+        { placeHolder: `Where should ${branch} live?` }
+      );
+      if (!where) return;
+      if (where.value === 'container') {
+        // Building the image and seeding the clone takes a while and may ask questions: a terminal
+        const args = ['ct', 'start', branch, ...(selection.isNew ? ['-c'] : []), ...(base ? ['--base', base] : [])];
+        runToCompletion(`kunj ct start: ${branch}`, repo.cwd, kunjCommandLine(args), refresh);
+        return;
+      }
     }
 
     const customPath = await vscode.window.showInputBox({

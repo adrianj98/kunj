@@ -8,7 +8,9 @@ export class KunjCliError extends Error {
   constructor(
     message: string,
     public readonly code: 'not-found' | 'not-a-repo' | 'command-failed',
-    public readonly args: string[]
+    public readonly args: string[],
+    // Everything the command wrote to stderr (the message is only its last line)
+    public readonly stderr = ''
   ) {
     super(message);
     this.name = 'KunjCliError';
@@ -67,12 +69,41 @@ export interface Worktree {
   pullRequest?: PullRequest | null;
 }
 
+// A branch container as `kunj worktree list --containers` reports it (kunj ct list plus its PR)
+export interface ContainerPort {
+  container: number;
+  host: number;
+  kind: 'publish' | 'forward';
+  pid?: number;
+  service?: string;
+}
+
+export interface BranchContainer {
+  branch: string;
+  name: string;
+  id: string;
+  state: string;
+  image: string;
+  createdAt: string;
+  firewall: string;
+  dind: string;
+  ports: ContainerPort[];
+  agent: { running: boolean | null; state?: 'running' | 'waiting' | null };
+  workspace: { head: string | null; ahead: number | null; dirty: boolean | null };
+  status: string;
+  services: Array<{ name: string; state: string }>;
+  blueprint?: { hash: string; stale: boolean | null };
+  pullRequest?: PullRequest | null;
+}
+
 export interface WorktreeListResult {
   repoRoot: string;
   currentPath: string | null;
   pullRequestLookup?: 'github' | 'gitlab' | 'unavailable' | 'skipped';
   pullRequestsFromCache?: boolean;
   worktrees: Worktree[];
+  // Only with --containers; a CLI older than the option refuses it (the provider retries without)
+  containers?: { available: boolean; message?: string; items: BranchContainer[] };
 }
 
 export interface BranchListResult {
@@ -128,8 +159,11 @@ export class KunjCli {
           return;
         }
 
+        // `{ error: "…" }`, or `{ error: { code, message } }` from kunj ct
+        const jsonError = parsed && typeof parsed === 'object' ? (parsed as any).error : undefined;
         const message: string =
-          (parsed && typeof parsed === 'object' && typeof (parsed as any).error === 'string' && (parsed as any).error) ||
+          (typeof jsonError === 'string' && jsonError) ||
+          (jsonError && typeof jsonError.message === 'string' && jsonError.message) ||
           stderr.trim().split('\n').pop() ||
           stdout.trim().split('\n').pop() ||
           `kunj exited with code ${code}`;
@@ -142,7 +176,7 @@ export class KunjCli {
         }
 
         const isRepoError = /not (a|in a) git repository/i.test(message);
-        reject(new KunjCliError(message, isRepoError ? 'not-a-repo' : 'command-failed', args));
+        reject(new KunjCliError(message, isRepoError ? 'not-a-repo' : 'command-failed', args, stderr));
       });
     });
   }
@@ -168,12 +202,28 @@ export class KunjCli {
 
   // ---- worktree operations ---------------------------------------------
 
-  listWorktrees(cwd: string, includeStatus: boolean, includePullRequests = true, fresh = false): Promise<WorktreeListResult> {
+  listWorktrees(cwd: string, includeStatus: boolean, includePullRequests = true, fresh = false, includeContainers = false): Promise<WorktreeListResult> {
     const args = ['worktree', 'list'];
     if (!includeStatus) args.push('--no-status');
     if (!includePullRequests) args.push('--no-pr');
     if (fresh) args.push('--fresh');
+    if (includeContainers) args.push('--containers');
     return this.run<WorktreeListResult>(args, cwd);
+  }
+
+  // ---- container operations (kunj ct) --------------------------------------
+
+  stopContainer(cwd: string, branch: string): Promise<{ success: boolean }> {
+    return this.run(['ct', 'stop', branch], cwd);
+  }
+
+  // Resumes a stopped container, then launches the editor attached to it
+  openContainer(cwd: string, branch: string, newWindow: boolean): Promise<{ success: boolean; uri: string | null; warning?: string; exec?: string }> {
+    return this.run(['ct', 'open', branch, ...(newWindow ? ['--new-window'] : [])], cwd);
+  }
+
+  autoForward(cwd: string, branch: string): Promise<unknown> {
+    return this.run(['ct', 'forward', branch, '--auto', '--detach'], cwd);
   }
 
   getPullRequest(cwd: string, target: string): Promise<{ branch: string; path: string; pullRequest: PullRequest | null }> {

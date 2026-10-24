@@ -2,6 +2,16 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-24 — VS Code extension: containers as rows
+
+- The Worktrees view lists containers from `worktree list --containers` next to the worktrees (a branch's container
+  right after its worktree), with open (attached), terminal, agent, ports, start/stop/rebuild/remove, PR actions and
+  a container choice in Add Worktree…; Start Agent in Worktree. Long commands run in a terminal that closes on
+  success. An older CLI without `--containers` is retried without it. Why: containers should feel like local
+  worktrees (agreed design).
+- Review fixes (adversary round): `worktree list --containers` gives up on a wedged Docker after 10s and kills its
+  calls; `listJson` keeps warnings on stderr; the old-CLI fallback reads all of stderr.
+
 ## 2026-10-24 — `kunj worktree list --containers`
 
 - `kunj worktree list --json --containers` adds the repository's containers (`kunj ct list --json` shape plus the

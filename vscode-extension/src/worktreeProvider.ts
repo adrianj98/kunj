@@ -1,15 +1,17 @@
-// Tree view of git worktrees, grouped by repository when the workspace spans
-// more than one repo. All data comes from `kunj worktree list --json`.
+// Tree view of git worktrees and branch containers, grouped by repository when the
+// workspace spans more than one repo. All data comes from `kunj worktree list --json
+// --containers`. A container is shown like a worktree: another place a branch lives.
 
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { KunjCli, KunjCliError, PullRequest, Worktree, WorktreeListResult, WorktreeSession } from './kunjCli';
+import { BranchContainer, ContainerPort, KunjCli, KunjCliError, PullRequest, Worktree, WorktreeListResult, WorktreeSession } from './kunjCli';
 
 export interface RepoEntry {
   repoRoot: string;
   cwd: string; // a folder inside the repo we can run the CLI from
   worktrees: Worktree[];
+  containers: BranchContainer[];
 }
 
 export class RepoNode extends vscode.TreeItem {
@@ -150,6 +152,85 @@ export class WorktreeNode extends vscode.TreeItem {
   }
 }
 
+export class ContainerNode extends vscode.TreeItem {
+  readonly running: boolean;
+
+  constructor(readonly container: BranchContainer, readonly repo: RepoEntry) {
+    const running = container.state === 'running';
+    const ports = running ? container.ports : [];
+    super(container.branch, ports.length ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
+    this.running = running;
+
+    // Word-like flags; none of them may match the worktree menus' /worktree/, /exists/, /main/ or /current/
+    const flags = ['container', running ? 'running' : 'stopped'];
+    flags.push(container.pullRequest ? 'haspr' : 'nopr');
+    if (ports.length) flags.push('ports');
+    this.contextValue = flags.join(' ');
+
+    this.id = `${repo.repoRoot}::container::${container.name}`;
+    this.iconPath = this.pickIcon();
+    this.description = this.buildDescription();
+    this.tooltip = this.buildTooltip();
+    this.command = { command: 'kunj.containers.open', title: 'Open Container', arguments: [this] };
+  }
+
+  private pickIcon(): vscode.ThemeIcon {
+    const c = this.container;
+    if (!this.running) return new vscode.ThemeIcon('package', new vscode.ThemeColor('disabledForeground'));
+    if (c.agent.state === 'waiting') return new vscode.ThemeIcon('bell-dot', new vscode.ThemeColor('charts.yellow'));
+    if (c.status === 'error' || c.status === 'timeout') return new vscode.ThemeIcon('package', new vscode.ThemeColor('list.warningForeground'));
+    return new vscode.ThemeIcon('package', new vscode.ThemeColor('charts.green'));
+  }
+
+  private buildDescription(): string {
+    const c = this.container;
+    const parts = [this.running ? 'container' : 'container · stopped'];
+    if (c.agent.running) parts.push(c.agent.state === 'waiting' ? 'agent waiting' : 'agent');
+    if (c.workspace.dirty) parts.push('✎');
+    if (c.workspace.ahead) parts.push(`↑${c.workspace.ahead}`);
+    if (c.pullRequest) parts.push(prBadge(c.pullRequest));
+    if (c.blueprint?.stale) parts.push('blueprint stale');
+    return parts.join('  ·  ');
+  }
+
+  private buildTooltip(): vscode.MarkdownString {
+    const c = this.container;
+    const md = new vscode.MarkdownString('', true);
+    md.appendMarkdown(`**${c.branch}** _(container)_\n\n`);
+    md.appendMarkdown(`$(package) \`${c.name}\` — ${c.state}\n\n`);
+    md.appendMarkdown(`$(file-binary) \`${c.image}\`${c.blueprint ? ' (blueprint snapshot)' : ''}\n\n`);
+    if (c.workspace.head) {
+      const bits = [c.workspace.dirty ? 'uncommitted changes' : 'clean'];
+      if (c.workspace.ahead) bits.push(`${c.workspace.ahead} commit(s) not on origin`);
+      md.appendMarkdown(`$(git-commit) \`${c.workspace.head}\` — ${bits.join(', ')}\n\n`);
+    }
+    if (c.agent.running) md.appendMarkdown(`$(hubot) Agent ${c.agent.state === 'waiting' ? 'waiting for input' : 'running'}\n\n`);
+    if (c.pullRequest) {
+      const pr = c.pullRequest;
+      md.appendMarkdown(`$(git-pull-request) [#${pr.number} ${escapeMd(pr.title)}](${pr.url}) — ${prState(pr)}\n\n`);
+      md.isTrusted = true;
+    }
+    for (const p of c.ports) md.appendMarkdown(`$(plug) ${portLabel(p)}\n\n`);
+    if (c.services.length) md.appendMarkdown(`$(server) ${c.services.map(svc => `${svc.name} (${svc.state})`).join(', ')}\n\n`);
+    if (c.firewall !== 'default') md.appendMarkdown(`$(shield) firewall ${c.firewall}\n\n`);
+    if (c.dind !== 'off') md.appendMarkdown(`$(layers) Docker-in-Docker ${c.dind}\n\n`);
+    return md;
+  }
+}
+
+// A port of a running container, reachable on the host; clicking opens it in the browser
+export class PortNode extends vscode.TreeItem {
+  constructor(readonly port: ContainerPort, readonly parent: ContainerNode) {
+    super(`localhost:${port.host}`, vscode.TreeItemCollapsibleState.None);
+    this.id = `${parent.id}::port::${port.host}`;
+    this.contextValue = 'port';
+    this.iconPath = new vscode.ThemeIcon('plug');
+    this.description = port.service ? `${port.service}:${port.container}` : `→ ${port.container}${port.kind === 'publish' ? ' (published)' : ''}`;
+    this.tooltip = `Open http://localhost:${port.host} in the browser`;
+    this.command = { command: 'kunj.containers.openPort', title: 'Open in Browser', arguments: [this] };
+  }
+}
+
 export class MessageNode extends vscode.TreeItem {
   constructor(message: string, icon = 'info') {
     super(message, vscode.TreeItemCollapsibleState.None);
@@ -158,7 +239,7 @@ export class MessageNode extends vscode.TreeItem {
   }
 }
 
-type Node = RepoNode | WorktreeNode | MessageNode;
+type Node = RepoNode | WorktreeNode | ContainerNode | PortNode | MessageNode;
 
 export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.Disposable {
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<Node | undefined>();
@@ -170,6 +251,7 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
   private lastError: KunjCliError | undefined;
   private loading: Promise<RepoEntry[]> | undefined;
   private forceFresh = false;
+  private containersUnsupported = false;
   // Remembered so folders of the same repository cost one CLI call, not one each
   private readonly folderRepoRoots = new Map<string, string>();
 
@@ -189,13 +271,35 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
+  get allContainers(): Array<{ container: BranchContainer; repo: RepoEntry }> {
+    return this.repos.flatMap(repo => repo.containers.map(container => ({ container, repo })));
+  }
+
   getTreeItem(element: Node): vscode.TreeItem {
     return element;
   }
 
+  // Worktrees in git's order, each branch's container right after its worktree, then the
+  // containers of branches without a worktree by name
+  private rows(repo: RepoEntry): Node[] {
+    const byBranch = new Map(repo.containers.map(c => [c.branch, c]));
+    const rows: Node[] = [];
+    for (const wt of repo.worktrees) {
+      rows.push(new WorktreeNode(wt, repo, this.ownPid));
+      const container = wt.branch ? byBranch.get(wt.branch) : undefined;
+      if (container) {
+        rows.push(new ContainerNode(container, repo));
+        byBranch.delete(container.branch);
+      }
+    }
+    const rest = [...byBranch.values()].sort((a, b) => a.branch.localeCompare(b.branch));
+    return [...rows, ...rest.map(c => new ContainerNode(c, repo))];
+  }
+
   async getChildren(element?: Node): Promise<Node[]> {
-    if (element instanceof RepoNode) {
-      return element.repo.worktrees.map(wt => new WorktreeNode(wt, element.repo, this.ownPid));
+    if (element instanceof RepoNode) return this.rows(element.repo);
+    if (element instanceof ContainerNode) {
+      return element.running ? element.container.ports.map(p => new PortNode(p, element)) : [];
     }
     if (element) return [];
 
@@ -207,9 +311,7 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
       return [new MessageNode(this.lastError.message, 'error')];
     }
     if (repos.length === 0) return [];
-    if (repos.length === 1) {
-      return repos[0].worktrees.map(wt => new WorktreeNode(wt, repos[0], this.ownPid));
-    }
+    if (repos.length === 1) return this.rows(repos[0]);
     return repos.map(repo => new RepoNode(repo));
   }
 
@@ -225,6 +327,7 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
     const config = vscode.workspace.getConfiguration('kunj.worktrees');
     const includeStatus = config.get<boolean>('showStatus', true);
     const includePullRequests = config.get<boolean>('showPullRequests', true);
+    const includeContainers = config.get<boolean>('showContainers', true);
     const fresh = this.forceFresh;
     this.forceFresh = false;
     const repos = new Map<string, RepoEntry>();
@@ -238,12 +341,12 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
         continue; // same repository as a folder we already listed this round
       }
       try {
-        const result: WorktreeListResult = await this.cli.listWorktrees(cwd, includeStatus, includePullRequests, fresh);
+        const result: WorktreeListResult = await this.listWorktrees(cwd, includeStatus, includePullRequests, fresh, includeContainers);
         sawRepo = true;
         const key = normalize(result.repoRoot);
         this.folderRepoRoots.set(cwd, key);
         if (!repos.has(key)) {
-          repos.set(key, { repoRoot: result.repoRoot, cwd, worktrees: result.worktrees });
+          repos.set(key, { repoRoot: result.repoRoot, cwd, worktrees: result.worktrees, containers: result.containers?.items ?? [] });
         }
       } catch (error) {
         if (error instanceof KunjCliError) {
@@ -269,6 +372,18 @@ export class WorktreeProvider implements vscode.TreeDataProvider<Node>, vscode.D
     return this.repos;
   }
 
+  // A kunj older than --containers refuses the option: list without it from then on
+  private async listWorktrees(cwd: string, includeStatus: boolean, includePullRequests: boolean, fresh: boolean, includeContainers: boolean): Promise<WorktreeListResult> {
+    const withContainers = includeContainers && !this.containersUnsupported;
+    try {
+      return await this.cli.listWorktrees(cwd, includeStatus, includePullRequests, fresh, withContainers);
+    } catch (error) {
+      if (!withContainers || !(error instanceof KunjCliError) || !/unknown option.*--containers/i.test(`${error.stderr}\n${error.message}`)) throw error;
+      this.containersUnsupported = true;
+      return this.cli.listWorktrees(cwd, includeStatus, includePullRequests, fresh, false);
+    }
+  }
+
   dispose(): void {
     this.onDidChangeTreeDataEmitter.dispose();
     this.onDidLoadEmitter.dispose();
@@ -286,6 +401,11 @@ export function prBadge(pr: PullRequest): string {
   const check = pr.checks === 'success' ? ' ✓' : pr.checks === 'failure' ? ' ✗' : pr.checks === 'pending' ? ' …' : '';
   if (pr.state === 'open') return `#${pr.number}${pr.draft ? ' draft' : ''}${check}`;
   return `#${pr.number} ${pr.state}`;
+}
+
+export function portLabel(port: ContainerPort): string {
+  const target = port.service ? `${port.service}:${port.container}` : String(port.container);
+  return `localhost:${port.host} → ${target}${port.kind === 'publish' ? ' (published)' : ''}`;
 }
 
 function escapeMd(text: string): string {

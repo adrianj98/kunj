@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Branch containers (`kunj ct`) in the Worktrees view, as rows that behave like worktrees: open attached,
+  terminal, agent, ports, start/stop/rebuild/remove, pull request; Add Worktree… can create a container.
+- Start Agent in Worktree (`kunj agent`).
+- Setting `kunj.worktrees.showContainers`.
+
 ## 0.1.0
 
 - Initial release: Worktrees view backed by `kunj worktree --json`.

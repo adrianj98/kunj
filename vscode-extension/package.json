@@ -1,7 +1,7 @@
 {
   "name": "kunj-worktrees",
   "displayName": "Kunj Worktrees",
-  "description": "Browse git worktrees, see which ones are open in other VS Code windows, and open them with one click. Powered by the kunj CLI.",
+  "description": "Browse git worktrees and branch containers, see which ones are open in other VS Code windows, and open them with one click. Powered by the kunj CLI.",
   "version": "0.1.0",
   "publisher": "kunj",
   "license": "MIT",
@@ -149,6 +149,114 @@
         "title": "Create Pull Request\u2026",
         "category": "Kunj",
         "icon": "$(git-pull-request-create)"
+      },
+      {
+        "command": "kunj.worktrees.agent",
+        "title": "Start Agent in Worktree",
+        "category": "Kunj",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "kunj.containers.open",
+        "title": "Open Container",
+        "category": "Kunj",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "kunj.containers.openInNewWindow",
+        "title": "Open Container in New Window",
+        "category": "Kunj",
+        "icon": "$(empty-window)"
+      },
+      {
+        "command": "kunj.containers.openInCurrentWindow",
+        "title": "Open Container in Current Window",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.containers.shell",
+        "title": "Open Terminal in Container",
+        "category": "Kunj",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "kunj.containers.agent",
+        "title": "Start Agent in Container",
+        "category": "Kunj",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "kunj.containers.start",
+        "title": "Start Container",
+        "category": "Kunj",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "kunj.containers.stop",
+        "title": "Stop Container",
+        "category": "Kunj",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "kunj.containers.rebuild",
+        "title": "Rebuild Container\u2026",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.containers.remove",
+        "title": "Remove Container\u2026",
+        "category": "Kunj",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "kunj.containers.forward",
+        "title": "Forward Port\u2026",
+        "category": "Kunj",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "kunj.containers.autoForward",
+        "title": "Forward Ports Automatically",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.containers.openPort",
+        "title": "Open in Browser",
+        "category": "Kunj",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "kunj.containers.copyPortUrl",
+        "title": "Copy URL",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.containers.openPullRequest",
+        "title": "Open Pull Request",
+        "category": "Kunj",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "kunj.containers.copyPullRequestUrl",
+        "title": "Copy Pull Request URL",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.containers.createPullRequest",
+        "title": "Create Pull Request\u2026",
+        "category": "Kunj",
+        "icon": "$(git-pull-request-create)"
+      },
+      {
+        "command": "kunj.containers.copyName",
+        "title": "Copy Container Name",
+        "category": "Kunj"
+      },
+      {
+        "command": "kunj.containers.prune",
+        "title": "Prune Containers\u2026",
+        "category": "Kunj",
+        "icon": "$(clear-all)"
       }
     ],
     "menus": {
@@ -171,6 +279,11 @@
         {
           "command": "kunj.worktrees.remove",
           "when": "view == kunjWorktrees",
+          "group": "1_actions"
+        },
+        {
+          "command": "kunj.containers.prune",
+          "when": "view == kunjWorktrees && config.kunj.worktrees.showContainers",
           "group": "1_actions"
         }
       ],
@@ -249,6 +362,126 @@
           "command": "kunj.worktrees.createPullRequest",
           "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /nopr/ && viewItem =~ /exists/",
           "group": "1a_pr@3"
+        },
+        {
+          "command": "kunj.worktrees.agent",
+          "when": "view == kunjWorktrees && viewItem =~ /worktree/ && viewItem =~ /exists/",
+          "group": "2_tools@0"
+        },
+        {
+          "command": "kunj.containers.openPullRequest",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\bhaspr\\b/",
+          "group": "inline@0"
+        },
+        {
+          "command": "kunj.containers.openInNewWindow",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "kunj.containers.shell",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\brunning\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "kunj.containers.start",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\bstopped\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "kunj.containers.remove",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/",
+          "group": "inline@3"
+        },
+        {
+          "command": "kunj.containers.open",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "kunj.containers.openInNewWindow",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/",
+          "group": "1_open@2"
+        },
+        {
+          "command": "kunj.containers.openInCurrentWindow",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/",
+          "group": "1_open@3"
+        },
+        {
+          "command": "kunj.containers.openPullRequest",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\bhaspr\\b/",
+          "group": "1a_pr@1"
+        },
+        {
+          "command": "kunj.containers.copyPullRequestUrl",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\bhaspr\\b/",
+          "group": "1a_pr@2"
+        },
+        {
+          "command": "kunj.containers.createPullRequest",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\bnopr\\b/",
+          "group": "1a_pr@3"
+        },
+        {
+          "command": "kunj.containers.agent",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/",
+          "group": "2_tools@0"
+        },
+        {
+          "command": "kunj.containers.shell",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\brunning\\b/",
+          "group": "2_tools@1"
+        },
+        {
+          "command": "kunj.containers.forward",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\brunning\\b/",
+          "group": "2_tools@2"
+        },
+        {
+          "command": "kunj.containers.autoForward",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\brunning\\b/",
+          "group": "2_tools@3"
+        },
+        {
+          "command": "kunj.containers.copyName",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/",
+          "group": "2_tools@4"
+        },
+        {
+          "command": "kunj.containers.start",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\bstopped\\b/",
+          "group": "2b_state@1"
+        },
+        {
+          "command": "kunj.containers.stop",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/ && viewItem =~ /\\brunning\\b/",
+          "group": "2b_state@2"
+        },
+        {
+          "command": "kunj.containers.rebuild",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/",
+          "group": "2b_state@3"
+        },
+        {
+          "command": "kunj.containers.remove",
+          "when": "view == kunjWorktrees && viewItem =~ /\\bcontainer\\b/",
+          "group": "3_danger@1"
+        },
+        {
+          "command": "kunj.containers.openPort",
+          "when": "view == kunjWorktrees && viewItem == port",
+          "group": "inline@0"
+        },
+        {
+          "command": "kunj.containers.openPort",
+          "when": "view == kunjWorktrees && viewItem == port",
+          "group": "1_open@1"
+        },
+        {
+          "command": "kunj.containers.copyPortUrl",
+          "when": "view == kunjWorktrees && viewItem == port",
+          "group": "1_open@2"
         }
       ],
       "commandPalette": [
@@ -282,6 +515,22 @@
         },
         {
           "command": "kunj.worktrees.copyPullRequestUrl",
+          "when": "false"
+        },
+        {
+          "command": "kunj.containers.openPort",
+          "when": "false"
+        },
+        {
+          "command": "kunj.containers.copyPortUrl",
+          "when": "false"
+        },
+        {
+          "command": "kunj.containers.copyPullRequestUrl",
+          "when": "false"
+        },
+        {
+          "command": "kunj.containers.copyName",
           "when": "false"
         }
       ]
@@ -339,6 +588,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show the pull request for each worktree (looked up through `gh` or `glab` by the kunj CLI)."
+        },
+        "kunj.worktrees.showContainers": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the repository's branch containers (`kunj ct`) next to the worktrees, each as a row you can open, run an agent in or stop like a worktree. Needs Docker and a kunj that knows `worktree list --containers` (older ones just show worktrees)."
         }
       }
     }
