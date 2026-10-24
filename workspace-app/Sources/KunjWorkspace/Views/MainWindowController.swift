@@ -301,6 +301,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         root.displayIfNeeded()
         guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { completion(nil); return }
         root.cacheDisplay(in: root.bounds, to: rep)
+        compositeTerminals(into: rep, root: root)
         // cacheDisplay renders in a calibrated (generic) RGB space; convert so the PNG's pixels
         // are the sRGB token values, comparable with the mockups
         let out = rep.converting(to: .sRGB, renderingIntent: .default) ?? rep
@@ -319,5 +320,29 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             }
             completion(out.representation(using: .png, properties: [:]))
         }
+    }
+
+    /// SwiftTerm leaves default-background cells transparent and relies on its layer's background,
+    /// which cacheDisplay does not draw, so each visible terminal is rendered on its own and
+    /// composited over its background colour (the spike's snapshot code).
+    private func compositeTerminals(into rep: NSBitmapImageRep, root: NSView) {
+        let terms = terminalColumn.registry.allTabs.filter { !$0.isHidden && $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
+        guard !terms.isEmpty else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        for t in terms {
+            guard let trep = t.bitmapImageRepForCachingDisplay(in: t.bounds) else { continue }
+            // the overlay scroller is invisible on screen until scrolling, but cacheDisplay draws its track
+            let scrollers = t.subviews.filter { $0 is NSScroller && !$0.isHidden }
+            scrollers.forEach { $0.isHidden = true }
+            t.cacheDisplay(in: t.bounds, to: trep)
+            scrollers.forEach { $0.isHidden = false }
+            var r = t.convert(t.bounds, to: root)
+            if root.isFlipped { r.origin.y = root.bounds.height - r.maxY }
+            t.nativeBackgroundColor.setFill()
+            r.fill()
+            trep.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+        NSGraphicsContext.restoreGraphicsState()
     }
 }

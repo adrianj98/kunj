@@ -85,3 +85,14 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
             : kunj(["ct", "shell", env.branch], title: "shell")
     }
 }
+
+/// The tab bar's dot for a tab: a live agent tab is amber while its environment waits for input,
+/// green otherwise; a live action tab (a long kunj command) is green; anything else has none.
+public func tabDot(kind: TabKind, running: Bool, agent: AgentActivity) -> DotColor? {
+    guard running else { return nil }
+    switch kind {
+    case .agent: return agent == .waiting ? .amber : .green
+    case .action: return .green
+    case .shell, .editor: return nil
+    }
+}

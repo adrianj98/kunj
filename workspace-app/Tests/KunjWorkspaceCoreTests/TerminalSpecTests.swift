@@ -115,4 +115,15 @@ private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cw
     @Test func tabKindRawValues() {
         #expect(TabKind.allCases.map(\.rawValue) == ["shell", "agent", "action", "editor"])
     }
+
+    @Test func tabDots() {
+        #expect(tabDot(kind: .agent, running: true, agent: .running) == .green)
+        #expect(tabDot(kind: .agent, running: true, agent: .unknown) == .green)
+        #expect(tabDot(kind: .agent, running: true, agent: .waiting) == .amber)
+        #expect(tabDot(kind: .agent, running: false, agent: .waiting) == nil)
+        #expect(tabDot(kind: .action, running: true, agent: .none) == .green)
+        #expect(tabDot(kind: .action, running: false, agent: .none) == nil)
+        #expect(tabDot(kind: .shell, running: true, agent: .waiting) == nil)
+        #expect(tabDot(kind: .editor, running: true, agent: .running) == nil)
+    }
 }
