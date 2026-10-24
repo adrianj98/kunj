@@ -126,6 +126,11 @@ export interface AgentStopJson {
   session: string;
 }
 
+/** `kunj worktree shell --session <id> --kill --json` and `kunj ct shell --session <id> --kill --json` */
+export interface ShellKillJson {
+  killed: boolean;
+}
+
 // ---- kunj events --json ----------------------------------------------------------------------
 
 /**

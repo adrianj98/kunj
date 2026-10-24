@@ -11,6 +11,7 @@
 //   kunj worktree pr <target>             show / open the pull request for a worktree
 //   kunj worktree session start|end|list  editor session tracking
 //   kunj worktree keep [add|apply|delete|list]  files copied into every worktree
+//   kunj worktree shell [branch] [--session <id>] [--kill]  login shell, kept in tmux with --session
 //
 // add and remove fire the pre/post-worktree-create and pre/post-worktree-delete
 // hooks (src/lib/hooks.ts); --no-hooks skips them.
@@ -22,7 +23,7 @@ import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
-import { loadConfig } from '../lib/config';
+import { loadConfig, loadResolvedConfig } from '../lib/config';
 import { repoVariables } from '../lib/config-vars';
 import { HookRunResult, runHook, warnHookFailures, worktreeHookContext } from '../lib/hooks';
 import {
@@ -58,7 +59,9 @@ import {
 } from '../lib/keep';
 import { resolveBaseRef } from '../lib/base-branch';
 import { recordRepo } from '../lib/repos';
-import type { WorktreeJson, WorktreeListJson } from '../lib/json-types';
+import { AgentError, checkShellSessionId, killTmuxSessionIfExists, loginShell, readTmuxSessions, runTmux, shellArgv, shellSessionName } from '../lib/agent-session';
+import { repoIdentity } from '../lib/repo-identity';
+import type { ShellKillJson, WorktreeJson, WorktreeListJson } from '../lib/json-types';
 
 interface WorktreeOptions {
   all?: boolean;
@@ -78,9 +81,11 @@ interface WorktreeOptions {
   id?: string;
   newWindow?: boolean;
   hooks?: boolean;
+  session?: string;
+  kill?: boolean;
 }
 
-const ACTIONS = ['list', 'add', 'remove', 'prune', 'open', 'session', 'path', 'pr', 'keep'];
+const ACTIONS = ['list', 'add', 'remove', 'prune', 'open', 'session', 'path', 'pr', 'keep', 'shell'];
 
 export class WorktreeCommand extends BaseCommand {
   constructor() {
@@ -124,6 +129,8 @@ export class WorktreeCommand extends BaseCommand {
         { flags: '--editor <name>', description: '[session] Editor name (e.g. vscode)' },
         { flags: '--label <text>', description: '[session] Human readable window label' },
         { flags: '--id <id>', description: '[session] Session id' },
+        { flags: '--session <id>', description: '[shell] Keep the shell in a tmux session with this id (letters, digits, _ and -; up to 32), reattaching when it exists' },
+        { flags: '--kill', description: '[shell --session] End that tmux session (exit 0 whether or not it existed)' },
       ],
     });
   }
@@ -163,7 +170,47 @@ export class WorktreeCommand extends BaseCommand {
         return this.keep(target, extra, options);
       case 'session':
         return this.session(target, options);
+      case 'shell':
+        return this.shell(target, options);
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // shell
+  // ---------------------------------------------------------------------
+
+  // A login shell in the worktree. With --session it lives in a host tmux session (kunjsh-…, see
+  // shellSessionName) that `-A` reattaches, so a terminal tab survives the app that opened it.
+  private async shell(target: string | undefined, options: WorktreeOptions): Promise<void> {
+    const id = options.session !== undefined || options.kill ? checkShellSessionId(options.session) : undefined;
+    const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
+    const wt = target ? findWorktreeIn(listing.worktrees, target) : listing.worktrees.find(w => w.isCurrent) ?? null;
+    const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
+    // The session of a worktree removed since can still be ended: the name needs only the branch
+    const killBranch = wt ? wt.branch || wt.name : target;
+    if (options.kill && id !== undefined && killBranch) {
+      const killed = await killTmuxSessionIfExists(shellSessionName(repo.name, repo.id, killBranch, id));
+      if (this.jsonMode) this.outputJSON({ killed } satisfies ShellKillJson);
+      return;
+    }
+    if (!wt || wt.bare) {
+      throw new AgentError('no-worktree', `No worktree for ${target || 'the current directory'}; see kunj worktree list`);
+    }
+    if (!wt.exists) throw new AgentError('no-worktree', `The worktree directory of ${wt.branch || wt.name} is missing: ${wt.path}`);
+
+    const name = id === undefined ? undefined : shellSessionName(repo.name, repo.id, wt.branch || wt.name, id);
+
+    const shell = loginShell();
+    // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
+    const { TMUX: _tmux, ...env } = process.env;
+    let argv = [shell, '-l'];
+    if (name) {
+      const config = await loadResolvedConfig(process.cwd());
+      if (config.agent?.tmux !== false && (await readTmuxSessions()) !== 'missing') {
+        argv = shellArgv(name, wt.path, shell, { status: config.agent?.tmuxStatus === true });
+      }
+    }
+    process.exitCode = await runTmux(argv, wt.path, env);
   }
 
   // ---------------------------------------------------------------------

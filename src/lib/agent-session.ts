@@ -12,7 +12,7 @@ import { containerNames } from './container/names';
 
 const execFileAsync = promisify(execFile);
 
-export type AgentErrorCode = 'tmux-missing' | 'no-tty' | 'not-running' | 'no-worktree';
+export type AgentErrorCode = 'tmux-missing' | 'no-tty' | 'not-running' | 'no-worktree' | 'bad-session-id';
 
 // Expected outcomes: printed without a stack trace
 export class AgentError extends Error {
@@ -29,6 +29,27 @@ export class AgentError extends Error {
 
 export function agentSessionName(repoName: string, repoId: string, branch: string): string {
   return containerNames(repoName, repoId, branch).container.replace(/[.:]/g, '-');
+}
+
+// Persistent shells (`kunj worktree shell --session <id>`): one host tmux session per worktree and id.
+// `kunjsh-` rather than `kunj-`, so `kunj events`' agent poll and the worktree listing, which match
+// `kunj-`, never take a shell for an agent.
+export function shellSessionName(repoName: string, repoId: string, branch: string, id: string): string {
+  return agentSessionName(repoName, repoId, branch).replace(/^kunj-/, 'kunjsh-') + `-sh-${id}`;
+}
+
+// The id becomes part of a tmux target, so only characters tmux gives no meaning to
+const SHELL_SESSION_ID = /^[A-Za-z0-9_-]{1,32}$/;
+
+export function checkShellSessionId(id: unknown): string {
+  if (typeof id !== 'string' || !SHELL_SESSION_ID.test(id)) {
+    throw new AgentError('bad-session-id', `Invalid session id ${JSON.stringify(id ?? '')}: use 1-32 letters, digits, _ or -`);
+  }
+  return id;
+}
+
+export function loginShell(): string {
+  return process.env.SHELL || 'sh';
 }
 
 // []: tmux has no server (or no sessions). 'missing': tmux is not installed. 'failed': any other
@@ -70,9 +91,15 @@ export function agentRunning(sessions: string[] | null, name: string): boolean |
 // tmux runs a single command argument through the shell, so the setting keeps its quoting.
 // -e (tmux 3.2+): a new session's environment comes from the tmux server, not this client, so the
 // variables must be given here or a running server hands it an earlier agent's values.
-export function agentArgv(name: string, cwd: string, command: string, env: Record<string, string>, opts: { status?: boolean } = {}): string[] {
+// An array command is run by tmux as argv, without a shell in between.
+export function agentArgv(name: string, cwd: string, command: string | string[], env: Record<string, string>, opts: { status?: boolean } = {}): string[] {
   const vars = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-  return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, ...vars, command, ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', opts.status ? 'on' : 'off'];
+  return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, ...vars, ...(Array.isArray(command) ? command : [command]), ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', opts.status ? 'on' : 'off'];
+}
+
+// A login shell in the session (no KUNJ_* variables: it is not an agent)
+export function shellArgv(name: string, cwd: string, shell: string, opts: { status?: boolean } = {}): string[] {
+  return agentArgv(name, cwd, [shell, '-l'], {}, opts);
 }
 
 // Without tmux: the agent runs in this terminal, through the login shell as tmux would run it
@@ -93,6 +120,16 @@ export function runTmux(argv: string[], cwd: string, env: Record<string, string 
 
 export async function killTmuxSession(name: string): Promise<void> {
   await execFileAsync('tmux', ['kill-session', '-t', name]);
+}
+
+// Exact name (`=`); false when there was no such session, no server or no tmux
+export async function killTmuxSessionIfExists(name: string): Promise<boolean> {
+  try {
+    await execFileAsync('tmux', ['kill-session', '-t', `=${name}`]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

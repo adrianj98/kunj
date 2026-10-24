@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { agentSessionName, agentRunning, agentArgv, hasTmuxSession, listTmuxSessions, readTmuxSessions } from '../agent-session';
+import { AgentError, agentSessionName, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName } from '../agent-session';
 
 jest.mock('child_process', () => ({
   ...jest.requireActual('child_process'),
@@ -132,5 +132,59 @@ describe('agent state hooks', () => {
   test('agentStateFile lives in agent-state under the repo kunj dir', () => {
     expect(agentStateDir('/h/.kunj/app')).toBe('/h/.kunj/app/agent-state');
     expect(agentStateFile('/h/.kunj/app', 'kunj-app-x-1')).toBe('/h/.kunj/app/agent-state/kunj-app-x-1');
+  });
+});
+
+describe('shell sessions', () => {
+  beforeEach(() => execFileMock.mockReset());
+
+  test('shellSessionName is the agent session name with kunjsh- and -sh-<id>, out of reach of kunj- matching', () => {
+    const agent = agentSessionName('app', 'github.com/acme/app', 'feature/x');
+    const name = shellSessionName('app', 'github.com/acme/app', 'feature/x', 'tab_1');
+    expect(name).toBe(agent.replace(/^kunj-/, 'kunjsh-') + '-sh-tab_1');
+    expect(name.startsWith('kunj-')).toBe(false);
+    expect(shellSessionName('app', 'github.com/acme/app', 'feature-x', 'tab_1')).not.toBe(name);
+  });
+
+  test('checkShellSessionId accepts 1-32 of [A-Za-z0-9_-] and rejects the rest', () => {
+    for (const id of ['a', 'A-b_9', 'x'.repeat(32)]) expect(checkShellSessionId(id)).toBe(id);
+    for (const id of ['', 'x'.repeat(33), 'a b', 'a.b', 'a:b', '=a', 'a/b', 'é']) {
+      expect(() => checkShellSessionId(id)).toThrow(AgentError);
+    }
+    try {
+      checkShellSessionId('a b');
+    } catch (e) {
+      expect((e as AgentError).code).toBe('bad-session-id');
+    }
+  });
+
+  test('shellArgv runs the login shell in the worktree, no -e variables, status off unless asked', () => {
+    expect(shellArgv('kunjsh-x-sh-1', '/wt', '/bin/zsh')).toEqual([
+      'tmux', '-u', 'new-session', '-A', '-s', 'kunjsh-x-sh-1', '-c', '/wt', '/bin/zsh', '-l',
+      ';', 'set-option', '-t', 'kunjsh-x-sh-1', 'window-size', 'latest', ';', 'set-option', '-t', 'kunjsh-x-sh-1', 'status', 'off',
+    ]);
+    expect(shellArgv('s', '/wt', 'sh', { status: true }).slice(-2)).toEqual(['status', 'on']);
+  });
+
+  test('loginShell is $SHELL, else sh', () => {
+    const before = process.env.SHELL;
+    try {
+      process.env.SHELL = '/bin/fish';
+      expect(loginShell()).toBe('/bin/fish');
+      delete process.env.SHELL;
+      expect(loginShell()).toBe('sh');
+    } finally {
+      if (before === undefined) delete process.env.SHELL; else process.env.SHELL = before;
+    }
+  });
+
+  test('killTmuxSessionIfExists kills the exact name and reports whether it did', async () => {
+    tmuxResult(null);
+    await expect(killTmuxSessionIfExists('kunjsh-x-sh-1')).resolves.toBe(true);
+    expect(execFileMock.mock.calls[0].slice(0, 2)).toEqual(['tmux', ['kill-session', '-t', '=kunjsh-x-sh-1']]);
+    tmuxResult(failure({ stderr: "can't find session" }));
+    await expect(killTmuxSessionIfExists('kunjsh-x-sh-1')).resolves.toBe(false);
+    tmuxResult(failure({ code: 'ENOENT' }));
+    await expect(killTmuxSessionIfExists('kunjsh-x-sh-1')).resolves.toBe(false);
   });
 });

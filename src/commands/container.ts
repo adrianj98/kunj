@@ -1,7 +1,7 @@
 // Container command - a sandboxed container per branch, cloned from origin.
 //
 //   kunj container start [branch] [-c] [--base <ref>]   create or resume a branch's container
-//   kunj container shell [branch]                       interactive login shell in /workspace
+//   kunj container shell [branch] [--session <id>]      interactive login shell in /workspace (tmux sh-<id>)
 //   kunj container exec [branch] -- <cmd...>            run a command
 //   kunj container agent [branch] [-- <args>]           the agent in a tmux session
 //   kunj container attach [branch]                      reattach to that session
@@ -54,7 +54,7 @@ import {
   stopContainer,
 } from '../lib/container/lifecycle';
 import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
-import { CONTAINER_AGENT_STATE_FILE, withAgentHooks } from '../lib/agent-session';
+import { CONTAINER_AGENT_STATE_FILE, agentArgv, checkShellSessionId, withAgentHooks } from '../lib/agent-session';
 import { stripUserinfo } from '../lib/container/seed';
 import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
@@ -62,7 +62,7 @@ import { precheckDind } from '../lib/container/dind';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
 import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount } from '../lib/container/prune';
 import { KunjConfig } from '../types';
-import type { ContainerJson, ContainerListJson, FileReadJson, FileWriteJson } from '../lib/json-types';
+import type { ContainerJson, ContainerListJson, FileReadJson, FileWriteJson, ShellKillJson } from '../lib/json-types';
 
 interface ContainerOptions {
   json?: boolean;
@@ -88,6 +88,8 @@ interface ContainerOptions {
   auto?: boolean;
   detach?: boolean;
   dryRun?: boolean;
+  session?: string;
+  kill?: boolean;
 }
 
 interface Context {
@@ -142,12 +144,14 @@ export class ContainerCommand extends BaseCommand {
         { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file; [prune] remove without asking, also from a script or with --json' },
         { flags: '--no-bundle', description: '[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)' },
         { flags: '--blueprint <path>', description: '[blueprint snapshot|status] Use this blueprint file instead of the resolved one' },
+        { flags: '--session <id>', description: "[shell] Keep the shell in the container's tmux session sh-<id> (letters, digits, _ and -; up to 32), reattaching when it exists" },
+        { flags: '--kill', description: '[shell --session] End that tmux session (exit 0 whether or not it existed, or the container runs)' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
       ],
       helpText: [
         'Actions:',
         '  start [branch]                       create or resume the branch\'s container',
-        '  shell [branch]                       login shell in /workspace',
+        '  shell [branch] [--session <id>]      login shell in /workspace (kept in tmux session sh-<id>; --kill ends it)',
         '  exec [branch] -- <cmd...>            run a command in the container',
         '  agent [branch] [-- <args>]           start or reattach the agent\'s tmux session',
         '  attach [branch]                      reattach to the agent\'s tmux session',
@@ -528,12 +532,38 @@ export class ContainerCommand extends BaseCommand {
   // shell / exec / agent / attach
   // ---------------------------------------------------------------------
 
+  // --session <id>: the shell lives in the container's tmux session sh-<id> (one tmux server per
+  // container, so no repo or branch in the name), reattached by `-A`, so it outlives the terminal
   private async shell(target: string | undefined, options: ContainerOptions): Promise<void> {
+    const id = options.session !== undefined || options.kill ? checkShellSessionId(options.session) : undefined;
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
+    if (options.kill && id !== undefined) return this.killShell(ctx, branch, id);
     const main = await this.requireRunning(ctx, branch);
-    const r = await ctx.backend.exec(main.id, ['sh', '-lc', SHELL], this.interactive(main, !!process.stdin.isTTY));
+    const user = this.userOf(main) || undefined;
+    let argv = ['sh', '-lc', SHELL];
+    if (id !== undefined && ctx.config.agent?.tmux !== false) {
+      const probe = await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user });
+      if (probe.exitCode === 0) argv = agentArgv(`sh-${id}`, WORKSPACE, argv, {}, { status: ctx.config.agent?.tmuxStatus === true });
+    }
+    const r = await ctx.backend.exec(main.id, argv, this.interactive(main, id !== undefined || !!process.stdin.isTTY));
     process.exitCode = r.exitCode;
+  }
+
+  // Quiet whatever the outcome: no container, a stopped one, no tmux or no such session all mean
+  // there is nothing left to end
+  private async killShell(ctx: Context, branch: string, id: string): Promise<void> {
+    const main = await this.findMain(ctx, branch);
+    let killed = false;
+    if (main?.state === 'running') {
+      try {
+        const r = await ctx.backend.exec(main.id, ['tmux', 'kill-session', '-t', `=sh-${id}`], { user: this.userOf(main) || undefined });
+        killed = r.exitCode === 0;
+      } catch {
+        killed = false;
+      }
+    }
+    if (this.jsonMode) this.outputJSON({ killed } satisfies ShellKillJson);
   }
 
   private async exec(target: string | undefined, command: string[], options: ContainerOptions): Promise<void> {

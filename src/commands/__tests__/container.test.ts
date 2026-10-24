@@ -307,6 +307,94 @@ describe('ContainerCommand', () => {
     ]);
   });
 
+  describe('shell --session', () => {
+    const SH = 'exec $(command -v zsh || command -v bash || echo sh) -l';
+    const cfg = () => jest.requireMock('../../lib/config').loadResolvedConfig as jest.Mock;
+
+    it('without --session: the plain login shell, unchanged', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('shell', 'feat', {});
+      expect(backend.callsOf('exec').map(c => c[1])).toEqual([['sh', '-lc', SH]]);
+    });
+
+    it('runs the shell in tmux session sh-<id> as the container user', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('shell', 'feat', { session: 'tab1' } as any);
+      const execs = backend.callsOf('exec');
+      expect(execs.map(c => c[1])).toEqual([
+        ['sh', '-c', 'command -v tmux'],
+        [
+          'tmux', '-u', 'new-session', '-A', '-s', 'sh-tab1', '-c', '/workspace', 'sh', '-lc', SH,
+          ';', 'set-option', '-t', 'sh-tab1', 'window-size', 'latest', ';', 'set-option', '-t', 'sh-tab1', 'status', 'off',
+        ],
+      ]);
+      expect((execs[0][2] as any).user).toBe('dev');
+      expect((execs[1][2] as any)).toMatchObject({ user: 'dev', tty: true, workdir: '/workspace' });
+    });
+
+    it('agent.tmuxStatus keeps the status line', async () => {
+      backend.existing = [mainContainer('feat')];
+      cfg().mockResolvedValueOnce({ agent: { tmuxStatus: true } });
+      await new ContainerCommand().execute('shell', 'feat', { session: 'tab1' } as any);
+      expect((backend.callsOf('exec').pop()![1] as string[]).slice(-2)).toEqual(['status', 'on']);
+    });
+
+    it('falls back to the plain shell without tmux in the image, or with agent.tmux false', async () => {
+      backend.existing = [mainContainer('feat')];
+      backend.execResults.set('sh -c command -v tmux', { exitCode: 1, stdout: '' });
+      await new ContainerCommand().execute('shell', 'feat', { session: 'tab1' } as any);
+      expect(backend.callsOf('exec').pop()![1]).toEqual(['sh', '-lc', SH]);
+
+      backend.calls = [];
+      backend.execResults.clear();
+      cfg().mockResolvedValueOnce({ agent: { tmux: false } });
+      await new ContainerCommand().execute('shell', 'feat', { session: 'tab1' } as any);
+      expect(backend.callsOf('exec').map(c => c[1])).toEqual([['sh', '-lc', SH]]);
+    });
+
+    it('refuses an invalid session id', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('shell', 'feat', { session: 'a;b' } as any);
+      expect(errors.join('\n')).toMatch(/session id/);
+      expect(process.exitCode).toBe(1);
+      expect(backend.callsOf('exec')).toEqual([]);
+    });
+
+    it('--kill kills sh-<id> as the user and exits 0 even when tmux fails', async () => {
+      backend.existing = [mainContainer('feat')];
+      backend.execResults.set('tmux kill-session -t =sh-tab1', { exitCode: 1, stdout: '' });
+      await new ContainerCommand().execute('shell', 'feat', { session: 'tab1', kill: true } as any);
+      const execs = backend.callsOf('exec');
+      expect(execs.map(c => c[1])).toEqual([['tmux', 'kill-session', '-t', '=sh-tab1']]);
+      expect((execs[0][2] as any).user).toBe('dev');
+      expect(process.exitCode).toBeUndefined();
+      expect(errors).toEqual([]);
+    });
+
+    it('--kill --json reports whether it killed a session', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('shell', 'feat', { session: 'tab1', kill: true, json: true } as any);
+      expect(JSON.parse(stdout.join(''))).toEqual({ killed: true });
+    });
+
+    it('--kill on a stopped or missing container is a quiet exit 0', async () => {
+      backend.existing = [mainContainer('feat', { state: 'exited' })];
+      await new ContainerCommand().execute('shell', 'feat', { session: 'tab1', kill: true } as any);
+      backend.existing = [];
+      await new ContainerCommand().execute('shell', 'feat', { session: 'tab1', kill: true } as any);
+      expect(backend.callsOf('exec')).toEqual([]);
+      expect(errors).toEqual([]);
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('--session on a stopped container is the usual not-running error', async () => {
+      backend.existing = [mainContainer('feat', { state: 'exited' })];
+      await new ContainerCommand().execute('shell', 'feat', { session: 'tab1' } as any);
+      expect(errors.join('\n')).toMatch(/not running/);
+      expect(process.exitCode).toBe(1);
+    });
+  });
+
   it('runs the agent through sh without tmux', async () => {
     backend.existing = [mainContainer('feat')];
     backend.execResults.set('sh -c command -v tmux', { exitCode: 1, stdout: '' });
