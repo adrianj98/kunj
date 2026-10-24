@@ -177,6 +177,7 @@ export class FakeBackend implements ContainerBackend {
     if (io.timeoutMs !== undefined && (this.hangOn.has(key) || this.hangOn.has('__hang__'))) {
       throw new ExecTimeoutError(`docker exec timed out after ${io.timeoutMs} ms`);
     }
+    if (io.signal?.aborted) throw new Error('exec aborted');
     const error = this.execErrors.get(key);
     if (error) throw error;
     if (this.echoUpper && input !== undefined && io.stdout && io.stdout !== 'inherit') {

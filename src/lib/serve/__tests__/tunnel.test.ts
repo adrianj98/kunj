@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { openTunnel, sshArgs } from '../tunnel';
+import { bindLifetime, openTunnel, sshArgs } from '../tunnel';
 
 // A stand-in for ssh: reads the -L spec, listens on the local port and forwards to the target
 // (or, told to, prints an error and exits). Written as a script so the tunnel spawns it like ssh.
@@ -19,6 +19,41 @@ const server = net.createServer(s => { const t = net.connect(Number(rport), '127
 setTimeout(() => server.listen(Number(lport), '127.0.0.1'), 150);
 process.on('SIGTERM', () => process.exit(0));
 `;
+
+describe('bindLifetime', () => {
+  it('kills on a signal, steps aside and re-raises when no other handler is installed', () => {
+    const before = process.listenerCount('SIGTERM');
+    const kill = jest.fn();
+    const reRaise = jest.fn();
+    bindLifetime(kill, reRaise);
+    expect(process.listenerCount('SIGTERM')).toBe(before + 1);
+    process.emit('SIGTERM', 'SIGTERM');
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(process.listenerCount('SIGTERM')).toBe(before);
+    expect(reRaise).toHaveBeenCalledWith(before === 0 ? 'SIGTERM' : expect.anything());
+  });
+
+  it('does not re-raise when another handler owns the signal, and release() removes everything', () => {
+    const other = jest.fn();
+    process.on('SIGHUP', other);
+    const kill = jest.fn();
+    const reRaise = jest.fn();
+    const release = bindLifetime(kill, reRaise);
+    process.emit('SIGHUP', 'SIGHUP');
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledTimes(1);
+    expect(reRaise).not.toHaveBeenCalled();
+    process.off('SIGHUP', other);
+
+    const exitBefore = process.listenerCount('exit');
+    const release2 = bindLifetime(jest.fn(), reRaise);
+    expect(process.listenerCount('exit')).toBe(exitBefore + 1);
+    release2();
+    release();
+    expect(process.listenerCount('exit')).toBe(exitBefore);
+    expect(process.listenerCount('SIGINT')).toBe(0);
+  });
+});
 
 describe('openTunnel', () => {
   let dir: string;

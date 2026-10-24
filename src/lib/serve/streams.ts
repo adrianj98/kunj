@@ -123,6 +123,8 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
   const stdout = frameWriter(ws, CHANNEL.stdout);
   const stderr = frameWriter(ws, CHANNEL.stderr);
   let closed = false;
+  // Aborted when the client leaves: ends a command that does not read stdin (sleep) too
+  const gone = new AbortController();
   let tty: TtySession | undefined;
   // The newest resize, kept until the pty exists
   let size: { cols: number; rows: number } | undefined;
@@ -152,8 +154,9 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
   });
   ws.on('close', () => {
     closed = true;
-    // The client went away mid-exec: ending stdin is how `docker exec -i` learns it; a pty is hung up
+    // The client went away mid-exec: stdin ends, the exec is aborted (killed), a pty is hung up
     stdin.destroy();
+    gone.abort();
     tty?.close();
   });
 
@@ -174,9 +177,14 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
       return;
     }
     stdin.pipe(tty.stdin);
+    // pipe() ends `stdout` when the pty's stream ends, after every queued byte was sent; the exit
+    // frame waits for that, else a burst of output before `exit` would be cut (a pty stream that
+    // never ends is given a moment, then ended)
+    const drained = new Promise<void>(resolve => stdout.once('finish', resolve));
     tty.stdout.pipe(stdout);
     const exitCode = await tty.wait();
-    await new Promise<void>(resolve => (stdout.writableFinished ? resolve() : stdout.end(resolve)));
+    await Promise.race([drained, new Promise<void>(resolve => setTimeout(resolve, 2000))]);
+    if (!stdout.writableFinished) await new Promise<void>(resolve => stdout.end(resolve));
     if (!closed) {
       sendControl(ws, { exit: exitCode });
       ws.close();
@@ -184,6 +192,8 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
     return;
   }
   if (!request.stdin) stdin.end();
+  // The client left while the request was checked: nothing starts
+  if (closed) return;
 
   const io: ExecIO = {
     stdin: request.stdin ? stdin : 'ignore',
@@ -193,6 +203,7 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
     workdir: request.workdir,
     env: request.env,
     timeoutMs: request.timeoutMs,
+    signal: gone.signal,
   };
   const result = await opts.backend.exec(id, request.cmd, io);
   // A backend that answered in the result rather than the stream (the fake does): same bytes, same channel
@@ -216,6 +227,7 @@ async function serveLogs(ws: WebSocket, id: string, url: URL, opts: StreamOption
   await opts.backend.logs(id, {
     follow,
     tail,
+    signal: controller.signal,
     onLine: (stream, line) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ stream, line }));
     },

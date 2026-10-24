@@ -149,6 +149,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     spec.publish = Array.isArray(spec.publish) ? spec.publish : [];
     spec.volumes = Array.isArray(spec.volumes) ? spec.volumes : [];
     guard.runSpec(spec);
+    guard.forget(spec.name);
     return { id: await backend.run(spec) };
   });
   route('GET', '/v1/containers', async (_req, _p, url) => {

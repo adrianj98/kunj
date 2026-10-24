@@ -113,12 +113,14 @@ describe('RemoteKunjBackend: streams', () => {
       expect(h.fake.callsOf('exec')).toEqual([]);
     });
 
-    it('ends the server-side stdin when the client drops the connection', async () => {
+    it('ends the server-side stdin and aborts the exec when the client drops the connection', async () => {
       let stdinClosed = false;
+      let aborted = false;
       const execStarted = new Promise<void>(resolve => {
         h.fake.execHandler = (_id, _cmd, io) => {
           const stdin = io.stdin as PassThrough;
           stdin.on('close', () => (stdinClosed = true));
+          io.signal!.addEventListener('abort', () => (aborted = true));
           resolve();
           return new Promise(res => stdin.on('close', () => res({ exitCode: 137, stdout: '' })));
         };
@@ -130,6 +132,7 @@ describe('RemoteKunjBackend: streams', () => {
       await expect(exec).rejects.toThrow(/exec ended: connection closed|unreachable/);
       await new Promise(r => setTimeout(r, 50));
       expect(stdinClosed).toBe(true);
+      expect(aborted).toBe(true);
       h = await startHarness(); // for afterEach
     });
   });
@@ -177,8 +180,10 @@ describe('RemoteKunjBackend: streams', () => {
       const lines: Array<[string, string]> = [];
       await h.remote.logs('kunj-r-b-1', { follow: true, tail: 10, onLine: (s, l) => lines.push([s, l]) });
       expect(lines).toEqual([['stdout', 'a'], ['stderr', 'b']]);
-      const [, opts] = h.fake.callsOf('logs')[0] as [string, { follow: boolean; tail: number }];
+      const [, opts] = h.fake.callsOf('logs')[0] as [string, { follow: boolean; tail: number; signal?: AbortSignal }];
       expect(opts).toMatchObject({ follow: true, tail: 10 });
+      // A client that leaves a follow ends it on the box
+      expect(opts.signal).toBeInstanceOf(AbortSignal);
     });
   });
 

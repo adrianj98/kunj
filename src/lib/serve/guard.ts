@@ -28,7 +28,9 @@ export function backendLookup(backend: ContainerBackend): GuardLookup {
 }
 
 const REPO_LABEL = 'kunj.repo';
-const CACHE_MS = 5000;
+// Short: a kunj container removed out of band and replaced under the same name is let through for
+// at most this long (the token holder could exec into kunj's containers anyway)
+const CACHE_MS = 2000;
 
 function refused(message: string): ServeError {
   return new ServeError(403, 'remote-refused', message);
@@ -72,9 +74,9 @@ export class Guard {
     this.cache.delete(id);
   }
 
+  /** kunj's images have no registry or namespace: the whole reference starts with kunj- */
   image(tag: string): void {
-    const repo = tag.split('/').pop() ?? tag;
-    if (!tag || tag.startsWith('-') || !repo.startsWith(IMAGE_TAG_PREFIX)) throw refused(`${tag || '(empty)'} is not a kunj image`);
+    if (!tag || !tag.startsWith(IMAGE_TAG_PREFIX)) throw refused(`${tag || '(empty)'} is not a kunj image`);
   }
 
   runSpec(spec: ContainerSpec): void {

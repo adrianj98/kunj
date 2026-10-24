@@ -497,6 +497,34 @@ describe('docker backend', () => {
     });
   });
 
+  describe('exec and logs with a signal', () => {
+    it('exec kills the child and rejects when the signal aborts', async () => {
+      const backend = new LocalDockerBackend();
+      const controller = new AbortController();
+      const pending = backend.exec('c', ['sleep', '3600'], { signal: controller.signal });
+      await new Promise(r => setImmediate(r));
+      controller.abort();
+      await expect(pending).rejects.toThrow('exec aborted');
+      expect(children[0].kill).toHaveBeenCalledWith('SIGKILL');
+    });
+
+    it('logs --follow ends and resolves when the signal aborts', async () => {
+      const backend = new LocalDockerBackend();
+      const controller = new AbortController();
+      const lines: string[] = [];
+      const pending = backend.logs('c', { follow: true, signal: controller.signal, onLine: (_s, l) => lines.push(l) });
+      await new Promise(r => setImmediate(r));
+      children[0].stdout.write('a\n');
+      controller.abort();
+      expect(children[0].kill).toHaveBeenCalled();
+      children[0].stdout.end();
+      children[0].stderr.end();
+      children[0].emit('close', 143);
+      await expect(pending).resolves.toBeUndefined();
+      expect(lines).toEqual(['a']);
+    });
+  });
+
   describe('execTty over the Engine API', () => {
     it('parses endpoints', () => {
       expect(parseEngineEndpoint('unix:///var/run/docker.sock\n')).toEqual({ socketPath: '/var/run/docker.sock' });

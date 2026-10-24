@@ -478,6 +478,15 @@ export class LocalDockerBackend implements ContainerBackend {
           finish(() => reject(new ExecTimeoutError(`docker exec timed out after ${ms} ms`)));
         }, ms);
       }
+      if (io.signal) {
+        const onAbort = () => {
+          child.kill('SIGKILL');
+          finish(() => reject(new Error('exec aborted')));
+        };
+        if (io.signal.aborted) onAbort();
+        else io.signal.addEventListener('abort', onAbort, { once: true });
+        child.on('close', () => io.signal!.removeEventListener('abort', onAbort));
+      }
       child.on('error', err =>
         finish(() => {
           const detail = Buffer.concat(stderr).toString().trim().split('\n')[0];
@@ -582,12 +591,13 @@ export class LocalDockerBackend implements ContainerBackend {
       const finish = async () => {
         // The process has ended when its connection does; its exit code is in the exec's state
         try {
-          for (let i = 0; i < 50; i++) {
+          // The daemon marks the exec not Running a moment after the connection ends; 30 s is generous
+          for (let i = 0; i < 300; i++) {
             const state = await this.engineCall('GET', `/exec/${execId}/json`);
             if (!state.Running) return resolve(typeof state.ExitCode === 'number' ? state.ExitCode : 1);
             await new Promise(r => setTimeout(r, 100));
           }
-          resolve(1);
+          reject(new Error('docker exec failed: the process did not report its exit code'));
         } catch (err) {
           if (closed) resolve(129);
           else reject(err);
@@ -653,9 +663,13 @@ export class LocalDockerBackend implements ContainerBackend {
     if (opts.follow) args.push('--follow');
     if (opts.tail !== undefined) args.push('--tail', String(opts.tail));
     args.push(id);
-    const { onLine } = opts;
+    const { onLine, signal } = opts;
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) return resolve();
       const child = this.spawnChild(args, { stdio: ['ignore', onLine ? 'pipe' : 'inherit', onLine ? 'pipe' : 'inherit'] });
+      const onAbort = () => child.kill();
+      signal?.addEventListener('abort', onAbort, { once: true });
+      child.on('close', () => signal?.removeEventListener('abort', onAbort));
       if (onLine) {
         for (const stream of ['stdout', 'stderr'] as const) {
           let pending = '';
@@ -671,7 +685,7 @@ export class LocalDockerBackend implements ContainerBackend {
         }
       }
       child.on('error', reject);
-      child.on('close', (code: number | null) => (code === 0 || code === null ? resolve() : reject(new Error(`docker logs failed: exit code ${code}`))));
+      child.on('close', (code: number | null) => (code === 0 || code === null || signal?.aborted ? resolve() : reject(new Error(`docker logs failed: exit code ${code}`))));
     });
   }
 

@@ -42,6 +42,35 @@ function accepts(port: number): Promise<boolean> {
   });
 }
 
+const LIFETIME_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+
+/**
+ * Ends the tunnel with this process: on 'exit', and on the signals that end a process without an
+ * 'exit' event when nothing handles them. A signal handler of ours kills ssh, steps aside and, when
+ * no other handler is installed, re-raises the signal so the default action still happens
+ * (SIGKILL cannot be caught: that one orphans ssh). Returns the release for a normal close().
+ */
+export function bindLifetime(kill: () => void, reRaise: (signal: NodeJS.Signals) => void = s => process.kill(process.pid, s)): () => void {
+  const onExit = () => kill();
+  const handlers = new Map<NodeJS.Signals, () => void>();
+  const release = () => {
+    process.off('exit', onExit);
+    for (const [signal, handler] of handlers) process.off(signal, handler);
+    handlers.clear();
+  };
+  process.once('exit', onExit);
+  for (const signal of LIFETIME_SIGNALS) {
+    const handler = () => {
+      release();
+      kill();
+      if (process.listenerCount(signal) === 0) reRaise(signal);
+    };
+    handlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+  return release;
+}
+
 export function sshArgs(opts: { ssh: string; port: number; localPort: number }): string[] {
   return [
     '-N',
@@ -77,17 +106,17 @@ export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
   const kill = () => {
     if (!exited) child.kill('SIGTERM');
   };
-  process.once('exit', kill);
+  const release = bindLifetime(kill);
 
   const firstLine = () => stderr.join('').trim().split('\n').find(l => l.trim()) ?? '';
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (spawnError) {
-      process.off('exit', kill);
+      release();
       throw new ContainerError(`Could not run ${opts.sshPath ?? 'ssh'}: ${spawnError.message}`, 'bad-remote');
     }
     if (exited) {
-      process.off('exit', kill);
+      release();
       const detail = firstLine();
       throw new ContainerError(
         `ssh to ${opts.ssh} ended before the tunnel was up${detail ? `: ${detail}` : ''}` +
@@ -98,7 +127,7 @@ export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
     if (await accepts(localPort)) break;
     if (Date.now() >= deadline) {
       kill();
-      process.off('exit', kill);
+      release();
       throw new ContainerError(`ssh to ${opts.ssh} did not bring the tunnel up within ${Math.round(timeoutMs / 1000)} s${firstLine() ? `: ${firstLine()}` : ''}`, 'bad-remote');
     }
     await new Promise(r => setTimeout(r, READY_POLL_MS));
@@ -112,7 +141,7 @@ export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
     localPort,
     pid: child.pid ?? 0,
     close: async () => {
-      process.off('exit', kill);
+      release();
       kill();
       await exit;
     },

@@ -167,6 +167,12 @@ channel: `0` stdin (client→server), `1` stdout, `2` stderr (server→client); 
 (server→client, then close). Stdin EOF is an empty `0` frame. Backpressure: each side stops reading
 its source while the socket's buffered amount is above 1 MB, like the MCP bridge. A WebSocket closed
 without `exit` is `Error('exec ended: connection closed')`, which lifecycle already treats as a failure.
+A client that leaves mid-exec ends it on the box: stdin is destroyed and the exec's `AbortSignal`
+(`ExecIO.signal`) kills the process, so a `sleep` without a timeout does not outlive its caller; a
+client gone before the request was checked starts nothing. A `logs --follow` carries
+`LogOptions.signal` the same way. For a TTY exec the exit frame waits until the pty's stream has
+drained into the socket (`finish` of the frame writer, 2 s at most), so a burst of output just before
+`exit` is not cut.
 
 - `stdin`/`stdout`/`stderr` **streams** (forward, autoforward, the MCP bridge, copy helpers) pipe to and
   from the channel frames. Nothing in those modules changes.
@@ -182,7 +188,7 @@ without `exit` is `Error('exec ended: connection closed')`, which lifecycle alre
   dependency, so a TTY exec goes through the **Docker Engine API** on the daemon socket (the socket from
   `docker context inspect`): `POST /containers/:id/exec` with `Tty`, `AttachStdin/Stdout/Stderr`, `User`,
   `WorkingDir`, `Env`; `POST /exec/:id/start` on a hijacked connection, whose raw bytes are the pty;
-  `POST /exec/:id/resize?h=&w=` for each `resize` frame; `GET /exec/:id/json` for the exit code. Closing
+  `POST /exec/:id/resize?h=&w=` for each `resize` frame; `GET /exec/:id/json` for the exit code (polled up to 30 s after the connection ends). Closing
   the WebSocket closes the hijacked socket, which hangs up the pty (SIGHUP to the process group, as a
   dropped SSH session would). This is `execTty()` in docker.ts, a second way of talking to Docker that
   stays inside the one module allowed to. Non-TTY execs keep spawning `docker exec`. The env a TTY exec
@@ -211,8 +217,11 @@ container to know which images are in use).
 
 - `exec`, `start`, `stop`, `remove`, `copyIn`, `commit`, `logs`, `containerState`/`containerRun`: the
   container must carry the label `kunj.repo`, or not exist (the backend then answers as it does
-  locally: null, or `docker exec`'s own error). A kunj container's labels are cached 5 s per id; a
-  missing one is never cached, because it may be created a moment later. Volumes and networks in
+  locally: null, or `docker exec`'s own error). A kunj container's labels are cached 2 s per id
+  (forgotten on a `run` or `remove` of that name through the server); a missing one is never cached,
+  because it may be created a moment later. The window: a kunj container removed out of band and
+  replaced under its name by a foreign one passes for up to 2 s, to a token holder who could exec into
+  kunj's containers anyway. Volumes and networks in
   `remove` must carry `kunj.repo` too.
 - `run`: the spec's labels must include `kunj.repo` and only `kunj.*` keys; `privileged` and `runtime`
   are refused unless the server was started with `--allow-privileged` / `--allow-runtime sysbox-runc`,
@@ -220,7 +229,8 @@ container to know which images are in use).
   before it tries. `spec.image` is whatever the branch chose (a devcontainer, `container.image`).
   `spec.publish` is allowed: docker.ts binds published ports to the box's loopback, where they are
   useless from the laptop but harmless; `forward` is the way to reach a port.
-- `buildImage`, `commitContainer`, `removeImage`: the tag must start with `kunj-`. `imageExists` is
+- `buildImage`, `commitContainer`, `removeImage`: the whole reference must start with `kunj-` (kunj's
+  tags have no registry or namespace, so `evil.example/kunj-x` is refused). `imageExists` is
   open (lifecycle asks about the branch's image, whatever it is).
 - `inspectLabels` is open: lifecycle reads a foreign container's labels to report a name collision.
 - `events`: the filter must include a `kunj.*` label. Listings (`list`, `listImages`, `listVolumes`,
@@ -268,7 +278,9 @@ container to know which images are in use).
   answered where there is a terminal, up once the local port accepts a connection (ssh listens only
   after the session is up), 120 s to get there, killed when the process exits (`unref`'d so a finished
   command does not wait for it). ssh ending first is `remote-unreachable` with its first stderr line
-  and a hint to check `kunj serve` on the box. It lives for one kunj process. Detached helpers (`forward --auto`, `ct mcp`) are
+  and a hint to check `kunj serve` on the box. It lives for one kunj process: killed on `exit` and on SIGINT/SIGTERM/SIGHUP (the handler
+  kills ssh, steps aside and re-raises the signal when nothing else handles it); only SIGKILL orphans
+  it, and the next command then finds the local port busy. Detached helpers (`forward --auto`, `ct mcp`) are
   their own processes and open their own tunnel; `spawnDetached` passes `--remote` as it passes
   `--context` today.
 

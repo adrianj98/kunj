@@ -448,7 +448,8 @@ from `--remote <name>` / `container.remote` (`local` forces the laptop). Spec: d
 Thin server: lifecycle, hooks, secrets and bundles stay on the laptop; the box holds only Docker labels and
 `~/.kunj/serve/token`. Unary calls are JSON routes under `/v1/`; exec, logs and events are WebSockets (binary
 frames with a channel byte: 0 stdin, 1 stdout, 2 stderr; text frames `resize`/`exit`/`error`), copyIn and
-buildImage are chunked tar bodies. The server acts only on objects with `kunj.*` labels, builds/commits/removes
+buildImage are chunked tar bodies. A client that leaves ends its exec on the box (`ExecIO.signal`, `LogOptions.signal`,
+both new; docker.ts kills the child). The server acts only on objects with `kunj.*` labels, builds/commits/removes
 only `kunj-*` tags, needs `--allow-privileged` / `--allow-runtime` for those run options, and reads
 (`inspectLabels`, `imageExists`, listings) openly. TTY execs (`shell`, `attach`, `agent`) go through the Docker
 Engine API on the server (`execTty()` in docker.ts, still the only module that touches Docker) and raw mode on

@@ -77,6 +77,8 @@ export interface ExecIO {
   workdir?: string;
   env?: Record<string, string>;
   timeoutMs?: number;
+  /** Aborting ends the exec (the process is killed); the call then rejects with Error('exec aborted') */
+  signal?: AbortSignal;
 }
 
 /** A TTY exec (shell, attach, agent) for the remote server: the pty's bytes both ways, resize, exit. */
@@ -132,6 +134,8 @@ export interface EngineInfo {
 export interface LogOptions {
   follow?: boolean;
   tail?: number;
+  /** Aborting ends a follow; the call then resolves */
+  signal?: AbortSignal;
   onLine?: (stream: 'stdout' | 'stderr', line: string) => void;
 }
 
