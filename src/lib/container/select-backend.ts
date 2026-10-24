@@ -28,7 +28,7 @@ export interface SelectOptions {
   config: KunjConfig;
   /** Test seams */
   remotes?: (name: string) => RemoteEntry;
-  tunnel?: (entry: RemoteEntry) => Promise<{ localPort: number; close(): Promise<void> }>;
+  tunnel?: (opts: { ssh: string; port: number }) => Promise<{ localPort: number; close(): Promise<void> }>;
 }
 
 /** The remote name a command should use, or undefined for the laptop. */
@@ -50,7 +50,7 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
     baseUrl = entry.url;
   } else if (entry.ssh) {
     const open = options.tunnel ?? (await import('../serve/tunnel')).openTunnel;
-    const tunnel = await open({ ...entry, port: entry.port ?? DEFAULT_SERVE_PORT });
+    const tunnel = await open({ ssh: entry.ssh, port: entry.port ?? DEFAULT_SERVE_PORT });
     baseUrl = `http://127.0.0.1:${tunnel.localPort}`;
     let closed = false;
     close = async () => {

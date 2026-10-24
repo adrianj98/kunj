@@ -31,7 +31,13 @@ const execFileAsync = promisify(execFile);
 export interface WatchEventsOptions {
   repos: KnownRepoInfo[];
   kunjDir: string;
+  /** The container backend of every repository (null: no container events) */
   backend: ContainerBackend | null;
+  /**
+   * A repository's own backend (its container.remote), else `backend`. Repositories sharing a backend
+   * share its event stream and status poll, so one remote is one connection.
+   */
+  backendFor?: (repo: KnownRepoInfo) => ContainerBackend | null;
   onEvent: (e: EventJson) => void;
   signal: AbortSignal;
   debounceMs?: number;
@@ -267,15 +273,24 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
     if (type) debounce(type, () => emit({ type, at: at() }));
   });
 
-  // Container labels carry the repo id; computed once
+  // Container labels carry the repo id; computed once. Repositories are grouped by backend.
   const byId = new Map<string, { name: string; root: string }>();
+  const groups = new Map<ContainerBackend, Set<string>>();
   await Promise.all(repos.map(async r => {
     try {
-      byId.set(await repoId(r), { name: r.name, root: r.root });
+      const id = await repoId(r);
+      byId.set(id, { name: r.name, root: r.root });
+      const b = options.backendFor ? options.backendFor(r) : backend;
+      if (b) {
+        if (!groups.has(b)) groups.set(b, new Set());
+        groups.get(b)!.add(id);
+      }
     } catch {
       // its containers are reported with repo null
     }
   }));
+  // A backend no repository named still streams (its events carry repo null), as before
+  if (backend && !groups.has(backend) && !options.backendFor) groups.set(backend, new Set());
 
   // Host agent sessions: the first poll is the baseline; a failed listing (null) is not a change
   let known: Set<string> | null = null;
@@ -323,12 +338,13 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
   await Promise.all([pollTmux(), pollWorktrees()]);
   if (!signal.aborted) options.onReady?.();
 
-  let backendDone: Promise<void> = Promise.resolve();
-  if (backend) {
+  const watchBackend = (backend: ContainerBackend, ids: Set<string>): Promise<void> => {
     let available = true;
     const onContainer = (e: BackendEvent) => {
       if (!containerActionMatters(e.action)) return;
       const id = e.labels[LABEL.repo];
+      // Another backend reports its own repositories
+      if (id !== undefined && byId.has(id) && !ids.has(id)) return;
       emit({
         type: 'container',
         repo: (id !== undefined && byId.get(id)) || null,
@@ -343,7 +359,7 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
     const containerHashes = new Map<string, string>();
     const pollContainers = every(statusPollMs, async () => {
       if (!available) return;
-      const lists = await untilAbort(Promise.all([...byId.keys()].map(id => backend.list({ [LABEL.repo]: id }).catch(() => []))), signal);
+      const lists = await untilAbort(Promise.all([...ids].map(id => backend.list({ [LABEL.repo]: id }).catch(() => []))), signal);
       if (!lists) return;
       const mains = lists.flat().filter(c => c.state === 'running' && isMain(c));
       const seen = new Set(mains.map(c => c.name));
@@ -368,7 +384,7 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
     });
     void pollContainers();
 
-    backendDone = (async () => {
+    return (async () => {
       while (!signal.aborted) {
         if (!available) {
           try {
@@ -392,7 +408,8 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
         await sleep(backendRetryMs, signal);
       }
     })();
-  }
+  };
+  const backendDone = Promise.all([...groups].map(([b, ids]) => watchBackend(b, ids)));
 
   await new Promise<void>(resolve => {
     if (signal.aborted) return resolve();

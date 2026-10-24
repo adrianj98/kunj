@@ -55,7 +55,7 @@ page only says where each thing stands.
 | Work | Spec | Notes |
 | --- | --- | --- |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
-| Remote containers (`kunj serve`, `RemoteKunjBackend`, `kunj remote`) | [remote-containers.md](remote-containers.md) | Plan docs/superpowers/plans/2026-10-24-remote-containers.md. Done: protocol, server and client over the wire (aab2a76, 8b4d3e2, fbb95e0), `kunj serve`, `kunj remote`, `--remote` (d1ad96c), TTY exec. Left: the SSH tunnel, `kunj events` per repo, functional and real-daemon tests, docs. Still to do by hand: validate `container.dockerContext` over SSH |
+| Remote containers (`kunj serve`, `RemoteKunjBackend`, `kunj remote`) | [remote-containers.md](remote-containers.md) | Plan docs/superpowers/plans/2026-10-24-remote-containers.md. Done: protocol, server and client over the wire (aab2a76, 8b4d3e2, fbb95e0), `kunj serve`, `kunj remote`, `--remote` (d1ad96c), TTY exec (662b060), the SSH tunnel and `kunj events` per repo. Left: functional and real-daemon tests, docs-site page, `kunj setup`. Still to do by hand: validate `container.dockerContext` over SSH |
 
 ## To do
 

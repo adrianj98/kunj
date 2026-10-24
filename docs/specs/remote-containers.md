@@ -14,9 +14,11 @@ later phase.
 | `container.dockerContext` over SSH validated end to end (prerequisite, no code) | Not started |
 | Protocol and `RemoteKunjBackend` (client) over an in-process server with `FakeBackend` | Shipped: unary calls, exec/copy/build/logs/events streams; `npm run test:remote` runs the container suites over the wire |
 | `kunj serve` (server) | Shipped: `serve [--listen] [--allow-privileged] [--allow-runtime] [--verbose]`, `serve token [--rotate]` |
-| `kunj remote add\|list\|remove\|ping\|token`, `container.remote`, `--remote`, `backend` in `ct list --json`, `ct open` refusal | Shipped (`--ssh` remotes wait for the tunnel) |
+| `kunj remote add\|list\|remove\|ping\|token`, `container.remote`, `--remote`, `backend` in `ct list --json`, `ct open` refusal | Shipped |
+| SSH tunnel for `--ssh` remotes (`src/lib/serve/tunnel.ts`) | Shipped (tested with a stand-in ssh; a real box still to try) |
 | TTY exec over the WebSocket (`shell`, `attach`, `agent`): raw-mode client, resize frames, Engine API on the server | Shipped (unit-tested against a fake daemon socket; a real daemon still to try) |
-| `forward`, `forward --auto`, the MCP bridge against a remote | Covered by the suites over the wire; `kunj events` per-repo remotes not started |
+| `forward`, `forward --auto`, the MCP bridge against a remote | Covered by the suites over the wire |
+| `kunj events` watches each repository on the backend its `container.remote` names | Shipped (a remote that is down at startup is reported once and left out) |
 | Functional test against a real daemon | Not started |
 | Editor attach through Remote-SSH | Later |
 | TLS, multi-user | Later, own spec |
@@ -261,7 +263,12 @@ container to know which images are in use).
   agent (macOS gives GUI apps `SSH_AUTH_SOCK`), and `kunj remote add --ssh` connects once,
   interactively, so the host key is in `known_hosts` before any app session; a prompt that does appear
   lands in the terminal tab, where it can be answered. A `--url` remote has no such step.
-- **The SSH tunnel** lives for one kunj process. Detached helpers (`forward --auto`, `ct mcp`) are
+- **The SSH tunnel** (`openTunnel()`): `ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30
+  -L 127.0.0.1:<free>:127.0.0.1:<port> -- <destination>`, stdin left to this process so a prompt can be
+  answered where there is a terminal, up once the local port accepts a connection (ssh listens only
+  after the session is up), 120 s to get there, killed when the process exits (`unref`'d so a finished
+  command does not wait for it). ssh ending first is `remote-unreachable` with its first stderr line
+  and a hint to check `kunj serve` on the box. It lives for one kunj process. Detached helpers (`forward --auto`, `ct mcp`) are
   their own processes and open their own tunnel; `spawnDetached` passes `--remote` as it passes
   `--context` today.
 

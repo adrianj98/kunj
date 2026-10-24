@@ -475,6 +475,20 @@ describe('watchEvents status poll', () => {
       expect(ofType('container')).toHaveLength(1);
     });
 
+    it('watches a repository on the backend backendFor names, not the default one', async () => {
+      const local = new FakeBackend();
+      const remote = new FakeBackend();
+      remote.existing = [main('kunj-app-x-1', {})];
+      remote.execResults.set(key, { exitCode: 0, stdout: 'tmux=1\n# branch.oid ' + 'a'.repeat(40) + '\n' });
+      startPolling({ backend: local, backendFor: () => remote });
+      await ready;
+      await waitFor(() => remote.callsOf('exec').length > 0);
+      expect(local.methods()).toEqual([]);
+      remote.emitEvent({ action: 'start', name: 'kunj-app-x-1', labels: { 'kunj.repo': 'github.com/acme/app', 'kunj.branch': 'x' }, at: 'now' });
+      await waitFor(() => ofType('container').length > 0);
+      expect(ofType('container')[0]).toMatchObject({ type: 'container', repo: { name: 'real', root }, container: 'kunj-app-x-1', action: 'start' });
+    });
+
     it('a failing exec is skipped and polls never overlap', async () => {
       const backend = new FakeBackend();
       backend.existing = [main('kunj-app-x-1', {})];

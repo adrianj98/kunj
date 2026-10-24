@@ -110,6 +110,8 @@
 
 ### Task 6: SSH tunnel, events per repo, detached helpers
 
+**Status: done** (this commit). `watchEvents` takes `backendFor(repo)` and groups repositories by backend; `kunj events` selects each repository's backend from its own config, one per remote.
+
 **Files:**
 - Create: `src/lib/serve/tunnel.ts` (`openTunnel({ ssh, port }) → { localPort, close }`: `ssh -N -L <free>:127.0.0.1:<port> <ssh>`, ready when the local port accepts, killed on exit)
 - Modify: `src/commands/remote.ts` (`add --ssh` pings once interactively so the host key is known), `src/lib/container/remote.ts`, `src/commands/events.ts` (per-repo remote from the repo's config), `src/commands/container.ts` (`spawnDetached` passes `--remote`)

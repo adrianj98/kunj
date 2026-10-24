@@ -11,6 +11,8 @@ import { watchEvents } from '../lib/events';
 import { KnownRepoInfo, listRepos } from '../lib/repos';
 import { getGitCommonDir } from '../lib/worktree';
 import { LocalDockerBackend } from '../lib/container/docker';
+import type { ContainerBackend } from '../lib/container/backend';
+import { remoteNameOf, selectBackend } from '../lib/container/select-backend';
 import { getVersion } from '../lib/version';
 import type { EventJson } from '../lib/json-types';
 
@@ -100,6 +102,27 @@ export class EventsCommand extends BaseCommand {
     const config = await loadResolvedConfig();
     const backend = new LocalDockerBackend({ context: config.container?.dockerContext || undefined });
 
+    // A repository whose config names a remote (container.remote) is watched there; one backend per
+    // remote, so one tunnel. A remote that cannot be reached now is reported once and left out: the
+    // retry loop covers a backend that went away, not one that never came up.
+    const selections = new Map<string, Awaited<ReturnType<typeof selectBackend>>>();
+    const perRepo = new Map<string, ContainerBackend | null>();
+    for (const repo of repos) {
+      const repoConfig = await loadResolvedConfig(repo.root).catch(() => config);
+      const remote = remoteNameOf({}, repoConfig);
+      if (!remote) {
+        perRepo.set(repo.root, backend);
+        continue;
+      }
+      try {
+        if (!selections.has(remote)) selections.set(remote, await selectBackend({ remote, config: repoConfig }));
+        perRepo.set(repo.root, selections.get(remote)!.backend);
+      } catch (err) {
+        process.stderr.write(`⚠ ${repo.name}: remote ${remote} is not reachable, its containers are not watched: ${err instanceof Error ? err.message : String(err)}\n`);
+        perRepo.set(repo.root, null);
+      }
+    }
+
     const controller = new AbortController();
     const stop = () => controller.abort();
     const stdin = process.stdin;
@@ -116,8 +139,17 @@ export class EventsCommand extends BaseCommand {
     try {
       // hello once the sources are armed: a change made after it is reported
       const onReady = () => print({ type: 'hello', version: getVersion(), repos: repos.length, at: new Date().toISOString() });
-      await watchEvents({ repos, kunjDir: getGlobalKunjDir(), backend, onEvent: print, onReady, signal: controller.signal });
+      await watchEvents({
+        repos,
+        kunjDir: getGlobalKunjDir(),
+        backend,
+        backendFor: repo => perRepo.get(repo.root) ?? backend,
+        onEvent: print,
+        onReady,
+        signal: controller.signal,
+      });
     } finally {
+      for (const s of selections.values()) await s.close().catch(() => undefined);
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
       process.stdout.off('error', stop);

@@ -29,7 +29,8 @@ export type ContainerErrorCode =
   | 'bad-remote'
   | 'remote-unknown'
   | 'remote-no-editor'
-  | 'remote-no-tty';
+  | 'remote-no-tty'
+  | 'remote-unreachable';
 
 // Expected outcomes (not running, nothing to remove, ...): printed without a stack trace.
 // With a code, `--json` prints { error: { code, message } }; without, the plain message.
