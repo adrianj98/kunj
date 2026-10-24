@@ -64,6 +64,8 @@ export interface ContainerStatus {
   agentRunning: boolean | null;
   /** What the agent's Claude Code hooks last wrote (see agent-session.ts); null when unknown */
   agentState: 'running' | 'waiting' | null;
+  /** The agent tmux sessions (`agent`, `agent-<id>`) with their hook state; undefined when unknown */
+  agentSessions?: Array<{ session: string; id: string | null; state?: 'running' | 'waiting' }>;
   head: string | null;
   ahead: number | null;
   dirty: boolean | null;
@@ -77,21 +79,35 @@ export function emptyStatus(status: ContainerStatus['status']): ContainerStatus 
 // The workspace's .git/config is the agent's: git must not run its fsmonitor or hooks for kunj
 export const SAFE_GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
 
-/** Run with `sh -c` in a main container (kunj ct list, kunj events); its output is for parseStatus. */
-export const STATUS_SCRIPT = `tmux has-session -t agent 2>/dev/null; echo "tmux=$?"; tmux has-session -t agent 2>/dev/null && echo "state=$(cat /tmp/kunj-agent-state 2>/dev/null)"; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
+/**
+ * Run with `sh -c` in a main container (kunj ct list, kunj events); its output is for parseStatus.
+ * `tmux=<code>` of list-sessions (1: no server, 127: no tmux), then `session=<name> <state>` for the
+ * default agent session `agent` (state file /tmp/kunj-agent-state) and each `agent-<id>` one
+ * (/tmp/kunj-agent-state-<id>), then git status.
+ */
+export const STATUS_SCRIPT = `s=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); echo "tmux=$?"; printf '%s\\n' "$s" | while IFS= read -r n; do case "$n" in agent) echo "session=agent $(head -n 1 /tmp/kunj-agent-state 2>/dev/null)";; agent-*) echo "session=$n $(head -n 1 "/tmp/kunj-agent-state-\${n#agent-}" 2>/dev/null)";; esac; done; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
 
-/** Parse `tmux=<code>` followed by `git status --porcelain=v2 --branch`. */
+// The session names kunj ct agent gives: the id is checked as on the host (checkShellSessionId)
+const AGENT_SESSION_LINE = /^session=(agent(?:-([A-Za-z0-9_-]{1,32}))?)(?: (.*))?$/;
+
+/** Parse the output of STATUS_SCRIPT. */
 export function parseStatus(stdout: string): ContainerStatus {
   const result: ContainerStatus = { agentRunning: null, agentState: null, head: null, ahead: null, dirty: false, status: 'ok' };
+  let tmuxCode: string | null = null;
+  const sessions: NonNullable<ContainerStatus['agentSessions']> = [];
   for (const line of stdout.split('\n')) {
     const tmux = /^tmux=(\d+)$/.exec(line);
-    const state = /^state=(.*)$/.exec(line);
     if (tmux) {
-      result.agentRunning = tmux[1] === '0' ? true : tmux[1] === '1' ? false : null;
-    } else if (state && result.agentRunning === true) {
-      // a crashed agent never fires SessionEnd: its leftover state means nothing without a session
-      const v = state[1].trim();
-      result.agentState = v === 'running' || v === 'waiting' ? v : null;
+      tmuxCode = tmux[1];
+      continue;
+    }
+    if (line.startsWith('session=')) {
+      // a name the container made up (it runs the agent's code) is not one of kunj's sessions
+      const m = AGENT_SESSION_LINE.exec(line);
+      if (m) {
+        const v = (m[3] ?? '').trim();
+        sessions.push({ session: m[1], id: m[2] ?? null, ...(v === 'running' || v === 'waiting' ? { state: v } : {}) });
+      }
     } else if (line.startsWith('# branch.oid ')) {
       const oid = line.slice('# branch.oid '.length).trim();
       result.head = oid === '(initial)' ? null : oid;
@@ -101,6 +117,13 @@ export function parseStatus(stdout: string): ContainerStatus {
     } else if (line.trim() && !line.startsWith('#')) {
       result.dirty = true;
     }
+  }
+  if (tmuxCode === '0' || tmuxCode === '1') {
+    result.agentSessions = tmuxCode === '0' ? sessions : [];
+    result.agentRunning = result.agentSessions.length > 0;
+    // a crashed agent never fires SessionEnd: only the state files of running sessions are listed
+    const states = result.agentSessions.map(a => a.state);
+    result.agentState = states.includes('waiting') ? 'waiting' : states.includes('running') ? 'running' : null;
   }
   return result;
 }

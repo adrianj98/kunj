@@ -301,13 +301,13 @@ describe('watchEvents', () => {
       id: 'id-1', name: 'kunj-app-x-1', state: 'running', image: 'img', createdAt: '', ports: [],
       labels: { 'kunj.repo': 'github.com/acme/app', 'kunj.branch': 'x', 'kunj.role': 'main' },
     }];
-    backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\nstate=running\n# branch.oid ' + 'a'.repeat(40) + '\n' });
+    backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\nsession=agent running\n# branch.oid ' + 'a'.repeat(40) + '\n' });
     let ready!: () => void;
     const armed = new Promise<void>(r => (ready = r));
     start({ backend, statusPollMs: 50, onReady: ready });
     await armed;
     await waitFor(() => backend.callsOf('exec').length > 1);
-    backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\nstate=waiting\n# branch.oid ' + 'a'.repeat(40) + '\n' });
+    backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\nsession=agent waiting\n# branch.oid ' + 'a'.repeat(40) + '\n' });
     await waitFor(() => ofType('container').some(e => (e as { action: string }).action === 'status'));
   });
 
@@ -466,7 +466,7 @@ describe('watchEvents status poll', () => {
       await settle(600);
       expect(ofType('container')).toEqual([]);
       expect(backend.callsOf('exec').every(([id]) => id === 'id-kunj-app-x-1')).toBe(true);
-      backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\n# branch.oid ' + 'a'.repeat(40) + '\n' });
+      backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=0\nsession=agent \n# branch.oid ' + 'a'.repeat(40) + '\n' });
       await waitFor(() => ofType('container').length > 0);
       expect(ofType('container')[0]).toEqual({
         type: 'container', repo: { name: 'real', root }, branch: 'x', container: 'kunj-app-x-1', action: 'status', at: expect.any(String),

@@ -14,8 +14,8 @@ import { getGlobalKunjDir, initGlobalKunjDirectory } from './config';
 import { applyKeptFiles } from './keep';
 import { expandVariables, repoVariables } from './config-vars';
 import { DEFAULT_WORKTREE_BASE_DIR } from './worktree-defaults';
-import type { AgentState } from './json-types';
-import { agentRunning, agentSessionName, agentStateFile, listTmuxSessions, readAgentState } from './agent-session';
+import type { AgentSessionJson, AgentState } from './json-types';
+import { agentRunning, agentSessionName, agentSessionsOf, agentStateFile, combineAgentStates, listTmuxSessions, readAgentState } from './agent-session';
 import { repoIdentity } from './repo-identity';
 
 const execAsync = promisify(exec);
@@ -331,10 +331,18 @@ export async function listWorktreesDetailed(options: ListWorktreesOptions = {}):
       }
       if (includeStatus && agentRepo && exists && !wt.bare && wt.branch) {
         const session = agentSessionName(agentRepo.name, agentRepo.id, wt.branch);
-        const running = agentRunning(tmuxSessions, session);
-        // The hooks' state file (agent-session.ts) only means something while the session runs
-        const state = running ? readAgentState(agentStateFile(path.join(getGlobalKunjDir(), agentRepo.name), session)) : null;
-        info.agent = { running, session, state };
+        if (tmuxSessions === null) {
+          info.agent = { running: agentRunning(null, session), session, state: null };
+        } else {
+          // The default session and every --session one, from the same listing. The hooks' state
+          // file (agent-session.ts) only means something while its session runs.
+          const kunjDir = path.join(getGlobalKunjDir(), agentRepo.name);
+          const sessions = agentSessionsOf(tmuxSessions, session).map((s): AgentSessionJson => {
+            const state = readAgentState(agentStateFile(kunjDir, s.session));
+            return state ? { ...s, state } : s;
+          });
+          info.agent = { running: sessions.length > 0, session, state: combineAgentStates(sessions.map(s => s.state ?? null)), sessions };
+        }
       }
       if (includePullRequests) {
         info.pullRequest = prResult.pullRequests && wt.branch ? pickPullRequest(prResult.pullRequests, wt.branch) : null;

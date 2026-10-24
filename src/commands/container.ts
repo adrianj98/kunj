@@ -3,7 +3,7 @@
 //   kunj container start [branch] [-c] [--base <ref>]   create or resume a branch's container
 //   kunj container shell [branch] [--session <id>]      interactive login shell in /workspace (tmux sh-<id>)
 //   kunj container exec [branch] -- <cmd...>            run a command
-//   kunj container agent [branch] [-- <args>]           the agent in a tmux session
+//   kunj container agent [branch] [-- <args>]           the agent in a tmux session (--session <id>: agent-<id>)
 //   kunj container attach [branch]                      reattach to that session
 //   kunj container open [branch] [--new-window]         attach the editor (worktree.editorCommand)
 //   kunj container forward [branch] <port>|<host>:<port>|<service>:<port>...
@@ -144,8 +144,8 @@ export class ContainerCommand extends BaseCommand {
         { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file; [prune] remove without asking, also from a script or with --json' },
         { flags: '--no-bundle', description: '[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)' },
         { flags: '--blueprint <path>', description: '[blueprint snapshot|status] Use this blueprint file instead of the resolved one' },
-        { flags: '--session <id>', description: "[shell] Keep the shell in the container's tmux session sh-<id> (letters, digits, _ and -; up to 32), reattaching when it exists" },
-        { flags: '--kill', description: '[shell --session] End that tmux session (exit 0 whether or not it existed, or the container runs)' },
+        { flags: '--session <id>', description: "[shell] Keep the shell in the container's tmux session sh-<id>; [agent|attach] one of several agents, tmux session agent-<id> (letters, digits, _ and -; up to 32)" },
+        { flags: '--kill', description: '[shell|agent] End the --session tmux session, or without --session every shell (sh-*) or agent (agent, agent-*) session; exit 0 whether or not one existed or the container runs' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
       ],
       helpText: [
@@ -153,8 +153,8 @@ export class ContainerCommand extends BaseCommand {
         '  start [branch]                       create or resume the branch\'s container',
         '  shell [branch] [--session <id>]      login shell in /workspace (kept in tmux session sh-<id>; --kill ends it)',
         '  exec [branch] -- <cmd...>            run a command in the container',
-        '  agent [branch] [-- <args>]           start or reattach the agent\'s tmux session',
-        '  attach [branch]                      reattach to the agent\'s tmux session',
+        '  agent [branch] [-- <args>]           start or reattach the agent\'s tmux session (--session <id>: agent-<id>; --kill ends it)',
+        '  attach [branch]                      reattach to the agent\'s tmux session (--session <id>: agent-<id>)',
         '  open [branch] [--new-window]         attach the editor (worktree.editorCommand), starting it if stopped',
         '  forward [branch] <port>|<host>:<port>...  forward localhost ports into the container',
         '  forward [branch] <service>:<port>    forward a sidecar service\'s port (e.g. postgres:5432)',
@@ -535,10 +535,10 @@ export class ContainerCommand extends BaseCommand {
   // --session <id>: the shell lives in the container's tmux session sh-<id> (one tmux server per
   // container, so no repo or branch in the name), reattached by `-A`, so it outlives the terminal
   private async shell(target: string | undefined, options: ContainerOptions): Promise<void> {
-    const id = options.session !== undefined || options.kill ? checkShellSessionId(options.session) : undefined;
+    const id = options.session !== undefined ? checkShellSessionId(options.session) : undefined;
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
-    if (options.kill && id !== undefined) return this.killShell(ctx, branch, id);
+    if (options.kill) return this.killSessions(ctx, branch, id !== undefined ? `sh-${id}` : null, 'sh-*');
     const main = await this.requireRunning(ctx, branch);
     const user = this.userOf(main) || undefined;
     let argv = ['sh', '-lc', SHELL];
@@ -550,15 +550,20 @@ export class ContainerCommand extends BaseCommand {
     process.exitCode = r.exitCode;
   }
 
+  // End one tmux session (`name`), or with null every session matching the `case` pattern `all`.
   // Quiet whatever the outcome: no container, a stopped one, no tmux or no such session all mean
-  // there is nothing left to end
-  private async killShell(ctx: Context, branch: string, id: string): Promise<void> {
+  // there is nothing left to end.
+  private async killSessions(ctx: Context, branch: string, name: string | null, all: string): Promise<void> {
     const main = await this.findMain(ctx, branch);
     let killed = false;
     if (main?.state === 'running') {
+      const user = this.userOf(main) || undefined;
       try {
-        const r = await ctx.backend.exec(main.id, ['tmux', 'kill-session', '-t', `=sh-${id}`], { user: this.userOf(main) || undefined });
-        killed = r.exitCode === 0;
+        if (name) {
+          killed = (await ctx.backend.exec(main.id, ['tmux', 'kill-session', '-t', `=${name}`], { user })).exitCode === 0;
+        } else {
+          killed = (await ctx.backend.exec(main.id, ['sh', '-c', killAllScript(all)], { user })).stdout.trim() !== '';
+        }
       } catch {
         killed = false;
       }
@@ -575,9 +580,14 @@ export class ContainerCommand extends BaseCommand {
     process.exitCode = r.exitCode;
   }
 
+  // --session <id>: one more agent, in tmux session agent-<id> with its own state file
   private async agent(target: string | undefined, args: string[], options: ContainerOptions): Promise<void> {
+    const id = options.session !== undefined ? checkShellSessionId(options.session) : undefined;
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
+    if (options.kill) return this.killSessions(ctx, branch, id !== undefined ? `agent-${id}` : null, 'agent|agent-*');
+    const session = id !== undefined ? `agent-${id}` : 'agent';
+    const stateFile = id !== undefined ? `${CONTAINER_AGENT_STATE_FILE}-${id}` : CONTAINER_AGENT_STATE_FILE;
     const main = await this.requireRunning(ctx, branch);
     if (ctx.config.container?.forward?.auto !== false && ctx.backend.features.localPorts && !forwarderFor(main)) {
       // The same checks as the foreground command: a detached forwarder's failure would go unseen
@@ -595,10 +605,10 @@ export class ContainerCommand extends BaseCommand {
     await this.ensureBridge(ctx, branch, main);
     const user = this.userOf(main) || undefined;
     // The Claude Code hooks write the agent's state into the container's state file (read by STATUS_SCRIPT)
-    const command = `KUNJ_AGENT_STATE=${CONTAINER_AGENT_STATE_FILE} ` + withAgentHooks(agentCommandLine(ctx.config.container?.agentCommand, args), CONTAINER_AGENT_STATE_FILE, ctx.config.agent?.hooks !== false);
+    const command = `KUNJ_AGENT_STATE=${stateFile} ` + withAgentHooks(agentCommandLine(ctx.config.container?.agentCommand, args), stateFile, ctx.config.agent?.hooks !== false);
     // agent.tmux false: run the agent directly, as when the image has no tmux (no warning), unless an
     // agent session from before the setting changed still runs: reattach rather than start a second agent
-    const wantTmux = ctx.config.agent?.tmux !== false || await this.agentSessionRunning(ctx, main.id, user);
+    const wantTmux = ctx.config.agent?.tmux !== false || await this.agentSessionRunning(ctx, main.id, user, session);
     const probe = wantTmux ? await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user }) : { exitCode: 1 };
     if (wantTmux && probe.exitCode !== 0) {
       this.warn('tmux is not installed in the container; running the agent directly (it stops when you leave)');
@@ -608,24 +618,26 @@ export class ContainerCommand extends BaseCommand {
     // window-size latest: an IDE terminal and a CLI one attached together follow the one used last, not the smaller
     // status off unless agent.tmuxStatus (see agentArgv)
     const argv = probe.exitCode === 0
-      ? ['tmux', '-u', 'new-session', '-A', '-s', 'agent', command, ';', 'set-option', '-t', 'agent', 'window-size', 'latest', ';', 'set-option', '-t', 'agent', 'status', ctx.config.agent?.tmuxStatus === true ? 'on' : 'off']
+      ? ['tmux', '-u', 'new-session', '-A', '-s', session, command, ';', 'set-option', '-t', session, 'window-size', 'latest', ';', 'set-option', '-t', session, 'status', ctx.config.agent?.tmuxStatus === true ? 'on' : 'off']
       : ['sh', '-lc', command];
     const r = await ctx.backend.exec(main.id, argv, this.interactive(main, true));
     process.exitCode = r.exitCode;
   }
 
-  private async agentSessionRunning(ctx: { backend: ContainerBackend }, id: string, user: string | undefined): Promise<boolean> {
-    return (await ctx.backend.exec(id, ['sh', '-c', 'tmux has-session -t agent 2>/dev/null'], { user })).exitCode === 0;
+  // session is `agent` or `agent-<checked id>`, so it needs no quoting
+  private async agentSessionRunning(ctx: { backend: ContainerBackend }, id: string, user: string | undefined, session = 'agent'): Promise<boolean> {
+    return (await ctx.backend.exec(id, ['sh', '-c', `tmux has-session -t ${session} 2>/dev/null`], { user })).exitCode === 0;
   }
 
   private async attach(target: string | undefined, options: ContainerOptions): Promise<void> {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
+    const session = options.session !== undefined ? `agent-${checkShellSessionId(options.session)}` : 'agent';
     const main = await this.requireRunning(ctx, branch);
-    if (ctx.config.agent?.tmux === false && !(await this.agentSessionRunning(ctx, main.id, this.userOf(main) || undefined))) {
+    if (ctx.config.agent?.tmux === false && !(await this.agentSessionRunning(ctx, main.id, this.userOf(main) || undefined, session))) {
       throw new ContainerError(`No agent session to attach to: agent.tmux is off, so kunj ct agent runs the agent in the terminal that started it (kunj config --set agent.tmux=true --global to use tmux)`);
     }
-    const r = await ctx.backend.exec(main.id, ['tmux', '-u', 'attach', '-t', 'agent'], this.interactive(main, true));
+    const r = await ctx.backend.exec(main.id, ['tmux', '-u', 'attach', '-t', session], this.interactive(main, true));
     if (r.exitCode !== 0) throw new ContainerError(`No agent session; run kunj ct agent ${branch}`);
   }
 
@@ -1057,7 +1069,7 @@ export class ContainerCommand extends BaseCommand {
           ...c.ports.map(p => ({ container: p.container, host: p.host, kind: 'publish' as const })),
           ...forwards.filter(r => recordIsFor(r, c)).map(r => ({ container: r.port, host: r.hostPort, kind: 'forward' as const, pid: r.pid, ...(r.service ? { service: r.service } : {}) })),
         ],
-        agent: { running: s.agentRunning, state: s.agentState },
+        agent: { running: s.agentRunning, state: s.agentState, ...(s.agentSessions ? { sessions: s.agentSessions } : {}) },
         workspace: { head: s.head ? s.head.slice(0, 7) : null, ahead: s.ahead, dirty: s.dirty },
         status: s.status,
         services: describeServices(servicesOf(all, c.name, { repoId: c.labels[LABEL.repo] ?? '', branch: c.labels[LABEL.branch] ?? '' })),
@@ -1530,6 +1542,11 @@ export class ContainerCommand extends BaseCommand {
     }
     console.log(chalk.green(`✓ Removed ${names.container}${options.keepVolumes ? ' (volumes kept)' : ''}`));
   }
+}
+
+// Kill every tmux session whose name matches the `case` pattern; prints the names it ended
+function killAllScript(pattern: string): string {
+  return `tmux list-sessions -F '#{session_name}' 2>/dev/null | while IFS= read -r n; do case "$n" in ${pattern}) tmux kill-session -t "=$n" 2>/dev/null && echo "$n";; esac; done; true`;
 }
 
 // container.agentCommand is shell text (it may quote its own arguments); extra args are data

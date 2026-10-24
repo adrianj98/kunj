@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { AgentCommand } from '../agent';
-import { AgentError, agentArgv, agentSessionName, agentStateFile, hasTmuxSession, readTmuxSessions, runTmux, killTmuxSession, withAgentHooks } from '../../lib/agent-session';
+import { AgentError, killTmuxSessionIfExists, agentArgv, agentSessionName, agentStateFile, hasTmuxSession, readTmuxSessions, runTmux, killTmuxSession, withAgentHooks } from '../../lib/agent-session';
 import { loadResolvedConfig } from '../../lib/config';
 
 jest.mock('../../lib/worktree', () => ({
@@ -25,6 +25,7 @@ jest.mock('../../lib/agent-session', () => ({
   runTmux: jest.fn(async () => 0),
   killTmuxSession: jest.fn(async () => undefined),
   hasTmuxSession: jest.fn(async () => false),
+  killTmuxSessionIfExists: jest.fn(async () => true),
 }));
 
 jest.mock('../../lib/config', () => ({
@@ -68,7 +69,7 @@ afterEach(() => {
 test('status --json reports the session', async () => {
   tmuxSessions.mockResolvedValue([session]);
   await new AgentCommand().execute('status', 'feature-a', { json: true });
-  expect(JSON.parse(stdout.join(''))).toEqual({ branch: 'feature-a', worktree: '/wt/feature-a', session: expect.stringMatching(/^kunj-/), running: true });
+  expect(JSON.parse(stdout.join(''))).toEqual({ branch: 'feature-a', worktree: '/wt/feature-a', session: expect.stringMatching(/^kunj-/), running: true, sessions: [{ session, id: null }] });
 });
 
 test('status without a branch uses the current branch and reports null without tmux', async () => {
@@ -231,4 +232,64 @@ test('status --json for an unknown branch prints a coded error and exits 1', asy
   await program.parseAsync(['agent', 'status', 'nope', '--json'], { from: 'user' }).catch(() => undefined);
   expect(JSON.parse(stdout.join(''))).toEqual({ error: { code: 'no-worktree', message: expect.stringContaining('nope') } });
   expect(exit).toBe(1);
+});
+
+describe('--session: several agents per worktree', () => {
+  const two = agentSessionName('app', 'github.com/acme/app', 'feature-a', 'two');
+  const kill = killTmuxSessionIfExists as jest.Mock;
+  beforeEach(() => {
+    kill.mockReset();
+    kill.mockResolvedValue(true);
+  });
+
+  test('start --session runs its own tmux session and state file', async () => {
+    tmuxSessions.mockResolvedValue([session]);
+    await new AgentCommand().execute('start', 'feature-a', { session: 'two' } as any);
+    const file = agentStateFile('/h/.kunj/app', two);
+    const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: file };
+    expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', withAgentHooks('claude', file, true), vars), '/wt/feature-a', expect.objectContaining(vars));
+    expect(two).toBe(session + '-a-two');
+  });
+
+  test('a bad id is refused', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    await expect(new AgentCommand().execute('start', 'feature-a', { session: 'a:b' } as any)).rejects.toMatchObject({ code: 'bad-session-id' });
+    expect(runTmux).not.toHaveBeenCalled();
+  });
+
+  test('status is running when only a --session agent runs, and lists the sessions', async () => {
+    tmuxSessions.mockResolvedValue([two, 'kunj-other']);
+    await new AgentCommand().execute('status', 'feature-a', { json: true });
+    expect(JSON.parse(stdout.join(''))).toEqual({ branch: 'feature-a', worktree: '/wt/feature-a', session, running: true, sessions: [{ session: two, id: 'two' }] });
+  });
+
+  test('status --session reports that session', async () => {
+    tmuxSessions.mockResolvedValue([session]);
+    await new AgentCommand().execute('status', 'feature-a', { json: true, session: 'two' } as any);
+    expect(JSON.parse(stdout.join(''))).toMatchObject({ session: two, running: false });
+  });
+
+  test('stop --session kills that one and exits 0 when it did not run', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    kill.mockResolvedValue(false);
+    await new AgentCommand().execute('stop', 'feature-a', { json: true, session: 'two' } as any);
+    expect(kill).toHaveBeenCalledWith(two);
+    expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feature-a', session: two, stopped: [] });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test('stop --all kills the default session and every -a-<id> one of the branch', async () => {
+    const three = agentSessionName('app', 'github.com/acme/app', 'feature-a', 'three');
+    tmuxSessions.mockResolvedValue([two, 'kunj-other', session, three]);
+    await new AgentCommand().execute('stop', 'feature-a', { json: true, all: true } as any);
+    expect(kill.mock.calls.map(c => c[0])).toEqual([session, two, three]);
+    expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feature-a', session, stopped: [session, two, three] });
+  });
+
+  test('stop --all without tmux exits 0 having stopped nothing', async () => {
+    tmuxSessions.mockResolvedValue('missing');
+    await new AgentCommand().execute('stop', 'feature-a', { json: true, all: true } as any);
+    expect(kill).not.toHaveBeenCalled();
+    expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feature-a', session, stopped: [] });
+  });
 });

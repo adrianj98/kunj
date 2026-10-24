@@ -9,13 +9,15 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, agentStateDir, agentStateFile, directArgv, hasTmuxSession, killTmuxSession, readTmuxSessions, runTmux, withAgentHooks } from '../lib/agent-session';
-import type { AgentStatusJson, AgentStopJson } from '../lib/json-types';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, agentSessionsOf, agentStateDir, agentStateFile, checkShellSessionId, directArgv, hasTmuxSession, killTmuxSession, killTmuxSessionIfExists, readAgentState, readTmuxSessions, runTmux, withAgentHooks } from '../lib/agent-session';
+import type { AgentSessionJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
   json?: boolean;
   command?: string;
   tmux?: boolean;
+  session?: string;
+  all?: boolean;
 }
 
 const ACTIONS = ['start', 'status', 'stop'];
@@ -29,6 +31,8 @@ export class AgentCommand extends BaseCommand {
       options: [
         { flags: '--command <cmd>', description: 'Command to run (default: the agent.command setting)' },
         { flags: '--no-tmux', description: 'Run the agent directly in this terminal, without a tmux session' },
+        { flags: '--session <id>', description: "One of several agents of the worktree: its own tmux session (<agent session>-a-<id>; letters, digits, _ and -, up to 32)" },
+        { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs)' },
       ],
       helpText: [
         'Actions:',
@@ -38,6 +42,10 @@ export class AgentCommand extends BaseCommand {
         '',
         '[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with',
         '--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.',
+        '',
+        '--session <id> runs one more agent in the worktree, in its own tmux session; status, stop and',
+        'start then act on that one. status without it reports every agent of the worktree; stop --all',
+        'ends them all. stop with --session or --all exits 0 even when nothing ran.',
       ].join('\n'),
     });
   }
@@ -64,19 +72,40 @@ export class AgentCommand extends BaseCommand {
     if (!wt || !wt.branch || !wt.exists || wt.bare) {
       throw new AgentError('no-worktree', `No worktree for ${name || 'the current directory'}; see kunj worktree list`);
     }
+    const id = opts.session !== undefined ? checkShellSessionId(opts.session) : undefined;
     const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
-    const session = agentSessionName(repo.name, repo.id, wt.branch);
+    const base = agentSessionName(repo.name, repo.id, wt.branch);
+    const session = agentSessionName(repo.name, repo.id, wt.branch, id);
     const tmux = await readTmuxSessions();
     const sessions = Array.isArray(tmux) ? tmux : null;
 
     if (verb === 'status') {
-      const running = agentRunning(sessions, session);
+      const kunjDir = getKunjDir();
+      const all = sessions && agentSessionsOf(sessions, base).map((s): AgentSessionJson => {
+        const state = readAgentState(agentStateFile(kunjDir, s.session));
+        return state ? { ...s, state } : s;
+      });
+      const running = id !== undefined || !all ? agentRunning(sessions, session) : all.length > 0;
       if (this.jsonMode) {
-        this.outputJSON({ branch: wt.branch, worktree: wt.path, session, running } satisfies AgentStatusJson);
+        this.outputJSON({ branch: wt.branch, worktree: wt.path, session, running, ...(all ? { sessions: all } : {}) } satisfies AgentStatusJson);
       } else {
         const unknown = tmux === 'missing' ? 'unknown (tmux is not installed)' : 'unknown (tmux failed)';
         const state = running === null ? chalk.yellow(unknown) : running ? chalk.green('running') : chalk.dim('not running');
         console.log(`${wt.branch}: ${state} (${session})`);
+        if (id === undefined && all && all.length > 1) for (const s of all) console.log(`  ${s.session}${s.state ? ` ${s.state}` : ''}`);
+      }
+      return;
+    }
+
+    // One named session, or all of the worktree's: quiet when nothing runs (the app ends tabs and environments with it)
+    if (verb === 'stop' && (id !== undefined || opts.all)) {
+      const targets = id !== undefined ? [session] : sessions ? agentSessionsOf(sessions, base).map(s => s.session).sort((a, b) => (a === base ? -1 : b === base ? 1 : 0)) : tmux === 'failed' ? [base] : [];
+      const stopped: string[] = [];
+      for (const t of targets) if (await killTmuxSessionIfExists(t)) stopped.push(t);
+      if (this.jsonMode) {
+        this.outputJSON({ success: true, branch: wt.branch, session, stopped } satisfies AgentStopJson);
+      } else {
+        console.log(stopped.length ? chalk.green(`✓ Stopped ${stopped.join(', ')}`) : chalk.dim(`No agent session of ${wt.branch} was running`));
       }
       return;
     }

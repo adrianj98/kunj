@@ -59,7 +59,7 @@ import {
 } from '../lib/keep';
 import { resolveBaseRef } from '../lib/base-branch';
 import { recordRepo } from '../lib/repos';
-import { AgentError, checkShellSessionId, killTmuxSessionIfExists, loginShell, readTmuxSessions, runTmux, shellArgv, shellSessionName } from '../lib/agent-session';
+import { AgentError, checkShellSessionId, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, readTmuxSessions, runTmux, shellArgv, shellSessionName } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
 import type { ShellKillJson, WorktreeJson, WorktreeListJson } from '../lib/json-types';
 
@@ -130,7 +130,7 @@ export class WorktreeCommand extends BaseCommand {
         { flags: '--label <text>', description: '[session] Human readable window label' },
         { flags: '--id <id>', description: '[session] Session id' },
         { flags: '--session <id>', description: '[shell] Keep the shell in a tmux session with this id (letters, digits, _ and -; up to 32), reattaching when it exists' },
-        { flags: '--kill', description: '[shell --session] End that tmux session (exit 0 whether or not it existed)' },
+        { flags: '--kill', description: '[shell] End the --session tmux session, or without --session every shell session of the branch (exit 0 whether or not one existed)' },
       ],
     });
   }
@@ -182,14 +182,17 @@ export class WorktreeCommand extends BaseCommand {
   // A login shell in the worktree. With --session it lives in a host tmux session (kunjsh-…, see
   // shellSessionName) that `-A` reattaches, so a terminal tab survives the app that opened it.
   private async shell(target: string | undefined, options: WorktreeOptions): Promise<void> {
-    const id = options.session !== undefined || options.kill ? checkShellSessionId(options.session) : undefined;
+    const id = options.session !== undefined ? checkShellSessionId(options.session) : undefined;
     const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
     const wt = target ? findWorktreeIn(listing.worktrees, target) : listing.worktrees.find(w => w.isCurrent) ?? null;
     const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
     // The session of a worktree removed since can still be ended: the name needs only the branch
     const killBranch = wt ? wt.branch || wt.name : target;
-    if (options.kill && id !== undefined && killBranch) {
-      const killed = await killTmuxSessionIfExists(shellSessionName(repo.name, repo.id, killBranch, id));
+    if (options.kill && killBranch) {
+      // Without --session: every shell session of the branch (closing the whole environment)
+      const killed = id !== undefined
+        ? await killTmuxSessionIfExists(shellSessionName(repo.name, repo.id, killBranch, id))
+        : (await killTmuxSessionsWithPrefix(shellSessionName(repo.name, repo.id, killBranch, ''))).length > 0;
       if (this.jsonMode) this.outputJSON({ killed } satisfies ShellKillJson);
       return;
     }

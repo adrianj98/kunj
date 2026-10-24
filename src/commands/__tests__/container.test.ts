@@ -377,6 +377,23 @@ describe('ContainerCommand', () => {
       expect(JSON.parse(stdout.join(''))).toEqual({ killed: true });
     });
 
+    it('--kill without --session kills every sh-* session as the user', async () => {
+      backend.existing = [mainContainer('feat')];
+      backend.execHandler = (_id, cmd) => cmd[0] === 'sh' && cmd[1] === '-c' && cmd[2].includes('kill-session') ? Promise.resolve({ exitCode: 0, stdout: 'sh-a\nsh-b\n' }) : undefined;
+      try {
+        await new ContainerCommand().execute('shell', 'feat', { kill: true, json: true } as any);
+      } finally {
+        backend.execHandler = undefined;
+      }
+      const execs = backend.callsOf('exec');
+      expect(execs).toHaveLength(1);
+      const script = (execs[0][1] as string[])[2];
+      expect(script).toContain('sh-*)');
+      expect(script).toContain('tmux kill-session -t "=$n"');
+      expect((execs[0][2] as any).user).toBe('dev');
+      expect(JSON.parse(stdout.join(''))).toEqual({ killed: true });
+    });
+
     it('--kill on a stopped or missing container is a quiet exit 0', async () => {
       backend.existing = [mainContainer('feat', { state: 'exited' })];
       await new ContainerCommand().execute('shell', 'feat', { session: 'tab1', kill: true } as any);
@@ -392,6 +409,63 @@ describe('ContainerCommand', () => {
       await new ContainerCommand().execute('shell', 'feat', { session: 'tab1' } as any);
       expect(errors.join('\n')).toMatch(/not running/);
       expect(process.exitCode).toBe(1);
+    });
+  });
+
+  describe('agent --session', () => {
+    const stateTwo = '/tmp/kunj-agent-state-two';
+    const shellTwo = (command: string) => `KUNJ_AGENT_STATE=${stateTwo} ` + withAgentHooks(command, stateTwo, true);
+
+    it('runs the agent in tmux session agent-<id> with its own state file', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('agent', 'feat', [], { session: 'two' } as any);
+      expect(backend.callsOf('exec').pop()![1]).toEqual([
+        'tmux', '-u', 'new-session', '-A', '-s', 'agent-two', shellTwo(agentCommandLine(undefined, [])),
+        ';', 'set-option', '-t', 'agent-two', 'window-size', 'latest', ';', 'set-option', '-t', 'agent-two', 'status', 'off',
+      ]);
+    });
+
+    it('refuses a bad id', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('agent', 'feat', [], { session: '../x' } as any);
+      expect(errors.join('\n')).toMatch(/session id/);
+      expect(backend.callsOf('exec')).toEqual([]);
+    });
+
+    it('--kill --session kills agent-<id> as the user, exit 0 even when it did not run', async () => {
+      backend.existing = [mainContainer('feat')];
+      backend.execResults.set('tmux kill-session -t =agent-two', { exitCode: 1, stdout: '' });
+      await new ContainerCommand().execute('agent', 'feat', [], { session: 'two', kill: true, json: true } as any);
+      const execs = backend.callsOf('exec');
+      expect(execs.map(c => c[1])).toEqual([['tmux', 'kill-session', '-t', '=agent-two']]);
+      expect((execs[0][2] as any).user).toBe('dev');
+      expect(JSON.parse(stdout.join(''))).toEqual({ killed: false });
+      expect(process.exitCode).toBeUndefined();
+      expect(mockForwards).toEqual([]);
+    });
+
+    it('--kill without --session kills agent and every agent-* session', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('agent', 'feat', [], { kill: true } as any);
+      const execs = backend.callsOf('exec');
+      expect(execs).toHaveLength(1);
+      expect((execs[0][1] as string[]).slice(0, 2)).toEqual(['sh', '-c']);
+      expect((execs[0][1] as string[])[2]).toContain('agent|agent-*)');
+      expect(errors).toEqual([]);
+    });
+
+    it('--kill on a stopped container is a quiet exit 0', async () => {
+      backend.existing = [mainContainer('feat', { state: 'exited' })];
+      await new ContainerCommand().execute('agent', 'feat', [], { kill: true } as any);
+      expect(backend.callsOf('exec')).toEqual([]);
+      expect(errors).toEqual([]);
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('attach --session attaches agent-<id>', async () => {
+      backend.existing = [mainContainer('feat')];
+      await new ContainerCommand().execute('attach', 'feat', { session: 'two' } as any);
+      expect(backend.callsOf('exec').pop()![1]).toEqual(['tmux', '-u', 'attach', '-t', 'agent-two']);
     });
   });
 

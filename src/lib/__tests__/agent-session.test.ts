@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { AgentError, agentSessionName, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName } from '../agent-session';
+import { AgentError, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName } from '../agent-session';
 
 jest.mock('child_process', () => ({
   ...jest.requireActual('child_process'),
@@ -186,5 +186,55 @@ describe('shell sessions', () => {
     await expect(killTmuxSessionIfExists('kunjsh-x-sh-1')).resolves.toBe(false);
     tmuxResult(failure({ code: 'ENOENT' }));
     await expect(killTmuxSessionIfExists('kunjsh-x-sh-1')).resolves.toBe(false);
+  });
+});
+
+describe('many agent sessions per worktree', () => {
+  const base = agentSessionName('app', 'github.com/acme/app', 'feature-a');
+
+  test('agentSessionName with an id appends -a-<id> and keeps the kunj- prefix', () => {
+    expect(agentSessionName('app', 'github.com/acme/app', 'feature-a', 'two')).toBe(base + '-a-two');
+    expect(agentSessionName('app', 'github.com/acme/app', 'feature-a', null)).toBe(base);
+  });
+
+  test('agentSessionsOf finds the default and every -a-<id> session of the branch, nothing else', () => {
+    const other = agentSessionName('app', 'github.com/acme/app', 'feature-b');
+    expect(agentSessionsOf([other, base + '-a-x', 'zzz', base, base + '-a-bad id', base + '-ax', base + '-a-y'], base)).toEqual([
+      { session: base + '-a-x', id: 'x' },
+      { session: base, id: null },
+      { session: base + '-a-y', id: 'y' },
+    ]);
+    expect(agentSessionId(base + '-a-x', base)).toBe('x');
+    expect(agentSessionId(base, base)).toBeNull();
+    expect(agentSessionId(base + '-sh-x', base)).toBeUndefined();
+  });
+
+  test('combineAgentStates: waiting if any, else running if any, else null', () => {
+    expect(combineAgentStates(['running', 'waiting', null])).toBe('waiting');
+    expect(combineAgentStates(['running', null])).toBe('running');
+    expect(combineAgentStates([null])).toBeNull();
+    expect(combineAgentStates([])).toBeNull();
+  });
+
+  test('sessionsWithPrefix keeps names whose rest after the prefix is a valid id', () => {
+    expect(sessionsWithPrefix(['p-sh-a', 'p-sh-', 'p-sh-a.b', 'q-sh-a', 'p-sh-b_2'], 'p-sh-')).toEqual(['p-sh-a', 'p-sh-b_2']);
+  });
+
+  test('killTmuxSessionsWithPrefix kills each matching session by exact name', async () => {
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((...args: any[]) => {
+      const cb = args[args.length - 1];
+      if (args[1][0] === 'list-sessions') return cb(null, { stdout: 'p-sh-a\nother\np-sh-b\n', stderr: '' });
+      return cb(null, { stdout: '', stderr: '' });
+    });
+    await expect(killTmuxSessionsWithPrefix('p-sh-')).resolves.toEqual(['p-sh-a', 'p-sh-b']);
+    expect(execFileMock.mock.calls.map(c => c[1])).toEqual([
+      ['list-sessions', '-F', '#{session_name}'],
+      ['kill-session', '-t', '=p-sh-a'],
+      ['kill-session', '-t', '=p-sh-b'],
+    ]);
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((...args: any[]) => args[args.length - 1](Object.assign(new Error('x'), { code: 'ENOENT' })));
+    await expect(killTmuxSessionsWithPrefix('p-sh-')).resolves.toEqual([]);
   });
 });

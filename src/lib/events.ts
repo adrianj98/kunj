@@ -357,7 +357,7 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
         } catch {
           return;
         }
-        const h = JSON.stringify({ agentRunning: status.agentRunning, agentState: status.agentState, head: status.head, ahead: status.ahead, dirty: status.dirty });
+        const h = JSON.stringify({ agentRunning: status.agentRunning, agentState: status.agentState, agentSessions: status.agentSessions, head: status.head, ahead: status.ahead, dirty: status.dirty });
         const before = containerHashes.get(c.name);
         containerHashes.set(c.name, h);
         if (before !== undefined && before !== h) {

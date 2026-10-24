@@ -227,7 +227,7 @@ describe('agent status', () => {
     tmuxMock.mockResolvedValue([agentSessionName('app', 'github.com/acme/app', 'feature-a')]);
     const listing = await listWorktreesDetailed({ includeStatus: true, includePullRequests: false });
     const a = listing.worktrees.find(w => w.branch === 'feature-a')!;
-    expect(a.agent).toEqual({ running: true, session: expect.stringMatching(/^kunj-/), state: null });
+    expect(a.agent).toEqual({ running: true, session: expect.stringMatching(/^kunj-/), state: null, sessions: [{ session: a.agent!.session, id: null }] });
     expect(listing.worktrees.find(w => w.branch === 'main')!.agent!.running).toBe(false);
     expect(tmuxMock).toHaveBeenCalledTimes(1);
   });
@@ -239,8 +239,28 @@ describe('agent status', () => {
     fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(path.join(stateDir, session), 'waiting');
     const listing = await listWorktreesDetailed({ includeStatus: true, includePullRequests: false });
-    expect(listing.worktrees.find(w => w.branch === 'feature-a')!.agent).toEqual({ running: true, session, state: 'waiting' });
-    expect(listing.worktrees.find(w => w.branch === 'main')!.agent).toEqual({ running: false, session: expect.any(String), state: null });
+    expect(listing.worktrees.find(w => w.branch === 'feature-a')!.agent).toEqual({ running: true, session, state: 'waiting', sessions: [{ session, id: null, state: 'waiting' }] });
+    expect(listing.worktrees.find(w => w.branch === 'main')!.agent).toEqual({ running: false, session: expect.any(String), state: null, sessions: [] });
+  });
+
+  it('counts every --session agent of the branch: running when any runs, waiting when any waits', async () => {
+    const session = agentSessionName('app', 'github.com/acme/app', 'feature-a');
+    const two = agentSessionName('app', 'github.com/acme/app', 'feature-a', 'two');
+    const three = agentSessionName('app', 'github.com/acme/app', 'feature-a', 'three');
+    tmuxMock.mockResolvedValue([two, three, 'kunjsh-x-sh-1']);
+    const stateDir = path.join(kunjHome, 'app', 'agent-state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.rmSync(path.join(stateDir, session), { force: true });
+    fs.writeFileSync(path.join(stateDir, two), 'running');
+    fs.writeFileSync(path.join(stateDir, three), 'waiting');
+    const listing = await listWorktreesDetailed({ includeStatus: true, includePullRequests: false });
+    expect(listing.worktrees.find(w => w.branch === 'feature-a')!.agent).toEqual({
+      running: true,
+      session,
+      state: 'waiting',
+      sessions: [{ session: two, id: 'two', state: 'running' }, { session: three, id: 'three', state: 'waiting' }],
+    });
+    expect(tmuxMock).toHaveBeenCalledTimes(1);
   });
 
   it('agent.running is null when tmux is missing', async () => {
@@ -275,6 +295,7 @@ describe('agent status', () => {
       running: false,
       session: agentSessionName(path.basename(dir), gitCommonDir, 'feature-a'),
       state: null,
+      sessions: [],
     });
   });
 });

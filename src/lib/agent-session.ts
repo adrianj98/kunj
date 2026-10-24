@@ -27,8 +27,50 @@ export class AgentError extends Error {
   }
 }
 
-export function agentSessionName(repoName: string, repoId: string, branch: string): string {
-  return containerNames(repoName, repoId, branch).container.replace(/[.:]/g, '-');
+// With an id: one of several agents of the worktree (`kunj agent --session <id>`). The name keeps the
+// `kunj-` prefix, so `kunj events`' poll and the hook state files work per session.
+export function agentSessionName(repoName: string, repoId: string, branch: string, id?: string | null): string {
+  const base = containerNames(repoName, repoId, branch).container.replace(/[.:]/g, '-');
+  return id ? `${base}-a-${id}` : base;
+}
+
+// null: the default session `base`; undefined: not an agent session of that branch
+export function agentSessionId(session: string, base: string): string | null | undefined {
+  if (session === base) return null;
+  const prefix = `${base}-a-`;
+  if (!session.startsWith(prefix)) return undefined;
+  const id = session.slice(prefix.length);
+  return SHELL_SESSION_ID.test(id) ? id : undefined;
+}
+
+// The branch's agent sessions among a tmux listing, in listing order
+export function agentSessionsOf(sessions: string[], base: string): Array<{ session: string; id: string | null }> {
+  return sessions.flatMap(session => {
+    const id = agentSessionId(session, base);
+    return id === undefined ? [] : [{ session, id }];
+  });
+}
+
+// One state for several agents: waiting when any waits, else running when any reports running
+export function combineAgentStates(states: Array<AgentHookState | null>): AgentHookState | null {
+  if (states.includes('waiting')) return 'waiting';
+  return states.includes('running') ? 'running' : null;
+}
+
+// Names of the form <prefix><id>
+export function sessionsWithPrefix(sessions: string[], prefix: string): string[] {
+  return sessions.filter(s => s.startsWith(prefix) && SHELL_SESSION_ID.test(s.slice(prefix.length)));
+}
+
+// Kill every <prefix><id> session; the names it killed (none without tmux or on failure)
+export async function killTmuxSessionsWithPrefix(prefix: string): Promise<string[]> {
+  const sessions = await readTmuxSessions();
+  if (!Array.isArray(sessions)) return [];
+  const killed: string[] = [];
+  for (const s of sessionsWithPrefix(sessions, prefix)) {
+    if (await killTmuxSessionIfExists(s)) killed.push(s);
+  }
+  return killed;
 }
 
 // Persistent shells (`kunj worktree shell --session <id>`): one host tmux session per worktree and id.
@@ -39,7 +81,7 @@ export function shellSessionName(repoName: string, repoId: string, branch: strin
 }
 
 // The id becomes part of a tmux target, so only characters tmux gives no meaning to
-const SHELL_SESSION_ID = /^[A-Za-z0-9_-]{1,32}$/;
+export const SHELL_SESSION_ID = /^[A-Za-z0-9_-]{1,32}$/;
 
 export function checkShellSessionId(id: unknown): string {
   if (typeof id !== 'string' || !SHELL_SESSION_ID.test(id)) {

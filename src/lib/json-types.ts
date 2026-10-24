@@ -25,9 +25,24 @@ export interface ErrorJson {
  * input, 'running' while it works, null when unknown (no hooks, not claude, or not running).
  */
 export interface AgentState {
+  /** true when the default session or any `--session <id>` one runs */
   running: boolean | null;
+  /** The default session's name (`kunj agent` without --session) */
   session: string;
+  /** Across the running sessions: 'waiting' when any waits, else 'running' when any works */
   state?: 'running' | 'waiting' | null;
+  /** Every running agent session of the worktree or container; absent when tmux could not be asked */
+  sessions?: AgentSessionJson[];
+}
+
+/**
+ * One running agent session. `id` is the `--session <id>` it was started with, null for the default
+ * session. `state` is absent when its hooks have not written one.
+ */
+export interface AgentSessionJson {
+  session: string;
+  id: string | null;
+  state?: 'running' | 'waiting';
 }
 
 // ---- kunj worktree list --json ---------------------------------------------------------------
@@ -81,7 +96,8 @@ export interface ContainerJson {
   firewall: string;
   dind: DindMode | string;
   ports: ContainerPortJson[];
-  agent: { running: boolean | null; state?: 'running' | 'waiting' | null };
+  /** `sessions`: the container's agent tmux sessions (`agent`, `agent-<id>`); absent when unknown */
+  agent: { running: boolean | null; state?: 'running' | 'waiting' | null; sessions?: AgentSessionJson[] };
   workspace: { head: string | null; ahead: number | null; dirty: boolean | null };
   status: ContainerStatus['status'] | 'skipped';
   services: ServiceState[];
@@ -116,18 +132,26 @@ export interface FileWriteJson {
 export interface AgentStatusJson {
   branch: string;
   worktree: string;
+  /** The default session, or the --session one */
   session: string;
+  /** Without --session: any of the worktree's agent sessions; with it: that one */
   running: boolean | null;
+  /** Every running agent session of the worktree (absent when tmux could not be asked) */
+  sessions?: AgentSessionJson[];
 }
 
 export interface AgentStopJson {
   success: true;
   branch: string;
+  /** The default session, or the --session one */
   session: string;
+  /** With --session or --all: the sessions that were ended (may be empty) */
+  stopped?: string[];
 }
 
 /** `kunj worktree shell --session <id> --kill --json` and `kunj ct shell --session <id> --kill --json` */
 export interface ShellKillJson {
+  /** Whether a session was ended (with no --session: any of them) */
   killed: boolean;
 }
 

@@ -1,7 +1,7 @@
 // kunj worktree shell [branch] [--session <id>] [--kill]: a login shell in a worktree, kept in a host
 // tmux session (kunjsh-…) when --session is given so it survives the app that opened it.
 import { WorktreeCommand } from '../worktree';
-import { AgentError, killTmuxSessionIfExists, readTmuxSessions, runTmux, shellSessionName } from '../../lib/agent-session';
+import { AgentError, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, readTmuxSessions, runTmux, shellSessionName } from '../../lib/agent-session';
 import { loadResolvedConfig } from '../../lib/config';
 
 jest.mock('../../lib/worktree', () => ({
@@ -29,6 +29,7 @@ jest.mock('../../lib/agent-session', () => ({
   readTmuxSessions: jest.fn(async () => []),
   runTmux: jest.fn(async () => 0),
   killTmuxSessionIfExists: jest.fn(async () => true),
+  killTmuxSessionsWithPrefix: jest.fn(async () => ['x']),
 }));
 
 jest.mock('../../lib/config', () => ({
@@ -155,6 +156,16 @@ test('--kill ends the session of a branch whose worktree is gone', async () => {
   expect(kill).toHaveBeenCalledWith(shellSessionName('app', 'github.com/acme/app', 'removed-branch', 'tab1'));
 });
 
-test('--kill without --session is refused', async () => {
-  await expect(new WorktreeCommand().execute('shell', 'feature-a', { kill: true } as any)).rejects.toMatchObject({ name: 'AgentError', code: 'bad-session-id' });
+test('--kill without --session kills every shell session of the branch', async () => {
+  const killAll = killTmuxSessionsWithPrefix as jest.Mock;
+  killAll.mockClear();
+  killAll.mockResolvedValueOnce([]);
+  const cmd = new WorktreeCommand();
+  (cmd as any).jsonMode = true;
+  await cmd.execute('shell', 'feature-a', { kill: true, json: true } as any);
+  expect(killAll).toHaveBeenCalledWith(shellSessionName('app', 'github.com/acme/app', 'feature-a', ''));
+  expect(shellSessionName('app', 'github.com/acme/app', 'feature-a', '')).toMatch(/^kunjsh-.*-sh-$/);
+  expect(JSON.parse(stdout.join(''))).toEqual({ killed: false });
+  expect(kill).not.toHaveBeenCalled();
+  expect(process.exitCode).toBeUndefined();
 });
