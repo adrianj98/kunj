@@ -13,7 +13,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private(set) var selectedEnvironment: Environment?
     private var discoveryError: String?
 
-    /// The user selected a row (also after `render` replaced a selection that no longer exists).
+    /// The user selected a row. `render` never calls it: a selection whose row is gone stays
+    /// selected (and shows "Select an environment") until the row returns.
     var onSelect: (Environment?) -> Void = { _ in }
     var onHeaderAction: (HeaderAction, Environment) -> Void = { _, _ in }
     var onNewSession: () -> Void = {}

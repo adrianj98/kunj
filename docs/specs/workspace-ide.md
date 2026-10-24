@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215 |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -189,7 +189,7 @@ Kunj Workspace.app
 | Target | Holds | Depends on |
 | --- | --- | --- |
 | `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout`, `DesignTokens` (generated), `RelativeTime` | Foundation only |
-| `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `TerminalTab` (SwiftTerm), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
+| `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `SidebarRowView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `DemoData` (`--demo`), `TerminalTab` (SwiftTerm), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
 | `KunjWorkspaceCoreTests` | `swift test` (Swift Testing), with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) and the helpers in `Support.swift` | Core |
 
 SwiftTerm is vendored at an exact tag by `scripts/prepare-swiftterm.sh` (the spike's one-line
@@ -371,18 +371,18 @@ From the architecture review (2026-10-23):
 
 From the scaffold (Task 2):
 
-- [ ] The sidebar is `side` at 85 % over `NSVisualEffectView(.sidebar)`; the `--screenshot` render
-  samples `#242220` there against the mockup's `#201d1b`, and the blend depends on the desktop behind
-  the window. Task 6 decides: tune the alpha, or drop the vibrancy so the sidebar is exactly `side`.
-- [ ] The skeleton's status bar label uses the system monospaced font; Task 6's `Theme` must route
-  every font through the bundled Inter/JetBrains Mono (`DesignTokens.Fonts` are PostScript prefixes).
+- [x] The sidebar tint: Task 6 kept the vibrancy and raised the `side` tint to 94 %
+  (`MainWindowController.sideTintAlpha`); the render samples `#2c2725` against the mockup's `#2b2724`,
+  and a bright desktop still shows faintly. Drop the effect view if any tint is unwanted.
+- [x] Fonts: Task 6's `Theme.sans`/`Theme.mono` route every font through Inter/JetBrains Mono by
+  PostScript name, with the system fonts as fallback.
 
 From `KunjCLI` (Task 3):
 
 - [ ] The login PATH is read with `printf … "$PATH"` in `$SHELL -l -i -c`, as `macos-app/` does; fish
   expands a quoted `$PATH` with spaces, so a fish user gets only the fallback directories. Reading
   `/usr/bin/printenv PATH` between two marker lines would work in every shell.
-- [ ] Until Task 6's error state, a discovery error shows only as red text on the status bar's right.
+- [x] A discovery error is now the window's error state (Task 6), with `npm install -g kunj` under it.
 
 From the environment model (Task 4):
 
@@ -394,6 +394,16 @@ From the environment model (Task 4):
   terminals when its row drops out for a refresh or two.
 - [ ] `ct list` carries no PR for a container and no upstream, so a container row cannot show `PR #N`
   or `↑N from main` as the mockup does; reporting them would be a CLI addition.
+
+From the window chrome (Task 6):
+
+- [ ] The traffic lights are moved into the sidebar's 52 px top by resizing the titlebar container;
+  the header's buttons sit under that container, so whether clicks reach them needs a person to check
+  (else an `NSToolbar(.unified)` or a hit-test pass-through).
+- [ ] The status bar's `up 2h 14m` counts from the container's `createdAt`; a container stopped and
+  resumed shows time since creation, not since its last start. `ct list` would need a `startedAt`.
+- [ ] A row filtered out by the search stays selected, so the right side can show an environment the
+  list hides.
 
 From the diff and file core (Tasks 9–10):
 

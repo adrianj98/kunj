@@ -17,6 +17,12 @@ import Testing
         #expect(relativeTime(now - 800 * 86400, now: now) == "2y")
     }
 
+    /// The last half minute before an hour must not round up to 60 minutes and fall through to "0h".
+    @Test func justUnderAnHourIsMinutes() {
+        #expect(relativeTime(now - 3570, now: now) == "59m")
+        #expect(relativeTime(now - 3599, now: now) == "59m")
+    }
+
     @Test func futureDatesReadAsNow() {
         #expect(relativeTime(now + 600, now: now) == "now")
     }

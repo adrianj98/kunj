@@ -64,11 +64,13 @@ open "build/Kunj Workspace.app"
 ```
 
 `--screenshot <png>` renders the window after its first layout, writes the PNG (sRGB, 2x) and
-quits; compare it with `docs/workspace-app/design/mockups/warm.png`. On launch the app logs to
+quits; add `--demo` to show the mockup's environments instead of kunj's (rendered in the warm
+theme unless `-theme light|graphite|warm` is passed for that run) and compare it with
+`docs/workspace-app/design/mockups/warm.png`. On launch the app logs to
 stderr whether the bundled fonts registered (they only do inside the `.app`). It runs kunj as the
 `kunjCommand` default (`defaults write <bundle id> kunjCommand "node /path/dist/index.js"`, or
 `-kunjCommand "…"` after the executable for one run), else `kunj` on the login shell's PATH, and
-shows its version at the sidebar's foot or the error in red on the status bar. Not notarized: if
+shows its version at the sidebar's foot, or the error as the window's one message. Not notarized: if
 macOS refuses to open it, right-click > Open, or
 `xattr -dr com.apple.quarantine "/Applications/Kunj Workspace.app"`.
 

@@ -4,7 +4,8 @@ import Foundation
 public func relativeTime(_ date: Date, now: Date = Date()) -> String {
     let s = now.timeIntervalSince(date)
     if s < 45 { return "now" }
-    let minutes = max(1, Int((s / 60).rounded()))
+    // truncated like the larger units: rounding made 59m30s+ read as 60 → "0h"
+    let minutes = max(1, Int(s / 60))
     if minutes < 60 { return "\(minutes)m" }
     let hours = Int(s / 3600)
     if hours < 24 { return "\(hours)h" }
