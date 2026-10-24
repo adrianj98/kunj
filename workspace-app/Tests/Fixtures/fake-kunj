@@ -20,8 +20,10 @@
 #   FAKE_KUNJ_STDOUT=<text>    print <text> (no newline added) instead of any file
 #   FAKE_KUNJ_EXIT=<n>         exit with <n> after printing (default 0, 1 for a missing fixture)
 #   FAKE_KUNJ_LOG=<file>       append "<cwd><TAB><args joined by spaces>" for every call
+#   FAKE_KUNJ_EVENTS_EXIT=1    `events` exits after the last line instead of waiting for stdin EOF
 #
-# Later tasks add cases here (Task 5: `events` streams responses/events.ndjson).
+# `kunj events --json` prints responses/events.ndjson line by line, 20 ms apart, then waits for
+# stdin to close (as the real `kunj events` does) unless FAKE_KUNJ_EVENTS_EXIT=1.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 responses=${FAKE_KUNJ_RESPONSES:-$here/responses}
@@ -41,6 +43,16 @@ if [ "${1:-}" = "-V" ]; then
   else
     cat "$responses/version.txt" || exit 1
   fi
+  exit "${FAKE_KUNJ_EXIT:-0}"
+fi
+
+if [ "${1:-}" = "events" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "$line"
+    sleep 0.02
+  done < "$responses/events.ndjson"
+  [ "${FAKE_KUNJ_EVENTS_EXIT:-}" = "1" ] && exit "${FAKE_KUNJ_EXIT:-0}"
+  cat > /dev/null
   exit "${FAKE_KUNJ_EXIT:-0}"
 fi
 

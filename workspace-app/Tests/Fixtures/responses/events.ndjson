@@ -1,0 +1,4 @@
+{"type":"hello","version":"1.3.0","repos":2,"at":"2026-10-23T09:00:00.000Z"}
+{"type":"git","repo":{"name":"alertd-core","root":"/Users/demo/projects/alertd-core.git"},"at":"2026-10-23T09:00:01.000Z"}
+{"type":"container","repo":{"name":"alertd-core","root":"/Users/demo/projects/alertd-core.git"},"branch":"feat/llm-insights","container":"kunj-alertd-core-feat-llm-insights-1a2b3c","action":"status","at":"2026-10-23T09:00:02.000Z"}
+{"type":"backend","status":"unavailable","message":"Cannot connect to the Docker daemon","at":"2026-10-23T09:00:03.000Z"}

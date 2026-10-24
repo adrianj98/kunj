@@ -70,8 +70,28 @@ public func mergeEnvironments(
     return RepoEnvironments(repo: repo, backend: backend, environments: trees + boxes)
 }
 
-private func asCLIError(_ error: Error) -> KunjCLIError {
+func asCLIError(_ error: Error) -> KunjCLIError {
     error as? KunjCLIError ?? KunjCLIError(code: .commandFailed, message: "\(error)")
+}
+
+/// One repository's `kunj worktree list --json`, run in its root (the store's scoped refresh after a
+/// `git` or `agent` event).
+public func listWorktrees(cli: KunjCLI, repo: RepoRef) async throws -> WorktreeListJson {
+    do {
+        return try await cli.run(["worktree", "list"], cwd: repo.root)
+    } catch {
+        throw asCLIError(error)
+    }
+}
+
+/// One repository's `kunj ct list --json`, run in its root; a failure (Docker stopped) is a value,
+/// because it marks the backend unavailable rather than dropping the repository.
+public func listContainers(cli: KunjCLI, repo: RepoRef) async -> Result<ContainerListJson, KunjCLIError> {
+    do {
+        return .success(try await cli.run(["ct", "list"], cwd: repo.root))
+    } catch {
+        return .failure(asCLIError(error))
+    }
 }
 
 /// The full listing: `kunj repos`, then per repository (hidden and missing ones skipped)
@@ -92,10 +112,9 @@ public func listEnvironments(cli: KunjCLI) async -> ([RepoEnvironments], KunjCLI
     let results = await withTaskGroup(of: (Int, Result<RepoEnvironments, KunjCLIError>).self) { group in
         for (i, repo) in repos.enumerated() {
             group.addTask {
-                async let trees: WorktreeListJson = cli.run(["worktree", "list"], cwd: repo.root)
-                async let boxes: ContainerListJson = cli.run(["ct", "list"], cwd: repo.root)
-                let containers: Result<ContainerListJson, KunjCLIError>
-                do { containers = .success(try await boxes) } catch { containers = .failure(asCLIError(error)) }
+                async let trees = listWorktrees(cli: cli, repo: repo)
+                async let boxes = listContainers(cli: cli, repo: repo)
+                let containers = await boxes
                 do {
                     let worktrees = try await trees
                     return (i, .success(mergeEnvironments(repo: repo, worktrees: worktrees, containers: containers)))
