@@ -229,6 +229,11 @@ final class TabRegistry {
         }
     }
 
+    /// Closes a tab without asking, unsaved text included (Close Session asked already).
+    func discard(_ tab: any WorkspaceTab) {
+        remove(tab)
+    }
+
     private func remove(_ tab: any WorkspaceTab) {
         guard var tabs = tabsByEnv[tab.envId], let i = tabs.firstIndex(where: { $0 === tab }) else { return }
         if let terminal = tab as? TerminalTab {

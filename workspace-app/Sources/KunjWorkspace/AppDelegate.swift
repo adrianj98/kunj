@@ -500,13 +500,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the ones started outside the app too; the row leaves the list of open sessions.
     @objc func closeSession(_ sender: Any?) {
         let env = (sender as? NSMenuItem)?.representedObject as? Environment ?? windowController.selectedEnvironment
-        guard let env, let cli = kunj else { return }
+        guard let env, kunj != nil else { return }
         let registry = windowController.terminalColumn.registry
-        for tab in registry.tabs(for: env.id) { registry.close(tab) }
-        // an editor whose Save prompt was cancelled keeps the session open
-        guard registry.tabs(for: env.id).allSatisfy({ !($0 is EditorTab) }) else { return }
+        // unsaved editors are asked about once, before anything closes: Cancel leaves every tab
+        // and tmux session as it was
+        let dirty = registry.tabs(for: env.id).compactMap { $0 as? EditorTab }.filter(\.dirty)
+        guard !dirty.isEmpty else { finishClosingSession(env); return }
+        let alert = NSAlert()
+        alert.messageText = dirty.count == 1 ? "Save changes to \(dirty[0].title)?" : "Save changes to \(dirty.count) files?"
+        alert.informativeText = "Closing the session closes its tabs; your changes are lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            Task { @MainActor in
+                for editor in dirty {
+                    // a failed save (it says why) keeps the session open
+                    guard await registry.save(editor) else { return }
+                }
+                self.finishClosingSession(env)
+            }
+        case .alertSecondButtonReturn:
+            finishClosingSession(env)
+        default:
+            break
+        }
+    }
+
+    /// Closes every tab of the environment without asking (unsaved editors were dealt with), ends
+    /// all its tmux sessions and drops it from the open sessions.
+    private func finishClosingSession(_ env: Environment) {
+        guard let cli = kunj else { return }
+        let registry = windowController.terminalColumn.registry
+        for tab in registry.tabs(for: env.id) { registry.discard(tab) }
         for args in closeEnvironmentArguments(env: env) { runQuietly(cli, args, in: env) }
         layoutKeeper?.closed(env.id)
+        if UserDefaults.standard.string(forKey: Self.selectedEnvironmentKey) == env.id {
+            UserDefaults.standard.removeObject(forKey: Self.selectedEnvironmentKey)
+        }
         windowController.sessionClosed(env.id)
     }
 
