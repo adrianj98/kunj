@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let screenshotPath: String?
     /// `--demo`: the mockup's environments (DemoData) instead of kunj.
     private let demo: Bool
+    /// `--demo --loading`: the startup state (spinner, "Finding kunj") instead of the demo data
+    private let demoLoading: Bool
     private var windowController: MainWindowController!
     /// The kunj CLI once discovery succeeded (Tasks 4+ build the environment store on it).
     private(set) var kunj: KunjCLI?
@@ -42,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         changesArgument = arguments.contains("--changes") ? true : (arguments.contains("--no-changes") ? false : nil)
         demo = arguments.contains("--demo")
+        demoLoading = arguments.contains("--loading")
         super.init()
     }
 
@@ -68,7 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        if demo {
+        if demo && demoLoading {
+            windowController.showLoading(.findingKunj)
+        } else if demo {
             windowController.changesColumn.source = DemoChanges()
             windowController.lastActivity = DemoData.lastActivity
             windowController.render(repos: DemoData.repos, selected: DemoData.selectedId)
@@ -109,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let configured = UserDefaults.standard.string(forKey: SettingsWindow.kunjCommandKey)?
             .trimmingCharacters(in: .whitespaces)
         let command = (configured?.isEmpty ?? true) ? "kunj" : configured!
+        await MainActor.run { self.windowController.showLoading(.findingKunj) }
         let login = await ShellEnvironment.resolveLoginPath()
         let path = login.path
         if login.timedOut { log("login shell: -l -i timed out, PATH from -l: \(path)") }
@@ -131,7 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let message = (error as? KunjCLIError)?.message ?? "\(error)"
             let detail = (error as? KunjCLIError).flatMap { discoveryErrorDetail($0, loginPath: login) }
             log("kunj: \(message) (command \(command), PATH \(path))")
-            await MainActor.run { self.windowController.showDiscoveryError(message, detail: detail) }
+            await MainActor.run {
+                self.windowController.showLoading(nil)
+                self.windowController.showDiscoveryError(message, detail: detail)
+            }
         }
     }
 
@@ -153,10 +162,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // the Changes column follows git events and container status changes of its repository
         store.onRepoChanged = { [weak windowController] root in windowController?.changesColumn.repoChanged(root: root) }
+        windowController.showLoading(.listing)
         await store.refreshAll()
         // a change of the kunj command (reconnect) dropped this store while it listed: starting
         // its event stream now would leave a second `kunj events` running that nothing stops
         guard self.store === store else { return }
+        windowController.showLoading(nil)
         windowController.render(repos: store.repos)
         windowController.showListingError(store.lastError?.message)
         guard !terminating else { return }

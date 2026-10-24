@@ -1119,3 +1119,5 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - docs: spec, plan (final review note), workspace-app README updated for the four fixes; deferred minors listed in the spec. Why: review after each task.
 - docs/specs/README.md, workspace-ide.md: the final review fix commit named (22336bb). Why: commits listed by hash.
 - workspace-app LayoutStore: reads ~/.kunj/<folder name>/workspace.json while ~/.kunj/<kunjName>/ has none. Why: adversarial review of 22336bb, tabs saved before kunjName were dropped for bare or renamed clones.
+- workspace-app: a spinner with "Loading sessions…" and the step (Finding kunj, Listing worktrees and containers) while the app starts, from emptyStateText() in Core; `--demo --loading` renders it. Why: user asked for a loading signal; the window said "No repositories yet" for the seconds discovery and the first listing take.
+- docs: spec login-PATH paragraph, workspace-app README launch flags, docs-site workspace-app page describe the loading state. Why: same change.

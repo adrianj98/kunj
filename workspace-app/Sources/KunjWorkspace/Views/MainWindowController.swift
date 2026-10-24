@@ -13,6 +13,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private(set) var selectedEnvironment: Environment?
     private var discoveryError: String?
     private var discoveryDetail: String?
+    /// Finding kunj or the first listing still running (a spinner and the step in place of the columns)
+    private var loading: LoadingStep?
 
     /// The user selected a row. `render` never calls it: a selection whose row is gone stays
     /// selected (and shows "Select an environment") until the row returns.
@@ -41,6 +43,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let lines = (0..<4).map { _ in FillView(.clear) }
     private let mainArea = FillView(.clear)
     private let emptyState = NSStackView()
+    private let emptySpinner = NSProgressIndicator()
     private let emptyTitle = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.body, weight: .medium), color: .clear)
     private let emptyDetail = makeLabel("", font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
     private var timeTimer: Timer?
@@ -141,6 +144,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         renderSelection()
     }
 
+    /// The startup step in progress, nil once the first listing is in (or discovery failed).
+    func showLoading(_ step: LoadingStep?) {
+        loading = step
+        renderSelection()
+    }
+
     /// A failed listing while kunj works (shown in red on the status bar).
     func showListingError(_ message: String?) {
         statusBar.showError(message)
@@ -166,17 +175,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         for v in [terminalColumn, lines[2]] as [NSView] { v.isHidden = !showColumns }
         for v in [changesColumn, lines[1]] as [NSView] { v.isHidden = !showColumns || !changesVisible }
         emptyState.isHidden = showColumns
-        if let discoveryError {
-            emptyTitle.stringValue = discoveryError
-            emptyTitle.textColor = theme.color(\.red)
-            emptyDetail.stringValue = discoveryDetail ?? "Install or update it with npm install -g kunj"
-            emptyDetail.isHidden = discoveryDetail == nil && discoveryError.contains("npm install")
-        } else {
-            emptyTitle.stringValue = repos.isEmpty ? "No repositories yet" : "Select an environment"
-            emptyTitle.textColor = theme.color(\.muted)
-            emptyDetail.stringValue = "Run kunj in a repository to add it"
-            emptyDetail.isHidden = !repos.isEmpty
-        }
+        let text = emptyStateText(discoveryError: discoveryError, discoveryDetail: discoveryDetail,
+                                  loading: loading, hasRepos: !repos.isEmpty)
+        emptyTitle.stringValue = text.title
+        emptyTitle.textColor = theme.color(text.tone == .error ? \.red : \.muted)
+        emptyDetail.stringValue = text.detail ?? ""
+        emptyDetail.isHidden = text.detail == nil
+        emptySpinner.isHidden = !text.spinner || showColumns
+        if emptySpinner.isHidden { emptySpinner.stopAnimation(nil) } else { emptySpinner.startAnimation(nil) }
     }
 
     // MARK: theme
@@ -224,6 +230,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         emptyState.alignment = .centerX
         emptyState.spacing = 6
         emptyState.translatesAutoresizingMaskIntoConstraints = false
+        emptySpinner.style = .spinning
+        emptySpinner.controlSize = .small
+        emptySpinner.isDisplayedWhenStopped = false
+        emptySpinner.isHidden = true
+        emptyState.addArrangedSubview(emptySpinner)
+        emptyState.setCustomSpacing(10, after: emptySpinner)
         emptyState.addArrangedSubview(emptyTitle)
         emptyState.addArrangedSubview(emptyDetail)
         emptyTitle.alignment = .center

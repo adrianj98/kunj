@@ -274,7 +274,8 @@ and leave the terminal in the wrong mode. A shown tab is fed at once. The enviro
 (user's or `en_US.UTF-8`), PATH from the login shell (resolved once per discovery, off the main thread: `$SHELL -l -i -c` capped
 at 5 s; when that times out, `$SHELL -l -c` with the same cap, which reads `.zprofile` but not
 `.zshrc`, and a `kunj not found` then says the shell timed out, shows the PATH used and points to
-Settings),
+Settings; until the first listing is in, the window shows a spinner, "Loading sessions…" and the step,
+`Finding kunj` then `Listing worktrees and containers`, from `emptyStateText()` in Core),
 the Claude Code and terminal-program markers removed; kunj's own `--json` calls get the same
 environment, so nothing kunj spawns inherits the markers. The theme's `term*` tokens are the terminal
 colours (`termMuted` as bright black, `termAccent` as blue).
