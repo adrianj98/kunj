@@ -101,9 +101,25 @@ With [`container.mcp`](../configuration/#a-browser-for-the-agent) set, `agent` a
 servers to the container's Claude Code config and starts a background [`kunj ct mcp`](#mcp), so the
 agent can drive a browser on your machine. Nothing happens without that setting.
 
+### Several agents
+
+`--session <id>` runs another agent next to the default one, in the tmux session `agent-<id>`
+(the id is 1 to 32 letters, digits, `_` or `-`). `--kill` ends agents instead of starting one: with
+`--session` that agent, without it the default agent and every `agent-<id>` one. It exits 0 whether
+or not anything was running, also when the container is stopped.
+
+```bash
+kunj ct agent feature/search --session review -- "Review the diff on this branch"
+kunj ct agent feature/search --session review --kill
+kunj ct agent feature/search --kill            # every agent in the container
+```
+
+`kunj ct list --json` reports the container's agents in `agent.sessions`: `running` is true when
+any runs and `state` is `waiting` when any waits for you.
+
 ## attach
 
-Reattaches to the agent's `tmux` session:
+Reattaches to the agent's `tmux` session (`--session <id>`: that agent's):
 
 ```bash
 kunj ct attach feature/search
@@ -178,8 +194,9 @@ kunj ct shell feature/search --session build     # start or reattach
 kunj ct shell feature/search --session build --kill
 ```
 
-`--kill` ends the session. It exits 0 whether or not the session existed, and also when the
-container is stopped or gone; with `--json` it prints `{ "killed": true }` or `{ "killed": false }`.
+`--kill` ends the session; without `--session` it ends every `sh-<id>` session in the container. It
+exits 0 whether or not a session existed, and also when the container is stopped or gone; with
+`--json` it prints `{ "killed": true }` or `{ "killed": false }`.
 
 ## exec
 

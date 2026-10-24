@@ -231,7 +231,7 @@ kunj worktree shell fix/login-timeout --session tests --kill
 
 Without tmux, or with `agent.tmux` set to `false`, the shell runs directly in the terminal; like
 [agents](../agent/), `agent.tmuxStatus` turns on tmux's status line. `--kill` ends
-the session and exits 0 whether or not it existed; with `--json` it prints `{ "killed": true }` or
+the session (without `--session`, every shell session of the branch) and exits 0 whether or not one existed; with `--json` it prints `{ "killed": true }` or
 `{ "killed": false }`.
 
 ## Pull request of a worktree

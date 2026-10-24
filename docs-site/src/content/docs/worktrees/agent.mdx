@@ -27,6 +27,22 @@ The command is `agent.command` (default `claude`); `--command <cmd>` overrides i
 agent starts in the worktree's directory with `KUNJ_BRANCH`, `KUNJ_REPO` and `KUNJ_WORKTREE` set.
 `kunj agent` needs a terminal, and works from inside a tmux pane too.
 
+## Several agents in one worktree
+
+`--session <id>` runs another agent next to the default one, in its own tmux session; the id is 1
+to 32 letters, digits, `_` or `-`. `start`, `status` and `stop` with `--session` act on that agent,
+and `stop --all` ends the default agent and every `--session` one.
+
+```bash
+kunj agent fix/login --session review       # start or reattach a second agent
+kunj agent stop fix/login --session review
+kunj agent stop fix/login --all
+```
+
+`stop` with `--session` or `--all` exits 0 even when nothing was running; with `--json` it lists
+what it ended in `stopped`. Without `--session`, `status` reports the worktree as running when any of
+its agents runs, and lists them in `sessions`.
+
 ## Without tmux
 
 tmux is optional. When it is not installed, `start` runs the command directly in your terminal,
@@ -45,17 +61,30 @@ there is no session to stop.
 One tmux server serves the whole machine, so kunj picks the session name rather than using the
 branch name. It is the branch container's name (`kunj-<repo>-<branch>-<hash>`, the hash covering the
 exact branch name so `feature/x` and `feature-x` differ) with every `.` and `:` replaced by `-`,
-because tmux treats those as target separators.
+because tmux treats those as target separators. An agent started with `--session <id>` adds
+`-a-<id>` to it.
 
 ## In the worktree list
 
 `kunj worktree list --json` adds an `agent` field to every worktree that exists and is on a branch:
 
 ```json
-{ "agent": { "running": true, "session": "kunj-shop-api-fix-login-timeout-3fa9c1" } }
+{
+  "agent": {
+    "running": true,
+    "session": "kunj-shop-api-fix-login-timeout-3fa9c1",
+    "state": "waiting",
+    "sessions": [
+      { "session": "kunj-shop-api-fix-login-timeout-3fa9c1", "id": null, "state": "running" },
+      { "session": "kunj-shop-api-fix-login-timeout-3fa9c1-a-review", "id": "review", "state": "waiting" }
+    ]
+  }
+}
 ```
 
-`running` is `null` when tmux is not installed. The listing asks tmux once, not once per worktree,
+`session` is the default agent's session. `running` is true when any of the worktree's agents runs,
+and `state` is `waiting` when any of them waits for you. `sessions` lists the running ones (`id` is
+null for the default agent). `running` is `null`, and `sessions` absent, when tmux is not installed. The listing asks tmux once, not once per worktree,
 and skips it with `--no-status`.
 
 ## Setting

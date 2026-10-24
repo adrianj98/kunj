@@ -145,7 +145,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj prompt-info` - Output PR# for shell prompts
 - `kunj worktree [list|add|remove|prune|open|path|pr|session|shell]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension); `shell [branch] --session <id> [--kill]` is a login shell kept in a host tmux session (see Worktree agents below)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
-- `kunj agent [start|status|stop] [branch]` - Run an agent in a host tmux session for a worktree (see Worktree agents below)
+- `kunj agent [start|status|stop] [branch] [--session <id>] [--all]` - Run one or more agents in host tmux sessions for a worktree (see Worktree agents below)
 - `kunj container [start|shell|exec|agent|attach|open|forward|logs|list|stop|remove|prune|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
@@ -209,7 +209,16 @@ Persistent shells (the workspace app's shell tabs): `kunj worktree shell [branch
 `kunj ct shell --session <id>` uses the session `sh-<id>` in the container (tmux probed like `ct agent`).
 `<id>` is `[A-Za-z0-9_-]{1,32}` (`checkShellSessionId()`, `bad-session-id`). Without tmux or with
 `agent.tmux` false the shell runs directly; `agent.tmuxStatus` applies. `--kill` ends the session and
-always exits 0 (`{ killed }` with `--json`), also for a removed worktree or a stopped container.
+always exits 0 (`{ killed }` with `--json`), also for a removed worktree or a stopped container;
+without `--session` it ends every shell session of the branch (`kunjsh-…-sh-*`, or `sh-*` in a container).
+Several agents per worktree (one per app tab): `kunj agent --session <id>` runs `agentSessionName(…, id)`
+= the default name plus `-a-<id>` (still `kunj-`, so the events poll and the per-session hook state
+file work); `stop --session <id>` / `stop --all` exit 0 when nothing ran and report `stopped`. The
+listing and `agent status` find a branch's sessions with `agentSessionsOf()` in the same one tmux call:
+`running` when any runs, `state` waiting when any waits (`combineAgentStates()`), `sessions` lists them.
+In a container `kunj ct agent --session <id>` uses tmux `agent-<id>` and `/tmp/kunj-agent-state-<id>`,
+`--kill [--session]` ends one or all (`agent`, `agent-*`), `ct attach --session` attaches one, and
+`STATUS_SCRIPT` prints `session=<name> <state>` for each, read back by `parseStatus()` (`agentSessions`).
 
 ## Branch Containers
 
@@ -438,7 +447,7 @@ worktree or work inside a container, so a status poll (`statusPollMs`, 10 s) run
 (both `GIT_OPTIONAL_LOCKS=0`), emitting a `git` event when a worktree's hash changes, and, while the
 backend is available, one `backend.list` per repo and one exec of `STATUS_SCRIPT` (env.ts, shared with
 `kunj ct list`) per running main container, emitting `container` with `action: 'status'` when
-`{ agentRunning, head, ahead, dirty }` changes. The first poll only primes; ticks never overlap; a
+`{ agentRunning, agentState, agentSessions, head, ahead, dirty }` changes. The first poll only primes; ticks never overlap; a
 failing worktree or container is skipped; Docker calls are raced against the abort signal. `hello` is
 printed from `onReady`, after the watches, the repo ids and the first tmux and git polls. Changes are
 debounced per key (250 ms, the first change starts the timer). An unreachable backend gives one
