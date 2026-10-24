@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         if demo {
+            windowController.changesColumn.source = DemoChanges()
             windowController.lastActivity = DemoData.lastActivity
             windowController.render(repos: DemoData.repos, selected: DemoData.selectedId)
             windowController.setKunjVersion(DemoData.version)
@@ -45,7 +46,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // After discovery (so the sidebar shows the kunj version and the list) and the next layout pass
             Task { @MainActor [weak self] in
                 await self?.discovery?.value
-                try? await Task.sleep(nanoseconds: 300_000_000)
+                // Monaco loads in about a second; give the diff time to render (at most 8 s)
+                for _ in 0..<80 where self?.windowController.changesColumn.diffView.ready != true {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
                 self?.windowController.snapshotPNG { data in
                     if let data {
                         FileManager.default.createFile(atPath: screenshotPath, contents: data)
@@ -75,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.kunj = cli
                 self.kunjStatus = status
                 self.windowController.setKunjVersion(status.label)
+                self.windowController.changesColumn.source = DiffService(cli: cli)
             }
             await loadEnvironments(cli: cli)
         } catch {

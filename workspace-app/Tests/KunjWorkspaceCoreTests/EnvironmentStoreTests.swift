@@ -257,4 +257,20 @@ private func sleepMs(_ ms: UInt64) async { try? await Task.sleep(nanoseconds: ms
         await stream.stop()
         #expect(stream.restarts == 0)
     }
+
+    @Test func gitAndContainerStatusEventsReachOnRepoChanged() async {
+        let fake = FakeKunj()
+        let store = makeStore(fake)
+        await store.refreshAll()
+        var roots: [String] = []
+        store.onRepoChanged = { roots.append($0) }
+        store.handle(.git(repoRoot: repoA.root))
+        store.handle(.git(repoRoot: nil))
+        store.handle(.container(repoRoot: repoB.root, branch: "x", container: "c", action: "status"))
+        store.handle(.container(repoRoot: repoB.root, branch: "x", container: "c", action: "start"))
+        store.handle(.agent(session: "s", running: true, state: nil, repoRoot: repoA.root))
+        store.handle(.registry(kind: "repos", repoRoot: nil))
+        // At once (the Changes column debounces), only for git and container status changes.
+        #expect(roots == [repoA.root, repoB.root])
+    }
 }

@@ -20,6 +20,10 @@ public final class EnvironmentStore {
     public private(set) var lastError: KunjCLIError?
     /// Called on the main actor after a refresh that changed `repos` or `lastError`.
     public var onChange: (() -> Void)?
+    /// Called on the main actor, at once (not coalesced), with the repository root of a `git`
+    /// event or a container `status` event (head or dirty state changed): the Changes column
+    /// reloads its diff when the root is its environment's (it debounces).
+    public var onRepoChanged: ((String) -> Void)?
 
     private let coalesceMs: Int
     private let lister: Lister
@@ -164,10 +168,14 @@ public final class EnvironmentStore {
         case .hello:
             if seenHello { schedule(.all) }
             seenHello = true
-        case .git(let root), .agent(_, _, _, let root):
+        case .git(let root):
             scoped(root) { .worktrees($0) }
-        case .container(let root, _, _, _):
+            if let root { onRepoChanged?(root) }
+        case .agent(_, _, _, let root):
+            scoped(root) { .worktrees($0) }
+        case .container(let root, _, _, let action):
             scoped(root) { .containers($0) }
+            if action == "status", let root { onRepoChanged?(root) }
         case .registry, .backend:
             schedule(.all)
         case .error(let code, let message):

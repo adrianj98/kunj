@@ -1,0 +1,242 @@
+// The Monaco page. Swift (MonacoWebView) calls `window.kunj[name](args)` with one argument object
+// and receives messages posted to `window.webkit.messageHandlers.kunj`: `ready` once Monaco is up,
+// `error` for page errors. Modes: `?mode=diff` (the Changes column) and `?mode=editor` (Task 10).
+(function () {
+  'use strict';
+  const mode = new URLSearchParams(location.search).get('mode') || 'diff';
+  const post = (m) => {
+    try { window.webkit.messageHandlers.kunj.postMessage(m); } catch (e) { /* not in the app */ }
+  };
+  window.onerror = (msg, src, line) => post({ type: 'error', message: String(msg) + ' ' + src + ':' + line });
+  window.addEventListener('unhandledrejection', (e) => post({ type: 'error', message: 'unhandled: ' + e.reason }));
+
+  const FONT = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+  const FONT_SIZE = 11.5; // tokens.json type.mono-diff: 11.5px / 1.65
+  const LINE_HEIGHT = Math.round(11.5 * 1.65);
+
+  // Language ids by file extension (Monaco's basic languages), or by file name.
+  const BY_EXT = {
+    ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
+    js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    json: 'json', jsonc: 'json', md: 'markdown', markdown: 'markdown', mdx: 'mdx',
+    swift: 'swift', py: 'python', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin', kts: 'kotlin',
+    rb: 'ruby', php: 'php', cs: 'csharp', c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp',
+    m: 'objective-c', sh: 'shell', bash: 'shell', zsh: 'shell', yml: 'yaml', yaml: 'yaml',
+    css: 'css', scss: 'scss', less: 'less', html: 'html', htm: 'html', xml: 'xml', plist: 'xml', svg: 'xml',
+    sql: 'sql', graphql: 'graphql', gql: 'graphql', lua: 'lua', r: 'r', dart: 'dart', scala: 'scala',
+    ini: 'ini', toml: 'ini', proto: 'proto', tf: 'hcl', hcl: 'hcl', ps1: 'powershell', vue: 'html',
+  };
+  const BY_NAME = { dockerfile: 'dockerfile', makefile: 'shell', '.gitignore': 'shell', '.env': 'shell' };
+  function languageFor(path) {
+    const name = String(path || '').split('/').pop().toLowerCase();
+    if (BY_NAME[name]) return BY_NAME[name];
+    if (name.startsWith('dockerfile')) return 'dockerfile';
+    const dot = name.lastIndexOf('.');
+    return dot > 0 ? (BY_EXT[name.slice(dot + 1)] || 'plaintext') : 'plaintext';
+  }
+
+  // `#rrggbb` + alpha (0–1) as `#rrggbbaa`.
+  function alpha(hex, a) {
+    const h = Math.round(a * 255).toString(16).padStart(2, '0');
+    return String(hex).slice(0, 7) + h;
+  }
+
+  let editor = null; // the diff editor (diff mode)
+  let single = null; // a whole added or deleted file, one side only (diff mode)
+  let models = [];
+  let singleDecorations = null;
+
+  // Monaco diffs an empty side as one empty line that changed, so an added file would show a
+  // deleted empty line above it: a file with one empty side is shown in `single` instead, every
+  // line marked as added (or deleted), as the mockup's new file reads `1 + import …`.
+  function showPane(which) {
+    document.getElementById('diff').style.display = which === 'diff' ? 'block' : 'none';
+    document.getElementById('single').style.display = which === 'single' ? 'block' : 'none';
+  }
+
+  function replaceModels(next) {
+    const old = models;
+    models = next;
+    return () => { for (const m of old) m.dispose(); };
+  }
+
+  const api = {
+    /** tokens: the theme's token strings plus `dark` (Bool). */
+    setTheme({ tokens }) {
+      const t = tokens;
+      document.body.style.background = t.bg;
+      const root = document.documentElement.style;
+      root.setProperty('--add-bg', t.addBg);
+      root.setProperty('--del-bg', alpha(t.red, 0.18));
+      root.setProperty('--green', t.green);
+      root.setProperty('--red', t.red);
+      const brackets = {};
+      for (let i = 1; i <= 6; i++) brackets['editorBracketHighlight.foreground' + i] = t.text2;
+      monaco.editor.defineTheme('kunj', {
+        // Code in the ramp's text colours only: status colours are the design's only chroma
+        // (DESIGN.md principle 4), and the mockup's diff is uncoloured.
+        base: t.dark ? 'vs-dark' : 'vs',
+        inherit: false,
+        rules: [
+          { token: '', foreground: t.text2.slice(1) },
+          { token: 'keyword', foreground: t.text2.slice(1) },
+          { token: 'comment', foreground: t.muted.slice(1) },
+        ],
+        colors: Object.assign(brackets, {
+          'editor.background': t.bg,
+          'editor.foreground': t.text2,
+          'editorGutter.background': t.bg,
+          'editorLineNumber.foreground': t.faintest,
+          'editorLineNumber.activeForeground': t.faintest,
+          'editor.lineHighlightBackground': '#00000000',
+          'editor.lineHighlightBorder': '#00000000',
+          'editor.selectionBackground': alpha(t.muted, 0.3),
+          'editorCursor.foreground': t.text,
+          'editorBracketHighlight.unexpectedBracket.foreground': t.text2,
+          'editorWidget.background': t.raised2,
+          'editorWidget.border': t.borderStrong,
+          'input.background': t.bg,
+          'input.border': t.borderStrong,
+          'focusBorder': t.borderStrong,
+          'diffEditor.insertedLineBackground': t.addBg,
+          'diffEditor.insertedTextBackground': alpha(t.green, 0.18),
+          'diffEditor.removedLineBackground': alpha(t.red, 0.18),
+          'diffEditor.removedTextBackground': alpha(t.red, 0.28),
+          'diffEditorGutter.insertedLineBackground': t.addBg,
+          'diffEditorGutter.removedLineBackground': alpha(t.red, 0.18),
+          'diffEditor.border': t.border,
+          'diffEditor.unchangedRegionBackground': t.raised2,
+          'diffEditor.unchangedRegionForeground': t.muted,
+          'diffEditor.unchangedCodeBackground': '#00000000',
+          'scrollbar.shadow': '#00000000',
+          'scrollbarSlider.background': alpha(t.muted, 0.2),
+          'scrollbarSlider.hoverBackground': alpha(t.muted, 0.35),
+          'scrollbarSlider.activeBackground': alpha(t.muted, 0.45),
+        }),
+      });
+      monaco.editor.setTheme('kunj');
+      return true;
+    },
+
+    /** Shows one file's two sides; resolves once the diff is shown ({ changes, language }). */
+    showDiff({ original, modified, language, path }) {
+      const lang = language || languageFor(path);
+      original = original || '';
+      modified = modified || '';
+      if ((original === '') !== (modified === '')) {
+        return showSingle(original === '' ? modified : original, original === '', lang);
+      }
+      const dispose = replaceModels([monaco.editor.createModel(original, lang), monaco.editor.createModel(modified, lang)]);
+      showPane('diff');
+      return new Promise((resolve) => {
+        let done = false;
+        let d = null;
+        const finish = (force) => {
+          const changes = editor.getLineChanges();
+          if (done || (!changes && !force)) return; // the first update only resets the diff
+          done = true;
+          if (d) d.dispose();
+          resolve({ changes: (changes || []).length, language: lang });
+        };
+        d = editor.onDidUpdateDiff(() => finish(false));
+        editor.setModel({ original: models[0], modified: models[1] });
+        dispose();
+        editor.getModifiedEditor().setScrollTop(0);
+        setTimeout(() => finish(true), 3000); // identical sides or a huge file: never wait forever
+      });
+    },
+
+    /** Empties the diff (no file selected). */
+    clear() {
+      const dispose = replaceModels([monaco.editor.createModel('', 'plaintext'), monaco.editor.createModel('', 'plaintext')]);
+      editor.setModel({ original: models[0], modified: models[1] });
+      single.setModel(null);
+      dispose();
+      showPane('diff');
+      return true;
+    },
+
+    languageFor({ path }) { return languageFor(path); },
+  };
+  window.kunj = api;
+
+  function showSingle(text, added, lang) {
+    const model = monaco.editor.createModel(text, lang);
+    const dispose = replaceModels([model]);
+    single.setModel(model);
+    editor.setModel(null);
+    dispose();
+    let lines = model.getLineCount();
+    if (lines > 1 && model.getLineContent(lines) === '') lines -= 1; // the newline at the end
+    const kind = added ? 'add' : 'del';
+    const decorations = [];
+    for (let i = 1; i <= lines; i++) {
+      decorations.push({ range: new monaco.Range(i, 1, i, 1), options: {
+        isWholeLine: true, className: `kunj-${kind}-line`, marginClassName: `kunj-${kind}-margin`,
+        linesDecorationsClassName: `kunj-${kind}-sign`,
+      } });
+    }
+    if (singleDecorations) singleDecorations.clear();
+    singleDecorations = single.createDecorationsCollection(decorations);
+    showPane('single');
+    single.setScrollTop(0);
+    return Promise.resolve({ changes: 1, language: lang });
+  }
+
+  const COMMON = {
+    readOnly: true,
+    automaticLayout: true,
+    theme: 'kunj',
+    fontFamily: FONT,
+    fontSize: FONT_SIZE,
+    lineHeight: LINE_HEIGHT,
+    minimap: { enabled: false },
+    overviewRulerLanes: 0,
+    scrollBeyondLastLine: false,
+    glyphMargin: false,
+    folding: false,
+    lineNumbersMinChars: 3,
+    lineDecorationsWidth: 14,
+    renderLineHighlight: 'none',
+    contextmenu: false,
+    padding: { top: 6, bottom: 6 },
+    scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8, useShadows: false },
+    stickyScroll: { enabled: false },
+    fontLigatures: false,
+    bracketPairColorization: { enabled: false },
+    guides: { indentation: false, bracketPairs: false },
+    matchBrackets: 'never',
+    occurrencesHighlight: 'off',
+    selectionHighlight: false,
+  };
+
+  function createDiff() {
+    editor = monaco.editor.createDiffEditor(document.getElementById('diff'), Object.assign({}, COMMON, {
+      originalEditable: false,
+      renderSideBySide: true, // Monaco switches to inline below 900 px (useInlineViewWhenSpaceIsLimited)
+      renderOverviewRuler: false,
+      renderMarginRevertIcon: false,
+      hideUnchangedRegions: { enabled: true, contextLineCount: 3, minimumLineCount: 5, revealLineCount: 20 },
+    }));
+    single = monaco.editor.create(document.getElementById('single'), Object.assign({}, COMMON, { model: null }));
+    models = [monaco.editor.createModel('', 'plaintext'), monaco.editor.createModel('', 'plaintext')];
+    editor.setModel({ original: models[0], modified: models[1] });
+    showPane('diff');
+  }
+
+  const loader = document.createElement('script');
+  loader.src = 'vs/loader.js';
+  loader.onerror = () => post({ type: 'error', message: 'vs/loader.js did not load' });
+  loader.onload = () => {
+    require.config({ paths: { vs: 'vs' } });
+    require(['vs/editor/editor.main'], async function () {
+      // Monaco measures the font when an editor is created: load it first.
+      try { await document.fonts.load(`${FONT_SIZE}px 'JetBrains Mono'`); } catch (e) { /* fallback font */ }
+      monaco.editor.defineTheme('kunj', { base: 'vs-dark', inherit: true, rules: [], colors: {} });
+      if (mode === 'diff') createDiff();
+      // ?mode=editor: Task 10 adds the editor and its functions here.
+      post({ type: 'ready', mode });
+    }, (err) => post({ type: 'error', message: 'require failed: ' + err }));
+  };
+  document.head.appendChild(loader);
+})();

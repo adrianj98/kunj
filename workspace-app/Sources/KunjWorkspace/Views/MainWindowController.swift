@@ -304,6 +304,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         // cacheDisplay renders in a calibrated (generic) RGB space; convert so the PNG's pixels
         // are the sRGB token values, comparable with the mockups
         let out = rep.converting(to: .sRGB, renderingIntent: .default) ?? rep
-        completion(out.representation(using: .png, properties: [:]))
+        // The diff's WKWebView is not drawn by cacheDisplay: draw its own snapshot on top
+        changesColumn.snapshotOverlay(in: root) { overlay in
+            if let (frame, image) = overlay {
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: out)
+                // the bitmap is unflipped and, once converted, sized in pixels: convert the
+                // (possibly flipped) content view's rect
+                let scale = out.size.width / max(1, root.bounds.width)
+                let y = root.isFlipped ? root.bounds.height - frame.maxY : frame.minY
+                image.draw(in: NSRect(x: frame.minX * scale, y: y * scale,
+                                      width: frame.width * scale, height: frame.height * scale))
+                NSGraphicsContext.restoreGraphicsState()
+            }
+            completion(out.representation(using: .png, properties: [:]))
+        }
     }
 }
