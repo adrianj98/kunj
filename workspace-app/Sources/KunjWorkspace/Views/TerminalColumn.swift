@@ -121,6 +121,7 @@ final class TerminalColumn: NSView {
             placeEditor(page)
             let editor = active as? EditorTab
             page.isHidden = editor == nil || messageText != nil
+            registry.shownEditor = page.isHidden ? nil : editor
             editor?.show()
         }
         let hasTabs = environment.map { !registry.tabs(for: $0.id).isEmpty } ?? false

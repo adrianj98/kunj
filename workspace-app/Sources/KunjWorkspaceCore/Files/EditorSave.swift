@@ -29,10 +29,13 @@ public func editorTabTitle(_ path: String) -> String {
 /// into the web view as one string).
 public let maxEditableBytes = 5 * 1024 * 1024
 
-/// Why a file's text cannot be edited in a tab (nil: it can). A NUL byte means a binary file, which
-/// `FileAccess` decodes lossily: saving it would corrupt it.
+/// Why a file's text cannot be edited in a tab (nil: it can). A NUL byte means a binary file, and a
+/// U+FFFD a file that was not UTF-8 (Latin-1, UTF-16): `FileAccess` and `kunj ct file read` decode
+/// lossily, so saving either would corrupt it. (A UTF-8 file that really contains U+FFFD is refused
+/// too; better than writing replacement characters over someone's bytes.)
 public func editorRefusal(_ text: String) -> String? {
     if text.utf8.count > maxEditableBytes { return "This file is too large to edit here (over 5 MB)" }
     if text.utf8.contains(0) { return "This looks like a binary file" }
+    if text.unicodeScalars.contains("\u{FFFD}") { return "This file is not UTF-8 text" }
     return nil
 }

@@ -50,7 +50,7 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Workspace app v1 (native) | [workspace-ide.md](workspace-ide.md#architecture) | Started 2026-10-23 from the design package (`docs/workspace-app/`); plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`, 12 tasks; done: 1 (ace71b1), 2 scaffold (0e8ab41), 3 KunjCLI (e6feedc), 4 JSON mirrors and environment model (53fdf6b), 6 sidebar, header and status bar (95410df, d7b79fa), 5 core: event stream and environment store (8f49f54), 9–10 core: diff model and service, file access (831d215), 9 Changes column (f3c01a5), 7 terminals, agent tabs and tab bar, with the store wired into the app (a4ec693 core, 5158fe4, 45756ae), 8 layout persistence and last activity (062d22d core, 2d972db), 12 CLI part (7d497a6) |
+| Workspace app v1 (native) | [workspace-ide.md](workspace-ide.md#architecture) | Started 2026-10-23 from the design package (`docs/workspace-app/`); plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`, 12 tasks; done: 1 (ace71b1), 2 scaffold (0e8ab41), 3 KunjCLI (e6feedc), 4 JSON mirrors and environment model (53fdf6b), 6 sidebar, header and status bar (95410df, d7b79fa), 5 core: event stream and environment store (8f49f54), 9–10 core: diff model and service, file access (831d215), 9 Changes column (f3c01a5), 7 terminals, agent tabs and tab bar, with the store wired into the app (a4ec693 core, 5158fe4, 45756ae), 8 layout persistence and last activity (062d22d core, 2d972db), 10 editor tabs (54a0685), 12 CLI part (7d497a6) |
 
 ## To do
 

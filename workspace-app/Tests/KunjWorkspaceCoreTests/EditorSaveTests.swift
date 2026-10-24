@@ -32,4 +32,13 @@ import Testing
         #expect(editorRefusal("PNG\u{0}\u{1}") == "This looks like a binary file")
         #expect(editorRefusal(String(repeating: "x", count: maxEditableBytes + 1)) == "This file is too large to edit here (over 5 MB)")
     }
+
+    /// A Latin-1 (or any non-UTF-8) file has no NUL byte, but FileAccess and `kunj ct file read`
+    /// decode it lossily: its bytes come back as U+FFFD, and saving would write those instead.
+    @Test func refusesTextThatWasNotUTF8() {
+        let latin1 = Data([0x63, 0x61, 0x66, 0xE9, 0x0A]) // "café\n" in ISO-8859-1
+        let decoded = String(decoding: latin1, as: UTF8.self)
+        #expect(editorRefusal(decoded) == "This file is not UTF-8 text")
+        #expect(editorRefusal("café\n") == nil)
+    }
 }

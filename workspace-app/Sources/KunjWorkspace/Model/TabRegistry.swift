@@ -39,6 +39,9 @@ final class TabRegistry {
     /// An editor tab saved its file (the Changes column reloads).
     var onSaved: ((EditorTab) -> Void)?
     private var editorPage: MonacoWebView?
+    /// The editor tab the editor page shows on screen (set by the TerminalColumn), so key presses
+    /// in the page count as activity of its environment.
+    weak var shownEditor: EditorTab?
     private var keyMonitor: Any?
 
     init(theme: Theme) {
@@ -46,9 +49,16 @@ final class TabRegistry {
         // Key presses, not `send(source:data:)`: SwiftTerm also sends the terminal's own replies
         // (device attributes, cursor reports) through it, which are not the user's activity.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let tab = event.window?.firstResponder as? TerminalTab
+            let responder = event.window?.firstResponder
             MainActor.assumeIsolated {
-                if let tab { self?.onInput?(tab.envId) }
+                guard let self else { return }
+                if let tab = responder as? TerminalTab {
+                    self.onInput?(tab.envId)
+                } else if let view = responder as? NSView, let page = self.editorPage, view.isDescendant(of: page),
+                          let editor = self.shownEditor {
+                    // Typing in the editor page: the editor tab it shows
+                    self.onInput?(editor.envId)
+                }
             }
             return event
         }

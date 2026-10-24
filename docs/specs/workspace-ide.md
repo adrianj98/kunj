@@ -28,7 +28,7 @@ no state beyond UI layout.
 | `kunj events --json` | Shipped (189d9ba, 3685ef6; status poll, origin-based repo ids and `hello` when ready in ce5691d) |
 | tmux optional for `kunj agent` (`--no-tmux`) | Shipped (453f241, e5b15a4) |
 | Design package (`docs/workspace-app/design/`) | Received 2026-10-23; the app must match `mockups/warm.png` |
-| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa; terminals, agent tabs and the tab bar (`TerminalTab`, `TabRegistry`, `TabBarView`, `HiddenFeedScheduler`), the store and `kunj events` wired into the app, Environment and Tabs menus in 5158fe4, 45756ae; layout file, tab restore and last activity (`LayoutStore`, `LayoutKeeper`) in 062d22d, 2d972db |
+| The app (`workspace-app/`) | In progress; plan `docs/superpowers/plans/2026-10-23-workspace-app-v1.md` (native). Scaffold (package, tokens, scripts, fake-kunj, skeleton window) in 0e8ab41; `KunjCLI`, login PATH and version check in e6feedc; JSON mirrors and the environment model in 53fdf6b; diff and file access core (`DiffModel`, `DiffService`, `FileAccess`) in 831d215; the Changes column (Monaco diff page, `MonacoWebView`, `ChangesColumn`; `--demo` matches `warm.png`'s column) in f3c01a5; event stream and environment store (`EventStream`, `EnvironmentStore`; wired into the app by Task 7) in 8f49f54; sidebar, header, status bar, window chrome and the discovery error state (`--demo` matches `warm.png`) in 95410df, d7b79fa; terminals, agent tabs and the tab bar (`TerminalTab`, `TabRegistry`, `TabBarView`, `HiddenFeedScheduler`), the store and `kunj events` wired into the app, Environment and Tabs menus in 5158fe4, 45756ae; layout file, tab restore and last activity (`LayoutStore`, `LayoutKeeper`) in 062d22d, 2d972db; editor tabs (`EditorTab`, `EditorSave`, the `?mode=editor` page, the diff header's `Edit`, File > Save) in 54a0685 |
 | Runtime choice | Native: AppKit + SwiftTerm, Monaco in one WKWebView (spike 1c2aaa3, 0e41a24) |
 | `kunj install workspace`, release job | Shipped (7d497a6) |
 
@@ -63,7 +63,7 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   Actions right-aligned: Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O (outlined) and Create PR ⌘⇧P (the one
   filled button), plus an overflow menu with start/stop/remove and worktree remove.
 - **Tab bar (left column):** segmented pills, one per terminal or editor tab; a dot when its process
-  has a notable state. Right side: `tmux <session> · uptime`, the split button (disabled until v2) and
+  has a notable state, or a `text2` dot on an editor tab with unsaved changes. Right side: `tmux <session> · uptime`, the split button (disabled until v2) and
   new-tab.
 - **Terminal tabs:** a login shell in the worktree, or `kunj ct shell <branch>` for a container.
 - **Agent tab:** a terminal running `kunj agent <branch>` or `kunj ct agent <branch>`, which attaches
@@ -192,8 +192,8 @@ Kunj Workspace.app
 
 | Target | Holds | Depends on |
 | --- | --- | --- |
-| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec` + `tabDot` + `exitCode(waitStatus:)`, `HiddenFeedScheduler`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout` + `LayoutStore` + `restorePlan` + `ActivityTracker`, `DesignTokens` (generated), `RelativeTime` | Foundation only |
-| `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `SidebarRowView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `DemoData` (`--demo`), `TerminalTab` (SwiftTerm), `TabRegistry`, `LayoutKeeper` (layout file and `lastActivity`), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
+| `KunjWorkspaceCore` | Everything testable without a window: `Version`, the `Codable` mirrors of `json-types.ts`, `ShellEnvironment` (login PATH), `KunjCLI`, `EventStream`, `Environment` + `EnvironmentStore`, `TerminalSpec` + `tabDot` + `exitCode(waitStatus:)`, `HiddenFeedScheduler`, `DiffModel` + `DiffService`, `FileAccess`, `WorkspaceLayout` + `LayoutStore` + `restorePlan` + `ActivityTracker`, `saveDecision` + `editorRefusal` (EditorSave), `DesignTokens` (generated), `RelativeTime` | Foundation only |
+| `KunjWorkspace` | The app: `AppDelegate` (menu, shortcuts), `Theme` (NSColor/NSFont from the tokens, system appearance), the views (`MainWindowController`, `SidebarView`, `HeaderView`, `SidebarRowView`, `TabBarView`, `TerminalColumn`, `ChangesColumn`, `StatusBarView`, `Controls`), `DemoData` (`--demo`), `TerminalTab` (SwiftTerm), `EditorTab`, `TabRegistry` (terminals and editors as `WorkspaceTab`), `LayoutKeeper` (layout file and `lastActivity`), `MonacoWebView`, `ActionRunner`, `NewSessionSheet`, `SettingsWindow` | Core, SwiftTerm, AppKit, WebKit |
 | `KunjWorkspaceCoreTests` | `swift test` (Swift Testing), with `Tests/Fixtures/fake-kunj` (a `sh` script answering from `Tests/Fixtures/responses/*.json`) and the helpers in `Support.swift` | Core |
 
 SwiftTerm is vendored at an exact tag by `scripts/prepare-swiftterm.sh` (the spike's one-line
@@ -292,12 +292,21 @@ numbers) and leaves code monochrome. The page's functions take one argument obje
 the selected path and the scope per environment, and refetches the selected file without re-sending
 an identical diff, so the view does not jump back to the top.
 
-**Editor tabs.** Double-clicking a changed file (or "Edit" in the diff header) opens it as a tab in the
-left column, in the second WKWebView (`?mode=editor`, one Monaco model per open file). ⌘S saves through
+**Editor tabs.** Double-clicking a changed file (or "Edit" in the header row over the diff: the
+file's path and the button, 29 px in `raised2`) opens it as a tab in the left column, in the second
+WKWebView (`?mode=editor`, one Monaco model per open file, one page shared by every editor tab; an
+open tab of the same file is activated instead). A binary file (a NUL byte), one that is not UTF-8 (a
+replacement character after the lossy decode) and one over 5 MB are refused with an inline message,
+since saving their decoded text would corrupt them. ⌘S (File > Save, or inside Monaco) saves through
 `FileAccess` (`fs` for a worktree, `kunj ct file write` for a container; paths relative, no `..`; a
-worktree read takes regular files only, a write goes through a symlink and keeps the file's mode); the tab shows a dot while
-dirty; a save over a file that changed since it was opened asks before overwriting. Closing a dirty tab
-asks. No language servers. The web views never name a file to Swift: a save message carries only the
+worktree read takes regular files only, a write goes through a symlink and keeps the file's mode) and
+reloads the Changes column; the tab shows a `text2` dot while dirty (status colours stay for agent
+states), and text typed while a save is in flight stays dirty. The file is read again before a save:
+one that changed since it was opened asks before overwriting, one that was deleted asks before
+recreating it, one that already holds the text is not written. Closing a dirty tab asks Save / Don't
+Save / Cancel, and quitting with dirty tabs asks Cancel / Quit Without Saving. Key presses in the
+editor count as the environment's activity. A crashed editor page is reloaded with every file read
+again (unsaved text is lost). No language servers. The web views never name a file to Swift: a save message carries only the
 tab id, and Swift holds the path, so content from a container cannot steer a write.
 
 **Layout file** `~/.kunj/<reponame>/workspace.json`: `{ "<kind>:<branch>": { "tabs": [{ "kind": "shell|agent|editor",
@@ -307,7 +316,7 @@ are never saved; entries or tabs that do not decode are skipped, not the whole f
 environment for the first time in a session, once it can run them (worktree present, container running;
 until then its entry is not saved over), its tabs are restored with the titles of their specs: shells
 restart, one agent tab reattaches to tmux only while the agent runs (restoring one that ended would start
-a new agent), editor tabs reopen the file (Task 10). The app writes pending changes when it quits.
+a new agent), editor tabs reopen the file by its saved `path` (one that cannot be read closes). The app writes pending changes when it quits.
 
 **Actions** (`ActionRunner`): Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O (`worktree open` / `ct open`),
 Create PR ⌘⇧P (`kunj pr` in an action tab, in the worktree; for a container environment the host
@@ -471,8 +480,8 @@ From the Changes column (Task 9):
 - [ ] A binary file (numstat `-`, counts 0) is decoded lossily and sent to Monaco as text, and a large
   file is sent whole; the column could show "Binary file" (a NUL in the first 8 KB, as git checks) and
   cap the size it diffs.
-- [ ] Monaco shows no `@@ … @@  path` hunk header as `warm.png` does; the folded regions stand in for
-  them. Task 10's `Edit` button needs a place: a header over the diff would hold both.
+- [ ] Monaco shows no `@@ … @@` hunk text as `warm.png` does; the folded regions stand in for
+  them. Task 10 added one header row over the diff (the path and `Edit`), not one per hunk.
 - [ ] Any `git` event of the repository reloads the column, also one from another worktree of it;
   `kunj events` could name the worktree so only its environment reloads.
 
@@ -493,6 +502,19 @@ From the layout file (Task 8):
 - [ ] Key presses that are menu shortcuts (⌘W, ⌘1) while a tab has focus count as input.
 - [ ] A hidden tab's queue is fed whole when its process exits, on the main thread, so a large
   backlog in a background tab can stall the UI once at exit.
+
+From the editor tabs (Task 10):
+
+- [ ] Typing, the dirty dot, ⌘S, the conflict alert, the close and quit prompts, double-click and a
+  file in a running container have not been checked by hand; neither has whether ⌘S inside Monaco
+  also reaches File > Save (two saves would race, harmlessly but with two alerts on a conflict).
+- [ ] `--screenshot` does not composite the editor page (`snapshotPNG` draws only the diff page and
+  the terminals), so an editor tab cannot be compared by screenshot.
+- [ ] Monaco normalises a file's line endings to its majority and drops a UTF-8 BOM, so saving a file
+  with mixed endings or a BOM changes those bytes too.
+- [ ] An `EditorTab` keeps the `Environment` it was opened with; a container stopped (or a worktree
+  removed) since fails at save with an alert, and the tab stays open.
+- [ ] A restored editor tab whose file is gone closes without a message (only logged).
 
 - [ ] Linux, and whether this app replaces `macos-app/` eventually.
 - [ ] Multiple windows: tearing an environment out for a second monitor (v2).
