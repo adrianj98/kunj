@@ -14,9 +14,21 @@ final class TabRegistry {
     /// Called after tabs were opened, closed, activated or changed state; the argument is the
     /// environment id whose tabs changed.
     var onChange: ((String) -> Void)?
+    /// A key press went to a tab of this environment (its `lastActivity`).
+    var onInput: ((String) -> Void)?
+    private var keyMonitor: Any?
 
     init(theme: Theme) {
         self.theme = theme
+        // Key presses, not `send(source:data:)`: SwiftTerm also sends the terminal's own replies
+        // (device attributes, cursor reports) through it, which are not the user's activity.
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let tab = event.window?.firstResponder as? TerminalTab
+            MainActor.assumeIsolated {
+                if let tab { self?.onInput?(tab.envId) }
+            }
+            return event
+        }
     }
 
     var allTabs: [TerminalTab] { tabsByEnv.values.flatMap { $0 } }

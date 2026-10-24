@@ -107,3 +107,76 @@ private func sampleLayout() -> WorkspaceLayout {
         #expect(store.layout(repo: "other") == WorkspaceLayout())
     }
 }
+
+private func shell(_ title: String = "zsh") -> SavedTab { SavedTab(kind: .shell, title: title, path: nil) }
+private let agentTab = SavedTab(kind: .agent, title: "agent", path: nil)
+private let actionTab = SavedTab(kind: .action, title: "ct start", path: nil)
+private let editorTab = SavedTab(kind: .editor, title: "a.ts", path: "src/a.ts")
+
+private func repos(_ envs: [Environment]) -> [RepoEnvironments] {
+    [RepoEnvironments(repo: RepoRef(name: "demo", root: "/r", bare: false), backend: .docker, environments: envs)]
+}
+
+/// Saving and restoring the tabs of one environment, and the activity tracker.
+@Suite struct LayoutRestoreTests {
+    @Test func actionTabsAreNotSaved() {
+        let saved = tabsToSave([shell(), actionTab, agentTab], active: 2)
+        #expect(saved.tabs == [shell(), agentTab])
+        #expect(saved.active == 1)
+    }
+
+    @Test func anActiveActionTabSavesNoActiveIndex() {
+        #expect(tabsToSave([shell(), actionTab], active: 1).active == nil)
+        #expect(tabsToSave([], active: nil).tabs.isEmpty)
+    }
+
+    @Test func restoreWaitsForAUsableEnvironment() {
+        let entry = BranchLayout(tabs: [shell()], active: 0)
+        #expect(restorePlan(entry, env: diffTestEnvironment(path: "/w", exists: false)) == nil)
+        #expect(restorePlan(entry, env: diffTestEnvironment(kind: .container, path: nil, state: .stopped)) == nil)
+        #expect(restorePlan(entry, env: diffTestEnvironment(path: "/w"))?.tabs == [shell()])
+    }
+
+    @Test func agentTabsReattachOnlyToARunningAgent() {
+        let entry = BranchLayout(tabs: [shell(), agentTab], active: 1)
+        var env = diffTestEnvironment(path: "/w")
+        env.agent = .none
+        #expect(restorePlan(entry, env: env)?.tabs == [shell()])
+        #expect(restorePlan(entry, env: env)?.active == nil)
+        env.agent = .unknown
+        #expect(restorePlan(entry, env: env)?.tabs == [shell()])
+        for state in [AgentActivity.running, .waiting] {
+            env.agent = state
+            #expect(restorePlan(entry, env: env)?.tabs == [shell(), agentTab])
+            #expect(restorePlan(entry, env: env)?.active == 1)
+        }
+    }
+
+    @Test func restoreKeepsOneAgentAndTheKindsAsked() {
+        var env = diffTestEnvironment(path: "/w")
+        env.agent = .waiting
+        let entry = BranchLayout(tabs: [editorTab, agentTab, shell("a"), agentTab, shell("b")], active: 4)
+        let plan = restorePlan(entry, env: env)
+        #expect(plan?.tabs == [agentTab, shell("a"), shell("b")])
+        #expect(plan?.active == 2)
+        let withEditors = restorePlan(entry, env: env, kinds: [.shell, .agent, .editor])
+        #expect(withEditors?.tabs == [editorTab, agentTab, shell("a"), shell("b")])
+        #expect(withEditors?.active == 3)
+        #expect(restorePlan(BranchLayout(tabs: [shell()], active: 7), env: env)?.active == nil)
+    }
+
+    @Test func trackerPrimesThenReportsChangedAndNewEnvironments() {
+        var tracker = ActivityTracker()
+        let a = diffTestEnvironment(branch: "a", path: "/a")
+        let b = diffTestEnvironment(branch: "b", path: "/b")
+        #expect(tracker.changed(repos([a, b])).isEmpty)
+        #expect(tracker.changed(repos([a, b])).isEmpty)
+        var a2 = a
+        a2.ahead = 1
+        let c = diffTestEnvironment(branch: "c", path: "/c")
+        #expect(tracker.changed(repos([a2, b, c])) == [a.id, c.id])
+        // gone and back counts as a change
+        #expect(tracker.changed(repos([a2, c])).isEmpty)
+        #expect(tracker.changed(repos([a2, b, c])) == [b.id])
+    }
+}

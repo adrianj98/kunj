@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The environments (live) and the `kunj events` child that keeps them current.
     private var store: EnvironmentStore?
     private var events: EventStream?
+    /// Saves and restores each environment's tabs and its `lastActivity` (not in `--demo`).
+    private var layoutKeeper: LayoutKeeper?
     private var terminating = false
 
     nonisolated init(arguments: [String]) {
@@ -103,10 +105,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func loadEnvironments(cli: KunjCLI) async {
         let store = EnvironmentStore(cli: cli)
         self.store = store
+        let keeper = makeLayoutKeeper(store: store)
         store.onChange = { [weak self, weak store] in
             guard let self, let store else { return }
+            keeper.listed(store.repos)
             self.windowController.render(repos: store.repos)
             self.windowController.showListingError(store.lastError?.message)
+            // a selected environment that could not restore its tabs (stopped) may now
+            keeper.selected(self.windowController.selectedEnvironment)
         }
         // the Changes column follows git events and container status changes of its repository
         store.onRepoChanged = { [weak windowController] root in windowController?.changesColumn.repoChanged(root: root) }
@@ -120,15 +126,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openTabsFromArguments()
     }
 
+    /// The layout file's keeper, wired to the store, the registry and the window: selecting an
+    /// environment restores its tabs, tab changes are saved, listings and key presses bump
+    /// `lastActivity`, which the sidebar shows.
+    private func makeLayoutKeeper(store: EnvironmentStore) -> LayoutKeeper {
+        let keeper = LayoutKeeper()
+        layoutKeeper = keeper
+        let registry = windowController.terminalColumn.registry
+        keeper.environment = { [weak store] id in store?.environment(id: id) }
+        keeper.tabs = { [weak registry] id in
+            guard let registry else { return ([], nil) }
+            let tabs = registry.tabs(for: id)
+            let active = registry.active(for: id)
+            return (tabs.map { SavedTab(kind: $0.kind, title: $0.title, path: nil) },
+                    tabs.firstIndex { $0 === active })
+        }
+        keeper.open = { [weak self] env, tab in _ = self?.startTab(env: env, kind: tab.kind) }
+        keeper.activate = { [weak registry] id, index in
+            guard let registry else { return }
+            let tabs = registry.tabs(for: id)
+            if tabs.indices.contains(index) { registry.activate(tabs[index]) }
+        }
+        keeper.onActivity = { [weak self] in self?.windowController.sidebar.refreshTimes() }
+        // the column already listens to the registry: keep its handler and add the keeper's
+        let columnHandler = registry.onChange
+        registry.onChange = { [weak keeper] id in
+            columnHandler?(id)
+            keeper?.tabsChanged(id)
+        }
+        registry.onInput = { [weak keeper] id in keeper?.input(id) }
+        windowController.lastActivity = { [weak keeper] id in keeper?.lastActivity(id) }
+        windowController.onSelect = { [weak keeper] env in keeper?.selected(env) }
+        return keeper
+    }
+
     /// `-openTabs "<environment id>#<kind>,…"` (e.g. `kunj|worktree|main#shell,kunj|worktree|main#agent`)
     /// selects each environment and opens the tab after the first listing: a way to check
-    /// terminals without a person at the keyboard.
+    /// terminals without a person at the keyboard. An entry without `#<kind>` only selects (which
+    /// restores the environment's saved tabs).
     private func openTabsFromArguments() {
         guard let raw = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["openTabs"] as? String
         else { return }
         for entry in raw.split(separator: ",") {
             guard let hash = entry.lastIndex(of: "#"), let kind = TabKind(rawValue: String(entry[entry.index(after: hash)...]))
-            else { continue }
+            else {
+                windowController.select(String(entry))
+                continue
+            }
             windowController.select(String(entry[..<hash]))
             openTab(kind)
         }
@@ -142,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !terminating else { return .terminateLater }
         terminating = true
         windowController?.terminalColumn.registry.closeAll()
+        layoutKeeper?.flush()
         guard let events else { return .terminateNow }
         // terminate may be called from a main-actor job (the --screenshot path); the main queue
         // is then busy for as long as AppKit waits for the reply, so neither stop() nor the
@@ -182,18 +227,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             column.focusActive()
             return
         }
-        guard let cli = kunj else { return }
+        if startTab(env: env, kind: kind) {
+            DispatchQueue.main.async { column.focusActive() }
+        }
+    }
+
+    /// Opens a `kind` tab in `env` (also one restored from the layout file); a refused spec shows
+    /// inline in the column and opens nothing.
+    @discardableResult
+    private func startTab(env: Environment, kind: TabKind) -> Bool {
+        let column = windowController.terminalColumn
+        guard let cli = kunj else { return false }
         do {
             let spec = try terminalSpec(cli: cli, env: env, kind: kind, shell: Self.loginShell,
                                         terminalEnv: ProcessInfo.processInfo.environment)
             column.registry.open(spec: spec, env: env, kind: kind)
             log("opened \(kind.rawValue) in \(env.id): \(spec.executable) \(spec.arguments.joined(separator: " ")) (cwd \(spec.cwd))")
-            DispatchQueue.main.async { column.focusActive() }
+            return true
         } catch let error as TerminalSpecError {
             column.showMessage(error.message)
         } catch {
             column.showMessage("\(error)")
         }
+        return false
     }
 
     @objc func nextTab(_ sender: Any?) { cycleTab(1) }

@@ -82,6 +82,61 @@ public func layoutPath(repoName: String, home: String = NSHomeDirectory()) -> St
         .appendingPathComponent("workspace.json").path
 }
 
+// MARK: saving and restoring one environment's tabs
+
+/// The tabs of an environment as the file keeps them: action tabs dropped, `active` (an index into
+/// `open`) moved to its place among the rest, nil when the active tab is an action tab.
+public func tabsToSave(_ open: [SavedTab], active: Int?) -> (tabs: [SavedTab], active: Int?) {
+    var tabs: [SavedTab] = []
+    var newActive: Int?
+    for (i, tab) in open.enumerated() where tab.kind != .action {
+        if i == active { newActive = tabs.count }
+        tabs.append(tab)
+    }
+    return (tabs, newActive)
+}
+
+/// The tabs to reopen when an environment is selected for the first time in a session, and which
+/// one becomes active. nil while the environment cannot run them (a missing worktree, a stopped
+/// container): the caller tries again on a later selection, and must not save over the entry
+/// meanwhile. An agent tab comes back only while the agent runs (it reattaches to its tmux
+/// session; restoring one that ended would start a new agent), and only one of them. `kinds` are
+/// the kinds the app can reopen (editor tabs once they exist).
+public func restorePlan(_ entry: BranchLayout, env: Environment,
+                        kinds: Set<TabKind> = [.shell, .agent]) -> (tabs: [SavedTab], active: Int?)? {
+    guard env.state == .ok || env.state == .running else { return nil }
+    let agentRuns = env.agent == .running || env.agent == .waiting
+    var tabs: [SavedTab] = []
+    var active: Int?
+    var hasAgent = false
+    for (i, tab) in entry.tabs.enumerated() where kinds.contains(tab.kind) && tab.kind != .action {
+        if tab.kind == .agent {
+            guard agentRuns, !hasAgent else { continue }
+            hasAgent = true
+        }
+        if i == entry.active { active = tabs.count }
+        tabs.append(tab)
+    }
+    return (tabs, active)
+}
+
+/// Which environments changed since the last listing, for `lastActivity`. The first listing only
+/// primes (launching the app is not activity); after that an environment whose state differs, or
+/// one that appeared (also one that comes back after a listing without it), is reported.
+public struct ActivityTracker: Sendable {
+    private var seen: [String: Environment]?
+
+    public init() {}
+
+    /// The ids, in listing order, of environments that changed or appeared.
+    public mutating func changed(_ repos: [RepoEnvironments]) -> [String] {
+        let envs = repos.flatMap(\.environments)
+        defer { seen = Dictionary(envs.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }
+        guard let seen else { return [] }
+        return envs.filter { seen[$0.id] != $0 }.map(\.id)
+    }
+}
+
 /// The layout at `path`; empty when the file is missing or not a layout.
 public func loadLayout(path: String) -> WorkspaceLayout {
     guard let data = FileManager.default.contents(atPath: path) else { return WorkspaceLayout() }
