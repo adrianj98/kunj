@@ -1,6 +1,6 @@
 ---
 title: Companion apps
-description: Install the VS Code extension and the macOS menu bar app with kunj install.
+description: Install the VS Code extension, the macOS menu bar app and the Workspace app with kunj install.
 sidebar:
   order: 3
 ---
@@ -8,15 +8,16 @@ sidebar:
 import { Aside } from '@astrojs/starlight/components';
 import CommandReference from '../../../components/CommandReference.astro';
 
-Two apps show your worktrees, which ones are open in an editor and their pull requests, without a
-terminal:
+Three apps work with your worktrees without a terminal:
 
 - **Kunj Worktrees**, a VS Code extension that also works in VS Code-like editors such as Cursor.
   See [VS Code extension](../../worktrees/vscode-extension/).
 - **Kunj.app**, a macOS menu bar app (macOS 14 or later). See
   [macOS app](../../worktrees/macos-app/).
+- **Kunj Workspace.app**, a window with every worktree and branch container, their terminals,
+  agents and changes (macOS 14 or later). See [Workspace app](../../workspace-app/).
 
-Both run the `kunj` CLI for everything, so install kunj first. `kunj install` downloads them from
+All three run the `kunj` CLI for everything, so install kunj first. `kunj install` downloads them from
 the [GitHub releases](https://github.com/adrianj98/kunj/releases) and installs them. `kunj setup`
 offers the same choice at the end.
 
@@ -24,6 +25,7 @@ offers the same choice at the end.
 kunj install            # choose from a checklist
 kunj install vscode     # just the extension
 kunj install macos      # just the menu bar app
+kunj install workspace  # just the Workspace app
 kunj install all -y     # everything available on this machine
 ```
 
@@ -57,14 +59,14 @@ If the editor's CLI isn't on your `PATH`, kunj says so: in VS Code run **Shell C
 'code' command in PATH** from the command palette, then try again. Reload open VS Code windows
 afterwards to load the extension.
 
-## macOS app
+## macOS apps
 
-The app is unpacked into `/Applications`, or `~/Applications` when `/Applications` isn't writable
+Both macOS apps are unpacked into `/Applications`, or `~/Applications` when `/Applications` isn't writable
 (an existing copy is replaced where it is, after quitting it), and then launched. Look for the
-branch icon in the menu bar. `kunj install` only offers it on macOS.
+menu bar app's branch icon in the menu bar. `kunj install` only offers them on macOS.
 
 <Aside type="note">
-The app is not notarized by Apple. kunj clears the download quarantine flag so it opens without a
+The apps are not notarized by Apple. kunj clears the download quarantine flag so they open without a
 Gatekeeper warning. If you download the zip by hand instead, right-click the app and choose
 **Open** the first time.
 </Aside>
@@ -76,4 +78,5 @@ If no release has an app yet, `kunj install` tells you to build it from a clone 
 ```bash
 cd vscode-extension && npm install && npm run install-local   # the VS Code extension
 cd macos-app && scripts/bundle.sh --install                   # the menu bar app
+cd workspace-app && scripts/bundle.sh --install               # the Workspace app
 ```

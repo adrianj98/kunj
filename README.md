@@ -18,13 +18,14 @@ CLI (`glab`), logged in. Then run `kunj setup` for shell aliases, optional Jira 
 ### 2. The apps (optional)
 
 ```bash
-kunj install          # asks which to install
-kunj install vscode   # VS Code extension (Kunj Worktrees); --editor cursor for Cursor & co.
-kunj install macos    # macOS menu bar app, into /Applications (or ~/Applications)
-kunj install all -y   # everything available, no questions
+kunj install            # asks which to install
+kunj install vscode     # VS Code extension (Kunj Worktrees); --editor cursor for Cursor & co.
+kunj install macos      # macOS menu bar app, into /Applications (or ~/Applications)
+kunj install workspace  # Kunj Workspace, the macOS app with terminals and agents per branch
+kunj install all -y     # everything available, no questions
 ```
 
-Both are downloaded from the [GitHub release](https://github.com/adrianj98/kunj/releases) matching
+They are downloaded from the [GitHub release](https://github.com/adrianj98/kunj/releases) matching
 your CLI version (or the newest one that has them). Running `kunj install` again updates them.
 
 To install by hand instead, download from the release:
@@ -34,6 +35,8 @@ To install by hand instead, download from the release:
 - **macOS** (14+): `Kunj-macos-<version>.zip`, unzip it, move `Kunj.app` to /Applications and, because
   the app is not signed or notarized yet, clear the quarantine before opening it:
   `xattr -dr com.apple.quarantine /Applications/Kunj.app`
+- **Workspace** (macOS 14+): `Kunj-workspace-<version>.zip`, the same way with `Kunj Workspace.app`:
+  `xattr -dr com.apple.quarantine "/Applications/Kunj Workspace.app"`
 
 ### From source (development)
 
@@ -41,6 +44,7 @@ To install by hand instead, download from the release:
 npm install && npm run build && npm link              # the CLI
 cd vscode-extension && npm install && npm run install-local   # the VS Code extension
 cd macos-app && scripts/bundle.sh --install           # the menu bar app
+cd workspace-app && scripts/bundle.sh --install       # the Workspace app
 ```
 
 ## Usage
@@ -566,6 +570,18 @@ kunj repos                 # repositories kunj has been used in, most recent fir
 kunj repos add ~/src/app   # add one by hand
 kunj repos remove ~/src/x  # hide one from the list
 ```
+
+### Workspace app
+
+The `workspace-app/` folder contains **Kunj Workspace**, a macOS window (14+) where every worktree
+and branch container of every repository in `kunj repos` is an environment with its own terminals,
+agent and open files. Selecting another branch swaps the whole window; the terminals of the others
+keep running. Agent tabs run `kunj agent <branch>` (or `kunj ct agent`), so they attach to the same
+tmux session as the CLI and survive the app quitting. A Changes column shows the branch's diff in
+Monaco, and small fixes can be made in editor tabs. Like the other apps it does everything through
+`kunj … --json`, and needs kunj 1.3.0 or newer. Install it with `kunj install workspace`; see the
+[user docs](https://adrianj98.github.io/kunj/docs/workspace-app/) and
+[workspace-app/README.md](./workspace-app/README.md).
 
 ## Development
 

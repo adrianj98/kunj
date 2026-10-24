@@ -2,15 +2,24 @@
 
 A native macOS app (AppKit, SwiftPM, no Xcode project) that lists every worktree and branch
 container kunj knows about as an environment, keeps terminals and agent sessions per environment,
-and shows each environment's changes. Everything goes through the installed `kunj` CLI
-(`kunj … --json`); the app never imports kunj, never runs `docker`, and runs `git` only read-only.
+shows each environment's changes in Monaco and edits files in editor tabs. Everything goes through
+the installed `kunj` CLI (`kunj … --json`); the app never imports kunj, never runs `docker`, and runs
+`git` only read-only (`GIT_OPTIONAL_LOCKS=0`). Its only state is UI layout in
+`~/.kunj/<repo>/workspace.json` and three user defaults (`kunjCommand`, `theme`, `showChanges`).
 
-Design: [docs/specs/workspace-ide.md](../docs/specs/workspace-ide.md) and
-[docs/workspace-app/design/](../docs/workspace-app/design/) (the app must look like
-`mockups/warm.png`). Plan: `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`.
+Users install it with `kunj install workspace` (or `kunj install all` on macOS), which downloads
+`Kunj-workspace-<version>.zip` from the GitHub release; what it does for them is in the user docs,
+[docs-site/src/content/docs/workspace-app.mdx](../docs-site/src/content/docs/workspace-app.mdx).
+It needs kunj 1.3.0 or newer (`MIN_KUNJ_VERSION`; a kunj reporting `1.0.0` is an `npm link`ed dev
+build, accepted and shown as `dev`), tmux to keep agents alive across launches, and Docker for
+containers.
 
-Needs macOS 14+, the Command Line Tools (Swift 6.x, used in Swift 5 language mode), Node and npm
-(Monaco), `curl`, `git` and network access on the first build.
+Design: [docs/specs/workspace-ide.md](../docs/specs/workspace-ide.md) (Layout, Architecture,
+Decisions, open questions) and [docs/workspace-app/design/](../docs/workspace-app/design/) (the app
+must look like `mockups/warm.png`). Plan: `docs/superpowers/plans/2026-10-23-workspace-app-v1.md`.
+
+Building needs macOS 14+, the Command Line Tools (Swift 6.x, used in Swift 5 language mode), Node
+and npm (Monaco), `curl`, `git` and network access on the first build.
 
 ## Layout
 
@@ -59,20 +68,62 @@ after your own bundle.
 ## Running
 
 ```bash
-scripts/bundle.sh && "build/Kunj Workspace.app/Contents/MacOS/KunjWorkspace" --screenshot /tmp/ws.png
-open "build/Kunj Workspace.app"
+scripts/bundle.sh && open "build/Kunj Workspace.app"
+scripts/bundle.sh --install            # replace /Applications/Kunj Workspace.app and launch it
+"build/Kunj Workspace.app/Contents/MacOS/KunjWorkspace" --demo --screenshot /tmp/ws.png
 ```
 
-`--screenshot <png>` renders the window after its first layout, writes the PNG (sRGB, 2x) and
-quits; add `--demo` to show the mockup's environments instead of kunj's (rendered in the warm
-theme unless `-theme light|graphite|warm` is passed for that run) and compare it with
-`docs/workspace-app/design/mockups/warm.png`. On launch the app logs to
-stderr whether the bundled fonts registered (they only do inside the `.app`). It runs kunj as the
-`kunjCommand` default (`defaults write <bundle id> kunjCommand "node /path/dist/index.js"`, or
-`-kunjCommand "…"` after the executable for one run), else `kunj` on the login shell's PATH, and
-shows its version at the sidebar's foot, or the error as the window's one message. Not notarized: if
-macOS refuses to open it, right-click > Open, or
+Launch arguments (after the executable):
+
+| Argument | Does |
+| --- | --- |
+| `--demo` | Shows the mockup's environments, tabs and diff (`Demo/`) instead of kunj's, in the warm theme with the Changes column open; nothing is read from or written to `workspace.json` |
+| `--screenshot <png>` | Renders the window after its first layout (waiting for Monaco's page, at most 8 s), writes the PNG (sRGB, 2x) and quits. Compare a `--demo` render with `docs/workspace-app/design/mockups/warm.png` |
+| `--theme warm\|light\|graphite` (or `-theme`) | The theme for this run, not saved |
+| `--changes` / `--no-changes` | The Changes column open or closed for this run, not saved |
+| `-kunjCommand "<command>"` | The kunj command for this run (`node /path/dist/index.js` for a dev build) |
+| `-openTabs "<env id>#<kind>,…"` | After the first listing, selects each environment and opens the tab (`kunj\|worktree\|main#shell,kunj\|worktree\|main#agent`); an entry without `#kind` only selects, which restores its saved tabs. For checking PTYs live without assistive access |
+
+The kunj command is the `kunjCommand` default (Settings, or
+`defaults write dev.kunj.workspace kunjCommand "node /path/dist/index.js"`), else `kunj` on the login
+shell's PATH. The app shows its version at the sidebar's foot, or the error (`npm install -g kunj`)
+as the window's one message. On launch it logs to stderr whether the bundled fonts registered (they
+only do inside the `.app`). Not notarized: if macOS refuses to open it, right-click > Open, or
 `xattr -dr com.apple.quarantine "/Applications/Kunj Workspace.app"`.
+
+The app has no automated UI tests. A change to the views ends with `scripts/bundle.sh`, a
+`--demo --screenshot` compared against `warm.png` (and `light.png`/`graphite.png` with `--theme`),
+and a run against the real kunj. `--screenshot` composites the Changes diff page and the visible
+terminals, not the editor page.
+
+## Code map
+
+| Path | What |
+| --- | --- |
+| `Sources/KunjWorkspaceCore/CLI/` | `KunjCLI` (runs kunj through `/usr/bin/env` with the login PATH, the version check), `ShellEnvironment` (login PATH, the PTY environment), `EventStream` (`kunj events --json` with stdin held open, restart with backoff), `ProcessRunner`, `Version` |
+| `Sources/KunjWorkspaceCore/JSON/KunjJSON.swift` | `Codable` mirrors of `src/lib/json-types.ts` (fields optional where kunj may omit them) |
+| `Sources/KunjWorkspaceCore/Model/` | `Environment` (id `<repo>\|<kind>\|<branch>`, `statusVerb`, `dot`, meta line), `EnvironmentList` (merging `worktree list` and `ct list`), `EnvironmentStore` (refreshes scoped by event, `onChange`, `onRepoChanged`), `EnvironmentFilter` (⌘K) |
+| `Sources/KunjWorkspaceCore/Terminal/` | `TerminalSpec` (shell, agent and action tabs, refused with a reason for a missing worktree or stopped container), `tabDot`, `exitCode(waitStatus:)`, `HiddenFeedScheduler` (hidden tabs fed under a 4 ms budget) |
+| `Sources/KunjWorkspaceCore/Diff/` | `DiffService` (scopes base/uncommitted/last, via `git` or `kunj ct exec`), `DiffModel`, `ChangesList` (row names), `GitRunner` |
+| `Sources/KunjWorkspaceCore/Files/` | `FileAccess` (worktree fs or `kunj ct file`), `EditorSave` (`saveDecision`, `editorRefusal`) |
+| `Sources/KunjWorkspaceCore/Layout/` | `WorkspaceLayout`, `LayoutStore` (debounced atomic writes), `restorePlan`, `ActivityTracker` |
+| `Sources/KunjWorkspaceCore/Actions/` | `actionPlan` (what is enabled, with the reason), `newSessionPlan`, `runOutcome`, `KunjSetting` |
+| `Sources/KunjWorkspaceCore/Design/` | `DesignTokens` (generated), `HexColor`, `RelativeTime` |
+| `Sources/KunjWorkspace/AppDelegate.swift` | Launch arguments, menus and shortcuts, discovery, wiring of the store, tabs and layout, quit (stops `kunj events`, closes every tab) |
+| `Sources/KunjWorkspace/Views/` | `MainWindowController` (window chrome, snapshot) and the sidebar, header, tab bar, terminal column, Changes column and status bar |
+| `Sources/KunjWorkspace/Terminal/`, `Model/` | `TerminalTab` (SwiftTerm), `TabRegistry` (tabs per environment), `LayoutKeeper` (layout file, `lastActivity`) |
+| `Sources/KunjWorkspace/Editor/` | `MonacoWebView` (the `kunj://` page, one-object page functions), `EditorTab` |
+| `Sources/KunjWorkspace/Actions/`, `Sheets/`, `Settings/` | `ActionRunner` (header, overflow menu, alerts), `NewSessionSheet`, `SettingsWindow` |
+| `Sources/KunjWorkspace/Theme/`, `Demo/` | `Theme`/`ThemeManager` (NSColor/NSFont from the tokens, system appearance), the `--demo` data |
+| `Resources/web/index.html`, `app.js` | The Monaco page: `?mode=diff` for the Changes column, `?mode=editor` for editor tabs |
+
+## Release
+
+The release workflow's `workspace-app` job (`.github/workflows/release.yml`, on `macos-15`) runs
+`npm ci` in `web/`, `scripts/bundle.sh` with `VERSION` set to the release version, zips the app with
+`ditto -c -k --keepParent "build/Kunj Workspace.app" "Kunj-workspace-$VERSION.zip"` and attaches it to
+the release. `kunj install workspace` (`src/lib/apps.ts`) finds that asset by the name pattern
+`Kunj-workspace-*.zip`, so keep the name in step. The app is ad-hoc signed, not notarized.
 
 ## Tests and fake-kunj
 

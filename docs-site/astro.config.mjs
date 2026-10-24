@@ -21,6 +21,7 @@ export default defineConfig({
         { label: 'Commits & pull requests', items: [{ autogenerate: { directory: 'commits-and-prs' } }] },
         { label: 'Worktrees', items: [{ autogenerate: { directory: 'worktrees' } }] },
         { label: 'Containers', items: [{ autogenerate: { directory: 'containers' } }] },
+        { label: 'Workspace app', slug: 'workspace-app' },
         { label: 'Work logs & team', items: [{ autogenerate: { directory: 'work-logs' } }] },
         { label: 'Configuration', items: [{ autogenerate: { directory: 'configuration' } }] },
         { label: 'Integrations', items: [{ autogenerate: { directory: 'integrations' } }] },

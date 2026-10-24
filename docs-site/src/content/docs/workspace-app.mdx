@@ -1,0 +1,188 @@
+---
+title: Workspace app
+description: Kunj Workspace is a macOS app that puts every worktree and branch container in one window, with their terminals, agents and changes.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Kunj Workspace (macOS 14 or newer) is a desktop app built around kunj where every branch is an
+**environment**: a local [worktree](../worktrees/overview/) or a
+[branch container](../containers/overview/). Each environment keeps its own terminals, its agent
+and its open files. Click another branch in the sidebar and the whole right side changes to it; the
+terminals of the branch you left keep running in the background.
+
+It is not a replacement for VS Code or Cursor. You use it to watch and steer many branches and agents
+at once, and hand a branch off to your editor (**Open in VS Code**) when you want to work in it
+properly.
+
+Like the [VS Code extension](../worktrees/vscode-extension/) and the
+[menu bar app](../worktrees/macos-app/), it does everything through `kunj … --json`. It can't do
+anything the CLI can't do, and it stores nothing except its window layout.
+
+## Install
+
+```bash
+kunj install workspace
+```
+
+This downloads `Kunj-workspace-<version>.zip` from the GitHub release (the one matching your CLI
+version when it has the app, else the newest), installs `Kunj Workspace.app` into `/Applications`
+(or `~/Applications`), clears the download quarantine and launches it. Run it again to update. On
+macOS `kunj install all` includes it. See [Companion apps](../integrations/apps/).
+
+To install by hand, unzip the release asset, move `Kunj Workspace.app` to `/Applications` and clear
+the quarantine, because the app is not notarized:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Kunj Workspace.app"
+```
+
+What it needs:
+
+- **kunj 1.3.0 or newer** on your login shell's `PATH` (apps started from Finder don't get one
+  otherwise). If kunj is missing or too old, the window says so and shows `npm install -g kunj`.
+  To use another command, such as `node /path/to/kunj/dist/index.js`, set it in Settings.
+- **tmux** (`brew install tmux`) so agents keep running when the app quits. See
+  [Agents](#agents).
+- **Docker** for branch containers. Without it your worktrees still show; the containers show as
+  unavailable until Docker is back.
+- `gh` or `glab`, logged in, for pull requests, as for `kunj pr`.
+
+## The window
+
+```
+┌──────────┬────────────────────────────────────────────────────┐
+│ sidebar  │ header: branch, repo · kind · ahead/behind · PR     │
+│          ├─────────────────────────────┬──────────────────────┤
+│ ⌘K       │ tabs                        │ Changes (⌘⇧C)        │
+│ sessions │ terminal / agent / editor   │ files │ diff          │
+│ by repo  │                             │       │               │
+│ + New    ├─────────────────────────────┴──────────────────────┤
+│ session  │ status bar                                          │
+└──────────┴────────────────────────────────────────────────────┘
+```
+
+- **Sidebar.** The repositories in [`kunj repos`](../worktrees/macos-app/#kunj-repos), each with its
+  worktrees and containers. A row shows the branch, when you last did something in it, the kind
+  (worktree or container) and its state: *Waiting for input*, *Running* (the agent), *Merged #398*,
+  *PR #412 open*, *3 changed files*, *↑2 unpushed*, *Clean*, or *Stopped* / *Missing*. The dot is
+  green while an agent works, amber when it waits for you. A worktree and a container on the same
+  branch are two rows. The box on top searches (⌘K), **+ New session** is at the bottom.
+- **Header.** The branch, then repository, kind, ahead/behind, the pull request (a link) and
+  forwarded ports (links that open your browser). On the right: **Shell**, **Agent**,
+  **Open in VS Code**, **Create PR** and a ⋯ menu with the rest.
+- **Tabs.** One per terminal, agent or open file. A green dot marks a running agent or command, an
+  amber one an agent waiting for input, a grey one a file with unsaved changes. On the right: the
+  agent's tmux session and how long it has been up.
+- **Changes** (hidden until you open it with the **Changes** pill or ⌘⇧C). The files the branch
+  changed, with added and removed line counts, and a diff of the selected file. The scope menu
+  compares with the branch's base (`origin/<base>`, from where the branch forked, uncommitted work
+  included), uncommitted changes only, or the last commit. It follows the branch as it changes.
+- **Status bar.** The worktree path or container name, uptime, services and forwarded ports; the
+  agent state on the right.
+
+Everything updates by itself: the app listens to [`kunj events`](../worktrees/events/), so a commit,
+a new worktree, a container starting or an agent finishing shows within a second or so, and work
+inside containers within about ten seconds.
+
+## Terminals and actions
+
+- **Shell** (⌘T) opens your login shell in the worktree, or `kunj ct shell <branch>` in a container.
+- **Agent** (⌘⇧A) runs `kunj agent <branch>` or `kunj ct agent <branch>` in a tab (see
+  [Agents](#agents)).
+- **Open in VS Code** (⌘O) runs `kunj worktree open` or `kunj ct open`, so it uses
+  `worktree.editorCommand` (Cursor and other editors work too).
+- **Create PR** (⌘⇧P) runs `kunj pr` in a tab of the worktree, which stays open so you can read the
+  pull request's URL. For a container it uses your checkout of the same branch on the Mac, and is
+  greyed out when there is none.
+- **New session** (⌘N) asks for a repository, a branch name, a base and whether you want a worktree
+  or a container, and can start an agent in it straight away. It runs `kunj worktree add -c` or
+  `kunj ct start -c` in a tab and selects the new environment once it is ready.
+- The **⋯ menu** has start, stop, rebuild and remove for a container, remove for a worktree, copy
+  the path, reveal in Finder, and `kunj ct prune`. Items that don't apply are greyed out with the
+  reason as a tooltip, and removing asks first, with a **Force** option.
+
+Long commands such as `kunj ct start` run in a terminal tab so you can watch them; the tab closes
+itself when the command succeeds and stays open with its exit code when it fails.
+
+## Editing files
+
+Double-click a file in Changes, or press **Edit** above its diff, to open it in a tab. It is a
+[Monaco](https://microsoft.github.io/monaco-editor/) editor (the editor of VS Code, without language
+servers) meant for small fixes. ⌘S saves, in the worktree or, for a container, through
+`kunj ct file write`. If the file changed on disk since you opened it, the app asks before
+overwriting it. Closing a tab or quitting with unsaved changes asks too. Binary files, files that are
+not UTF-8 and files over 5 MB are not opened.
+
+## Agents
+
+An agent tab runs `kunj agent <branch>` (in a container, `kunj ct agent <branch>`), which starts the
+agent (`agent.command`, `claude` by default) in a tmux session that kunj names, or attaches to it if
+it is already running. Because the session belongs to tmux and not to the app:
+
+- quitting, crashing or updating the app does not stop the agent; the next launch reattaches;
+- an agent you started with `kunj agent` in a terminal shows up in the app, and you can attach to
+  the app's agent from a terminal with `kunj agent <branch>`; both see the same session.
+
+The waiting-for-input state comes from Claude Code hooks that `kunj agent` installs (`agent.hooks`,
+on by default, only when the agent command is `claude`).
+
+Without tmux, or with **Run agents in tmux** turned off in Settings, the agent runs directly in the
+tab: it keeps running while the app is open, even when you look at another branch, but stops when
+the app quits. Containers always use tmux inside the container.
+
+## Tabs across launches
+
+The app remembers each environment's tabs in `~/.kunj/<repo>/workspace.json`. The first time you
+select an environment after launching, its shells reopen, its agent tab reattaches if the agent is
+still running, and its files reopen. A stopped container's tabs come back once it runs. Command tabs
+are not restored. The time on each sidebar row is your last activity there (typing in one of its
+tabs, or the branch changing), kept in the same file.
+
+## Shortcuts
+
+| Keys | Does |
+| --- | --- |
+| ⌘K | Search the sidebar (Esc clears it, Esc again goes back to the terminal) |
+| ⌘1 – ⌘9 | Select the first to ninth session the search shows |
+| ⌘N | New session |
+| ⌘T | New shell |
+| ⌘⇧A | Agent |
+| ⌘O | Open in VS Code |
+| ⌘⇧P | Create PR |
+| ⌘⇧C | Show or hide Changes |
+| ⌘⇧] / ⌘⇧[ | Next / previous tab |
+| ⌘W | Close the tab |
+| ⌘S | Save the file |
+| ⌘, | Settings |
+
+## Settings and themes
+
+**Settings…** (⌘,) has:
+
+- **kunj command**: `kunj` by default. Changing it reconnects; open tabs keep the command they
+  started with.
+- **Theme**: *Auto* (light or warm, following the system appearance), *Warm* (dark, the default),
+  *Light* or *Graphite*. **View › Theme** switches it too.
+- **Agents**: **Run agents in tmux** and **Show tmux status line**. These are kunj settings
+  (`agent.tmux`, `agent.tmuxStatus` in your global config), so they apply to `kunj agent` in a
+  terminal as well, and to agents started after the change.
+
+<Aside type="note">
+The app is not notarized by Apple. `kunj install` clears the quarantine flag; if you download the
+zip by hand, right-click the app and choose **Open** the first time, or run the `xattr` command
+above.
+</Aside>
+
+## Build from source
+
+You need macOS 14, the Swift toolchain (the Command Line Tools are enough), Node and npm:
+
+```bash
+cd workspace-app
+scripts/bundle.sh             # builds build/Kunj Workspace.app (arm64 and x86_64, ad-hoc signed)
+scripts/bundle.sh --install   # also copies it to /Applications and launches it
+```
+
+The first build downloads SwiftTerm, Monaco and the Inter and JetBrains Mono fonts.
+`workspace-app/README.md` in the repository has the details.

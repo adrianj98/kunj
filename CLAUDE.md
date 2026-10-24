@@ -151,7 +151,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
 - `kunj events [--json] [--repo <path>...]` - Stream changes to worktrees, containers and agents as NDJSON (see Events below)
-- `kunj install [vscode|macos|all]` - Download the VS Code extension / macOS app from the GitHub release and install them (also offered at the end of `kunj setup`)
+- `kunj install [vscode|macos|workspace|all]` - Download the VS Code extension / macOS app / Workspace app from the GitHub release and install them (also offered at the end of `kunj setup`)
 
 ## New Branches
 
@@ -397,6 +397,23 @@ older SDK because the Command Line Tools' newest SDK lacks the SwiftUI macro plu
 signed, not notarized. The release workflow's `macos-app` job attaches `Kunj-macos-<version>.zip`
 next to the `.vsix`; `kunj install` (src/lib/apps.ts) finds those assets by name pattern, preferring
 the release matching the CLI version, so keep the asset names in step with it.
+
+## Workspace App
+
+`workspace-app/` (AppKit + SwiftTerm, Monaco in two WKWebViews, macOS 14+, SwiftPM, no Xcode project) is
+the third consumer of the CLI's JSON: one window listing every worktree and branch container of the repos
+in `kunj repos --json` as environments, with terminals, agent tabs (`kunj agent`/`kunj ct agent`, so they
+reattach to kunj's tmux sessions), a Changes column and editor tabs. It runs `kunj … --json` with `cwd`
+= the repo root and the branch named, refreshes on `kunj events --json` (a child whose stdin it holds),
+never imports kunj, never runs `docker`, and runs `git` only read-only with `GIT_OPTIONAL_LOCKS=0`. Its only
+state is UI layout in `~/.kunj/<repo>/workspace.json`. `MIN_KUNJ_VERSION` is 1.3.0 (1.0.0 is accepted as a
+dev build), so a JSON or command change it relies on must stay additive. `KunjWorkspaceCore` (Foundation
+only) is unit tested with Swift Testing against `Tests/Fixtures/fake-kunj`; build with
+`workspace-app/scripts/test.sh` and `scripts/bundle.sh` (`SCRATCH=.build/<name>` when building in
+parallel; `--demo --screenshot <png>` renders the mockup data to compare with
+`docs/workspace-app/design/mockups/warm.png`). Spec: docs/specs/workspace-ide.md; build details in
+workspace-app/README.md. The release's `workspace-app` job attaches `Kunj-workspace-<version>.zip`, which
+`kunj install workspace` installs as `Kunj Workspace.app`.
 
 ## Events
 
