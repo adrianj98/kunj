@@ -326,7 +326,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     /// which cacheDisplay does not draw, so each visible terminal is rendered on its own and
     /// composited over its background colour (the spike's snapshot code).
     private func compositeTerminals(into rep: NSBitmapImageRep, root: NSView) {
-        let terms = terminalColumn.registry.allTabs.filter { !$0.isHidden && $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
+        let terms = terminalColumn.registry.allTerminals.filter { !$0.isHidden && $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
         guard !terms.isEmpty else { return }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)

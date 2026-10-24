@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- The Monaco page, served as kunj://app/index.html by MonacoWebView's scheme handler.
-     ?mode=diff: the Changes column's read-only diff editor; ?mode=editor: the editor tabs (Task 10).
+     ?mode=diff: the Changes column's read-only diff editor; ?mode=editor: the editor tabs.
      The page's functions are in app.js; Swift calls them with one argument object. -->
 <html>
 <head>
@@ -11,7 +11,7 @@
   @font-face { font-family: 'JetBrains Mono'; src: url('fonts/JetBrainsMono-Medium.ttf') format('truetype'); font-weight: 500; }
   @font-face { font-family: 'Inter'; src: url('fonts/Inter-Regular.ttf') format('truetype'); font-weight: 400; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
-  #c, #diff, #single { position: absolute; inset: 0; }
+  #c, #diff, #single, #editor { position: absolute; inset: 0; }
   /* A whole added or deleted file (app.js showSingle): the diff editor's colours and signs */
   .kunj-add-line, .kunj-add-margin { background: var(--add-bg); }
   .kunj-del-line, .kunj-del-margin { background: var(--del-bg); }
@@ -28,7 +28,7 @@
 </style>
 </head>
 <body>
-<div id="c"><div id="diff"></div><div id="single"></div></div>
+<div id="c"><div id="diff"></div><div id="single"></div><div id="editor"></div></div>
 <script src="app.js"></script>
 </body>
 </html>

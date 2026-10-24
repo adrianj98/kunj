@@ -8,6 +8,8 @@ struct TabBarItem: Equatable {
     var dot: DotColor?
     var active: Bool
     var toolTip: String?
+    /// An editor tab with unsaved changes: a `text2` dot (status colours stay for agent states).
+    var dirty = false
 }
 
 /// The left column's tab bar (40 px, padding 0 × 12): segmented 26 px pills, 2 px apart, then on
@@ -65,7 +67,8 @@ final class TabBarView: NSView {
         self.items = items
         pills.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for item in items {
-            let pill = PillView(item.title, dot: item.dot.map { theme.dotColor($0) }, active: item.active, theme: theme)
+            let dot = item.dot.map { theme.dotColor($0) } ?? (item.dirty ? theme.color(\.text2) : nil)
+            let pill = PillView(item.title, dot: dot, active: item.active, theme: theme)
             pill.toolTip = item.toolTip
             pill.onPress = { [weak self] in self?.onSelect(item.id) }
             pill.menu = closeMenu(for: item.id)

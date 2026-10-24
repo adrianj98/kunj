@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController = MainWindowController()
         windowController.onHeaderAction = { [weak self] action, env in self?.headerAction(action, env) }
         windowController.terminalColumn.onNewTab = { [weak self] in self?.openTab(.shell) }
+        wireEditors()
         windowController.showWindow(nil)
         windowController.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -90,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.kunjStatus = status
                 self.windowController.setKunjVersion(status.label)
                 self.windowController.changesColumn.source = DiffService(cli: cli)
+                self.windowController.terminalColumn.registry.fileAccess = FileAccess(cli: cli)
             }
             await loadEnvironments(cli: cli)
         } catch {
@@ -138,10 +140,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let registry else { return ([], nil) }
             let tabs = registry.tabs(for: id)
             let active = registry.active(for: id)
-            return (tabs.map { SavedTab(kind: $0.kind, title: $0.title, path: nil) },
+            return (tabs.map { SavedTab(kind: $0.kind, title: $0.title, path: ($0 as? EditorTab)?.path) },
                     tabs.firstIndex { $0 === active })
         }
-        keeper.open = { [weak self] env, tab in _ = self?.startTab(env: env, kind: tab.kind) }
+        keeper.open = { [weak self] env, tab in
+            if tab.kind == .editor {
+                if let path = tab.path { self?.windowController.terminalColumn.registry.openEditor(env: env, path: path) }
+            } else {
+                _ = self?.startTab(env: env, kind: tab.kind)
+            }
+        }
         keeper.activate = { [weak registry] id, index in
             guard let registry else { return }
             let tabs = registry.tabs(for: id)
@@ -184,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// so nothing the app started outlives it.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateLater }
+        guard confirmQuitWithUnsavedEditors() else { return .terminateCancel }
         terminating = true
         windowController?.terminalColumn.registry.closeAll()
         layoutKeeper?.flush()
@@ -286,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildMenu() -> NSMenu {
         let main = NSMenu()
-        for menu in [appMenu(), editMenu(), viewMenu(), environmentMenu(), tabsMenu(), windowMenu()] {
+        for menu in [appMenu(), fileMenu(), editMenu(), viewMenu(), environmentMenu(), tabsMenu(), windowMenu()] {
             let item = NSMenuItem()
             item.submenu = menu
             main.addItem(item)
@@ -300,6 +309,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Kunj Workspace", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu
+    }
+
+    // MARK: editor tabs and File > Save
+
+    /// File: Save ⌘S (the active editor tab; ⌘S inside the editor page posts the same save).
+    private func fileMenu() -> NSMenu {
+        let menu = NSMenu(title: "File")
+        menu.addItem(withTitle: "Save", action: #selector(saveFile(_:)), keyEquivalent: "s").target = self
+        return menu
+    }
+
+    @objc func saveFile(_ sender: Any?) {
+        let column = windowController.terminalColumn
+        guard let editor = column.activeEditor else { return }
+        Task { await column.registry.save(editor) }
+    }
+
+    /// Edit (or a double-click) in the Changes column opens the file in an editor tab; a save
+    /// reloads the column (its counts), since a working-tree edit makes no `git` event.
+    private func wireEditors() {
+        let column = windowController.terminalColumn
+        windowController.changesColumn.onEdit = { [weak column] env, path in
+            guard let column else { return }
+            column.showMessage(nil)
+            column.registry.openEditor(env: env, path: path) { [weak column] reason in column?.showMessage(reason) }
+            DispatchQueue.main.async { column.focusActive() }
+        }
+        column.registry.onSaved = { [weak windowController] tab in
+            windowController?.changesColumn.repoChanged(root: tab.env.repo.root)
+        }
+    }
+
+    /// Quitting with unsaved editor tabs asks first; true to quit.
+    private func confirmQuitWithUnsavedEditors() -> Bool {
+        let dirty = windowController?.terminalColumn.registry.allEditors.filter(\.dirty) ?? []
+        guard !dirty.isEmpty else { return true }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = dirty.count == 1 ? "\(dirty[0].title) has unsaved changes"
+            : "\(dirty.count) files have unsaved changes"
+        alert.informativeText = dirty.map(\.path).joined(separator: "\n")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Quit Without Saving")
+        return alert.runModal() == .alertSecondButtonReturn
     }
 
     private func editMenu() -> NSMenu {
@@ -376,6 +429,8 @@ extension AppDelegate: NSMenuItemValidation {
             return env.map { windowController.terminalColumn.registry.tabs(for: $0.id).count > 1 } ?? false
         case #selector(closeTab(_:)):
             return windowController?.terminalColumn.activeTab != nil
+        case #selector(saveFile(_:)):
+            return windowController?.terminalColumn.activeEditor?.loaded == true
         default:
             return true
         }

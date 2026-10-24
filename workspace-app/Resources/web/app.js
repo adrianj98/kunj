@@ -1,6 +1,8 @@
 // The Monaco page. Swift (MonacoWebView) calls `window.kunj[name](args)` with one argument object
 // and receives messages posted to `window.webkit.messageHandlers.kunj`: `ready` once Monaco is up,
-// `error` for page errors. Modes: `?mode=diff` (the Changes column) and `?mode=editor` (Task 10).
+// `error` for page errors. Modes: `?mode=diff` (the Changes column) and `?mode=editor` (the editor
+// tabs: one model per open file, keyed by the tab id; posts `dirty` and `save` with the id only, so
+// the page never names a file to Swift).
 (function () {
   'use strict';
   const mode = new URLSearchParams(location.search).get('mode') || 'diff';
@@ -13,6 +15,7 @@
   const FONT = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
   const FONT_SIZE = 11.5; // tokens.json type.mono-diff: 11.5px / 1.65
   const LINE_HEIGHT = Math.round(11.5 * 1.65);
+  const EDITOR_FONT_SIZE = 12.5; // the terminal's size: an editor tab sits where terminals do
 
   // Language ids by file extension (Monaco's basic languages), or by file name.
   const BY_EXT = {
@@ -160,6 +163,94 @@
   };
   window.kunj = api;
 
+  // ---- editor mode ----
+  let code = null; // the editor (editor mode)
+  const files = new Map(); // tab id -> { model, saved (alternative version id), dirty, view }
+  let current = null;
+
+  function postDirty(id, f) {
+    const dirty = f.model.getAlternativeVersionId() !== f.saved;
+    if (dirty === f.dirty) return;
+    f.dirty = dirty;
+    post({ type: 'dirty', id, dirty });
+  }
+
+  Object.assign(api, {
+    /** Opens (or replaces) the tab `id`'s file and shows it. */
+    openFile({ id, content, language, path }) {
+      const old = files.get(id);
+      if (old) old.model.dispose();
+      const model = monaco.editor.createModel(content || '', language || languageFor(path));
+      const f = { model, saved: model.getAlternativeVersionId(), dirty: false, view: null };
+      files.set(id, f);
+      model.onDidChangeContent(() => postDirty(id, f));
+      if (old && old.dirty) post({ type: 'dirty', id, dirty: false });
+      return api.showFile({ id });
+    },
+
+    /** Shows the tab `id`'s file, where it was scrolled to. */
+    showFile({ id }) {
+      const f = files.get(id);
+      if (!f) return false;
+      if (current === id && code.getModel() === f.model) return true;
+      const prev = current && files.get(current);
+      if (prev) prev.view = code.saveViewState();
+      current = id;
+      code.setModel(f.model);
+      if (f.view) code.restoreViewState(f.view);
+      return true;
+    },
+
+    closeFile({ id }) {
+      const f = files.get(id);
+      if (!f) return false;
+      files.delete(id);
+      if (current === id) { code.setModel(null); current = null; }
+      f.model.dispose();
+      return true;
+    },
+
+    /** The text to save and its version, which `markSaved` takes back once it is written. */
+    getContent({ id }) {
+      const f = files.get(id);
+      if (!f) return null;
+      return { content: f.model.getValue(), version: f.model.getAlternativeVersionId() };
+    },
+
+    /** `version` (from getContent) is on disk: the tab is clean while the text is that version. */
+    markSaved({ id, version }) {
+      const f = files.get(id);
+      if (!f) return false;
+      f.saved = version;
+      postDirty(id, f);
+      return true;
+    },
+
+    focus() { if (code) code.focus(); return true; },
+  });
+
+  function createEditor() {
+    code = monaco.editor.create(document.getElementById('editor'), Object.assign({}, COMMON, {
+      model: null,
+      readOnly: false,
+      fontSize: EDITOR_FONT_SIZE,
+      lineHeight: Math.round(EDITOR_FONT_SIZE * 1.6),
+      lineNumbersMinChars: 4,
+      lineDecorationsWidth: 10,
+      renderLineHighlight: 'line',
+      contextmenu: true,
+      matchBrackets: 'near',
+      occurrencesHighlight: 'singleFile',
+      selectionHighlight: true,
+      padding: { top: 12, bottom: 12 },
+      scrollBeyondLastLine: true,
+    }));
+    // ⌘S inside Monaco (the File > Save menu covers it when the page does not take the key)
+    code.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      if (current) post({ type: 'save', id: current });
+    });
+  }
+
   function showSingle(text, added, lang) {
     const model = monaco.editor.createModel(text, lang);
     const dispose = replaceModels([model]);
@@ -234,7 +325,7 @@
       try { await document.fonts.load(`${FONT_SIZE}px 'JetBrains Mono'`); } catch (e) { /* fallback font */ }
       monaco.editor.defineTheme('kunj', { base: 'vs-dark', inherit: true, rules: [], colors: {} });
       if (mode === 'diff') createDiff();
-      // ?mode=editor: Task 10 adds the editor and its functions here.
+      else createEditor();
       post({ type: 'ready', mode });
     }, (err) => post({ type: 'error', message: 'require failed: ' + err }));
   };

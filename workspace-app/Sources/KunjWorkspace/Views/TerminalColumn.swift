@@ -4,7 +4,8 @@ import KunjWorkspaceCore
 /// The left column under the header: the tab bar (40 px, a `border` hairline under it) over the
 /// terminal area in `term`. It holds every open tab's view of every environment (the registry's),
 /// shows the selected environment's active tab and keeps the others hidden, so their processes
-/// and scrollback are never touched by switching. An inline message (a refused Shell or Agent)
+/// and scrollback are never touched by switching. Editor tabs show the registry's one editor page
+/// in place of the terminal. An inline message (a refused Shell or Agent)
 /// or a hint replaces the terminal when there is nothing to show.
 final class TerminalColumn: NSView {
     var theme: Theme { didSet { apply() } }
@@ -88,24 +89,39 @@ final class TerminalColumn: NSView {
         sync()
     }
 
-    var activeTab: TerminalTab? { environment.flatMap { registry.active(for: $0.id) } }
+    var activeTab: (any WorkspaceTab)? { environment.flatMap { registry.active(for: $0.id) } }
+    var activeEditor: EditorTab? { activeTab as? EditorTab }
 
-    /// Gives the active terminal the keyboard.
+    /// Gives the active tab the keyboard.
     func focusActive() {
-        guard let tab = activeTab, !tab.inBackground else { return }
+        if activeEditor != nil {
+            guard messageText == nil else { return }
+            window?.makeFirstResponder(registry.editorView.webView)
+            Task { await registry.editorView.call("focus") }
+            return
+        }
+        guard let tab = activeTab as? TerminalTab, !tab.inBackground else { return }
         window?.makeFirstResponder(tab)
     }
 
-    private func tab(id: String) -> TerminalTab? {
+    private func tab(id: String) -> (any WorkspaceTab)? {
         guard let env = environment else { return nil }
         return registry.tabs(for: env.id).first { $0.id == id }
     }
 
     private func sync() {
         let active = activeTab
-        for tab in registry.allTabs {
+        for tab in registry.allTerminals {
             place(tab)
             tab.inBackground = tab !== active
+        }
+        // Editor tabs share one page: shown while the active tab is an editor, on that tab's file
+        if registry.hasEditorView {
+            let page = registry.editorView
+            placeEditor(page)
+            let editor = active as? EditorTab
+            page.isHidden = editor == nil || messageText != nil
+            editor?.show()
         }
         let hasTabs = environment.map { !registry.tabs(for: $0.id).isEmpty } ?? false
         if let messageText {
@@ -118,7 +134,7 @@ final class TerminalColumn: NSView {
         let showMessage = environment != nil && (messageText != nil || !hasTabs)
         message.isHidden = !showMessage
         hint.isHidden = !showMessage
-        active?.inBackground = messageText != nil
+        (active as? TerminalTab)?.inBackground = messageText != nil
         syncBar()
     }
 
@@ -126,14 +142,19 @@ final class TerminalColumn: NSView {
         guard let env = environment else { tabBar.show([], tmux: nil); return }
         let tabs = registry.tabs(for: env.id)
         let active = registry.active(for: env.id)
-        let items = tabs.map { t in
-            TabBarItem(id: t.id, title: t.title,
-                       dot: tabDot(kind: t.kind, running: t.running || t.spec == nil, agent: env.agent),
-                       active: t === active,
-                       toolTip: t.exited.map { "exited with code \($0)" } ?? t.programTitle)
+        let items = tabs.map { tab -> TabBarItem in
+            if let e = tab as? EditorTab {
+                return TabBarItem(id: e.id, title: e.title, dot: nil, active: e === active,
+                                  toolTip: e.dirty ? "\(e.path) (unsaved)" : e.path, dirty: e.dirty)
+            }
+            let t = tab as! TerminalTab
+            return TabBarItem(id: t.id, title: t.title,
+                              dot: tabDot(kind: t.kind, running: t.running || t.spec == nil, agent: env.agent),
+                              active: t === active,
+                              toolTip: t.exited.map { "exited with code \($0)" } ?? t.programTitle)
         }
         var tmux: String?
-        if let agentTab = tabs.first(where: { $0.kind == .agent }) {
+        if let agentTab = tabs.lazy.compactMap({ $0 as? TerminalTab }).first(where: { $0.kind == .agent }) {
             let session = env.agentSession ?? (env.kind == .container ? "agent" : nil)
             let up = uptime(since: agentTab.startedAt)
             tmux = session.map { "tmux \($0) · \(up)" } ?? up
@@ -150,6 +171,18 @@ final class TerminalColumn: NSView {
             tab.leadingAnchor.constraint(equalTo: body.leadingAnchor, constant: Self.insetX),
             tab.trailingAnchor.constraint(equalTo: body.trailingAnchor, constant: -Self.insetX / 2),
             tab.bottomAnchor.constraint(equalTo: body.bottomAnchor, constant: -Self.insetY / 2),
+        ])
+    }
+
+    /// The editor page fills the terminal area edge to edge (Monaco pads its own text).
+    private func placeEditor(_ page: MonacoWebView) {
+        guard page.superview !== body else { return }
+        body.addSubview(page, positioned: .below, relativeTo: message)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: body.topAnchor),
+            page.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            page.bottomAnchor.constraint(equalTo: body.bottomAnchor),
         ])
     }
 

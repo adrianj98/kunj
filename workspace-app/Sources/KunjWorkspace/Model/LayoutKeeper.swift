@@ -44,7 +44,7 @@ final class LayoutKeeper {
             restored.insert(env.id)
             return
         }
-        guard let plan = restorePlan(entry, env: env) else { return }
+        guard let plan = restorePlan(entry, env: env, kinds: [.shell, .agent, .editor]) else { return }
         restored.insert(env.id)
         let before = tabs(env.id).tabs.count
         for tab in plan.tabs { open(env, tab) }

@@ -1,21 +1,44 @@
 import AppKit
 import KunjWorkspaceCore
 
-/// Every open terminal tab, per environment id, and which one is active in each. The views are
-/// created here and placed by the TerminalColumn; closing a tab ends its process.
+/// A tab of the left column: a terminal (`TerminalTab`) or an editor (`EditorTab`).
+@MainActor
+protocol WorkspaceTab: AnyObject {
+    var id: String { get }
+    var envId: String { get }
+    var kind: TabKind { get }
+    var title: String { get }
+    /// The tab's process runs (always true for an editor).
+    var running: Bool { get }
+}
+
+extension TerminalTab: WorkspaceTab {}
+
+/// Every open tab, terminals and editors, per environment id, and which one is active in each.
+/// Terminal views are created here and placed by the TerminalColumn; closing a terminal ends its
+/// process. Editor tabs share one Monaco page (`editorView`, created with the first one); closing a
+/// dirty one asks first.
 @MainActor
 final class TabRegistry {
-    private var tabsByEnv: [String: [TerminalTab]] = [:]
+    private var tabsByEnv: [String: [any WorkspaceTab]] = [:]
     private var activeByEnv: [String: String] = [:]
     private var counters: [String: Int] = [:]
     var theme: Theme {
-        didSet { for t in allTabs { t.apply(theme) } }
+        didSet {
+            for t in allTerminals { t.apply(theme) }
+            if let editorPage { Task { await editorPage.call("setTheme", ["tokens": MonacoWebView.tokens(theme)]) } }
+        }
     }
     /// Called after tabs were opened, closed, activated or changed state; the argument is the
     /// environment id whose tabs changed.
     var onChange: ((String) -> Void)?
     /// A key press went to a tab of this environment (its `lastActivity`).
     var onInput: ((String) -> Void)?
+    /// Reads and writes editor tabs' files (set once kunj is discovered; no editor tabs before).
+    var fileAccess: FileAccess?
+    /// An editor tab saved its file (the Changes column reloads).
+    var onSaved: ((EditorTab) -> Void)?
+    private var editorPage: MonacoWebView?
     private var keyMonitor: Any?
 
     init(theme: Theme) {
@@ -31,11 +54,13 @@ final class TabRegistry {
         }
     }
 
-    var allTabs: [TerminalTab] { tabsByEnv.values.flatMap { $0 } }
+    var allTabs: [any WorkspaceTab] { tabsByEnv.values.flatMap { $0 } }
+    var allTerminals: [TerminalTab] { allTabs.compactMap { $0 as? TerminalTab } }
+    var allEditors: [EditorTab] { allTabs.compactMap { $0 as? EditorTab } }
 
-    func tabs(for envId: String) -> [TerminalTab] { tabsByEnv[envId] ?? [] }
+    func tabs(for envId: String) -> [any WorkspaceTab] { tabsByEnv[envId] ?? [] }
 
-    func active(for envId: String) -> TerminalTab? {
+    func active(for envId: String) -> (any WorkspaceTab)? {
         let tabs = tabs(for: envId)
         return tabs.first { $0.id == activeByEnv[envId] } ?? tabs.first
     }
@@ -60,18 +85,105 @@ final class TabRegistry {
     }
 
     private func makeTab(env: Environment, kind: TabKind, title: String, spec: TerminalSpec?) -> TerminalTab {
-        let key = "\(env.id)#\(kind.rawValue)"
-        let n = (counters[key] ?? 0) + 1
-        counters[key] = n
-        let tab = TerminalTab(id: "\(key)#\(n)", envId: env.id, kind: kind, title: title, spec: spec, theme: theme)
+        let tab = TerminalTab(id: nextId(env: env, kind: kind), envId: env.id, kind: kind, title: title, spec: spec,
+                              theme: theme)
         tab.onExit = { [weak self] t in self?.exited(t) }
         tab.onTitle = { [weak self] t in self?.onChange?(t.envId) }
-        tabsByEnv[env.id, default: []].append(tab)
-        activeByEnv[env.id] = tab.id
+        add(tab)
         return tab
     }
 
-    func activate(_ tab: TerminalTab) {
+    private func nextId(env: Environment, kind: TabKind) -> String {
+        let key = "\(env.id)#\(kind.rawValue)"
+        let n = (counters[key] ?? 0) + 1
+        counters[key] = n
+        return "\(key)#\(n)"
+    }
+
+    private func add(_ tab: any WorkspaceTab) {
+        tabsByEnv[tab.envId, default: []].append(tab)
+        activeByEnv[tab.envId] = tab.id
+    }
+
+    // MARK: editors
+
+    /// The editor tabs' Monaco page, created with the first editor tab.
+    var editorView: MonacoWebView {
+        if let editorPage { return editorPage }
+        let page = MonacoWebView(mode: "editor")
+        page.onMessage = { [weak self] m in self?.editorMessage(m) }
+        editorPage = page
+        Task { await page.call("setTheme", ["tokens": MonacoWebView.tokens(theme)]) }
+        return page
+    }
+    var hasEditorView: Bool { editorPage != nil }
+
+    /// Opens `path` of `env` in an editor tab and makes it active (an open tab of that file is
+    /// activated instead). The file loads in the background; when it cannot be read (or is binary
+    /// or too large) the tab closes and `failed` gets the reason. nil before kunj is discovered.
+    @discardableResult
+    func openEditor(env: Environment, path: String, failed: @escaping (String) -> Void = { _ in }) -> EditorTab? {
+        if let open = tabs(for: env.id).lazy.compactMap({ $0 as? EditorTab }).first(where: { $0.path == path }) {
+            activate(open)
+            return open
+        }
+        guard let access = fileAccess else { return nil }
+        let tab = EditorTab(id: nextId(env: env, kind: .editor), env: env, path: path, access: access, page: editorView)
+        add(tab)
+        onChange?(env.id)
+        Task { @MainActor in
+            do {
+                try await tab.load()
+                self.onChange?(env.id) // the column shows it now that the page has it
+            } catch {
+                log("editor: cannot open \(path) in \(env.id): \(error)")
+                self.remove(tab)
+                failed("Cannot open \(path): \(EditorTab.message(error))")
+            }
+        }
+        return tab
+    }
+
+    /// Saves an editor tab (File > Save, ⌘S in the page); `onSaved` follows a save.
+    @discardableResult
+    func save(_ tab: EditorTab) async -> Bool {
+        let saved = await tab.save()
+        if saved { onSaved?(tab) }
+        return saved
+    }
+
+    /// Messages from the editor page: `dirty` and `save` carry only a tab id.
+    private func editorMessage(_ m: [String: Any]) {
+        switch m["type"] as? String {
+        case "dirty":
+            guard let tab = editor(id: m["id"]), let dirty = m["dirty"] as? Bool, tab.dirty != dirty else { return }
+            tab.dirty = dirty
+            onChange?(tab.envId)
+        case "save":
+            guard let tab = editor(id: m["id"]) else { return }
+            Task { await self.save(tab) }
+        case "ready":
+            // A page reloaded after its process ended has lost every model: read the files again
+            // (unsaved text is gone with the process).
+            for tab in allEditors where tab.loaded {
+                Task { @MainActor in
+                    if (try? await tab.load()) == nil { self.remove(tab) }
+                    self.onChange?(tab.envId)
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    private func editor(id: Any?) -> EditorTab? {
+        guard let id = id as? String else { return nil }
+        return allEditors.first { $0.id == id }
+    }
+
+    // MARK: activation and closing
+
+    func activate(_ tab: any WorkspaceTab) {
         guard activeByEnv[tab.envId] != tab.id else { return }
         activeByEnv[tab.envId] = tab.id
         onChange?(tab.envId)
@@ -85,12 +197,37 @@ final class TabRegistry {
         activate(tabs[(i + step + tabs.count) % tabs.count])
     }
 
-    /// Ends the tab's process and removes it; the tab to its left (else right) becomes active.
-    func close(_ tab: TerminalTab) {
+    /// Closes a tab: a terminal's process ends; a dirty editor asks first (Save closes it once
+    /// saved, Don't Save closes it, Cancel keeps it). The tab to its left (else right) becomes active.
+    func close(_ tab: any WorkspaceTab) {
+        guard let editor = tab as? EditorTab, editor.dirty else { remove(tab); return }
+        let alert = NSAlert()
+        alert.messageText = "Save changes to \(editor.title)?"
+        alert.informativeText = "\(editor.path): your changes are lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            Task { @MainActor in
+                if await self.save(editor) { self.remove(editor) }
+            }
+        case .alertSecondButtonReturn:
+            remove(editor)
+        default:
+            break
+        }
+    }
+
+    private func remove(_ tab: any WorkspaceTab) {
         guard var tabs = tabsByEnv[tab.envId], let i = tabs.firstIndex(where: { $0 === tab }) else { return }
-        tab.onExit = nil
-        tab.close()
-        tab.removeFromSuperview()
+        if let terminal = tab as? TerminalTab {
+            terminal.onExit = nil
+            terminal.close()
+            terminal.removeFromSuperview()
+        } else if let editor = tab as? EditorTab {
+            editor.discard()
+        }
         tabs.remove(at: i)
         tabsByEnv[tab.envId] = tabs.isEmpty ? nil : tabs
         if activeByEnv[tab.envId] == tab.id {
@@ -99,9 +236,10 @@ final class TabRegistry {
         onChange?(tab.envId)
     }
 
-    /// Ends every tab's process (the app is quitting). tmux sessions stay: `tmux attach` only detaches.
+    /// Ends every terminal's process (the app is quitting). tmux sessions stay: `tmux attach` only
+    /// detaches. Editor tabs need nothing (the app asked about unsaved ones before).
     func closeAll() {
-        for tab in allTabs {
+        for tab in allTerminals {
             tab.onExit = nil
             tab.close()
         }
@@ -112,7 +250,7 @@ final class TabRegistry {
     private func exited(_ tab: TerminalTab) {
         let code = tab.exited ?? -1
         if code == 0 && (tab.kind == .shell || tab.spec?.closeOnExitZero == true) {
-            close(tab)
+            remove(tab)
             return
         }
         let muted = "\u{1b}[90m"

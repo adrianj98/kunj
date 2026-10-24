@@ -35,6 +35,15 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private let table = NSTableView()
     private let listScroll = NSScrollView()
     let diffView = MonacoWebView(mode: "diff")
+    /// The diff's header (warm.html's hunk header row: 29 px, `raised2`, mono 11.5 `muted`, a
+    /// `border` hairline under it): the selected file's path and `Edit`.
+    private let diffHeader = FillView(.clear)
+    private let diffHeaderLine = FillView(.clear)
+    private let pathLabel = makeLabel("", font: Theme.mono(11.5), color: .clear)
+    private let editButton = HeaderTextButton("Edit")
+    /// Edit (or a double-click on a file): open the file of the environment in an editor tab.
+    var onEdit: ((Environment, String) -> Void)?
+    static let diffHeaderHeight: CGFloat = 29
 
     private var summary = DiffSummary(files: [])
     private var names: [String] = []
@@ -69,7 +78,12 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         buildTable()
         for v in [bar, barLine, body] { addSubview(v) }
         for v in [title, counts, scopeButton] as [NSView] { bar.addSubview(v) }
-        for v in [listScroll, listLine, diffView, emptyLabel] as [NSView] { body.addSubview(v) }
+        for v in [listScroll, listLine, diffHeader, diffHeaderLine, diffView, emptyLabel] as [NSView] { body.addSubview(v) }
+        for v in [pathLabel, editButton] as [NSView] { diffHeader.addSubview(v) }
+        pathLabel.lineBreakMode = .byTruncatingHead
+        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        editButton.toolTip = "Edit this file in a tab (or double-click it)"
+        editButton.onPress = { [weak self] in self?.editSelected() }
         title.setContentCompressionResistancePriority(.required, for: .horizontal)
         counts.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         scopeButton.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -111,9 +125,22 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
             listLine.topAnchor.constraint(equalTo: body.topAnchor),
             listLine.bottomAnchor.constraint(equalTo: body.bottomAnchor),
             listLine.widthAnchor.constraint(equalToConstant: 1),
+            diffHeader.leadingAnchor.constraint(equalTo: listLine.trailingAnchor),
+            diffHeader.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            diffHeader.topAnchor.constraint(equalTo: body.topAnchor),
+            diffHeader.heightAnchor.constraint(equalToConstant: Self.diffHeaderHeight),
+            pathLabel.leadingAnchor.constraint(equalTo: diffHeader.leadingAnchor, constant: 14),
+            pathLabel.centerYAnchor.constraint(equalTo: diffHeader.centerYAnchor),
+            pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: editButton.leadingAnchor, constant: -8),
+            editButton.trailingAnchor.constraint(equalTo: diffHeader.trailingAnchor, constant: -8),
+            editButton.centerYAnchor.constraint(equalTo: diffHeader.centerYAnchor),
+            diffHeaderLine.topAnchor.constraint(equalTo: diffHeader.bottomAnchor),
+            diffHeaderLine.leadingAnchor.constraint(equalTo: diffHeader.leadingAnchor),
+            diffHeaderLine.trailingAnchor.constraint(equalTo: diffHeader.trailingAnchor),
+            diffHeaderLine.heightAnchor.constraint(equalToConstant: 1),
             diffView.leadingAnchor.constraint(equalTo: listLine.trailingAnchor),
             diffView.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-            diffView.topAnchor.constraint(equalTo: body.topAnchor),
+            diffView.topAnchor.constraint(equalTo: diffHeaderLine.bottomAnchor),
             diffView.bottomAnchor.constraint(equalTo: body.bottomAnchor),
 
             emptyLabel.centerXAnchor.constraint(equalTo: body.centerXAnchor),
@@ -143,6 +170,8 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         table.dataSource = self
         table.delegate = self
         table.setAccessibilityLabel("Changed files")
+        table.target = self
+        table.doubleAction = #selector(doubleClicked)
         listScroll.documentView = table
         listScroll.drawsBackground = false
         listScroll.hasVerticalScroller = true
@@ -306,6 +335,35 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         if table.selectedRow >= 0 { loadSelected() }
     }
 
+    // MARK: editing
+
+    @objc private func doubleClicked() {
+        let row = table.clickedRow
+        guard summary.files.indices.contains(row) else { return }
+        edit(summary.files[row])
+    }
+
+    private func editSelected() {
+        let row = table.selectedRow
+        guard summary.files.indices.contains(row) else { return }
+        edit(summary.files[row])
+    }
+
+    /// A deleted file has nothing in the working tree to edit.
+    private func edit(_ file: ChangedFile) {
+        guard let env = environment, file.status != .deleted else { return }
+        onEdit?(env, file.path)
+    }
+
+    private func renderDiffHeader() {
+        let row = table.selectedRow
+        let file = summary.files.indices.contains(row) ? summary.files[row] : nil
+        pathLabel.stringValue = file?.path ?? ""
+        editButton.isEnabled = file != nil && file?.status != .deleted && onEdit != nil
+        editButton.toolTip = file?.status == .deleted
+            ? "A deleted file cannot be edited" : "Edit this file in a tab (or double-click it)"
+    }
+
     // MARK: rendering
 
     private func render() {
@@ -313,6 +371,9 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         listScroll.isHidden = !hasFiles
         listLine.isHidden = !hasFiles
         diffView.isHidden = !hasFiles
+        diffHeader.isHidden = !hasFiles
+        diffHeaderLine.isHidden = !hasFiles
+        renderDiffHeader()
         emptyLabel.isHidden = hasFiles || message == nil
         emptyLabel.stringValue = message ?? ""
         counts.isHidden = failed || !loaded
@@ -340,6 +401,10 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         bar.color = theme.color(\.bg)
         barLine.color = theme.color(\.border)
         listLine.color = theme.color(\.border)
+        diffHeader.color = theme.color(\.raised2)
+        diffHeaderLine.color = theme.color(\.border)
+        pathLabel.textColor = theme.color(\.muted)
+        editButton.theme = theme
         body.color = theme.color(\.bg)
         title.textColor = theme.color(\.text)
         emptyLabel.textColor = theme.color(\.muted)
@@ -377,6 +442,7 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         restoreSelectionMarks()
+        renderDiffHeader()
         guard !selecting else { return }
         let row = table.selectedRow
         selectedPath = summary.files.indices.contains(row) ? summary.files[row].path : nil
