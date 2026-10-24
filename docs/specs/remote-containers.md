@@ -15,8 +15,7 @@ later phase.
 | Protocol and `RemoteKunjBackend` (client) over an in-process server with `FakeBackend` | Not started |
 | `kunj serve` (server) | Not started |
 | `kunj remote add\|list\|remove\|ping`, `container.remote`, `--remote` | Not started |
-| Interactive sessions (`shell`, `attach`, `agent`) as `ssh -t … kunj serve exec` | Not started |
-| TTY exec over the WebSocket, for `--url` remotes | Later |
+| TTY exec over the WebSocket (`shell`, `attach`, `agent`): raw-mode client, resize frames, Engine API on the server | Not started |
 | `forward`, `forward --auto`, the MCP bridge and `kunj events` against a remote | Not started (expected to work unchanged; to verify) |
 | Functional test against a real daemon | Not started |
 | Editor attach through Remote-SSH | Later |
@@ -65,8 +64,7 @@ tells us which assumptions in lifecycle.ts are really filesystem assumptions. Wh
 - No place for a server-side policy (which objects may be touched, which images built).
 
 `kunj serve` is the long-running counterpart: one authenticated connection, kunj's own vocabulary,
-and the laptop needs neither Docker nor a shell account on the box (except for interactive sessions,
-below).
+and the laptop needs neither Docker nor a shell account on the box.
 
 ## Why not only `ssh box kunj ct …`?
 
@@ -76,14 +74,13 @@ resize, colours and signals for free, which is the hardest part of any protocol 
 fails is state: the box would need its own `~/.kunj` (a second vault with a different key provider, keep
 files, blueprints, hooks that cannot reach the laptop), credentials for private origins would move to
 the box, forwards and the MCP bridge would need their own tunnels, and the apps, which run `kunj …
---json` locally, could not use it.
+--json` locally, could not use it. It also needs a shell account in the `docker` group per user.
 
-So the design is a **hybrid**: state and lifecycle stay on the laptop and go through the server
-(everything non-interactive), and the three interactive commands run their one TTY exec as
-`ssh -t user@box kunj serve exec …`, with the box's kunj spawning `docker exec -it` under the pty SSH
-gave it. That removes the raw-mode terminal, the resize protocol and the Engine API path from v1. The
-cost is that interactive commands need a shell account on the box in the `docker` group, where the rest
-needs only the token; a `--url` remote without SSH refuses them until the WebSocket TTY channel exists.
+A hybrid (the server for everything, `ssh -t … kunj serve exec` for the three interactive commands) was
+considered and dropped: it would make SSH a requirement rather than a transport, keep a shell account in
+the picture, and leave `--url` remotes without a terminal. So **everything goes over the protocol**,
+the terminal included, and SSH is only one way to carry it (an `ssh -L` tunnel when the box has no TLS
+in front of it). One credential, one code path, no accounts on the box.
 
 ## Shape
 
@@ -91,14 +88,13 @@ needs only the token; a `--url` remote without SSH refuses them until the WebSoc
 laptop                                              box
 ───────────────────────────────                     ──────────────────────────────────
 kunj ct …  ──► RemoteKunjBackend ──► HTTP+WS ──►  kunj serve ──► LocalDockerBackend ──► dockerd
-  ~/.kunj (vault, keep, blueprints,   (ssh -L)      ~/.kunj/serve/ (token, log)
-   forwards, bridges, config)                       labels on Docker objects (the only state)
-shell/attach/agent ─────────────────► ssh -t ────►  kunj serve exec ──► docker exec -it
+  ~/.kunj (vault, keep, blueprints,   via ssh -L,    ~/.kunj/serve/ (token, log)
+   forwards, bridges, config)         or a TLS URL   labels on Docker objects (the only state)
 ```
 
-Every non-interactive call is an HTTP or WebSocket request through the SSH tunnel. The one TTY exec
-of `shell`, `attach` and `agent` is instead `ssh -t … kunj serve exec`, so SSH's pty does the terminal
-work (see "Why not only `ssh box kunj ct …`?").
+Every call, the terminal of `shell`, `attach` and `agent` included, is an HTTP or WebSocket request
+to `kunj serve`. How the bytes reach the box (an SSH tunnel kunj opens, or a URL behind the user's TLS
+proxy) is a transport detail the protocol does not see.
 
 - **`RemoteKunjBackend`** (src/lib/container/remote.ts) implements `ContainerBackend` over the wire.
   Lifecycle, forward, autoforward, services, snapshot, prune, files and the MCP bridge are not changed:
@@ -173,17 +169,23 @@ without `exit` is `Error('exec ended: connection closed')`, which lifecycle alre
 - `stdin`/`stdout`/`stderr` **streams** (forward, autoforward, the MCP bridge, copy helpers) pipe to and
   from the channel frames. Nothing in those modules changes.
 - **`'inherit'` with `tty`** (`shell`, `attach`, `agent`) is the one case the local backend solves by
-  handing `docker exec -it` its real fds. `RemoteKunjBackend.exec` does not put it on the WebSocket: for
-  an `--ssh` remote it spawns, with inherited stdio,
-  `ssh -t user@box kunj serve exec <id> [-u user] [-w dir] [-e K=V]… -- <cmd…>`, and `kunj serve exec`
-  on the box runs `LocalDockerBackend.exec` with `'inherit'` under the pty SSH allocated, so
-  `docker exec -it` gets a real terminal, resize and signals as it does locally. The exit code is the
-  command's (`ssh` passes it through). The `-e` values are the ones `interactive()` sets today (`TERM`,
-  `COLORTERM`, `LANG`), which are not secrets; `kunj serve exec` refuses any other name. It checks the
-  `kunj.repo` label like the server does and needs no token: SSH authenticated the user. For a `--url`
-  remote the call is refused (`remote-no-tty`), with the hint to add the remote with `--ssh`; a TTY
-  channel over the WebSocket (`resize` control frames, the Engine API on the server) is a later addition
-  the protocol leaves room for. Non-TTY execs always use the WebSocket.
+  handing `docker exec -it` its real fds. Remotely the **client is the terminal**: `RemoteKunjBackend`
+  puts `process.stdin` in raw mode, sends its bytes on channel `0`, writes channel `1` to
+  `process.stdout` (a TTY exec has one merged output stream, as `docker exec -t` does), sends a `resize`
+  control frame right after the request and on every `SIGWINCH`, and restores the terminal on `exit`,
+  close, error and an uncaught exception, as commit.ts does around its own raw-mode moments. Ctrl-C is
+  byte `0x03` on channel `0`, delivered to the container's pty, so tmux and the agent see it and kunj does
+  not die. The exit code is the `exit` frame's.
+  On the **server**, `docker exec -t` refuses to run without a TTY on its own stdin and kunj has no pty
+  dependency, so a TTY exec goes through the **Docker Engine API** on the daemon socket (the socket from
+  `docker context inspect`): `POST /containers/:id/exec` with `Tty`, `AttachStdin/Stdout/Stderr`, `User`,
+  `WorkingDir`, `Env`; `POST /exec/:id/start` on a hijacked connection, whose raw bytes are the pty;
+  `POST /exec/:id/resize?h=&w=` for each `resize` frame; `GET /exec/:id/json` for the exit code. Closing
+  the WebSocket closes the hijacked socket, which hangs up the pty (SIGHUP to the process group, as a
+  dropped SSH session would). This is `execTty()` in docker.ts, a second way of talking to Docker that
+  stays inside the one module allowed to. Non-TTY execs keep spawning `docker exec`. The env a TTY exec
+  carries is what `interactive()` sets today (`TERM`, `COLORTERM`, `LANG`), not secrets; the server
+  refuses other names on a TTY exec.
 - `'inherit'` **without** `tty` (progress output of a seed or a preset) is streamed to the client's
   `process.stdout`/`stderr` unchanged.
 - `'ignore'` stdin sends EOF at once. `timeoutMs` is enforced on the server (the exec is killed) and
@@ -246,12 +248,12 @@ The server is not a Docker proxy. Every id it is given must be an object kunj ma
 - **Prune:** `git ls-remote --heads origin` runs on the laptop, the Docker side on the box. Unchanged.
 - **The apps' terminals** (the workspace app's shell and agent tabs, a VS Code terminal) run
   `kunj ct shell|agent <branch> --session <id>` in a pty as they do today; kunj runs the host-side parts,
-  then its one TTY exec is the `ssh -t … kunj serve exec` above with inherited stdio, so the pty is
-  SwiftTerm's → ssh → the box → `docker exec -it`. tmux stays inside the container, so a reopened tab
-  reattaches as locally. For this to work from a GUI, `ssh` must never prompt: keys through the agent
-  (macOS gives GUI apps `SSH_AUTH_SOCK`), and `kunj remote add --ssh` connects once, interactively, so
-  the host key is in `known_hosts` before any app session. A prompt that does appear lands in the
-  terminal tab, where it can be answered.
+  then its one TTY exec is the WebSocket channel above, kunj itself relaying between SwiftTerm's pty and
+  the socket. tmux stays inside the container, so a reopened tab reattaches as locally. Nothing in the
+  apps changes. For an `--ssh` remote the tunnel's `ssh` must never prompt from a GUI: keys through the
+  agent (macOS gives GUI apps `SSH_AUTH_SOCK`), and `kunj remote add --ssh` connects once,
+  interactively, so the host key is in `known_hosts` before any app session; a prompt that does appear
+  lands in the terminal tab, where it can be answered. A `--url` remote has no such step.
 - **The SSH tunnel** lives for one kunj process. Detached helpers (`forward --auto`, `ct mcp`) are
   their own processes and open their own tunnel; `spawnDetached` passes `--remote` as it passes
   `--context` today.
@@ -289,12 +291,13 @@ v1; if a listing turns out slow, the first batch is a `GET /v1/containers?label=
   `FakeBackend` behind it and runs `RemoteKunjBackend` against it; the existing lifecycle, forward,
   services, snapshot and prune tests are parametrised to run against both `FakeBackend` and
   `RemoteKunjBackend`-over-`FakeBackend`, so every stream and every error text crosses the wire once.
-  The TTY path is checked by the argv `RemoteKunjBackend` builds for `ssh` (a fake spawn) and by
-  `kunj serve exec` over `FakeBackend` (label check, refused env names, exit code). Auth: missing, wrong
-  and rotated tokens; the `kunj.*` refusals; body limits; a mid-stream disconnect.
+  The TTY channel is tested with a fake terminal (a duplex pair standing in for `process.stdin/stdout`,
+  `setRawMode` recorded) against `FakeBackend`'s `execTty`: raw mode on and off on every exit path,
+  the first `resize`, `SIGWINCH` → `resize`, `0x03` passed through, exit code, refused env names. Auth:
+  missing, wrong and rotated tokens; the `kunj.*` refusals; body limits; a mid-stream disconnect.
 - **Docker:** `remote.docker.test.ts` runs the server against the real daemon and checks copyIn and
-  build through the body stream, events, and `kunj serve exec` under `script` (a pty on the host, as the
-  functional tests already use) running `stty size` in the container.
+  build through the body stream, events, and a TTY exec through the Engine API: `stty size` in the
+  container after a `resize` frame, and a hang-up when the client closes the socket.
 - **Functional:** `remote.functional.test.ts` starts `kunj serve` as a child, adds it as a remote with
   `--url http://127.0.0.1:<port>` and runs the start/list/shell/forward/stop/remove path of the existing
   functional suite with `--remote`.
@@ -306,12 +309,11 @@ v1; if a listing turns out slow, the first batch is a `GET /v1/containers?label=
    `RemoteKunjBackend`, over an in-process server with `FakeBackend`; parametrised tests. No TTY yet.
 3. `kunj serve` command, token file, `--listen`, refusals, `--verbose` log; `kunj remote` and
    `~/.kunj/remotes.json`; `container.remote` and `--remote` in `ct`; `backend` in `ct list --json`.
-4. The SSH tunnel; `kunj serve exec` and the `ssh -t` path for `shell`, `attach` and `agent`;
-   `remote-no-tty` for `--url` remotes.
-5. `kunj events` per-repo remotes; `spawnDetached` with `--remote`.
+4. TTY exec: `execTty()` in docker.ts over the Engine API; the client's raw-mode terminal and resize;
+   `shell`, `attach` and `agent` against a remote.
+5. The SSH tunnel; `kunj events` per-repo remotes; `spawnDetached` with `--remote`.
 6. Docker and functional tests; docs-site page; `kunj setup` asks about a remote when `ct` is used.
-7. Later: a TTY channel over the WebSocket for `--url` remotes, Remote-SSH editor attach, TLS,
-   per-user tokens.
+7. Later: Remote-SSH editor attach, TLS, per-user tokens.
 
 ## Decisions
 
@@ -322,11 +324,13 @@ v1; if a listing turns out slow, the first batch is a `GET /v1/containers?label=
   in kunj; a user who wants a URL puts it behind their own proxy. Plain `http://` only to loopback.
 - **2026-10-24** One bearer token per server, in a 0600 file on each side, not in the secrets vault:
   the commands that use it most are the listings, which never unlock the vault.
-- **2026-10-24** Hybrid: interactive sessions run as `ssh -t … kunj serve exec`, everything else over
-  the server. SSH already solves the pty, resize and signals; a WebSocket TTY channel (and the Engine
-  API it would need on the server, since kunj has no pty dependency) is deferred to `--url` remotes.
-  Considered and rejected: the whole CLI over SSH (state moves to the box) and a TTY channel in v1
-  (the hardest part of the protocol, for no gain while every remote has SSH).
+- **2026-10-24** Everything over the protocol, the terminal included; SSH is only a tunnel when the
+  box has no TLS in front of it. Considered and rejected: the whole CLI over SSH (state moves to the
+  box) and a hybrid with `ssh -t … kunj serve exec` for the interactive commands (SSH becomes a
+  requirement, a shell account stays in the picture, `--url` remotes get no terminal).
+- **2026-10-24** TTY exec on the server goes through the Docker Engine API, not a pty: kunj gets no
+  native dependency (`node-pty` was the alternative; `script`/`unbuffer` wrappers rejected as fragile),
+  and docker.ts stays the only module that touches Docker.
 - **2026-10-24** The server refuses anything not labelled `kunj.*`, so a token is "kunj on this box",
   not "Docker on this box". Privileged and runtime are opt-in flags of the server.
 - **2026-10-24** `features.editorAttach` is false on a remote; `ct open` refuses with the Remote-SSH
