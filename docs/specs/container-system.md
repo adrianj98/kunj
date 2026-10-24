@@ -28,7 +28,7 @@ the host).*
 | Host MCP bridge (a browser on the Mac for the agent) | Shipped | [container-phase-2.md](container-phase-2.md) |
 | Workspace IDE (phase 3) | CLI contract shipped; app proposed | [workspace-ide.md](workspace-ide.md) |
 | Containers in the VS Code extension and the macOS app | In progress | [containers-in-apps.md](containers-in-apps.md) |
-| Remote Docker host (`kunj serve`) | Not started | — |
+| Remote Docker host (`kunj serve`, `RemoteKunjBackend`) | Spec written | [remote-containers.md](remote-containers.md) |
 | Secret manager (`kunj secret`, `kunj run`, delivery to containers and worktrees) | Shipped | [Secrets](#secrets) below |
 
 ## Rules every part follows
@@ -251,12 +251,13 @@ User docs: `docs-site/src/content/docs/configuration/secrets.mdx`.
 - Containers in the VS Code extension and the macOS app, reading `kunj ct list --json`.
 - Phase 3, the workspace IDE: [workspace-ide.md](workspace-ide.md).
 
-**Later (remote):** `container.dockerContext` over SSH validated end to end; then `kunj serve`, an
-authenticated HTTP and WebSocket API exposing `ContainerBackend`, and a `RemoteKunjBackend`. Because
-every Docker interaction is a stream through the backend and origin is the only git channel, it needs no
-new git or file transfer design: `forward` tunnels over the service's WebSocket instead of
-`docker exec`, and editor attach goes through Remote-SSH (`features.editorAttach` false until then).
-Auth, TLS and multi-user get their own spec.
+**Remote:** [remote-containers.md](remote-containers.md). `container.dockerContext` over SSH validated
+end to end first; then `kunj serve`, a token-authenticated HTTP and WebSocket API exposing
+`ContainerBackend` on the Docker host, reached through an SSH tunnel kunj opens, and a
+`RemoteKunjBackend` on the laptop. Because every Docker interaction is a stream through the backend and
+origin is the only git channel, it needs no new git or file transfer design: `forward` tunnels over the
+exec WebSocket, and editor attach goes through Remote-SSH (`features.editorAttach` false until then).
+TLS and multi-user get their own spec.
 
 ## Decisions
 

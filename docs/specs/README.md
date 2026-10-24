@@ -20,6 +20,7 @@ page only says where each thing stands.
 | [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | Shipped (CLI contract and the native app v1) |
 | [containers-in-apps.md](containers-in-apps.md) | Containers shown and managed like worktrees in the VS Code extension and the macOS app | In progress |
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
+| [remote-containers.md](remote-containers.md) | `kunj serve` on the Docker host, `RemoteKunjBackend`, `kunj remote`, the wire protocol, auth over an SSH tunnel | Spec written |
 
 ## Done
 
@@ -54,6 +55,7 @@ page only says where each thing stands.
 | Work | Spec | Notes |
 | --- | --- | --- |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
+| Remote containers (`kunj serve`, `RemoteKunjBackend`, `kunj remote`) | [remote-containers.md](remote-containers.md) | Spec written; needs review and an implementation plan. First step: validate `container.dockerContext` over SSH |
 
 ## To do
 
@@ -62,7 +64,6 @@ page only says where each thing stands.
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
 | Extra repos cloned next to the workspace | [container-system.md](container-system.md#roadmap) | — |
-| Remote Docker host (`kunj serve`) | [container-system.md](container-system.md#roadmap) | Later |
 | Phase 2 follow-ups left | [container-phase-2.md](container-phase-2.md) | `container.services` registered as a string setting (the registry has no object type); a snapshot copy reuses its own local branch on `ct start -c <same name>` (optional `switch -C`) |
 | MCP bridge follow-ups | [container-phase-2.md](container-phase-2.md#open-questions-and-roadmap) | Verify the download block in a visible browser |
 | Agent state follow-ups | [workspace-ide.md](workspace-ide.md#open-questions) | A killed session's leftover state shows until the next hook; `--settings` lands after a pipe in a compound `agent.command` |
