@@ -69,7 +69,7 @@ itself when Docker is unavailable.
 
 *Designed 2026-10-23; in progress.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, 6c08cd1 and its review fix) and host delivery (`kunj run`, `kunj agent` and `kunj worktree shell` under `kunj run`, file deliveries on `worktree add`; `src/commands/run.ts`, `src/lib/secrets/host.ts`, Task 6) and container delivery (`StartOptions.secrets` in `src/lib/container/lifecycle.ts`, the `kunj.secrets` label, `secretsChanged` in `kunj ct list --json`, 8fd3733 and its review fix); the migration hint and user docs (Task 8) are not. Today secrets reach a container only as host environment variables
+(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, 6c08cd1 and its review fix) and host delivery (`kunj run`, `kunj agent` and `kunj worktree shell` under `kunj run`, file deliveries on `worktree add`; `src/commands/run.ts`, `src/lib/secrets/host.ts`, 4a15833 and its review fix) and container delivery (`StartOptions.secrets` in `src/lib/container/lifecycle.ts`, the `kunj.secrets` label, `secretsChanged` in `kunj ct list --json`, 8fd3733 and its review fix in 20c95f9); the migration hint and user docs (Task 8) are not. Today secrets reach a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -143,7 +143,7 @@ Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in th
 | `kunj secret rm NAME [--branch b] [--global]` | Remove one |
 | `kunj secret env [--branch b] [--target host]` | Resolved secrets as `export NAME='…'` lines for `eval`; refused with `--json` |
 | `kunj secret apply [-a] [--force]` | Render file deliveries into this worktree (or all, each with its own branch), like `keep apply`; the vault is opened once |
-| `kunj run [--branch b] -- <cmd…>` | Run a host command with the host secrets in its environment, file deliveries rendered first |
+| `kunj run [--branch b] [--hold] -- <cmd…>` | Run a host command with the host secrets in its environment, file deliveries rendered first |
 
 `secret` and `run` are on the fast path (no AWS, LangChain or inquirer at top level). Writes (`set`,
 `import`, `rm`) go to repo scope unless `--global` or `--branch` is given (`--branch` without a name is the
@@ -187,14 +187,17 @@ or links to, a keep file it is removed from the keep store too, as is the keep c
   `docker inspect` already has root on the daemon.
 - **Host:** `kunj agent`, `kunj run` and the workspace app's worktree terminals get host-targeted `env`
   secrets, never through argv. `kunj agent` runs the tmux command as
-  `<node> <kunj> run --branch <b> -- <shell> -lc <agent.command>`, so the vault is unlocked inside the
+  `<node> <kunj> run --hold --branch <b> -- <shell> -lc <agent.command>` (an argv array, no shell
+  quoting), so the vault is unlocked inside the
   session (not through `new-session -e`, which would put values in argv; `KUNJ_*` stay there); without
   tmux it does the same in-process. `kunj worktree shell` (how the workspace app opens worktree
   terminals, with `--session <id>` in tmux) does the same with `<shell> -l`: under `kunj run` in tmux,
   in-process without. `kunj run` resolves with `--branch` or the branch checked out where it runs,
   renders file deliveries into that worktree first, and exits with the command's code (a signal: 128 +
   its number; not found: 127). A vault that cannot be unlocked fails `run` (and so `agent` and
-  `worktree shell`) before the command starts; a file it cannot render is a warning and the command
+  `worktree shell`) before the command starts; with `--hold`, which the tmux sessions pass, `run`
+  prints the error and waits for Enter first, because the pane (and the message) would otherwise close
+  at once, leaving only tmux's `[exited]`. A file it cannot render is a warning and the command
   still runs. `file` deliveries render into the worktree when `kunj worktree add` creates it (after
   keep files; every failure there, a locked vault included, is a warning, as for keep files, and
   `worktree add --json` lists `secretFiles`) and on `kunj secret apply`. A rendered file that git does not ignore (`git check-ignore`; a tracked file counts as not ignored) is refused unless `--force`, before any file is written; paths outside the worktree, also through a symlinked directory (checked for every file before any file or directory is created), and paths inside a `.git` directory (which `check-ignore` can report as ignored) are refused even with `--force`, and a symlink at the file's path is replaced, not written through. Rendered lines are `NAME="value"` sorted by name, with `\\`, `"` and newlines escaped (a raw CR does not survive the round trip).

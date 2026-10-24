@@ -52,7 +52,7 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Plan `docs/superpowers/plans/2026-10-23-secret-manager.md`. Task 1 (dotenv parser, rulings in the spec), Task 2 (encrypted vault), Task 3 (key providers) and Task 4 (resolution, host file rendering; 009958c + review fix) and Task 5 (`kunj secret`; 6c08cd1 + review fix) and Task 6 (`kunj run`, host delivery for `agent`, `worktree shell` and `worktree add`; 4a15833) and Task 7 (container delivery: env file, rendered files, `kunj.secrets`, `secretsChanged`; 8fd3733 + review fix) done; Task 8 left |
+| Secret manager (`kunj secret`, `kunj run`, `.env` import) | [container-system.md](container-system.md#secrets) | Plan `docs/superpowers/plans/2026-10-23-secret-manager.md`. Task 1 (dotenv parser, rulings in the spec), Task 2 (encrypted vault), Task 3 (key providers) and Task 4 (resolution, host file rendering; 009958c + review fix) and Task 5 (`kunj secret`; 6c08cd1 + review fix) and Task 6 (`kunj run`, host delivery for `agent`, `worktree shell` and `worktree add`; 4a15833) and Task 7 (container delivery: env file, rendered files, `kunj.secrets`, `secretsChanged`; 8fd3733 + review fix 20c95f9) done; Task 8 left |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
 
 ## To do
