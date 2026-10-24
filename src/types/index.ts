@@ -55,7 +55,7 @@ export interface KunjConfig {
     baseDir?: string;
     editorCommand?: string;
   };
-  agent?: { command?: string; hooks?: boolean };
+  agent?: { command?: string; hooks?: boolean; tmux?: boolean; tmuxStatus?: boolean };
   container?: {
     image?: string;
     agentCommand?: string;

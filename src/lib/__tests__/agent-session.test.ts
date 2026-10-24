@@ -78,6 +78,11 @@ describe('listTmuxSessions', () => {
   });
 });
 
+test('agentArgv shows the tmux status line when asked', () => {
+  const argv = agentArgv('kunj-x', '/wt', 'claude', {}, { status: true });
+  expect(argv.slice(-6)).toEqual([';', 'set-option', '-t', 'kunj-x', 'status', 'on']);
+});
+
 describe('agent state hooks', () => {
   const { withAgentHooks, claudeHookSettings, readAgentState, agentStateFile, agentStateDir } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
   const fs = jest.requireActual<typeof import('fs')>('fs');

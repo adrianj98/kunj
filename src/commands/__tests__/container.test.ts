@@ -314,6 +314,19 @@ describe('ContainerCommand', () => {
     expect(backend.callsOf('exec')[1][1]).toEqual(['sh', '-lc', agentShell(agentCommandLine(undefined, []))]);
   });
 
+  it('agent.tmux false runs the container agent through sh, agent.tmuxStatus true keeps the status line', async () => {
+    const cfg = jest.requireMock('../../lib/config').loadResolvedConfig as jest.Mock;
+    backend.existing = [mainContainer('feat')];
+    cfg.mockResolvedValueOnce({ agent: { tmux: false } });
+    await new ContainerCommand().execute('agent', 'feat', [], {});
+    const execs = backend.callsOf('exec').map(c => c[1]);
+    expect(execs[execs.length - 1]).toEqual(['sh', '-lc', agentShell(agentCommandLine(undefined, []))]);
+    cfg.mockResolvedValueOnce({ agent: { tmuxStatus: true } });
+    await new ContainerCommand().execute('agent', 'feat', [], {});
+    const last = backend.callsOf('exec').map(c => c[1] as string[]).pop()!;
+    expect(last.slice(-2)).toEqual(['status', 'on']);
+  });
+
   describe('auto forwarding', () => {
     const NAME = containerNames('app', REPO_ID, 'feat').container;
     const spawnDetached = autoforward.spawnDetached as jest.Mock;

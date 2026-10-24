@@ -105,9 +105,11 @@ export class AgentCommand extends BaseCommand {
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;
     // Like kunj ct agent in an image without tmux: the agent runs here and ends with the terminal
-    const direct = opts.tmux === false || tmux === 'missing';
-    if (tmux === 'missing' && opts.tmux !== false) process.stderr.write(NO_TMUX_HINT + '\n');
-    const argv = direct ? directArgv(command) : agentArgv(session, wt.path, command, vars);
+    // agent.tmux false: always direct, like --no-tmux (no hint: the user chose it)
+    const wantTmux = opts.tmux !== false && config.agent?.tmux !== false;
+    const direct = !wantTmux || tmux === 'missing';
+    if (tmux === 'missing' && wantTmux) process.stderr.write(NO_TMUX_HINT + '\n');
+    const argv = direct ? directArgv(command) : agentArgv(session, wt.path, command, vars, { status: config.agent?.tmuxStatus === true });
     process.exitCode = await runTmux(argv, wt.path, { ...env, ...vars });
   }
 }

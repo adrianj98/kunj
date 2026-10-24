@@ -566,16 +566,18 @@ export class ContainerCommand extends BaseCommand {
     const user = this.userOf(main) || undefined;
     // The Claude Code hooks write the agent's state into the container's state file (read by STATUS_SCRIPT)
     const command = `KUNJ_AGENT_STATE=${CONTAINER_AGENT_STATE_FILE} ` + withAgentHooks(agentCommandLine(ctx.config.container?.agentCommand, args), CONTAINER_AGENT_STATE_FILE, ctx.config.agent?.hooks !== false);
-    const probe = await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user });
-    if (probe.exitCode !== 0) {
+    // agent.tmux false: run the agent directly, as when the image has no tmux (no probe, no warning)
+    const wantTmux = ctx.config.agent?.tmux !== false;
+    const probe = wantTmux ? await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user }) : { exitCode: 1 };
+    if (wantTmux && probe.exitCode !== 0) {
       this.warn('tmux is not installed in the container; running the agent directly (it stops when you leave)');
     }
     // tmux runs a single command argument through the shell, so the setting keeps its quoting
     // -u: UTF-8 even when the image has no locale, so box-drawing glyphs render
     // window-size latest: an IDE terminal and a CLI one attached together follow the one used last, not the smaller
-    // status off: no tmux status line (see agentArgv)
+    // status off unless agent.tmuxStatus (see agentArgv)
     const argv = probe.exitCode === 0
-      ? ['tmux', '-u', 'new-session', '-A', '-s', 'agent', command, ';', 'set-option', '-t', 'agent', 'window-size', 'latest', ';', 'set-option', '-t', 'agent', 'status', 'off']
+      ? ['tmux', '-u', 'new-session', '-A', '-s', 'agent', command, ';', 'set-option', '-t', 'agent', 'window-size', 'latest', ';', 'set-option', '-t', 'agent', 'status', ctx.config.agent?.tmuxStatus === true ? 'on' : 'off']
       : ['sh', '-lc', command];
     const r = await ctx.backend.exec(main.id, argv, this.interactive(main, true));
     process.exitCode = r.exitCode;

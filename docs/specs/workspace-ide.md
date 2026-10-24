@@ -130,7 +130,7 @@ has its own tmux server, the session stays `agent`. `start` runs `tmux -u new-se
 <worktree> -e KUNJ_BRANCH=… -e KUNJ_REPO=… -e KUNJ_WORKTREE=… <command> ; set-option window-size latest ; set-option status off`
 (`-e` because a new session's environment comes from the tmux server; `TMUX` is dropped from the
 environment so it works from inside a pane; `window-size latest` so the app and a CLI terminal attached
-together are sized to the last one attached; `status off` because the app's tab bar and status bar already show the session, and tmux's line would cost the agent a row; it is a session option, so other tmux sessions keep theirs, and `kunj ct agent` sets it on the container's `agent` session too). Without tmux, or with `--no-tmux`, `start` runs the
+together are sized to the last one attached; `status off` because the app's tab bar and status bar already show the session, and tmux's line would cost the agent a row; it is a session option, so other tmux sessions keep theirs, and `kunj ct agent` sets it on the container's `agent` session too; `agent.tmuxStatus: true` keeps the line). `agent.tmux: false` makes `start` (and `kunj ct agent`) run the agent directly, as `--no-tmux` does, without the hint. Without tmux, or with `--no-tmux`, `start` runs the
 command directly through `$SHELL -lc` in the worktree with the same `KUNJ_*` environment, after a
 one-line stderr hint that the agent stops when the terminal closes. It needs a terminal (`no-tty`). `status --json` prints
 `AgentStatusJson`, `stop --json` `AgentStopJson`. `kunj worktree list --json` gives each existing,
@@ -299,8 +299,12 @@ session ⌘N (a sheet: repo, branch, base, worktree or container, start an agent
 or `ct start -c` in an action tab), the overflow menu (container start/stop/remove/rebuild, worktree
 remove, copy path, reveal in Finder, `ct prune`), ports as links (`open http://localhost:<host>`),
 ⌘K search filtering the sidebar, ⌘1–9 selecting the nth row, ⌘⇧] / ⌘⇧[ and ⌘W for tabs. Destructive
-actions confirm with an `NSAlert`. Settings (⌘,): the kunj command (default `kunj`) and the theme
-(`auto` = light ↔ warm by system appearance, `warm`, `light`, `graphite`).
+actions confirm with an `NSAlert`. Settings (⌘,): the kunj command (default `kunj`), the theme
+(`auto` = light ↔ warm by system appearance, `warm`, `light`, `graphite`), and two agent toggles that
+are kunj settings, not app state: "Run agents in tmux" (`agent.tmux`) and "Show tmux status line"
+(`agent.tmuxStatus`), read with `kunj config --get <key> --global --json` and written with
+`kunj config --set <key>=<bool> --global`, so the CLI and the app share them. They apply to agents
+started afterwards; a running session keeps its mode.
 
 **Window.** Transparent title bar with the traffic lights inside the sidebar's 52 px top (as in the
 mockup), `NSVisualEffectView` (`.sidebar`) under the sidebar tinted with `side`, everything else opaque

@@ -147,6 +147,22 @@ test('agent.hooks false runs claude without --settings', async () => {
   expect((runTmux as jest.Mock).mock.calls[0][0].join(' ')).not.toContain('--settings');
 });
 
+test('agent.tmux false runs the agent directly without a hint', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'aider', tmux: false } });
+  const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  await new AgentCommand().execute('start', 'feature-a', {});
+  expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual([process.env.SHELL || 'sh', '-lc', 'aider']);
+  expect(stderr).not.toHaveBeenCalled();
+});
+
+test('agent.tmuxStatus true keeps the tmux status line', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'aider', tmuxStatus: true } });
+  await new AgentCommand().execute('start', 'feature-a', {});
+  expect((runTmux as jest.Mock).mock.calls[0][0].slice(-2)).toEqual(['status', 'on']);
+});
+
 test('stop without tmux fails with tmux-missing', async () => {
   tmuxSessions.mockResolvedValue('missing');
   await expect(new AgentCommand().execute('stop', 'feature-a', {})).rejects.toMatchObject({ name: 'AgentError', code: 'tmux-missing' });

@@ -55,14 +55,14 @@ export function agentRunning(sessions: string[] | null, name: string): boolean |
 }
 
 // -u: UTF-8 even without a locale. window-size latest: the size follows the client that attached last.
-// status off: no tmux status line in kunj's sessions; the workspace app and the terminal show the
+// status off (agent.tmuxStatus turns it on): no tmux status line in kunj's sessions; the workspace app and the terminal show the
 // session already, and the line costs the agent a row. Set on every start, so reattaching applies it.
 // tmux runs a single command argument through the shell, so the setting keeps its quoting.
 // -e (tmux 3.2+): a new session's environment comes from the tmux server, not this client, so the
 // variables must be given here or a running server hands it an earlier agent's values.
-export function agentArgv(name: string, cwd: string, command: string, env: Record<string, string>): string[] {
+export function agentArgv(name: string, cwd: string, command: string, env: Record<string, string>, opts: { status?: boolean } = {}): string[] {
   const vars = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-  return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, ...vars, command, ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', 'off'];
+  return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, ...vars, command, ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', opts.status ? 'on' : 'off'];
 }
 
 // Without tmux: the agent runs in this terminal, through the login shell as tmux would run it

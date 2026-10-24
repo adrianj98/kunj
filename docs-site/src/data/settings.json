@@ -1512,6 +1512,30 @@
     "sensitive": false
   },
   {
+    "key": "agent.tmux",
+    "type": "boolean",
+    "category": "agent",
+    "default": true,
+    "description": "Run agents in a tmux session (kunj agent, kunj ct agent) so they outlive the terminal and can be reattached; false runs them directly, like --no-tmux",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "agent.tmuxStatus",
+    "type": "boolean",
+    "category": "agent",
+    "default": false,
+    "description": "Show tmux's status line in agent sessions (off by default: the workspace app and the terminal show the session already)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "agent.hooks",
     "type": "boolean",
     "category": "agent",
