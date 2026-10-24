@@ -156,6 +156,13 @@ test('agent.tmux false runs the agent directly without a hint', async () => {
   expect(stderr).not.toHaveBeenCalled();
 });
 
+test('agent.tmux false reattaches to a session that is still running instead of starting a second agent', async () => {
+  tmuxSessions.mockResolvedValue([session]);
+  (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'aider', tmux: false } });
+  await new AgentCommand().execute('start', 'feature-a', {});
+  expect((runTmux as jest.Mock).mock.calls[0][0][0]).toBe('tmux');
+});
+
 test('agent.tmuxStatus true keeps the tmux status line', async () => {
   tmuxSessions.mockResolvedValue([]);
   (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'aider', tmuxStatus: true } });

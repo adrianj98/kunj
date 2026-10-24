@@ -566,8 +566,9 @@ export class ContainerCommand extends BaseCommand {
     const user = this.userOf(main) || undefined;
     // The Claude Code hooks write the agent's state into the container's state file (read by STATUS_SCRIPT)
     const command = `KUNJ_AGENT_STATE=${CONTAINER_AGENT_STATE_FILE} ` + withAgentHooks(agentCommandLine(ctx.config.container?.agentCommand, args), CONTAINER_AGENT_STATE_FILE, ctx.config.agent?.hooks !== false);
-    // agent.tmux false: run the agent directly, as when the image has no tmux (no probe, no warning)
-    const wantTmux = ctx.config.agent?.tmux !== false;
+    // agent.tmux false: run the agent directly, as when the image has no tmux (no warning), unless an
+    // agent session from before the setting changed still runs: reattach rather than start a second agent
+    const wantTmux = ctx.config.agent?.tmux !== false || await this.agentSessionRunning(ctx, main.id, user);
     const probe = wantTmux ? await ctx.backend.exec(main.id, ['sh', '-c', 'command -v tmux'], { user }) : { exitCode: 1 };
     if (wantTmux && probe.exitCode !== 0) {
       this.warn('tmux is not installed in the container; running the agent directly (it stops when you leave)');
@@ -583,10 +584,17 @@ export class ContainerCommand extends BaseCommand {
     process.exitCode = r.exitCode;
   }
 
+  private async agentSessionRunning(ctx: { backend: ContainerBackend }, id: string, user: string | undefined): Promise<boolean> {
+    return (await ctx.backend.exec(id, ['sh', '-c', 'tmux has-session -t agent 2>/dev/null'], { user })).exitCode === 0;
+  }
+
   private async attach(target: string | undefined, options: ContainerOptions): Promise<void> {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireRunning(ctx, branch);
+    if (ctx.config.agent?.tmux === false && !(await this.agentSessionRunning(ctx, main.id, this.userOf(main) || undefined))) {
+      throw new ContainerError(`No agent session to attach to: agent.tmux is off, so kunj ct agent runs the agent in the terminal that started it (kunj config --set agent.tmux=true --global to use tmux)`);
+    }
     const r = await ctx.backend.exec(main.id, ['tmux', '-u', 'attach', '-t', 'agent'], this.interactive(main, true));
     if (r.exitCode !== 0) throw new ContainerError(`No agent session; run kunj ct agent ${branch}`);
   }

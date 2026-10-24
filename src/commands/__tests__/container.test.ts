@@ -314,9 +314,30 @@ describe('ContainerCommand', () => {
     expect(backend.callsOf('exec')[1][1]).toEqual(['sh', '-lc', agentShell(agentCommandLine(undefined, []))]);
   });
 
+  it('agent.tmux false reattaches to an agent session that is still running instead of starting another', async () => {
+    const cfg = jest.requireMock('../../lib/config').loadResolvedConfig as jest.Mock;
+    backend.existing = [mainContainer('feat')];
+    backend.execResults.set('sh -c tmux has-session -t agent 2>/dev/null', { exitCode: 0, stdout: '' });
+    cfg.mockResolvedValueOnce({ agent: { tmux: false } });
+    await new ContainerCommand().execute('agent', 'feat', [], {});
+    const last = backend.callsOf('exec').map(c => c[1] as string[]).pop()!;
+    expect(last.slice(0, 6)).toEqual(['tmux', '-u', 'new-session', '-A', '-s', 'agent']);
+  });
+
+  it('attach with agent.tmux false and no session explains that the agent cannot be reattached', async () => {
+    const cfg = jest.requireMock('../../lib/config').loadResolvedConfig as jest.Mock;
+    backend.existing = [mainContainer('feat')];
+    backend.execResults.set('sh -c tmux has-session -t agent 2>/dev/null', { exitCode: 1, stdout: '' });
+    cfg.mockResolvedValueOnce({ agent: { tmux: false } });
+    await new ContainerCommand().execute('attach', 'feat', {});
+    expect(errors.join('\n')).toMatch(/agent\.tmux is off/);
+    expect(backend.callsOf('exec').map(c => (c[1] as string[]).join(' '))).not.toContain('tmux -u attach -t agent');
+  });
+
   it('agent.tmux false runs the container agent through sh, agent.tmuxStatus true keeps the status line', async () => {
     const cfg = jest.requireMock('../../lib/config').loadResolvedConfig as jest.Mock;
     backend.existing = [mainContainer('feat')];
+    backend.execResults.set('sh -c tmux has-session -t agent 2>/dev/null', { exitCode: 1, stdout: '' });
     cfg.mockResolvedValueOnce({ agent: { tmux: false } });
     await new ContainerCommand().execute('agent', 'feat', [], {});
     const execs = backend.callsOf('exec').map(c => c[1]);
