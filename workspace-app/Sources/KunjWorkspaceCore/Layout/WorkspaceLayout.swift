@@ -1,0 +1,175 @@
+import Foundation
+
+/// A tab worth restoring: shells restart, agent tabs reattach to tmux, editor tabs reopen `path`
+/// (relative to the worktree or /workspace). Action tabs are never saved.
+public struct SavedTab: Codable, Equatable, Sendable {
+    public var kind: TabKind
+    public var title: String
+    public var path: String?
+
+    public init(kind: TabKind, title: String, path: String?) {
+        self.kind = kind
+        self.title = title
+        self.path = path
+    }
+}
+
+/// One environment's entry in the layout file.
+public struct BranchLayout: Codable, Equatable, Sendable {
+    public var tabs: [SavedTab]
+    public var active: Int?
+    public var lastActivity: Date?
+
+    public init(tabs: [SavedTab] = [], active: Int? = nil, lastActivity: Date? = nil) {
+        self.tabs = tabs
+        self.active = active
+        self.lastActivity = lastActivity
+    }
+
+    enum CodingKeys: String, CodingKey { case tabs, active, lastActivity }
+
+    /// Tabs this build cannot read (a kind from a newer app) are skipped, not the whole entry.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tabs = (try c.decodeIfPresent([Lenient<SavedTab>].self, forKey: .tabs) ?? []).compactMap(\.value)
+        active = try? c.decodeIfPresent(Int.self, forKey: .active)
+        lastActivity = try? c.decodeIfPresent(Date.self, forKey: .lastActivity)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(tabs, forKey: .tabs)
+        try c.encodeIfPresent(active, forKey: .active)
+        try c.encodeIfPresent(lastActivity, forKey: .lastActivity)
+    }
+}
+
+/// `~/.kunj/<repo>/workspace.json`: one object keyed by `layoutKey(kind:branch:)`. A worktree and
+/// a container on one branch are two environments, hence the kind in the key; the file is per
+/// repository, so a `/` in a branch needs no escaping.
+public struct WorkspaceLayout: Codable, Equatable, Sendable {
+    public var branches: [String: BranchLayout]
+
+    public init(branches: [String: BranchLayout] = [:]) {
+        self.branches = branches
+    }
+
+    /// Entries that do not decode are skipped.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode([String: Lenient<BranchLayout>].self)
+        branches = raw.compactMapValues(\.value)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(branches)
+    }
+}
+
+private struct Lenient<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+}
+
+/// `"<kind>:<branch>"`, e.g. `worktree:feature/x`.
+public func layoutKey(kind: EnvironmentKind, branch: String) -> String {
+    "\(kind.rawValue):\(branch)"
+}
+
+/// `<home>/.kunj/<repoName>/workspace.json`
+public func layoutPath(repoName: String, home: String = NSHomeDirectory()) -> String {
+    URL(fileURLWithPath: home).appendingPathComponent(".kunj").appendingPathComponent(repoName)
+        .appendingPathComponent("workspace.json").path
+}
+
+/// The layout at `path`; empty when the file is missing or not a layout.
+public func loadLayout(path: String) -> WorkspaceLayout {
+    guard let data = FileManager.default.contents(atPath: path) else { return WorkspaceLayout() }
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return (try? decoder.decode(WorkspaceLayout.self, from: data)) ?? WorkspaceLayout()
+}
+
+/// Writes `layout` to a temporary file next to `path` and renames it over `path`, creating the
+/// parent directories, so a reader never sees half a file.
+public func saveLayout(_ layout: WorkspaceLayout, path: String) throws {
+    let url = URL(fileURLWithPath: path)
+    let dir = url.deletingLastPathComponent()
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    let data = try encoder.encode(layout)
+    let temp = dir.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
+    try data.write(to: temp)
+    if rename(temp.path, url.path) != 0 {
+        let code = errno
+        try? FileManager.default.removeItem(at: temp)
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+    }
+}
+
+/// The layout files of every repository, cached in memory: `update` changes an entry and saves
+/// that repository's file `debounceMs` later (one write for a burst of changes); `flush` writes
+/// everything pending now (call it before the app terminates). Safe to use from any thread.
+public final class LayoutStore: @unchecked Sendable {
+    private let home: String
+    private let debounceMs: Int
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "kunj.layout")
+    private var cache: [String: WorkspaceLayout] = [:]
+    private var pending: [String: DispatchWorkItem] = [:]
+
+    public init(home: String = NSHomeDirectory(), debounceMs: Int = 500) {
+        self.home = home
+        self.debounceMs = debounceMs
+    }
+
+    public func layout(repo: String) -> WorkspaceLayout {
+        lock.lock(); defer { lock.unlock() }
+        return cached(repo)
+    }
+
+    /// Changes the entry `key` of `repo` (created empty when absent) and schedules the save.
+    public func update(repo: String, key: String, _ change: (inout BranchLayout) -> Void) {
+        lock.lock()
+        var layout = cached(repo)
+        var entry = layout.branches[key] ?? BranchLayout()
+        change(&entry)
+        layout.branches[key] = entry
+        cache[repo] = layout
+        pending[repo]?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.save(repo: repo) }
+        pending[repo] = item
+        lock.unlock()
+        queue.asyncAfter(deadline: .now() + .milliseconds(debounceMs), execute: item)
+    }
+
+    /// Writes every pending repository now.
+    public func flush() {
+        lock.lock()
+        let repos = Array(pending.keys)
+        for item in pending.values { item.cancel() }
+        lock.unlock()
+        for repo in repos { save(repo: repo) }
+    }
+
+    private func cached(_ repo: String) -> WorkspaceLayout {
+        if let layout = cache[repo] { return layout }
+        let layout = loadLayout(path: layoutPath(repoName: repo, home: home))
+        cache[repo] = layout
+        return layout
+    }
+
+    private func save(repo: String) {
+        lock.lock()
+        guard pending.removeValue(forKey: repo) != nil, let layout = cache[repo] else { lock.unlock(); return }
+        // Written under the lock, so a flush and a timer never write one file at once out of order.
+        do {
+            try saveLayout(layout, path: layoutPath(repoName: repo, home: home))
+        } catch {
+            NSLog("Could not save the layout of %@: %@", repo, "\(error)")
+        }
+        lock.unlock()
+    }
+}
