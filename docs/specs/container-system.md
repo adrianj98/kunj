@@ -69,7 +69,7 @@ itself when Docker is unavailable.
 
 *Designed 2026-10-23; in progress.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b); the commands and delivery are not. Today secrets reach a container only as host environment variables
+(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, Task 4); the commands and the container and host delivery paths are not. Today secrets reach a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travel as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That means exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -181,7 +181,7 @@ file it is removed from the keep store too.
   tmux it does the same in-process. The workspace app opens worktree terminals with
   `kunj run -- $SHELL -l`. `file` deliveries render into the
   worktree when `kunj worktree add` creates it (where keep files apply today) and on
-  `kunj secret apply`. A rendered file that git does not ignore is refused unless `--force`.
+  `kunj secret apply`. A rendered file that git does not ignore (`git check-ignore`; a tracked file counts as not ignored) is refused unless `--force`, before any file is written; paths outside the worktree, also through a symlinked directory, are refused even with `--force`, and a symlink at the file's path is replaced, not written through. Rendered lines are `NAME="value"` sorted by name, with `\\`, `"` and newlines escaped (a raw CR does not survive the round trip).
 - **The workspace app** never reads the vault; it runs kunj commands, which unlock through the keychain,
   so an app launched from Finder works without shell variables.
 
@@ -201,8 +201,8 @@ file it is removed from the keep store too.
   in the container, a host-only one is not and appears nowhere in `docker inspect`, no label holds a
   value, and a snapshot image's `Config.Env` holds neither.
 
-**Code map:** built: `src/lib/secrets/{dotenv,vault,errors,keyprovider}.ts`, `secrets.*` settings in
-`src/settings/secrets.ts`. Planned: `src/lib/secrets/{resolve,deliver}.ts`,
+**Code map:** built: `src/lib/secrets/{dotenv,vault,errors,keyprovider,resolve,deliver}.ts`, `secrets.*` settings in
+`src/settings/secrets.ts`. Planned:
 `src/commands/secret.ts`, `src/commands/run.ts`,
 `SecretListJson` in `src/lib/json-types.ts`; container delivery hooks into `src/lib/container/env.ts`
 and `lifecycle.ts`.

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { SecretError } from '../errors';
-import { readVault, writeVault, vaultFiles, vaultStamp, SecretEntry, Unlock } from '../vault';
+import { readVault, writeVault, vaultFiles, vaultKdf, vaultStamp, SecretEntry, Unlock } from '../vault';
 
 // Tests never touch the real Keychain: fixed-key and scrypt passphrase unlocks only.
 const fixedKey = (key: Buffer = crypto.randomBytes(32)): Unlock => ({
@@ -324,5 +324,36 @@ describe('vaultStamp', () => {
     await writeVault(file, entries, unlock);
     const other = path.join(dir, 'other.enc');
     expect(vaultStamp([file, other])).not.toBe(vaultStamp([other, file]));
+  });
+});
+
+describe('vaultKdf', () => {
+  let dir: string;
+  beforeEach(() => (dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-vaultkdf-'))));
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('is undefined when the file is missing', () => {
+    expect(vaultKdf(path.join(dir, 'secrets.enc'))).toBeUndefined();
+  });
+
+  it("reads the envelope's kdf without a key", async () => {
+    const file = path.join(dir, 'secrets.enc');
+    await writeVault(file, [], fixedKey());
+    expect(vaultKdf(file)).toBe('keychain');
+    await writeVault(path.join(dir, 'p.enc'), [], passphrase('pw'));
+    expect(vaultKdf(path.join(dir, 'p.enc'))).toBe('passphrase');
+  });
+
+  it('gives secrets-corrupt naming the file when it is not a v1 envelope', () => {
+    const file = path.join(dir, 'secrets.enc');
+    fs.writeFileSync(file, '{"version":2}');
+    let err: unknown;
+    try {
+      vaultKdf(file);
+    } catch (e) {
+      err = e;
+    }
+    expect((err as SecretError).jsonCode).toBe('secrets-corrupt');
+    expect((err as SecretError).message).toContain(file);
   });
 });

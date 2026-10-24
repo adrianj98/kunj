@@ -142,6 +142,8 @@
 
 ### Task 4: Resolution and host file delivery
 
+**Status: done** in the commit "Secrets: resolution by scope and target, host file rendering". Rulings in the ledger.
+
 **Files:**
 - Create: `src/lib/secrets/resolve.ts`, `src/lib/secrets/deliver.ts`
 - Test: `src/lib/secrets/__tests__/resolve.test.ts`, `src/lib/secrets/__tests__/deliver.test.ts`
@@ -154,17 +156,18 @@
   - `renderFiles(entries: SecretEntry[]): Map<string, string>` maps the relative file to `NAME=value` lines. Values are double-quoted with `\\`, `"` and newline escaped (`\n`) so `parseDotenv` reads them back, sorted by name. `parseDotenv` turns a raw CR into LF and has no `\r` escape, so a value containing `\r` does not round-trip; `set`/`import` keep it in the vault as given, and only the rendered file loses it.
   - `writeHostFiles(worktreeRoot: string, files: Map<string,string>, opts: { force?: boolean }): Promise<string[]>` checks `git check-ignore -q` per file and throws `SecretError('… is not ignored by git', 'not-ignored')` before writing anything. It writes with mode 0600 and refuses paths outside the root (`..`, absolute).
   - `loadSecrets(opts: { branch?: string; target: 'host'|'container'; create?: false }): Promise<SecretEntry[]>` does the glue: config, `getKunjDir`, `getUnlock`, both `readVault`s and `resolveSecrets`. It returns `[]` without unlocking when no `secrets.enc` exists.
+  - As built: `resolveSecrets`, `envOf` and `loadSecrets` (with `SecretTarget`, `LoadSecretsOptions`) are in resolve.ts; `renderFiles` and `writeHostFiles` in deliver.ts. `loadSecrets` also takes optional seams `kunjDir`, `globalDir`, `mode`, `env`, `platform`, `run`, `prompt`, `tty` (defaults: current repo, `secrets.keyProvider`, the process); `branch` undefined means no branch layer (callers pass the current branch). `resolveSecrets` sorts by name, drops `delivery.file` and `scope` meaning from global entries, and filters by target after the override. `writeHostFiles` returns the relative paths written, refuses (plain `Error`) a path outside the root, also through a symlinked directory, even with `force`, and writes via temp file + rename.
   - Add `vaultKdf(file: string): Kdf | undefined` to vault.ts (reads the envelope's `kdf` without decrypting; `undefined` when missing; `secrets-corrupt` when not a v1 envelope) so the caller can pass `getUnlock` its `existingKdf`. Rules from Task 3 the glue must keep: `mode` is `secrets.keyProvider` from the resolved config; `existingKdf` is the kdf of whichever vault file exists, so a new repo vault next to a keychain global one reuses the same key instead of minting one; when the global and repo files have different kdfs, call `getUnlock` once per kdf and open each file with its own `Unlock`; reads pass `create: false`. Pass one `Unlock` (per kdf) to both files so a passphrase is asked once per command. Test with a fake `Runner`/`prompt`, never the real Keychain.
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - A branch entry `X` overrides repo `X` for `feature/x` only. `main` still gets the repo value.
   - A host-only entry is absent for `target: 'container'`.
   - A global entry with `delivery.file` is ignored for files (globals are env only).
   - A `renderFiles` value containing a newline, a quote and `#` survives a round trip through `parseDotenv`.
   - In a temp git repo with `.gitignore` containing `.env`, `writeHostFiles` writes `.env` with mode 0600. Without that ignore it rejects with code `not-ignored` and `.env` does not exist. `force` writes it. `../x` is refused.
-- [ ] **Step 2:** Run the tests. Expected: FAIL.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Run the tests. Expected: PASS.
-- [ ] **Step 5:** Commit: `git commit -m "Secrets: resolution by scope and target, host file rendering"`.
+- [x] **Step 2:** Run the tests. Expected: FAIL.
+- [x] **Step 3:** Implement.
+- [x] **Step 4:** Run the tests. Expected: PASS.
+- [x] **Step 5:** Commit: `git commit -m "Secrets: resolution by scope and target, host file rendering"`.
 
 ### Task 5: `kunj secret` command
 

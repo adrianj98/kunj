@@ -67,6 +67,12 @@ export function vaultStamp(files: string[]): string {
   return any ? hash.digest('hex').slice(0, 12) : '';
 }
 
+// The kdf a vault file was written with, read without a key: undefined when the file is missing,
+// secrets-corrupt when it is not a v1 envelope. Lets a caller ask getUnlock for the right provider.
+export function vaultKdf(file: string): Kdf | undefined {
+  return readEnvelope(file)?.kdf;
+}
+
 export async function readVault(file: string, unlock: Unlock): Promise<SecretEntry[]> {
   const env = readEnvelope(file);
   if (!env) return [];
