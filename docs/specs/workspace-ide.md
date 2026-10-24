@@ -69,7 +69,11 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
 - **Agent tab:** a terminal running `kunj agent <branch>` or `kunj ct agent <branch>`, which attaches
   to the environment's tmux session, so a session started from the CLI shows up in the app and the
   reverse.
-- **Changes column (right, always visible):** header `N files · +adds −dels` and a scope select
+- **Changes column (right, hidden by default):** the terminal column takes the full width until it is
+  opened with the Changes toggle (a `Changes` pill with the file count at the right of the tab bar,
+  View > Show Changes ⌘⇧C); it closes the same way. Open or closed is one app-wide UI setting,
+  remembered across launches; while closed the column does not compute diffs. When open: header
+  `N files · +adds −dels` and a scope select
   (vs origin/<base>, default: everything since the fork point, working tree included; Uncommitted;
   Last commit); a file list (A/M/D letter, name, ± counts); Monaco's diff editor for the selected file.
 - **Status bar:** container name or worktree path · uptime · services · forwards; right side the agent
@@ -356,8 +360,11 @@ All 2026-10-23.
 - **Editor level: Monaco with the diff editor;** no language servers in v1; VS Code/Cursor as hand-off.
 - **Diff default against the base branch,** with uncommitted-only and last-commit options.
 - **The UI is the design package** (`docs/workspace-app/design/`, 2026-10-23): two columns under the
-  header, terminals left and the Changes column always on the right, sidebar rows titled by task with a
+  header, terminals left and the Changes column on the right, sidebar rows titled by task with a
   status verb, three themes from `tokens.json`. The package's technical remarks are ignored.
+- **The Changes column is hidden by default and opens on demand** (user, 2026-10-23), unlike the
+  design's always-visible column: the terminal gets the width, and the toggle (tab-bar pill with the
+  file count, ⌘⇧C) brings the diff in when needed.
 - **Ports in v1 as links;** webview previews and split panes in v2 (2026-10-23: the user kept them out of
   this build; the agent waiting state and editor tabs are in).
 - **Session titles are branch names** (2026-10-23); the design's task titles need metadata the CLI does
