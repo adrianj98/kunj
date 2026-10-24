@@ -573,8 +573,9 @@ export class ContainerCommand extends BaseCommand {
     // tmux runs a single command argument through the shell, so the setting keeps its quoting
     // -u: UTF-8 even when the image has no locale, so box-drawing glyphs render
     // window-size latest: an IDE terminal and a CLI one attached together follow the one used last, not the smaller
+    // status off: no tmux status line (see agentArgv)
     const argv = probe.exitCode === 0
-      ? ['tmux', '-u', 'new-session', '-A', '-s', 'agent', command, ';', 'set-option', '-t', 'agent', 'window-size', 'latest']
+      ? ['tmux', '-u', 'new-session', '-A', '-s', 'agent', command, ';', 'set-option', '-t', 'agent', 'window-size', 'latest', ';', 'set-option', '-t', 'agent', 'status', 'off']
       : ['sh', '-lc', command];
     const r = await ctx.backend.exec(main.id, argv, this.interactive(main, true));
     process.exitCode = r.exitCode;

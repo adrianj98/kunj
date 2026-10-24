@@ -127,10 +127,10 @@ opt-in: BaseCommand prints `{ code, message }` only for an error with a string `
 worktree. One tmux server serves the host, so the name is `agentSessionName()`: the container name from
 `containerNames()` with `.` and `:` replaced by `-` (`kunj-<readable>-<hash>`); inside a container, which
 has its own tmux server, the session stays `agent`. `start` runs `tmux -u new-session -A -s <name> -c
-<worktree> -e KUNJ_BRANCH=… -e KUNJ_REPO=… -e KUNJ_WORKTREE=… <command> ; set-option window-size latest`
+<worktree> -e KUNJ_BRANCH=… -e KUNJ_REPO=… -e KUNJ_WORKTREE=… <command> ; set-option window-size latest ; set-option status off`
 (`-e` because a new session's environment comes from the tmux server; `TMUX` is dropped from the
 environment so it works from inside a pane; `window-size latest` so the app and a CLI terminal attached
-together are sized to the last one attached). Without tmux, or with `--no-tmux`, `start` runs the
+together are sized to the last one attached; `status off` because the app's tab bar and status bar already show the session, and tmux's line would cost the agent a row; it is a session option, so other tmux sessions keep theirs, and `kunj ct agent` sets it on the container's `agent` session too). Without tmux, or with `--no-tmux`, `start` runs the
 command directly through `$SHELL -lc` in the worktree with the same `KUNJ_*` environment, after a
 one-line stderr hint that the agent stops when the terminal closes. It needs a terminal (`no-tty`). `status --json` prints
 `AgentStatusJson`, `stop --json` `AgentStopJson`. `kunj worktree list --json` gives each existing,

@@ -36,7 +36,7 @@ test('agentArgv attaches or creates, passes the env with -e and sets window-size
   expect(agentArgv('kunj-x', '/wt', 'claude', { KUNJ_BRANCH: 'a b', KUNJ_REPO: 'app' })).toEqual([
     'tmux', '-u', 'new-session', '-A', '-s', 'kunj-x', '-c', '/wt',
     '-e', 'KUNJ_BRANCH=a b', '-e', 'KUNJ_REPO=app',
-    'claude', ';', 'set-option', '-t', 'kunj-x', 'window-size', 'latest',
+    'claude', ';', 'set-option', '-t', 'kunj-x', 'window-size', 'latest', ';', 'set-option', '-t', 'kunj-x', 'status', 'off',
   ]);
 });
 

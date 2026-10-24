@@ -302,7 +302,7 @@ describe('ContainerCommand', () => {
       ['sh', '-c', 'command -v tmux'],
       [
         'tmux', '-u', 'new-session', '-A', '-s', 'agent', agentShell(`claude --append-system-prompt "be brief" 'it'\\''s'`),
-        ';', 'set-option', '-t', 'agent', 'window-size', 'latest',
+        ';', 'set-option', '-t', 'agent', 'window-size', 'latest', ';', 'set-option', '-t', 'agent', 'status', 'off',
       ],
     ]);
   });
