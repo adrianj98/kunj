@@ -73,9 +73,14 @@ function collect(): { stream: Writable; text: () => string } {
   });
 
   it('copies a tar in and reads the file back with a plain exec', async () => {
-    const tar = execFileSync('sh', ['-c', 'd=$(mktemp -d) && printf hello > "$d/greeting.txt" && tar -C "$d" -cf - greeting.txt'], { maxBuffer: 1 << 20 });
-    await remote.copyIn(NAME, '/tmp/in', Readable.from([tar]));
-    const r = await remote.exec(NAME, ['cat', '/tmp/in/greeting.txt']);
+    const tar = execFileSync('sh', ['-c', 'd=$(mktemp -d) && printf hello > "$d/greeting.txt" && tar --no-xattrs -C "$d" -cf - greeting.txt'], {
+      maxBuffer: 1 << 20,
+      // macOS tar otherwise adds Apple xattrs (com.apple.provenance) the daemon cannot set
+      env: { ...process.env, COPYFILE_DISABLE: '1' },
+    });
+    // docker cp extracts into a directory that must exist, as the local backend's callers ensure
+    await remote.copyIn(NAME, '/tmp', Readable.from([tar]));
+    const r = await remote.exec(NAME, ['cat', '/tmp/greeting.txt']);
     expect(r).toEqual({ exitCode: 0, stdout: 'hello' });
   });
 

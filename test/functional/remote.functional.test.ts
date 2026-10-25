@@ -1,22 +1,28 @@
 // Remote containers through the built CLI: a `kunj serve` child in the fixture's HOME, a `--url`
 // remote to it on 127.0.0.1, and the start/list/exec/stop/remove path with --remote. Opt-in: npm run
 // test:functional. (Written without a daemon at hand; the first run on one may need adjusting.)
-import { describe, it, expect, beforeAll } from '@jest/globals';
+import { describe, it, expect, beforeEach } from '@jest/globals';
 import * as fs from 'fs';
 import * as path from 'path';
-import { describeFunctional, useFixture } from './harness';
+import { describeFunctional, useFixture, waitFor } from './harness';
 
 describeFunctional('kunj ct (functional): remote', () => {
   const ctx = useFixture('remote');
   let port = 0;
   let token = '';
 
-  beforeAll(async () => {
+  // The fixture stops background processes after every test, so each test gets a fresh server (on a
+  // port the OS picks; the first run creates and prints the token, later runs reuse it)
+  beforeEach(async () => {
     const { fx } = ctx;
-    // The server, on a port the OS picks; its first run creates and prints the token
     const serve = fx.spawn(['serve', '--listen', '127.0.0.1:0', '--verbose']);
-    const line = await serve.line(l => /listening on 127\.0\.0\.1:\d+/.test(l), 'kunj serve listening');
-    port = Number(/:(\d+)/.exec(line)![1]);
+    // kunj serve logs to stderr (stdout stays free), so wait there
+    const listening = /listening on 127\.0\.0\.1:(\d+)/;
+    await waitFor(() => {
+      if (serve.child.exitCode !== null) throw new Error(`kunj serve exited (${serve.child.exitCode}): ${serve.stderr.slice(-2000)}`);
+      return listening.test(serve.stderr);
+    }, 'kunj serve listening');
+    port = Number(listening.exec(serve.stderr)![1]);
     token = fs.readFileSync(path.join(fx.home, '.kunj', 'serve', 'token'), 'utf8').trim();
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const added = await fx.kunj(['remote', 'add', 'box', '--url', `http://127.0.0.1:${port}`, '--token-stdin'], { input: token + '\n' });

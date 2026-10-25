@@ -2,6 +2,26 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Remote containers verified on a real Docker daemon
+
+- Fixed three tests that had never run (written without a daemon): `remote.docker.test.ts` copied into a directory
+  that did not exist and built its tar with macOS xattrs the daemon refuses; `remote.functional.test.ts` read the
+  server's "listening" line from stdout (it logs to stderr) and started the server once although the fixture stops
+  background processes after every test. Why: verify the feature end to end; no product code changed.
+
+## 2026-10-24 — Remote containers (`kunj serve`, `kunj remote`, `--remote`)
+
+- Spec (docs/specs/remote-containers.md) and plan: a thin server on the Docker host exposing `ContainerBackend`
+  over HTTP and WebSocket, the laptop keeping `~/.kunj` and the lifecycle; everything over the protocol, SSH only as
+  a tunnel. Why: agreed design after comparing a CLI-over-SSH and a hybrid approach.
+- `kunj serve` (token, loopback, `kunj.*`-only guard), `RemoteKunjBackend`, TTY exec through the Docker Engine API
+  with a raw-mode client, `kunj remote add|list|ping|token|remove`, the SSH tunnel, `--remote` / `container.remote`,
+  `kunj events` per-repo remotes, docs-site page. Why: run branch containers on another machine with the same
+  commands and apps.
+- Review fixes (adversary round): exec and `logs --follow` end on the box when the client leaves, the TTY tail drains
+  before the exit frame, the tunnel dies on SIGINT/SIGTERM/SIGHUP, exit-code polling 30 s, stricter image and
+  cache guards.
+
 ## 2026-10-24 — Review fixes for the container rows
 
 - macOS: a container listing the app cannot decode no longer drops the repository's worktrees; port rows are
