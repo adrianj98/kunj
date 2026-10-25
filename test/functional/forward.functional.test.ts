@@ -100,7 +100,7 @@ describeFunctional('kunj ct (functional): forward, agent and open', () => {
       await agent.stop();
       expect(hasSession()).toBe(true);
       const list = await fx.kunjJson<ContainerListJson>(['ct', 'list']);
-      expect(list.containers.find(c => c.branch === branch)?.agent).toEqual({ running: true });
+      expect(list.containers.find(c => c.branch === branch)?.agent).toMatchObject({ running: true, sessions: [{ session: "agent", id: null }] });
 
       const attach = fx.spawn(['ct', 'attach', branch], { pty: true });
       await waitFor(() => attach.stdout.includes('ft-agent-hi'), 'attach to show the session', 30_000);

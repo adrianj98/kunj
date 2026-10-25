@@ -355,10 +355,13 @@ export class Fixture {
   spawn(args: string[], options: RunOptions & { pty?: boolean } = {}): Background {
     const argv = [process.execPath, CLI, ...args];
     const [cmd, ...rest] = options.pty ? ptyCommand(argv) : argv;
+    // macOS `script` gives up when its stdin is a socket or a FIFO (node's pipes are socketpairs;
+    // tcgetattr fails with EOPNOTSUPP, not ENOTTY), so under a pty stdin is /dev/null: script sends the
+    // end of input to the pty as ^D and keeps relaying until the command exits
     const child = spawn(cmd, rest, {
       cwd: options.cwd ?? this.clone,
       env: this.env(options.env),
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: [options.pty ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       detached: true,
     });
     const bg = new Background(child);
