@@ -12,6 +12,9 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { LocalDockerBackend } from '../docker';
+import { ContainerBackend } from '../backend';
+import { RemoteKunjBackend } from '../remote';
+import { ServeServer, createServeServer } from '../../serve/server';
 import { LABEL, containerNames, repoIdFromUrl } from '../names';
 import { StartError, StartOptions, containerStatus, removeContainer, startContainer } from '../lifecycle';
 import { forwardPort } from '../forward';
@@ -63,7 +66,11 @@ let originUrl = '';
 let repoId = '';
 /** Repository ids other tests label objects with; afterAll cleans these up too. */
 const otherRepoIds: string[] = [];
-const backend = new LocalDockerBackend();
+// KUNJ_DOCKER_REMOTE=1 (npm run test:docker:remote): the same tests through kunj serve, in front of this daemon
+const DOCKER_REMOTE = process.env.KUNJ_DOCKER_REMOTE === '1';
+const localBackend = new LocalDockerBackend();
+let backend: ContainerBackend = localBackend;
+let serveServer: ServeServer | undefined;
 
 /** Everything labelled with this run's repo id (or `id`), by kind. */
 function labelled(id = repoId): { containers: string[]; volumes: string[]; networks: string[] } {
@@ -122,7 +129,19 @@ const BRANCH_GW = 'it-gw';
 const BRANCH_ALLOW = 'it-allow';
 const BRANCH_SECRETS = 'it-secrets';
 
-(dockerUp ? describe : describe.skip)('kunj container against Docker', () => {
+(dockerUp ? describe : describe.skip)(`kunj container against Docker${DOCKER_REMOTE ? ' (through kunj serve)' : ''}`, () => {
+  beforeAll(async () => {
+    if (!DOCKER_REMOTE) return;
+    serveServer = createServeServer({ backend: localBackend, token: 'it-token', version: VERSION, allowPrivileged: true, allowRuntimes: ['sysbox-runc'] });
+    const { port } = await serveServer.listen('127.0.0.1', 0);
+    const remote = new RemoteKunjBackend({ baseUrl: `http://127.0.0.1:${port}`, token: 'it-token', name: 'it' });
+    await remote.ready();
+    backend = remote;
+  });
+  afterAll(async () => {
+    await serveServer?.close();
+  });
+
   beforeAll(async () => {
     tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-it-')));
     bare = path.join(tmp, `${REPO_NAME}.git`);

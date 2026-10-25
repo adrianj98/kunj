@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Docker suite through kunj serve; repeated --allow-runtime
+
+- `npm run test:docker:remote` (`KUNJ_DOCKER_REMOTE=1`): the low-level Docker suite runs through a `kunj serve` in
+  front of this daemon. Why: test every feature over the server.
+- `kunj serve --allow-runtime a --allow-runtime b` kept only `b` (Commander keeps the last value); every occurrence
+  is now read from argv. Why: review finding, confirmed with Commander 12.1.0.
+
 ## 2026-10-25 — Everything through kunj serve; secrets over the server
 
 - `npm run test:functional:remote` (`KUNJ_FUNCTIONAL_REMOTE=1`): each fixture starts its own `kunj serve` in front of

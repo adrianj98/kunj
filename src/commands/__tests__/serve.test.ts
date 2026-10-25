@@ -3,7 +3,7 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { FakeBackend } from '../../lib/container/__tests__/fake-backend';
-import { ServeCommand, parseListen, parseRuntimes } from '../serve';
+import { ServeCommand, flagValues, parseListen, parseRuntimes } from '../serve';
 import { isFastCommand } from '../fast';
 
 jest.mock('../../lib/config', () => ({
@@ -41,6 +41,12 @@ describe('parseRuntimes', () => {
     expect(parseRuntimes('sysbox-runc')).toEqual(['sysbox-runc']);
     expect(parseRuntimes('sysbox-runc, kata')).toEqual(['sysbox-runc', 'kata']);
     expect(parseRuntimes(['a', 'b,c'])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('flagValues reads a repeated flag from argv, which Commander would reduce to the last value', () => {
+    const argv = ['node', 'kunj', 'serve', '--allow-runtime', 'sysbox-runc', '--allow-runtime=kata', '--verbose', '--', '--allow-runtime', 'x'];
+    expect(flagValues(argv, '--allow-runtime')).toEqual(['sysbox-runc', 'kata']);
+    expect(parseRuntimes(flagValues(argv, '--allow-runtime'))).toEqual(['sysbox-runc', 'kata']);
   });
 });
 

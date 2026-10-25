@@ -68,6 +68,17 @@ export function parseRuntimes(value: string | string[] | undefined): string[] {
   return parts.map(p => p.trim()).filter(Boolean);
 }
 
+/** Every value of `flag` in argv (`--flag v` and `--flag=v`), up to a `--`. */
+export function flagValues(argv: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--') break;
+    if (argv[i] === flag && i + 1 < argv.length) values.push(argv[++i]);
+    else if (argv[i].startsWith(flag + '=')) values.push(argv[i].slice(flag.length + 1));
+  }
+  return values;
+}
+
 export class ServeCommand extends BaseCommand {
   constructor(private readonly deps: ServeCommandDeps = {}) {
     super({
@@ -78,7 +89,7 @@ export class ServeCommand extends BaseCommand {
         { flags: '--listen <host:port>', description: `Address to listen on (default 127.0.0.1:${DEFAULT_SERVE_PORT}); a non-loopback address needs --allow-remote-listen` },
         { flags: '--allow-remote-listen', description: 'Listen on a non-loopback address (plain HTTP on your network: prefer an SSH tunnel or a TLS proxy)' },
         { flags: '--allow-privileged', description: 'Let clients run privileged containers (container.dockerInDocker "privileged")' },
-        { flags: '--allow-runtime <names>', description: 'Let clients use these --runtime values, comma-separated, e.g. sysbox-runc' },
+        { flags: '--allow-runtime <names>', description: 'Let clients use these --runtime values, e.g. sysbox-runc (comma-separated or repeated)' },
         { flags: '--context <name>', description: 'Docker context to serve (default: container.dockerContext)' },
         { flags: '--verbose', description: 'Log every request (method, route, status, duration); refusals are always logged' },
         { flags: '--rotate', description: '[token] Replace the token; every client must be given the new one' },
@@ -118,7 +129,9 @@ export class ServeCommand extends BaseCommand {
     if (verb !== 'run') throw new ContainerError(`Unknown serve action '${verb}'. Expected: token`);
 
     const listen = parseListen(opts.listen);
-    const allowRuntimes = parseRuntimes(opts.allowRuntime);
+    // Commander keeps only the last of a repeated option, so every occurrence is read from argv
+    const repeated = flagValues(process.argv, '--allow-runtime');
+    const allowRuntimes = parseRuntimes(repeated.length > 1 ? repeated : opts.allowRuntime);
     if (!LOOPBACK.test(listen.host) && !opts.allowRemoteListen) {
       throw new ContainerError(
         `--listen ${opts.listen} is not a loopback address: the connection would be plain HTTP on your network. ` +
