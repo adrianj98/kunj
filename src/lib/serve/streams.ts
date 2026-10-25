@@ -34,12 +34,15 @@ export interface StreamOptions {
 
 /** A Writable that sends each chunk as a frame and completes the write when the socket took it. */
 export function frameWriter(ws: WebSocket, channel: Channel): Writable {
-  return new Writable({
+  const writer = new Writable({
     write(chunk: Buffer, _enc, cb) {
       if (ws.readyState !== WebSocket.OPEN) return cb();
       ws.send(encodeFrame(channel, chunk), { binary: true }, err => cb(err ?? undefined));
     },
   });
+  // A write after end or a failed send concerns one client: never an uncaught error that ends the server
+  writer.on('error', () => undefined);
+  return writer;
 }
 
 /** Sends a control message; a closed socket is not an error (the client has gone). */
@@ -123,7 +126,8 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
   const stdout = frameWriter(ws, CHANNEL.stdout);
   const stderr = frameWriter(ws, CHANNEL.stderr);
   let closed = false;
-  // Aborted when the client leaves: ends a command that does not read stdin (sleep) too
+  // Aborted when the client leaves: kills the server's `docker exec` client. Docker cannot kill an exec,
+  // so a command that does not read stdin (sleep) runs on in the container, as with a local kunj ct exec
   const gone = new AbortController();
   let tty: TtySession | undefined;
   // The newest resize, kept until the pty exists
@@ -184,7 +188,11 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
     tty.stdout.pipe(stdout);
     const exitCode = await tty.wait();
     await Promise.race([drained, new Promise<void>(resolve => setTimeout(resolve, 2000))]);
-    if (!stdout.writableFinished) await new Promise<void>(resolve => stdout.end(resolve));
+    if (!stdout.writableFinished) {
+      // Detach first: a pty byte piped after end() would be a write after end
+      tty.stdout.unpipe(stdout);
+      await new Promise<void>(resolve => stdout.end(resolve));
+    }
     if (!closed) {
       sendControl(ws, { exit: exitCode });
       ws.close();

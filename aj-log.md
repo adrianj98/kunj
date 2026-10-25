@@ -2,6 +2,14 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Remote containers: second review round
+
+- A late pty byte after the TTY drain wait no longer crashes `kunj serve`: the pty is unpiped before the frame
+  writer ends, and the writer swallows its own errors. Image tags with a `/` anywhere are refused
+  (`kunj-x.example/img`). The spec no longer claims an aborted exec kills a `sleep`: Docker cannot kill an exec, so
+  only stdin-reading commands end, as locally. Why: adversary review of the first fix commit (crash reproduced with
+  a probe; the in-container `sleep` surviving was checked on Docker Desktop).
+
 ## 2026-10-25 — Remote containers verified on a real Docker daemon
 
 - Fixed three tests that had never run (written without a daemon): `remote.docker.test.ts` copied into a directory

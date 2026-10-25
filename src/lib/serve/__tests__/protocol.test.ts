@@ -1,4 +1,6 @@
 import { CHANNEL, ServeError, decodeFrame, encodeFrame, labelQuery, parseControl, parseLabelQuery } from '../protocol';
+import { frameWriter } from '../streams';
+import type WebSocket from 'ws';
 import { loadOrCreateToken, rotateToken, tokenMatches } from '../token';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -19,6 +21,27 @@ describe('frames', () => {
   it('refuses an empty frame and an unknown channel', () => {
     expect(() => decodeFrame(Buffer.alloc(0))).toThrow(ServeError);
     expect(() => decodeFrame(Buffer.from([7, 1]))).toThrow(/unknown channel 7/);
+  });
+});
+
+describe('frameWriter', () => {
+  it('swallows a write after end instead of raising an uncaught error (a late pty byte must not end kunj serve)', async () => {
+    const sent: Buffer[] = [];
+    const ws = { readyState: 1, send: (b: Buffer, _o: unknown, cb: (e?: Error) => void) => (sent.push(b), setTimeout(cb, 20)) } as unknown as WebSocket;
+    const writer = frameWriter(ws, CHANNEL.stdout);
+    writer.write('a');
+    writer.end();
+    const uncaught: unknown[] = [];
+    const onUncaught = (e: unknown) => uncaught.push(e);
+    process.on('uncaughtException', onUncaught);
+    try {
+      writer.write('late');
+      await new Promise(r => setTimeout(r, 100));
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+    expect(uncaught).toEqual([]);
+    expect(sent.map(b => b.toString('latin1'))).toEqual(['\u0001a']);
   });
 });
 

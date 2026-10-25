@@ -210,6 +210,8 @@ describe('kunj serve: unary routes', () => {
     expect((await request(port, 'DELETE', `/v1/images/${encodeURIComponent('node:22')}`)).status).toBe(403);
     // A registry or namespace in front is not kunj's either
     expect((await request(port, 'DELETE', `/v1/images/${encodeURIComponent('evil.example/kunj-sandbox:1')}`)).status).toBe(403);
+    expect((await request(port, 'DELETE', `/v1/images/${encodeURIComponent('kunj-x.example/img:1')}`)).status).toBe(403);
+    expect((await request(port, 'DELETE', `/v1/images/${encodeURIComponent('kunj-attacker/img')}`)).status).toBe(403);
     expect((await request(port, 'DELETE', `/v1/images/${tag}`)).status).toBe(200);
     expect(fake.callsOf('removeImage')).toEqual([['kunj-sandbox:1-a']]);
     const commit = await request(port, 'POST', '/v1/containers/kunj-r-b-1/commit', { tag: 'kunj-blueprint-r:h', labels: { 'kunj.blueprint.hash': 'h' }, changes: ['ENV A=1'] });

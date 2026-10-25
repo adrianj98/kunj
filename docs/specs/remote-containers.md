@@ -167,9 +167,12 @@ channel: `0` stdin (client→server), `1` stdout, `2` stderr (server→client); 
 (server→client, then close). Stdin EOF is an empty `0` frame. Backpressure: each side stops reading
 its source while the socket's buffered amount is above 1 MB, like the MCP bridge. A WebSocket closed
 without `exit` is `Error('exec ended: connection closed')`, which lifecycle already treats as a failure.
-A client that leaves mid-exec ends it on the box: stdin is destroyed and the exec's `AbortSignal`
-(`ExecIO.signal`) kills the process, so a `sleep` without a timeout does not outlive its caller; a
-client gone before the request was checked starts nothing. A `logs --follow` carries
+A client that leaves mid-exec: stdin is destroyed (a command reading it, like the `socat` of a
+forward, sees EOF and ends) and the exec's `AbortSignal` (`ExecIO.signal`) kills the server's
+`docker exec` client. Docker cannot kill an exec's process (neither the CLI nor the Engine API can),
+so a command that ignores stdin, like a `sleep`, runs on in the container, exactly as it does after a
+local `kunj ct exec` is killed; TTY sessions end, since closing the pty hangs them up. A client gone
+before the request was checked starts nothing. A `logs --follow` carries
 `LogOptions.signal` the same way. For a TTY exec the exit frame waits until the pty's stream has
 drained into the socket (`finish` of the frame writer, 2 s at most), so a burst of output just before
 `exit` is not cut.

@@ -137,6 +137,42 @@ describe('RemoteKunjBackend: streams', () => {
     });
   });
 
+  describe('TTY tail', () => {
+    it('survives pty output that keeps coming after the drain wait ends (no write after end)', async () => {
+      // A pty whose stream never ends and that writes after the exit: the server must detach it
+      h.fake.execTty = async () => {
+        const stdin = new PassThrough();
+        const stdout = new PassThrough();
+        let done!: (code: number) => void;
+        const exit = new Promise<number>(r => (done = r));
+        setTimeout(() => {
+          stdout.write('before exit');
+          done(0);
+          const t = setInterval(() => stdout.write('late'), 100);
+          setTimeout(() => clearInterval(t), 3500);
+        }, 50);
+        return { stdin, stdout, resize: async () => {}, wait: () => exit, close: () => {} };
+      };
+      const uncaught: unknown[] = [];
+      const onUncaught = (e: unknown) => uncaught.push(e);
+      process.on('uncaughtException', onUncaught);
+      try {
+        const out: Buffer[] = [];
+        const stdin = new PassThrough();
+        const stdout = new Writable({ write: (c: Buffer, _e, cb) => (out.push(c), cb()) });
+        const r = await h.remote.exec('kunj-r-b-1', ['sh'], { tty: true, stdin, stdout });
+        expect(r.exitCode).toBe(0);
+        expect(Buffer.concat(out).toString()).toContain('before exit');
+        await new Promise(res => setTimeout(res, 1000));
+        expect(uncaught).toEqual([]);
+        // The server still answers
+        expect(await h.remote.list({ 'kunj.repo': 'r' })).toHaveLength(1);
+      } finally {
+        process.off('uncaughtException', onUncaught);
+      }
+    }, 15000);
+  });
+
   describe('copyIn and buildImage', () => {
     class CapturingFake extends FakeBackend {
       tars: Buffer[] = [];

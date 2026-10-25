@@ -74,9 +74,9 @@ export class Guard {
     this.cache.delete(id);
   }
 
-  /** kunj's images have no registry or namespace: the whole reference starts with kunj- */
+  /** kunj's images have no registry or namespace: kunj-<name>[:tag], with no '/' anywhere */
   image(tag: string): void {
-    if (!tag || !tag.startsWith(IMAGE_TAG_PREFIX)) throw refused(`${tag || '(empty)'} is not a kunj image`);
+    if (!tag || !tag.startsWith(IMAGE_TAG_PREFIX) || tag.includes('/')) throw refused(`${tag || '(empty)'} is not a kunj image`);
   }
 
   runSpec(spec: ContainerSpec): void {
