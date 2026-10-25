@@ -168,7 +168,9 @@ Keep files are copied in and the `post-worktree-create` hook runs, exactly as wi
 | `kunj.worktrees.trackSessions` | `true` | Register this window so other windows and the CLI can see what it has open |
 | `kunj.worktrees.showContainers` | `true` | List the branch containers too (`kunj worktree list --containers`) |
 
-The view also refreshes when the window regains focus. Pull requests come from a 60-second cache, so
+The view also refreshes when the window regains focus, and right away when a container starts or
+stops, an agent starts, ends or waits, a port is forwarded or a worktree's git state changes: each
+window follows `kunj events --json` for its repositories. Pull requests come from a 60-second cache, so
 the periodic refresh never waits on the network; the Refresh button bypasses it.
 
 Where new worktrees go and which editor `kunj worktree open` launches are kunj settings, not

@@ -18,7 +18,6 @@ page only says where each thing stands.
 | [blueprints.md](blueprints.md) | `.kunj/blueprint.json`, presets, `init`, snapshots built by `start`, host-made bundles | Shipped |
 | [container-phase-2.md](container-phase-2.md) | Sidecar services, `ct open`, `forward --auto`, `ct prune`, Docker-in-Docker, host MCP bridge | Shipped |
 | [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | Shipped (CLI contract and the native app v1) |
-| [containers-in-apps.md](containers-in-apps.md) | Containers shown and managed like worktrees in the VS Code extension and the macOS app | In progress |
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
 
 ## Done
@@ -48,6 +47,7 @@ page only says where each thing stands.
 | Specs merged into one folder and checked against the code | this folder | f3a5e35, d1eea00 |
 | Native IDE spike: SwiftTerm handles five live Claude TUIs (6% CPU idle), Monaco diff in one WKWebView in under 1 s, menu shortcuts work with the webview focused; caveat: hidden tabs still parse on the main thread | [spikes/native-ide/REPORT.md](../../spikes/native-ide/REPORT.md) | 1c2aaa3, 1730cd1, 0e41a24 |
 | Secret manager: `kunj secret` (encrypted global, repo and branch secrets; `.env` import), `kunj run`, delivery to host commands, agents, new worktrees and branch containers, the kept `.env` import hint and `kunj setup` offer, user docs, the workspace app's Settings › Containers (GitHub token source, `container.useGhToken`, Claude Code token); plan `docs/superpowers/plans/2026-10-23-secret-manager.md` | [container-system.md](container-system.md#secrets) | c2a722f, d2c82e4, 1429ed9, bc006de, 8901b6b, 6b63a50, 009958c, a10f544, 6c08cd1, 70b398d, 4a15833, 8fd3733, 20c95f9, 45a9e6b, 3bbe9af |
+| Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | 4d99265, 60206aa, df59f3f, 2e76fd8, 0ebd0ed, d3031e0, live refresh (see the follow-up) |
 
 ## In progress
 

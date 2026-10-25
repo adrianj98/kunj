@@ -67,8 +67,10 @@ Finder don't get one otherwise); if it can't find it, set the command in Setting
   (System Settings › Privacy & Security › Accessibility) and works by driving Mission Control, so
   leave the keyboard and mouse alone for the few seconds it runs.
 
-The list refreshes on a timer you choose (30 seconds by default) and right away when an editor opens
-or closes a worktree or a repository is added.
+The list refreshes right away when a container starts or stops, an agent starts, ends or waits, a port
+is forwarded, a branch moves or a worktree changes (the app follows `kunj events --json`), when an
+editor opens or closes a worktree or a repository is added, and on a timer you choose (30 seconds by
+default) as a fallback.
 
 ### Settings
 

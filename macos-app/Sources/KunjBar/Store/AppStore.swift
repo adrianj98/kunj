@@ -1,6 +1,7 @@
 // App state: the known repositories (`kunj repos`) and each one's worktrees and
 // branch containers (`kunj worktree list --containers`), refreshed on a timer, when
-// the panel opens, and when ~/.kunj/worktree-sessions.json or repos.json change.
+// the panel opens, when ~/.kunj/worktree-sessions.json or repos.json change, and on
+// `kunj events` (containers, agents, forwards, git).
 
 import AppKit
 import KunjBarCore
@@ -48,6 +49,8 @@ final class AppStore {
     @ObservationIgnored let notifier = Notifier()
     @ObservationIgnored private var watcher: KunjDirWatcher?
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var events: EventStream?
+    @ObservationIgnored private var eventRefresh: Task<Void, Never>?
     @ObservationIgnored private var pendingFresh = false
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var defaultsObserver: NSObjectProtocol?
@@ -69,6 +72,7 @@ final class AppStore {
         notifier.requestAuthorization()
         watcher = KunjDirWatcher { [weak self] in self?.refresh() }
         watcher?.start()
+        startEvents()
         armTimer()
         // Settings changes: CLI path and refresh interval apply right away
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -91,6 +95,7 @@ final class AppStore {
         if defaults.kunjCliPath != lastCliPath {
             lastCliPath = defaults.kunjCliPath
             cli.command = lastCliPath
+            events?.restart()
             refresh()
         }
         if defaults.kunjShowContainers != lastShowContainers {
@@ -100,6 +105,31 @@ final class AppStore {
         if defaults.kunjRefreshInterval != lastInterval {
             lastInterval = defaults.kunjRefreshInterval
             armTimer()
+        }
+    }
+
+    private func startEvents() {
+        let stream = EventStream(cli: cli) { [weak self] line, afterRestart in
+            let reaction = eventReaction(line: line, afterRestart: afterRestart)
+            guard reaction != .ignore else { return }
+            Task { @MainActor in self?.handle(reaction) }
+        }
+        events = stream
+        stream.start()
+    }
+
+    // Changes come in bursts (a container start is several Docker events): one refresh a second at most
+    private func handle(_ reaction: EventReaction) {
+        if reaction == .restartStream {
+            events?.restart()
+            return
+        }
+        guard eventRefresh == nil else { return }
+        eventRefresh = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self else { return }
+            self.eventRefresh = nil
+            self.refresh()
         }
     }
 
