@@ -9,9 +9,9 @@ has them ([workspace-ide.md](workspace-ide.md)).
 | Part | State |
 | --- | --- |
 | CLI: `kunj worktree list --json --containers` | Shipped |
-| VS Code extension: container rows and actions | Shipped (not yet tried against a live container) |
-| macOS app: container rows and actions | Shipped (not yet tried against a live container) |
-| Refresh on `kunj events` | Not started |
+| VS Code extension: container rows and actions | Shipped, tried against live containers |
+| macOS app: container rows and actions | Shipped, tried against live containers |
+| Refresh on `kunj events` | Shipped |
 
 ## Principle
 
@@ -84,11 +84,29 @@ actions above; terminal actions open Terminal (the app's existing launcher) with
 
 ## Refresh
 
-Both apps refresh as they do now (timer, focus, the `~/.kunj` watchers); container state changes
-show on the next refresh. A later step subscribes to `kunj events --json` (`container`, `agent`,
-`forwards`) for immediate updates.
+Both apps keep their refreshes (timer, focus, the `~/.kunj` watchers) and also follow one long-lived
+`kunj events --json` child: the extension one per window with `--repo` for the repositories in the
+view (a new child when that set changes), the macOS app one for every known repository (a new child on
+a `repos` event, since `kunj events` resolves its repositories once). The child's stdin is held, so it
+dies with the app; an exited child is started again after 2 s, doubling to 60 s.
+
+| Event | Reaction |
+| --- | --- |
+| `git`, `forwards`, `agent`, `backend` | refresh |
+| `container` with a `repo` | refresh |
+| `container` with `repo: null` | ignored: `kunj events` reports every kunj container on the daemon, and another repository's (a functional test run, say) would refresh the view every second |
+| `hello` | refresh only after a restart (events from the gap are lost) |
+| `sessions`, `repos` | ignored (the file watchers refresh; `repos` restarts the macOS app's child) |
+
+Refreshes are debounced to one a second, because a container start is several Docker events.
+`EventFeed.swift` (KunjBarCore, tested) and `eventReaction()` in the extension's eventStream.ts decide.
 
 ## Decisions
+
+- **2026-10-25** Tried against live containers (a throwaway repository with a `git daemon` origin): the
+  listing, both apps' decoding and tree, stop and auto-forward. Found and fixed: a second
+  `ct forward --auto --detach` started another forwarder (now reports the registered one,
+  `alreadyRunning`), and `kunj events` container events of other repositories (now ignored by the apps).
 
 - **2026-10-24** Containers and worktrees show as rows of the same kind; two rows when a branch has
   both. The CLI provides both lists in one call (with PRs); the apps do no matching of their own.

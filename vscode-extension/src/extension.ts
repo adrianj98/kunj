@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { KunjCli, KunjCliError, Worktree } from './kunjCli';
 import { SessionManager } from './sessionManager';
+import { EventStream } from './eventStream';
 import { kunjCommandLine, registerContainerCommands, runInTerminal, runToCompletion } from './containerCommands';
 import { RepoEntry, WorktreeNode, WorktreeProvider, describeSession, prBadge, samePath, shortenPath } from './worktreeProvider';
 
@@ -54,12 +55,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   armTimer();
   context.subscriptions.push({ dispose: () => timer && clearInterval(timer) });
 
+  // Container, agent, forward and git changes as they happen, for the repositories in the view
+  const events = new EventStream(refresh, output);
+  context.subscriptions.push(events, provider.onDidLoad(repos => events.watch(repos.map(r => r.repoRoot))));
+
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState(state => state.focused && refresh()),
     vscode.workspace.onDidChangeWorkspaceFolders(refresh),
     sessions.onDidChange(refresh),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('kunj')) {
+        if (e.affectsConfiguration('kunj.cliPath')) events.reset();
         armTimer();
         refresh();
       }

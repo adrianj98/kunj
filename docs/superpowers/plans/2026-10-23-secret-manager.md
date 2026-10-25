@@ -268,6 +268,26 @@
 - [x] **Step 5:** Run `npm test`, `npm run lint`, and `npm run test:docker` (it skips itself without Docker). Expected: PASS.
 - [x] **Step 6:** Commit: `git commit -m "Secrets in branch containers: env file, rendered files, secretsChanged"`.
 
+### Final review
+
+Two Important findings fixed (tests first): a new vault file next to an existing one is written only after
+the existing one decrypts with the key or passphrase (`modify` in secret.ts; a typo used to lock the new
+file), and outside a repository repo and branch scope are refused, with `openVaults` never reading the
+global file a second time as the repo one (in `~` a branch secret used to land in the global vault and
+reach every repository). Deferred minors: `worktree-shell.test.ts` fails when run inside a kunj agent
+(inherited `KUNJ_*`); a rendered file's temp name (`.env.kunj-tmp-<pid>`) is not covered by `.env` in
+.gitignore if kunj is killed before the rename; `secret list --global` also opens the repo vault; children
+of `kunj run` inherit `KUNJ_SECRETS_KEY`; rendered `.env` lines are double-quoted, so tools that expand
+`$` inside double quotes change such values; the app's GitHub line knows only a global stored `GH_TOKEN`.
+
+### After Task 8: the workspace app's Settings › Containers
+
+**Status: done** (outside the numbered tasks, from the spec's tokens decision). `ContainerTokens.swift` in
+KunjWorkspaceCore (`SecretListJson`, `TokenStatusJson`, `githubTokenSummary`, `claudeTokenSummary`,
+`claudeTokenSetupSpec`, `KunjSetting.containerUseGhToken`) with `ContainerTokensTests`, and the Containers
+section of `SettingsWindow`. Reviewed: a stored global `GH_TOKEN` does win over gh (the env merge comes
+before `withHostTokens`); `secret list --global` unlocking is that command's documented behaviour.
+
 ### Task 8: Migration prompts and docs
 
 **Status: done** (3bbe9af, hash named in 1f2c6b3); review fix (the printed command single-quotes a path the shell would split, e.g. a repo directory with a space) in the Review 8 commit. Rulings in the ledger. No later task: the plan is complete. As built: `keptEnvImportCommand(home?)` (exported from secret.ts, `~/` for the home directory, the rest shell-quoted via `shellQuote()` from config-vars.ts when it holds a character outside `[\w@%+=:,./-]`) is shared by the `list` hint and `SetupCommand.offerSecretImport()`; the hint shows when the repo vault has no entries (global secrets do not hide it), also under `No secrets`; setup asks only when the repo has no `secrets.enc` (no unlock to decide), runs `kunj secret import <keep>/.env --delete` (which asks again with the names), prints the command on no and warns on a failed import. User docs: `docs-site/src/content/docs/configuration/secrets.mdx`, plus links from agent, keep files, setup, files-and-data and container security pages.

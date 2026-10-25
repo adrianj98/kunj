@@ -69,7 +69,7 @@ itself when Docker is unavailable.
 
 *Designed 2026-10-23; shipped 2026-10-24.* Plan: docs/superpowers/plans/2026-10-23-secret-manager.md
 (its rulings are written into Storage and Delivery below). Built so far: the `.env` parser
-(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, 6c08cd1 and its review fix) and host delivery (`kunj run`, `kunj agent` and `kunj worktree shell` under `kunj run`, file deliveries on `worktree add`; `src/commands/run.ts`, `src/lib/secrets/host.ts`, 4a15833 and its review fix) and container delivery (`StartOptions.secrets` in `src/lib/container/lifecycle.ts`, the `kunj.secrets` label, `secretsChanged` in `kunj ct list --json`, 8fd3733 and its review fix in 20c95f9) and the migration hint, the `kunj setup` offer and the user docs (`docs-site/src/content/docs/configuration/secrets.mdx`, Task 8, 3bbe9af and its review fix). Before it, secrets reached a container only as host environment variables
+(`src/lib/secrets/dotenv.ts`, c2a722f), the vault (`src/lib/secrets/vault.ts`, `errors.ts`, 1429ed9) and the key providers (`src/lib/secrets/keyprovider.ts`, `secrets.keyProvider`, 8901b6b) and resolution with host file rendering (`src/lib/secrets/resolve.ts`, `deliver.ts`, 009958c and its review fix) and `kunj secret` (`src/commands/secret.ts`, 6c08cd1 and its review fix) and host delivery (`kunj run`, `kunj agent` and `kunj worktree shell` under `kunj run`, file deliveries on `worktree add`; `src/commands/run.ts`, `src/lib/secrets/host.ts`, 4a15833 and its review fix) and container delivery (`StartOptions.secrets` in `src/lib/container/lifecycle.ts`, the `kunj.secrets` label, `secretsChanged` in `kunj ct list --json`, 8fd3733 and its review fix in 20c95f9) and the migration hint, the `kunj setup` offer and the user docs (`docs-site/src/content/docs/configuration/secrets.mdx`, Task 8, 3bbe9af and its review fix) and the workspace app's Settings › Containers (where the GitHub token comes from, the `container.useGhToken` toggle, the Claude Code token set up with `claude setup-token` then `kunj secret set CLAUDE_CODE_OAUTH_TOKEN --global --targets container` in an action tab, and removed with `kunj secret rm`). Before it, secrets reached a container only as host environment variables
 named in `container.env` (or literal `NAME=value` entries in the config), and `.env` files travelled as
 plaintext keep files in `~/.kunj/<repo>/keep/`. That meant exporting tokens by hand in every shell, a
 desktop app launched from Finder that sees none of them, and app secrets in plaintext. The secret
@@ -123,7 +123,11 @@ Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in th
   `secrets.keyProvider` (`auto|keychain|libsecret|passphrase`, default `auto`) picks the provider
   for a new vault (`auto`: Keychain on macOS, else libsecret, else the passphrase when `secret-tool` is not
   installed); an existing file's kdf decides how it is opened, and a new repo vault next to an existing global
-  one takes that file's kdf and key (a global and a repo file of different kdfs are opened with one key each).
+  one takes that file's kdf and key, checked by decrypting that file before the new one is written, so a mistyped
+  passphrase or another `KUNJ_SECRETS_KEY` fails instead of locking the new file under a stray key (a global and a
+  repo file of different kdfs are opened with one key each). Repo and branch secrets need a repository: outside one
+  `secret set|import|rm` without `--global` is refused, and a repo vault path that is the global file (`./.kunj` in
+  the home directory) is never read as the repo vault.
   The vault is only unlocked by commands that deliver or manage secrets, and only when a `secrets.enc`
   exists, never by listings (`worktree list`, `ct list`, `events`), so the fast path does not change.
 - **Stamp.** A container records the label `kunj.secrets`: the first 12 hex chars of the sha256 of the
@@ -233,7 +237,8 @@ shapes) in `src/lib/json-types.ts`, `src/commands/run.ts` with `src/lib/secrets/
 `checkSecrets`, `secretFilePath`, `renderSecretFiles`, `secretsRebuildHint`), `LABEL.secrets` in `names.ts` and
 `containerSecrets()`/`secretsChanged` in `src/commands/container.ts`, the migration hint
 (`keptEnvImportCommand()`) in `src/commands/secret.ts` and `offerSecretImport()` in `src/commands/setup.ts`.
-User docs: `docs-site/src/content/docs/configuration/secrets.mdx`.
+User docs: `docs-site/src/content/docs/configuration/secrets.mdx`. App: `ContainerTokens.swift` (Core: the JSON
+mirrors, the summaries and `claudeTokenSetupSpec`) and the Containers section of `SettingsWindow`.
 
 ## Roadmap
 
@@ -241,9 +246,9 @@ User docs: `docs-site/src/content/docs/configuration/secrets.mdx`.
 
 **Next:**
 
-- [ ] **Secret manager** ([Secrets](#secrets)): `kunj secret set|import|list|get|rm|env|apply`,
+- [x] **Secret manager** ([Secrets](#secrets)): `kunj secret set|import|list|get|rm|env|apply`,
   `kunj run`, encrypted vault with a Keychain key, delivery to containers and worktrees by explicit
-  target, `.env` import. Needs an implementation plan.
+  target, `.env` import. Shipped; plan `docs/superpowers/plans/2026-10-23-secret-manager.md`.
 - Copy the safe parts of `~/.claude` (CLAUDE.md, settings, skills, agents, commands) into containers;
   never session history or credentials.
 - Run `kunj` itself inside the container, with the user's kunj config minus sensitive settings.

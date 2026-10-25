@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
-import { getGlobalKunjDir, getKunjDir } from '../lib/config';
+import { getGlobalKunjDir, getKunjDir, getRepoName } from '../lib/config';
 import { shellQuote } from '../lib/config-vars';
 import { getCurrentBranch } from '../lib/git';
 import { getCurrentWorktreePath, listWorktrees } from '../lib/worktree';
@@ -284,6 +284,10 @@ export class SecretCommand extends BaseCommand {
   private async writeScope(opts: SecretOptions): Promise<Scope> {
     if (opts.global && opts.branch !== undefined) throw new Error('--global and --branch cannot be combined');
     if (opts.global) return { global: true };
+    // Outside one getKunjDir() is ./.kunj (in the home directory, the global vault's directory)
+    if (!getRepoName()) {
+      throw new Error('Not in a git repository: repo and branch secrets belong to one; use --global for a global secret');
+    }
     if (opts.branch === undefined) return { global: false };
     return { global: false, branch: await this.branchArg(opts.branch) };
   }
@@ -353,6 +357,9 @@ export class SecretCommand extends BaseCommand {
       existingKdf,
       create: true,
     });
+    // A new file next to an existing one must get that file's key: a mistyped passphrase or another
+    // KUNJ_SECRETS_KEY would otherwise lock the new file under a key nothing else opens
+    if (!own && existingKdf) await readVault(other, unlock);
     const entries = own ? await readVault(file, unlock) : [];
     const next = await change(entries);
     if (next) await writeVault(file, sortEntries(next), unlock);

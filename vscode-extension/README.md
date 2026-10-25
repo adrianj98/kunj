@@ -46,7 +46,7 @@ and run `code --install-extension kunj-worktrees-<version>.vsix`.
 
 When a window activates the extension, it registers itself with `kunj worktree session start --pid <extension host pid>`. Sessions live in `~/.kunj/worktree-sessions.json`. The CLI prunes any session whose process is no longer alive, so windows closed without a clean shutdown disappear automatically. Each window also sends a heartbeat every five minutes and removes its session on deactivate.
 
-The view watches that file, so opening or closing a worktree in one window updates the other windows within a second. It also refreshes when the window regains focus and every `kunj.worktrees.refreshInterval` seconds.
+The view watches that file, so opening or closing a worktree in one window updates the other windows within a second. It also refreshes when the window regains focus, every `kunj.worktrees.refreshInterval` seconds, and as soon as `kunj events --json` (one child per window, for the repositories in the view) reports a container, agent, forward or git change.
 
 ## Performance
 

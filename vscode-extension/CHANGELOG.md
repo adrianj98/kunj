@@ -6,6 +6,7 @@
   terminal, agent, ports, start/stop/rebuild/remove, pull request; Add Worktree… can create a container.
 - Start Agent in Worktree (`kunj agent`).
 - Setting `kunj.worktrees.showContainers`.
+- Live refresh: the view follows `kunj events --json`, so container, agent, forward and git changes show at once.
 
 ## 0.1.0
 

@@ -70,6 +70,22 @@ final class KunjCLI: @unchecked Sendable {
         commandParts.map(shellQuote).joined(separator: " ")
     }
 
+    private static func environment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = ShellEnvironment.path
+        // Never hand these on: kunj passes its environment to the editor it opens, and
+        // the editor to every terminal in its window. The CLI drops colour for --json itself.
+        env.removeValue(forKey: "NO_COLOR")
+        env.removeValue(forKey: "FORCE_COLOR")
+        return env
+    }
+
+    // How to start `kunj <args>` as a long-lived child (kunj events), the same way `run` does
+    func spawnSpec(_ args: [String]) -> (executable: String, arguments: [String], environment: [String: String]) {
+        let parts = commandParts
+        return ("/usr/bin/env", [parts[0]] + Array(parts.dropFirst()) + args, Self.environment())
+    }
+
     // Run `kunj <args> --json` in the given directory and decode the result.
     // `onOutput` receives stderr as it arrives (progress and hook output).
     func run<T: Decodable>(_ args: [String], cwd: String, timeout: TimeInterval = 120, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> T {
@@ -94,13 +110,7 @@ final class KunjCLI: @unchecked Sendable {
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
                 process.arguments = [parts[0]] + fullArgs
                 process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-                var env = ProcessInfo.processInfo.environment
-                env["PATH"] = ShellEnvironment.path
-                // Never hand these on: kunj passes its environment to the editor it opens, and
-                // the editor to every terminal in its window. The CLI drops colour for --json itself.
-                env.removeValue(forKey: "NO_COLOR")
-                env.removeValue(forKey: "FORCE_COLOR")
-                process.environment = env
+                process.environment = Self.environment()
 
                 let stdoutPipe = Pipe()
                 let stderrPipe = Pipe()

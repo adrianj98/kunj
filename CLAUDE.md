@@ -39,6 +39,8 @@ npm run lint
 
 also commit and push changes
 
+- ✅ Always update okf/
+
 Track work in `docs/specs/README.md`: it lists what is done (with commits), in progress, to do and
 waiting on the user. Move a line there in the same commit that ships or starts the work, and keep the
 spec's own status table in step. Design specs live in `docs/specs/<topic>.md`, one per topic.

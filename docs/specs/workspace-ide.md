@@ -381,7 +381,13 @@ environment is selected (its agent opened when asked) once a listing shows it us
 are kunj settings, not app state: "Run agents in tmux" (`agent.tmux`) and "Show tmux status line"
 (`agent.tmuxStatus`), read with `kunj config --get <key> --global --json` and written with
 `kunj config --set <key>=<bool> --global`, so the CLI and the app share them (an unset key reads as
-kunj's default). Changing the kunj command rediscovers kunj and rebuilds the store and the event
+kunj's default). Containers: where a new container's GitHub token comes from (`kunj ct token status
+--json`; a stored global container `GH_TOKEN` wins, and kunj then never asks gh), "Use gh's GitHub
+token" (`container.useGhToken`, the same way), and the Claude Code token (`kunj secret list --global
+--json`, which may unlock the vault): Set Up… opens an action tab in the selected environment running
+`claude setup-token && kunj secret set CLAUDE_CODE_OAUTH_TOKEN --global --targets container` (the kunj
+command as `"$@"`, never spliced into the script), whose hidden prompt takes the token, so the app never
+sees it; Remove runs `kunj secret rm CLAUDE_CODE_OAUTH_TOKEN --global` after asking. Changing the kunj command rediscovers kunj and rebuilds the store and the event
 stream; open tabs keep the command they started with. They apply to agents
 started afterwards; a running session keeps its mode.
 

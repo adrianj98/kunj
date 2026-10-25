@@ -190,6 +190,13 @@ tabs, or the branch changing), kept in the same file.
 - **Agents**: **Run agents in tmux** and **Show tmux status line**. These are kunj settings
   (`agent.tmux`, `agent.tmuxStatus` in your global config), so they apply to `kunj agent` in a
   terminal as well, and to agents started after the change.
+- **Containers**: where a new [branch container](../containers/overview/) gets its GitHub token
+  (a [stored secret](../configuration/secrets/), `GH_TOKEN` in your environment, or your `gh` login),
+  **Use gh's GitHub token** (`container.useGhToken`), and the **Claude Code token**. **Set Up…**
+  opens a tab in the selected session that runs `claude setup-token` and then
+  `kunj secret set CLAUDE_CODE_OAUTH_TOKEN --global --targets container`: paste the token at its hidden
+  prompt. New containers get it; existing ones need `kunj ct start <branch> --rebuild`. **Remove**
+  deletes it. Reading the stored secrets may unlock the vault, so macOS can ask for Keychain access.
 
 <Aside type="note">
 The app is not notarized by Apple. `kunj install` clears the quarantine flag; if you download the

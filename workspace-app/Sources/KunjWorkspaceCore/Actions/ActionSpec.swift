@@ -141,12 +141,14 @@ public func isValidBranchName(_ name: String) -> Bool {
 public enum KunjSetting: String, CaseIterable, Sendable {
     case agentTmux = "agent.tmux"
     case agentTmuxStatus = "agent.tmuxStatus"
+    case containerUseGhToken = "container.useGhToken"
 
     /// kunj's default when the setting is not in any config file.
     public var defaultValue: Bool {
         switch self {
         case .agentTmux: return true
         case .agentTmuxStatus: return false
+        case .containerUseGhToken: return true
         }
     }
 }
