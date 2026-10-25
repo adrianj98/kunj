@@ -20,7 +20,8 @@ interface ServeOptions {
   listen?: string;
   allowRemoteListen?: boolean;
   allowPrivileged?: boolean;
-  allowRuntime?: string[];
+  /** Commander gives the value as typed: one name or a comma-separated list */
+  allowRuntime?: string | string[];
   verbose?: boolean;
   rotate?: boolean;
   context?: string;
@@ -61,6 +62,12 @@ export function parseListen(text: string | undefined): { host: string; port: num
   return { host, port };
 }
 
+/** `sysbox-runc` or `a,b`: exact names (the guard compares whole names, never substrings). */
+export function parseRuntimes(value: string | string[] | undefined): string[] {
+  const parts = (Array.isArray(value) ? value : value ? [value] : []).flatMap(v => v.split(','));
+  return parts.map(p => p.trim()).filter(Boolean);
+}
+
 export class ServeCommand extends BaseCommand {
   constructor(private readonly deps: ServeCommandDeps = {}) {
     super({
@@ -71,7 +78,7 @@ export class ServeCommand extends BaseCommand {
         { flags: '--listen <host:port>', description: `Address to listen on (default 127.0.0.1:${DEFAULT_SERVE_PORT}); a non-loopback address needs --allow-remote-listen` },
         { flags: '--allow-remote-listen', description: 'Listen on a non-loopback address (plain HTTP on your network: prefer an SSH tunnel or a TLS proxy)' },
         { flags: '--allow-privileged', description: 'Let clients run privileged containers (container.dockerInDocker "privileged")' },
-        { flags: '--allow-runtime <name>', description: 'Let clients use this --runtime, e.g. sysbox-runc (repeatable)', defaultValue: [] },
+        { flags: '--allow-runtime <names>', description: 'Let clients use these --runtime values, comma-separated, e.g. sysbox-runc' },
         { flags: '--context <name>', description: 'Docker context to serve (default: container.dockerContext)' },
         { flags: '--verbose', description: 'Log every request (method, route, status, duration); refusals are always logged' },
         { flags: '--rotate', description: '[token] Replace the token; every client must be given the new one' },
@@ -111,6 +118,7 @@ export class ServeCommand extends BaseCommand {
     if (verb !== 'run') throw new ContainerError(`Unknown serve action '${verb}'. Expected: token`);
 
     const listen = parseListen(opts.listen);
+    const allowRuntimes = parseRuntimes(opts.allowRuntime);
     if (!LOOPBACK.test(listen.host) && !opts.allowRemoteListen) {
       throw new ContainerError(
         `--listen ${opts.listen} is not a loopback address: the connection would be plain HTTP on your network. ` +
@@ -133,7 +141,7 @@ export class ServeCommand extends BaseCommand {
       token,
       version: getVersion(),
       allowPrivileged: !!opts.allowPrivileged,
-      allowRuntimes: opts.allowRuntime ?? [],
+      allowRuntimes,
       log: line => {
         if (opts.verbose || /^(refused|unauthorized)/.test(line)) stderr(`${stamp()} ${line}`);
       },
@@ -147,7 +155,7 @@ export class ServeCommand extends BaseCommand {
     }
     stderr(`kunj serve ${getVersion()} listening on ${address.address}:${address.port}  (Docker ${engine.serverVersion}, ${engine.operatingSystem})`);
     if (opts.allowPrivileged) stderr(chalk.yellow('privileged containers allowed'));
-    if (opts.allowRuntime?.length) stderr(chalk.yellow(`runtimes allowed: ${opts.allowRuntime.join(', ')}`));
+    if (allowRuntimes.length) stderr(chalk.yellow(`runtimes allowed: ${allowRuntimes.join(', ')}`));
 
     await new Promise<void>(resolve => {
       let stopped = false;

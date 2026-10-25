@@ -3,7 +3,7 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { FakeBackend } from '../../lib/container/__tests__/fake-backend';
-import { ServeCommand, parseListen } from '../serve';
+import { ServeCommand, parseListen, parseRuntimes } from '../serve';
 import { isFastCommand } from '../fast';
 
 jest.mock('../../lib/config', () => ({
@@ -32,6 +32,15 @@ describe('parseListen', () => {
     expect(parseListen('localhost')).toEqual({ host: 'localhost', port: 7433 });
     expect(parseListen('[::1]:9')).toEqual({ host: '::1', port: 9 });
     expect(() => parseListen('box:70000')).toThrow(/0-65535/);
+  });
+});
+
+describe('parseRuntimes', () => {
+  it('takes the string Commander gives, a comma list or an array, as whole names', () => {
+    expect(parseRuntimes(undefined)).toEqual([]);
+    expect(parseRuntimes('sysbox-runc')).toEqual(['sysbox-runc']);
+    expect(parseRuntimes('sysbox-runc, kata')).toEqual(['sysbox-runc', 'kata']);
+    expect(parseRuntimes(['a', 'b,c'])).toEqual(['a', 'b', 'c']);
   });
 });
 
@@ -150,6 +159,24 @@ describe('kunj serve', () => {
       stop();
     }).execute({ listen: '127.0.0.1:0', allowPrivileged: true });
     expect(fake.callsOf('run')).toHaveLength(1);
+    // --allow-runtime as Commander passes it (a string): exact names only, no substring match
+    const withRuntime = (runtime: string) =>
+      new Promise<number>((resolve, reject) => {
+        const body = JSON.stringify({ ...spec, privileged: false, runtime });
+        command(async (a, stop) => {
+          const req = http.request({ host: '127.0.0.1', port: a.port, method: 'POST', path: '/v1/containers', headers: { authorization: `Bearer ${fs.readFileSync(tokenFile, 'utf8').trim()}`, 'content-type': 'application/json', 'content-length': body.length } }, res => {
+            res.resume();
+            res.on('end', () => {
+              stop();
+              resolve(res.statusCode ?? 0);
+            });
+          });
+          req.on('error', reject);
+          req.end(body);
+        }).execute({ listen: '127.0.0.1:0', allowRuntime: 'sysbox-runc' });
+      });
+    expect(await withRuntime('sysbox-runc')).toBe(200);
+    expect(await withRuntime('sysbox')).toBe(403);
     expect(stderr.join('\n')).toContain('privileged containers allowed');
   });
 });

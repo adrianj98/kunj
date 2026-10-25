@@ -372,8 +372,16 @@ export class Fixture {
   }
 
   /** `kunj ct start -c <branch> --json`, which must succeed. */
-  start(branch: string, extra: string[] = [], options: RunOptions = {}): Promise<StartJson> {
-    return this.kunjJson<StartJson>(['ct', 'start', '-c', branch, ...extra], options);
+  async start(branch: string, extra: string[] = [], options: RunOptions = {}): Promise<StartJson> {
+    const started = await this.kunjJson<StartJson>(['ct', 'start', '-c', branch, ...extra], options);
+    // Remote mode must really go through kunj serve: a silent fall back to local Docker would pass every test
+    if (functionalRemote && !extra.includes('--remote')) {
+      const list = await this.kunjJson<{ backend: { kind: string; remote?: string } }>(['ct', 'list', '--no-status'], options);
+      if (list.backend.kind !== 'remote' || list.backend.remote !== REMOTE_NAME) {
+        throw new Error(`remote mode, but ct list used ${JSON.stringify(list.backend)}`);
+      }
+    }
+    return started;
   }
 
   /** `kunj ct exec <branch> -- <command...>` */

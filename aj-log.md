@@ -2,6 +2,18 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Everything through kunj serve; secrets over the server
+
+- `npm run test:functional:remote` (`KUNJ_FUNCTIONAL_REMOTE=1`): each fixture starts its own `kunj serve` in front of
+  this Mac's Docker and sets `container.remote`, so the whole functional suite runs through the server; `start()`
+  checks `ct list` really reports the remote backend. Why: the user asked for every feature to be tested over the
+  server, not just the remote-specific tests.
+- New `secrets.functional.test.ts`: vault secrets (`kunj secret set`, container target, env and file) reach the
+  container, the file is 0600 and git-ignored, nothing in labels or argv; passes locally and through the server.
+- Fixed `kunj serve --allow-runtime`: Commander passes a string, which crashed the server at startup and would have
+  matched runtimes by substring (`sysbox` against `sysbox-runc`); now a comma-separated list of exact names.
+- Merged main (12 commits: live refresh in the apps, okf files, secrets final review, forward --auto --detach).
+
 ## 2026-10-25 — Functional tests: the agent test runs on macOS again
 
 - `ptyCommand()` on macOS runs `script` with `/dev/null` as stdin: macOS 26's `script` refuses Node's socketpair stdin
