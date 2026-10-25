@@ -69,7 +69,9 @@ const SCRUBBED = [
 
 /** The command line that runs argv under a pseudo-terminal (`script`), for agent and attach. */
 export function ptyCommand(argv: string[]): string[] {
-  if (process.platform === 'darwin') return ['script', '-q', '/dev/null', ...argv];
+  // macOS script refuses a socket on its stdin (tcgetattr: Operation not supported on socket), which is
+  // what Node's 'pipe' is, so it reads /dev/null; the command still gets the pty as its terminal
+  if (process.platform === 'darwin') return ['sh', '-c', 'exec script -q /dev/null "$@" </dev/null', 'sh', ...argv];
   const quoted = argv.map(a => `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
   return ['script', '-qfec', quoted, '/dev/null'];
 }

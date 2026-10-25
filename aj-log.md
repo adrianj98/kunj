@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Functional tests: the agent test runs on macOS again
+
+- `ptyCommand()` on macOS runs `script` with `/dev/null` as stdin: macOS 26's `script` refuses Node's socketpair stdin
+  (`tcgetattr/ioctl: Operation not supported on socket`), so `kunj ct agent` under it never started. The agent
+  test's `ct list` assertion matches the additive `agent.sessions`/`state` fields. Why: the full functional run for
+  the remote-containers verification failed there, on main as well as on this branch.
+
 ## 2026-10-25 — Remote containers: second review round
 
 - A late pty byte after the TTY drain wait no longer crashes `kunj serve`: the pty is unpiped before the frame
