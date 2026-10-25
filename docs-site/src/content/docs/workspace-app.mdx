@@ -82,15 +82,17 @@ is slow to start, the window shows a spinner with "Loading sessions…" and the 
   forwarded ports (links that open your browser). On the right: **Shell**, **Agent**,
   **Open in VS Code**, **Create PR** and a ⋯ menu with the rest.
 - **Tabs.** One per terminal, agent or open file. A green dot marks a running agent or command, an
-  amber one an agent waiting for input, a grey one a file with unsaved changes. On the right: the
-  agent's tmux session and how long it has been up.
+  amber one an agent waiting for input, a grey one a file with unsaved changes. The × on a tab closes
+  it (like ⌘W). On the right: the agent's tmux session and how long it has been up.
 - **Changes** (hidden until you open it with the **Changes** pill or ⌘⇧C). The files the branch
   changed, with added and removed line counts, and a diff of the selected file. The scope menu
   compares with the branch's base (`origin/<base>`, from where the branch forked, uncommitted work
   included), uncommitted changes only, or the last commit. It follows the branch as it changes.
+  The × at the right of its bar closes it.
 - **Files** (hidden until you open it with the **Files** pill or ⌘⇧E), at the window's right
   edge: the branch's files as a tree, without the ones git ignores. Double-click a file to edit it
-  in a tab. In a container it lists `/workspace`, so the container must be running.
+  in a tab. In a container it lists `/workspace`, so the container must be running. The × at the
+  right of its bar closes it.
 - **Status bar.** The worktree path or container name, uptime, services and forwarded ports; the
   agent state on the right.
 
@@ -120,7 +122,10 @@ itself when the command succeeds and stays open with its exit code when it fails
 
 ## Editing files
 
-Double-click a file in Changes, or press **Edit** above its diff, to open it in a tab. It is a
+Double-click a file in Changes or Files, press **Edit** above a diff, or ⌘-click a file path in a
+terminal (an agent's `Update(src/lib/streams.ts)`, a compiler's `src/a.ts:12:5`) to open it in a
+tab. ⌘ underlines the path under the pointer. Paths are taken relative to the worktree (or
+`/workspace` in a container); a path outside it, or a web link, opens in its default app. It is a
 [Monaco](https://microsoft.github.io/monaco-editor/) editor (the editor of VS Code, without language
 servers) meant for small fixes. ⌘S saves, in the worktree or, for a container, through
 `kunj ct file write`. If the file changed on disk since you opened it, the app asks before

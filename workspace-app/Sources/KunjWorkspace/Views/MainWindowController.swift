@@ -84,6 +84,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
         terminalColumn.onToggleChanges = { [weak self] in self?.onToggleChanges() }
         terminalColumn.onToggleFiles = { [weak self] in self?.onToggleFiles() }
+        changesColumn.onClose = { [weak self] in self?.onToggleChanges() }
+        filesColumn.onClose = { [weak self] in self?.onToggleFiles() }
         ThemeManager.shared.onChange.append { [weak self] t in self?.apply(t) }
         apply(t)
         renderSelection()
