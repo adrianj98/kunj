@@ -1,5 +1,9 @@
 # Directory Update Log
 
+## 2026-10-25 (later)
+* **Live refresh**: `apps/macos-app.md` and `apps/vscode-extension.md` describe the apps following
+  `kunj events --json` (6e7e330), which the first pass left out as uncommitted work.
+
 ## 2026-10-25
 * **Initialization**: Created the OKF v0.1 knowledge bundle for kunj, one file per technical
   feature or architectural piece, each checked against the source: `architecture/` (11: system

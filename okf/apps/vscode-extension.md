@@ -32,6 +32,7 @@ VS Code `^1.85.0`.
 | `src/kunjCli.ts` | `KunjCli` (spawn `kunj <args> --json`, parse, map errors to `KunjCliError` codes `not-found`, `not-a-repo`, `command-failed`) and TypeScript mirrors of the listing (`Worktree`, `BranchContainer`, `PullRequest`, `WorktreeListResult`) |
 | `src/worktreeProvider.ts` | Tree data provider: `RepoNode`, `WorktreeNode`, container and port nodes, grouping by repository, `contextValue` flags for menus |
 | `src/containerCommands.ts` | `kunj.containers.*` commands; helpers `runInTerminal` and `runToCompletion` (a `/bin/sh -c` terminal that closes itself on exit 0) |
+| `src/eventStream.ts` | `EventStream`: one `kunj events --json --repo <root>…` child per window for the repositories in the view (a new child when that set changes, `reset()` when `kunj.cliPath` changes), stdin held, restarted after 2 s doubling to 60 s; `eventReaction()` decides which lines refresh, debounced to one a second |
 | `src/sessionManager.ts` | Registers each workspace folder as an [editor session](/features/editor-sessions.md); heartbeat every 5 minutes (`HEARTBEAT_MS`) |
 
 # kunj commands it runs
@@ -80,7 +81,9 @@ activate ─> SessionManager.sync() ─> kunj worktree session start (per folder
         ├─> timer (refreshInterval) ─┐
         ├─> window focus ────────────┼─> kunj worktree list --json [--containers]
         ├─> ~/.kunj/worktree-sessions.json changed (300 ms debounce,
-        │   ignored within 2 s of our own write) ─┘
+        │   ignored within 2 s of our own write) ──┤
+        ├─> kunj events: git, forwards, agent, backend, ──┤
+        │   container with a repo (1 s debounce) ─┘
         └─> Refresh button ─> same call with --fresh (bypass the PR cache)
 ```
 
@@ -119,3 +122,4 @@ the remote side.
 [8] [.github/workflows/release.yml](/.github/workflows/release.yml)
 [9] [src/lib/apps.ts](/src/lib/apps.ts)
 [10] [docs/specs/containers-in-apps.md](/docs/specs/containers-in-apps.md)
+[11] [vscode-extension/src/eventStream.ts](/vscode-extension/src/eventStream.ts)

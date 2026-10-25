@@ -47,8 +47,13 @@ child environment because kunj hands its environment on to the editor it opens.
 `AppStore` refreshes on a timer (`refreshInterval`, default 60 s), when the panel opens, and when
 `KunjDirWatcher` sees `worktree-sessions.json` or `repos.json` change in `~/.kunj` (directory watched,
 modification times compared against a snapshot taken after each refresh, so its own listings do not
-loop). It does not subscribe to [`kunj events --json`](/features/events-stream.md) yet (work in progress,
-uncommitted at the time of writing).
+loop), and on [`kunj events --json`](/features/events-stream.md): `EventStream` (`CLI/EventStream.swift`)
+keeps one child for every known repository with its stdin held (it dies with the app), started again
+after 2 s doubling to 60 s. `eventReaction()` (`KunjBarCore/EventFeed.swift`, tested) refreshes on
+`git`, `forwards`, `agent`, `backend` and on `container` events that carry a `repo` (`repo: null` is
+another repository's container: the daemon reports them all), on `hello` only after a restart, and
+restarts the child on `repos` (kunj events resolves its repositories once); `sessions` is left to the
+watcher. Event refreshes are debounced to one a second.
 A failed listing keeps the last good one for that repository.
 
 # Features
@@ -115,3 +120,5 @@ notarized. `KUNJBAR_SNAPSHOT=<dir>` renders sample rows to PNGs for colour check
 [11] [docs/specs/containers-in-apps.md](/docs/specs/containers-in-apps.md)
 [12] [.github/workflows/release.yml](/.github/workflows/release.yml)
 [13] [src/lib/apps.ts](/src/lib/apps.ts)
+[14] [macos-app/Sources/KunjBarCore/EventFeed.swift](/macos-app/Sources/KunjBarCore/EventFeed.swift)
+[15] [macos-app/Sources/KunjBar/CLI/EventStream.swift](/macos-app/Sources/KunjBar/CLI/EventStream.swift)
