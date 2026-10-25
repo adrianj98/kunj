@@ -123,7 +123,11 @@ Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in th
   `secrets.keyProvider` (`auto|keychain|libsecret|passphrase`, default `auto`) picks the provider
   for a new vault (`auto`: Keychain on macOS, else libsecret, else the passphrase when `secret-tool` is not
   installed); an existing file's kdf decides how it is opened, and a new repo vault next to an existing global
-  one takes that file's kdf and key (a global and a repo file of different kdfs are opened with one key each).
+  one takes that file's kdf and key, checked by decrypting that file before the new one is written, so a mistyped
+  passphrase or another `KUNJ_SECRETS_KEY` fails instead of locking the new file under a stray key (a global and a
+  repo file of different kdfs are opened with one key each). Repo and branch secrets need a repository: outside one
+  `secret set|import|rm` without `--global` is refused, and a repo vault path that is the global file (`./.kunj` in
+  the home directory) is never read as the repo vault.
   The vault is only unlocked by commands that deliver or manage secrets, and only when a `secrets.enc`
   exists, never by listings (`worktree list`, `ct list`, `events`), so the fast path does not change.
 - **Stamp.** A container records the label `kunj.secrets`: the first 12 hex chars of the sha256 of the

@@ -2,6 +2,7 @@
 // by name), then only those whose targets include the target. loadSecrets is the glue that finds the
 // vault files, unlocks them (only when one exists) and resolves them.
 
+import * as path from 'path';
 import { getGlobalKunjDir, getKunjDir, loadResolvedConfig } from '../config';
 import { getUnlock, KeyProviderMode, Runner } from './keyprovider';
 import { Kdf, readVault, SecretEntry, Unlock, vaultFiles, vaultKdf } from './vault';
@@ -50,9 +51,12 @@ export async function loadSecrets(opts: LoadSecretsOptions): Promise<SecretEntry
 // for several branches (`secret apply -a`) opens once. Nothing is unlocked when no file exists.
 export async function openVaults(opts: Omit<LoadSecretsOptions, 'branch' | 'target'>): Promise<{ global: SecretEntry[]; repo: SecretEntry[] }> {
   const files = vaultFiles(opts.kunjDir ?? getKunjDir(), opts.globalDir ?? getGlobalKunjDir());
+  // Outside a repository getKunjDir() is ./.kunj, in the home directory the global one: never read it
+  // twice, or its entries would also count as repo (and branch) secrets.
+  const sameFile = path.resolve(files.repo) === path.resolve(files.global);
   // Read both kinds first, so a corrupt file is reported before anything is unlocked.
   const globalKdf = vaultKdf(files.global);
-  const repoKdf = vaultKdf(files.repo);
+  const repoKdf = sameFile ? undefined : vaultKdf(files.repo);
   if (!globalKdf && !repoKdf) return { global: [], repo: [] };
 
   const mode = opts.mode ?? (await configuredMode());

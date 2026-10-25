@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { SecretError } from '../errors';
 import { Runner } from '../keyprovider';
-import { envOf, loadSecrets, resolveSecrets } from '../resolve';
+import { envOf, loadSecrets, openVaults, resolveSecrets } from '../resolve';
 import { SecretEntry, Unlock, vaultFiles, writeVault } from '../vault';
 
 const at = '2026-10-24T00:00:00.000Z';
@@ -117,6 +117,14 @@ describe('loadSecrets', () => {
       ['X', 'branch'],
     ]);
     expect(calls).toEqual([['security', 'find-generic-password', '-s', 'kunj-secrets', '-a', 'kunj', '-w']]);
+  });
+
+  it('outside a repository the global vault is not read a second time as the repo one', async () => {
+    // getKunjDir falls back to ./.kunj, which in the home directory is the global one
+    await writeVault(files.global, [entry('X', 'global'), entry('X', 'leaked', { scope: { branch: 'b' } })], keyUnlock);
+    const got = await openVaults({ ...base, kunjDir: globalDir, globalDir, run: keychainRunner().run });
+    expect(got.repo).toEqual([]);
+    expect(got.global.map((e) => e.name)).toEqual(['X', 'X']);
   });
 
   it('never makes a new key: a keychain file whose item is missing is secrets-locked', async () => {

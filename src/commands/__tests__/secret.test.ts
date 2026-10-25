@@ -8,9 +8,10 @@ import type { SecretListJson } from '../../lib/json-types';
 import { readVault, SecretEntry, Unlock, vaultFiles } from '../../lib/secrets/vault';
 
 // Paths come from the temp HOME set up in beforeEach; keep.ts reads the same mocked getKunjDir.
-const dirs = { home: '', kunj: '', global: '' };
+const dirs: { home: string; kunj: string; global: string; repoName: string | null } = { home: '', kunj: '', global: '', repoName: 'app' };
 jest.mock('../../lib/config', () => ({
   getKunjDir: jest.fn(() => dirs.kunj),
+  getRepoName: jest.fn(() => dirs.repoName),
   getGlobalKunjDir: jest.fn(() => dirs.global),
   loadResolvedConfig: jest.fn(async () => ({})),
 }));
@@ -69,6 +70,7 @@ beforeEach(() => {
   dirs.home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-secret-cmd-')));
   dirs.global = path.join(dirs.home, '.kunj');
   dirs.kunj = path.join(dirs.global, 'app');
+  dirs.repoName = 'app';
   root = makeRepo('wt');
   stdout = [];
   jest.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
@@ -126,6 +128,35 @@ describe('set', () => {
     await cmd().execute('set', ['GH_TOKEN'], { global: true });
     expect((await globalEntries()).map((e) => e.name)).toEqual(['GH_TOKEN']);
     expect(fs.existsSync(vaultFiles(dirs.kunj, dirs.global).repo)).toBe(false);
+  });
+
+  test('outside a repository repo and branch scope are refused, and nothing is written', async () => {
+    // getKunjDir falls back to ./.kunj, which in the home directory is the global vault's directory
+    dirs.repoName = null;
+    dirs.kunj = dirs.global;
+    await expect(cmd().execute('set', ['DB_URL'], { branch: 'feature' })).rejects.toThrow(/not in a git repository.*--global/i);
+    await expect(cmd().execute('set', ['DB_URL'], {})).rejects.toThrow(/not in a git repository/i);
+    expect(fs.existsSync(vaultFiles(dirs.kunj, dirs.global).global)).toBe(false);
+    await cmd().execute('set', ['GH_TOKEN'], { global: true });
+    expect((await globalEntries()).map((e) => e.name)).toEqual(['GH_TOKEN']);
+  });
+
+  test('a new repo vault next to a passphrase global one checks the passphrase on the global file first', async () => {
+    const answers = ['right', 'right'];
+    const prompt = jest.fn(async () => answers.shift() ?? 'right');
+    const pp = { mode: 'passphrase' as const, env: {}, platform: 'darwin' as const, run: keychainRun, prompt };
+    await cmd({ unlock: pp }).execute('set', ['A'], { global: true });
+    const wrong = jest.fn(async () => 'typo');
+    await expect(cmd({ unlock: { ...pp, prompt: wrong } }).execute('set', ['B'], {})).rejects.toThrow(/did not decrypt/);
+    expect(fs.existsSync(vaultFiles(dirs.kunj, dirs.global).repo)).toBe(false);
+  });
+
+  test('a new global vault next to a repo one made with another key is refused', async () => {
+    await cmd().execute('set', ['A'], {});
+    const other = 'cd'.repeat(32);
+    await expect(cmd({ unlock: { mode: 'auto', env: { KUNJ_SECRETS_KEY: other }, platform: 'darwin', run: keychainRun } })
+      .execute('set', ['B'], { global: true })).rejects.toThrow(/does not decrypt/);
+    expect(fs.existsSync(vaultFiles(dirs.kunj, dirs.global).global)).toBe(false);
   });
 
   test('--global with --file is refused (globals are env only), and nothing is written', async () => {

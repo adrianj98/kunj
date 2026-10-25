@@ -268,6 +268,18 @@
 - [x] **Step 5:** Run `npm test`, `npm run lint`, and `npm run test:docker` (it skips itself without Docker). Expected: PASS.
 - [x] **Step 6:** Commit: `git commit -m "Secrets in branch containers: env file, rendered files, secretsChanged"`.
 
+### Final review
+
+Two Important findings fixed (tests first): a new vault file next to an existing one is written only after
+the existing one decrypts with the key or passphrase (`modify` in secret.ts; a typo used to lock the new
+file), and outside a repository repo and branch scope are refused, with `openVaults` never reading the
+global file a second time as the repo one (in `~` a branch secret used to land in the global vault and
+reach every repository). Deferred minors: `worktree-shell.test.ts` fails when run inside a kunj agent
+(inherited `KUNJ_*`); a rendered file's temp name (`.env.kunj-tmp-<pid>`) is not covered by `.env` in
+.gitignore if kunj is killed before the rename; `secret list --global` also opens the repo vault; children
+of `kunj run` inherit `KUNJ_SECRETS_KEY`; rendered `.env` lines are double-quoted, so tools that expand
+`$` inside double quotes change such values; the app's GitHub line knows only a global stored `GH_TOKEN`.
+
 ### After Task 8: the workspace app's Settings › Containers
 
 **Status: done** (outside the numbered tasks, from the spec's tokens decision). `ContainerTokens.swift` in
