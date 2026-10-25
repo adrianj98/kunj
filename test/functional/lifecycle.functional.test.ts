@@ -3,7 +3,7 @@
 import { describe, it, expect } from '@jest/globals';
 import * as path from 'path';
 import type { ContainerListJson } from '../../src/lib/json-types';
-import { describeFunctional, readMarker, useFixture } from './harness';
+import { describeFunctional, functionalRemote, readMarker, useFixture } from './harness';
 
 describeFunctional('kunj ct (functional): lifecycle', () => {
   const ctx = useFixture('life');
@@ -18,7 +18,7 @@ describeFunctional('kunj ct (functional): lifecycle', () => {
 
       const list = await fx.kunjJson<ContainerListJson>(['ct', 'list']);
       expect(list.repo).toBe(fx.repoName);
-      expect(list.backend.kind).toBe('docker');
+      expect(list.backend.kind).toBe(functionalRemote ? 'remote' : 'docker');
       expect(Array.isArray(list.orphans)).toBe(true);
       const entry = list.containers.find(c => c.branch === branch);
       expect(entry).toMatchObject({

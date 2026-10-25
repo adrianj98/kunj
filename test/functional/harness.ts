@@ -271,7 +271,9 @@ export class Fixture {
   private async startServe(): Promise<void> {
     const child = spawn(process.execPath, [CLI, 'serve', '--listen', '127.0.0.1:0', '--allow-privileged', '--allow-runtime', 'sysbox-runc'], {
       cwd: this.clone,
-      env: this.env(),
+      // scratch/bin first: a docker wrapper a test puts there (to record argv) is the one the server runs,
+      // as it is for the kunj the test runs; without one, PATH falls through to the real docker
+      env: this.env({ PATH: `${path.join(this.scratch, 'bin')}:${process.env.PATH}` }),
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     this.serve = child;

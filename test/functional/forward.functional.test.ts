@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { attachedContainerUri } from '../../src/lib/container/editor';
 import type { ContainerListJson } from '../../src/lib/json-types';
-import { USER, canConnect, describeFunctional, docker, hasScript, useFixture, waitFor } from './harness';
+import { USER, canConnect, describeFunctional, docker, functionalRemote, hasScript, useFixture, waitFor } from './harness';
 
 // A node http server in the container, left running in the background
 function serverScript(port: number, body: string, host = '0.0.0.0', pidFile = '/tmp/ft-server.pid'): string {
@@ -109,7 +109,8 @@ describeFunctional('kunj ct (functional): forward, agent and open', () => {
     });
   });
 
-  describe('open', () => {
+  // An editor attaches through this machine's Docker, so open refuses on a remote (remote.functional.test.ts)
+  (functionalRemote ? describe.skip : describe)('open', () => {
     it('with a non-VS Code editor prints how to exec into the container', async () => {
       const { fx } = ctx;
       const branch = 'ft-open';

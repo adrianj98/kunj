@@ -19,7 +19,8 @@ later phase.
 | TTY exec over the WebSocket (`shell`, `attach`, `agent`): raw-mode client, resize frames, Engine API on the server | Shipped (unit-tested against a fake daemon socket; a real daemon still to try) |
 | `forward`, `forward --auto`, the MCP bridge against a remote | Covered by the suites over the wire |
 | `kunj events` watches each repository on the backend its `container.remote` names | Shipped (a remote that is down at startup is reported once and left out) |
-| Functional test (`test/functional/remote.functional.test.ts`) and `remote.docker.test.ts` | Written without a daemon at hand: not yet run |
+| Functional test (`test/functional/remote.functional.test.ts`) and `remote.docker.test.ts` | Pass on Docker Desktop (2026-10-25) |
+| Every suite through `kunj serve`: `test:remote` (fake Docker), `test:docker:remote`, `test:functional:remote` (real Docker, a server per fixture, `container.remote` set; `open` skipped, it refuses on a remote by design) | Pass on Docker Desktop (2026-10-25) |
 | Editor attach through Remote-SSH | Later |
 | TLS, multi-user | Later, own spec |
 

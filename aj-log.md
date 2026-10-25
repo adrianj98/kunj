@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Whole functional suite green through kunj serve
+
+- Remote mode: the server's PATH starts with the fixture's `scratch/bin`, so the docker-argv check (secrets never on a
+  docker command line) covers the server's docker calls; the lifecycle test accepts the mode's backend kind; `ct open`
+  tests are local only (it refuses on a remote; that refusal has its own test). Why: the first full run through the
+  server failed four tests, all on test assumptions, none on kunj.
+- Result on Docker Desktop: lint; unit 1174; unit through the server 555; Docker 28 and through the server 25;
+  functional 28 and through the server 28 (2 + 2 skipped). Spec status and tracker updated.
+
 ## 2026-10-25 — Docker suite through kunj serve; repeated --allow-runtime
 
 - `npm run test:docker:remote` (`KUNJ_DOCKER_REMOTE=1`): the low-level Docker suite runs through a `kunj serve` in
