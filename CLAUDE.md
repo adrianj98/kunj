@@ -312,7 +312,8 @@ skips itself when Docker is unavailable.
 throwaway repository whose origin is a `git daemon` on the host (helpers shared with the Docker suite in
 `src/lib/container/__tests__/git-origin.ts`), with a throwaway `HOME` so `~/.kunj` is never touched, and
 asserts on `--json` output, exit codes and `docker inspect`. They cover start/list/stop/resume/remove,
-exec and shell, secrets, the firewall, the remove guard, blueprint snapshots, services, forward and
+exec and shell, forwarded secrets and the secret vault (`kunj secret`, `kunj run`, `agent --no-tmux`, `worktree add`,
+`ct start`), the firewall, the remove guard, blueprint snapshots, services, forward and
 `--auto`, agent/attach, open, prune, Docker-in-Docker refusals, the MCP bridge and the container hooks.
 Opt-in only: without `KUNJ_FUNCTIONAL=1` (which the script sets) every file is skipped, and `npm test` /
 `npm run test:docker` never see them (their roots are `src/`). They take many minutes, need Docker

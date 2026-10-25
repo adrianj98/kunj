@@ -91,6 +91,7 @@ final class TabBarView: NSView {
             let pill = PillView(item.title, dot: dot, active: item.active, theme: theme)
             pill.toolTip = item.toolTip
             pill.onPress = { [weak self] in self?.onSelect(item.id) }
+            pill.onClose = { [weak self] in self?.onClose(item.id) }
             pill.menu = closeMenu(for: item.id)
             pills.addArrangedSubview(pill)
         }

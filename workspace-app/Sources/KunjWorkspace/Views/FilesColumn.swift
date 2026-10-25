@@ -43,6 +43,9 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     }
     /// A file was opened (double-click or Return): show it in an editor tab.
     var onOpen: ((Environment, String) -> Void)?
+    /// The × at the bar's right: close the column.
+    var onClose: () -> Void = {}
+    private let closeButton = BarIconButton(.close, label: "Close Files")
 
     static let width: CGFloat = 260
     static let rowHeight: CGFloat = 24
@@ -69,7 +72,9 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         translatesAutoresizingMaskIntoConstraints = false
         buildOutline()
         for v in [bar, barLine, scroll, message] as [NSView] { addSubview(v) }
-        for v in [title, count] as [NSView] { bar.addSubview(v) }
+        for v in [title, count, closeButton] as [NSView] { bar.addSubview(v) }
+        closeButton.toolTip = "Close the Files column (⌘⇧E)"
+        closeButton.onPress = { [weak self] in self?.onClose() }
         count.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         count.lineBreakMode = .byTruncatingTail
         message.alignment = .center
@@ -84,7 +89,9 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             title.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             count.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 10),
             count.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
-            count.trailingAnchor.constraint(lessThanOrEqualTo: bar.trailingAnchor, constant: -16),
+            count.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
+            closeButton.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -10),
+            closeButton.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             barLine.topAnchor.constraint(equalTo: bar.bottomAnchor),
             barLine.leadingAnchor.constraint(equalTo: leadingAnchor),
             barLine.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -280,6 +287,8 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         barLine.color = theme.color(\.border)
         title.textColor = theme.color(\.text)
         count.textColor = theme.color(\.faint)
+        closeButton.color = theme.color(\.muted)
+        closeButton.hoverFill = theme.color(\.raised)
         message.textColor = theme.color(\.muted)
         outline.reloadData()
         if let id = listedId, let open = expanded[id] {

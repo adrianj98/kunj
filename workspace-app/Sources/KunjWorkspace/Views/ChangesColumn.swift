@@ -51,6 +51,9 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private let editButton = HeaderTextButton("Edit")
     /// Edit (or a double-click on a file): open the file of the environment in an editor tab.
     var onEdit: ((Environment, String) -> Void)?
+    /// The × at the bar's right: close the column.
+    var onClose: () -> Void = {}
+    private let closeButton = BarIconButton(.close, label: "Close Changes")
     static let diffHeaderHeight: CGFloat = 29
 
     private var summary = DiffSummary(files: [])
@@ -85,7 +88,9 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         translatesAutoresizingMaskIntoConstraints = false
         buildTable()
         for v in [bar, barLine, body] { addSubview(v) }
-        for v in [title, counts, scopeButton] as [NSView] { bar.addSubview(v) }
+        for v in [title, counts, scopeButton, closeButton] as [NSView] { bar.addSubview(v) }
+        closeButton.toolTip = "Close the Changes column (⌘⇧C)"
+        closeButton.onPress = { [weak self] in self?.onClose() }
         for v in [listScroll, listLine, diffHeader, diffHeaderLine, diffView, emptyLabel] as [NSView] { body.addSubview(v) }
         for v in [pathLabel, editButton] as [NSView] { diffHeader.addSubview(v) }
         pathLabel.lineBreakMode = .byTruncatingHead
@@ -114,7 +119,9 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
             counts.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 10),
             counts.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
             counts.trailingAnchor.constraint(lessThanOrEqualTo: scopeButton.leadingAnchor, constant: -10),
-            scopeButton.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -16),
+            scopeButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+            closeButton.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -10),
+            closeButton.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             scopeButton.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             barLine.topAnchor.constraint(equalTo: bar.bottomAnchor),
             barLine.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -410,6 +417,8 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         bar.color = theme.color(\.bg)
         barLine.color = theme.color(\.border)
         listLine.color = theme.color(\.border)
+        closeButton.color = theme.color(\.muted)
+        closeButton.hoverFill = theme.color(\.raised)
         diffHeader.color = theme.color(\.raised2)
         diffHeaderLine.color = theme.color(\.border)
         pathLabel.textColor = theme.color(\.muted)

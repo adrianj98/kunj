@@ -1,5 +1,9 @@
 # Directory Update Log
 
+## 2026-10-25 (workspace links)
+* **Workspace app**: `apps/workspace-app.md` gains ⌘-click file links in terminals and the close
+  buttons on tabs and the Changes/Files columns.
+
 ## 2026-10-25 (later)
 * **Live refresh**: `apps/macos-app.md` and `apps/vscode-extension.md` describe the apps following
   `kunj events --json` (6e7e330), which the first pass left out as uncommitted work.

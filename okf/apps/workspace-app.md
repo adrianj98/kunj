@@ -64,6 +64,10 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
 * `EnvironmentStore` refreshes per repository, scoped by the event that arrived.
 * The Changes column diffs against the base, uncommitted changes or the last commit (`DiffService`),
   via `git` for worktrees or `kunj ct exec` for containers.
+* ⌘-click on a file path in a terminal opens it in an editor tab (`terminalLinkPaths()` in
+  `KunjWorkspaceCore/Terminal/TerminalLink.swift`, wired through `TerminalTab.onOpenLink` and
+  `TabRegistry.onOpenFile`); URLs and paths outside the environment go to SwiftTerm's default opener.
+* Tab pills have an × (`PillView.onClose`), and the Changes and Files bars a close button.
 * Shortcuts include New Shell (⌘T), New Session (⌘N), Search Sessions (⌘K), Show Changes, Show Files,
   Close Tab (⌘W) and Session 1-9.
 * Launch arguments: `--demo`, `--screenshot <png>`, `--theme warm|light|graphite`,

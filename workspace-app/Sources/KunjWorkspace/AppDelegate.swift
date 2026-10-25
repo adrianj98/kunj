@@ -623,6 +623,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.changesColumn.onEdit = open
         // a double-click (or Return) on a file in the Files column
         windowController.filesColumn.onOpen = open
+        // a ⌘-click on a file path in a terminal
+        column.registry.onOpenFile = open
         column.registry.onSaved = { [weak windowController] tab in
             windowController?.changesColumn.repoChanged(root: tab.env.repo.root)
         }

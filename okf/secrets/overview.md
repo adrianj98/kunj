@@ -105,6 +105,16 @@ declining prints the command, a failure is a warning.
 | `src/lib/secrets/host.ts` | `hostSecrets`, `runAttached` |
 | `src/settings/secrets.ts` | `secrets.keyProvider` setting |
 
+# Tests
+
+Unit tests use a fixed `KUNJ_SECRETS_KEY` or a fake `Runner`/prompt, never the real Keychain.
+`src/lib/container/__tests__/integration.docker.test.ts` checks container delivery against Docker.
+`test/functional/secrets.functional.test.ts` drives the built CLI with a throwaway HOME: the vault on disk
+(0600, no plaintext), a wrong key, the outside-a-repository refusal, `kunj run`, `kunj agent --no-tmux` (under
+`script` with stdin `/dev/null`: macOS `script` fails on a socket stdin), `worktree add` file delivery and
+`not-ignored`, and `ct start` (env file, rendered file, no value in argv, labels or JSON, `secretsChanged`).
+tmux sessions are left out there: a session's command gets the tmux server's environment, not the fixture's.
+
 # Related Concepts
 
 * [Vault](/secrets/vault.md)

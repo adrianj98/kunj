@@ -20,6 +20,11 @@ final class TerminalTab: LocalProcessTerminalView {
     var startedAt = Date()
     var onExit: ((TerminalTab) -> Void)?
     var onTitle: ((TerminalTab) -> Void)?
+    /// A ⌘-clicked link; true when it was handled (a file opened in an editor tab), else the
+    /// default opener gets it.
+    var onOpenLink: ((TerminalTab, String) -> Bool)?
+    /// The directory the shell reported (OSC 7), for links relative to it.
+    fileprivate(set) var reportedDirectory: String?
     var running: Bool { exited == nil && process?.running == true }
 
     private var queue: HiddenFeedQueue!
@@ -132,6 +137,11 @@ final class TerminalTab: LocalProcessTerminalView {
         onExit?(self)
     }
 
+    override func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        if onOpenLink?(self, link) == true { return }
+        super.requestOpenLink(source: source, link: link, params: params)
+    }
+
     fileprivate func programSetTitle(_ title: String) {
         programTitle = title.isEmpty ? nil : title
         onTitle?(self)
@@ -143,6 +153,6 @@ private final class TabProcessEvents: LocalProcessTerminalViewDelegate {
     init(tab: TerminalTab) { self.tab = tab }
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) { tab?.programSetTitle(title) }
-    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) { tab?.reportedDirectory = directory }
     func processTerminated(source: TerminalView, exitCode: Int32?) {}
 }

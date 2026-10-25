@@ -78,7 +78,7 @@ extension Theme {
 
 /// The design's line icons, drawn from their 24-unit SVG paths.
 enum Icon {
-    case shell, plus, dots, search, split
+    case shell, plus, dots, search, split, close
 
     func draw(in rect: NSRect, color: NSColor) {
         let s = rect.width / 24
@@ -110,6 +110,10 @@ enum Icon {
             path.appendRoundedRect(NSRect(x: p(3, 0).x, y: p(0, 4).y, width: 18 * s, height: 16 * s),
                                    xRadius: 2 * s, yRadius: 2 * s)
             path.move(to: p(12, 4)); path.line(to: p(12, 20))
+            path.stroke()
+        case .close:
+            path.move(to: p(6, 6)); path.line(to: p(18, 18))
+            path.move(to: p(18, 6)); path.line(to: p(6, 18))
             path.stroke()
         }
     }
@@ -289,6 +293,9 @@ final class PillView: NSButton {
     /// A count after the label in mono 11 `muted` (the Changes pill's file count); nil: none.
     var count: String? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var onPress: (() -> Void)?
+    /// Set (a tab's pill): an × after the label that calls it instead of `onPress`.
+    var onClose: (() -> Void)? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    private var hoveringClose = false { didSet { needsDisplay = true } }
     private var countFont: NSFont { Theme.mono(DesignTokens.TypeScale.caption) }
     private var labelFont: NSFont { Theme.sans(DesignTokens.TypeScale.small, weight: active ? .medium : .regular) }
 
@@ -304,15 +311,34 @@ final class PillView: NSButton {
         target = self
         action = #selector(pressed)
         setAccessibilityLabel(label)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                       owner: self, userInfo: nil))
     }
     required init?(coder: NSCoder) { fatalError() }
-    @objc private func pressed() { onPress?() }
+    @objc private func pressed() {
+        // only a click lands on the ×: Space on a focused pill selects it wherever the pointer is
+        if let onClose, let event = NSApp.currentEvent, [.leftMouseUp, .leftMouseDown].contains(event.type),
+           closeRect.contains(convert(event.locationInWindow, from: nil)) {
+            onClose()
+        } else {
+            onPress?()
+        }
+    }
     override var isFlipped: Bool { true }
     override func accessibilityValue() -> Any? { active ? "selected" : nil }
+    override func mouseMoved(with event: NSEvent) {
+        hoveringClose = onClose != nil && closeRect.contains(convert(event.locationInWindow, from: nil))
+    }
+    override func mouseExited(with event: NSEvent) { hoveringClose = false }
+
+    /// The × at the right edge: 16 × 16, 5 px in.
+    private var closeRect: NSRect {
+        NSRect(x: bounds.maxX - 21, y: bounds.midY - 8, width: 16, height: 16)
+    }
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: 20 + textWidth(label, Theme.sans(12, weight: .medium)) + (dot == nil ? 0 : 13)
-                   + (count.map { 6 + textWidth($0, countFont) } ?? 0), height: 26)
+                   + (count.map { 6 + textWidth($0, countFont) } ?? 0) + (onClose == nil ? 0 : 16), height: 26)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -329,6 +355,15 @@ final class PillView: NSButton {
         }
         x = drawText(label, font: labelFont, color: theme.color(active ? \.text : \.text2), x: x, midY: bounds.midY)
         if let count { drawText(count, font: countFont, color: theme.color(\.muted), x: x + 6, midY: bounds.midY) }
+        if onClose != nil {
+            let r = closeRect
+            if hoveringClose {
+                theme.color(\.raised2).setFill()
+                NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3).fill()
+            }
+            Icon.close.draw(in: r.insetBy(dx: 3, dy: 3),
+                            color: theme.color(hoveringClose ? \.text : (active ? \.muted : \.faint)))
+        }
     }
 }
 

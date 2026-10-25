@@ -77,8 +77,16 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   Actions right-aligned: Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O (outlined) and Create PR ⌘⇧P (the one
   filled button), plus an overflow menu with start/stop/remove and worktree remove.
 - **Tab bar (left column):** segmented pills, one per terminal or editor tab; a dot when its process
-  has a notable state, or a `text2` dot on an editor tab with unsaved changes. Right side: `tmux <session> · uptime`, the split button (disabled until v2) and
+  has a notable state, or a `text2` dot on an editor tab with unsaved changes, and an × at its right
+  that closes it (like ⌘W; `faint`, `muted` on the active tab, `text` on a `raised2` square when
+  hovered). Right side: `tmux <session> · uptime`, the split button (disabled until v2) and
   new-tab.
+- **File links in terminals:** ⌘-click on a path SwiftTerm detects (⌘ underlines it) opens it in an
+  editor tab. `terminalLinkPaths()` (Core) drops a `:line[:col]`/`#L…` suffix and makes the path
+  relative to the worktree, or `/workspace` in a container: a relative one against the shell's OSC 7
+  directory first, then the root; absolute and `file://` ones only inside the root. In a worktree the
+  first candidate that exists opens; in a container the first one (a missing file shows the editor's
+  message). Anything else (a URL, a path outside the root) goes to SwiftTerm's default opener.
 - **Terminal tabs:** a login shell in the worktree (`kunj worktree shell <branch> --session <id>`), or
   `kunj ct shell <branch> --session <id>` for a container: with tmux (on the host, or in the image)
   each shell tab is its own tmux session, so quitting the app keeps it and the next launch
@@ -100,6 +108,7 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   `N files · +adds −dels` and a scope select
   (vs origin/<base>, default: everything since the fork point, working tree included; Uncommitted;
   Last commit); a file list (A/M/D letter, name, ± counts); Monaco's diff editor for the selected file.
+  An × at the right of its bar closes it (the same toggle).
 - **Files column (right edge, hidden by default):** a file explorer of the selected environment
   (`git ls-files` tracked + untracked, ignored files left out; through `kunj ct exec` in a running
   container), folders first, opened with a `Files` pill after `Changes` in the tab bar or View > Show
@@ -107,7 +116,8 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   the rest). A double-click (or Return) on a file opens an editor tab. Open folders are kept per
   environment for the session; it reloads 1 s after a `git` event of its repository; over 50,000
   files only the first 50,000 are listed. One app-wide setting (`showFiles`), remembered; closed it
-  lists nothing. `FileLister`/`buildFileTree` in Core, `FilesColumn` in the app.
+  lists nothing. An × at the right of its bar closes it. `FileLister`/`buildFileTree` in Core,
+  `FilesColumn` in the app.
 - **Status bar:** container name or worktree path · uptime · services · forwards; right side the agent
   state and the ⌘1–9 hint.
 - **Editor tab** (v1): a changed file of the environment, edited in Monaco (see Editor tabs).
