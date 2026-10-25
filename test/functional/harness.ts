@@ -27,6 +27,15 @@ export const USER = 'dev';
 
 /** Set by `npm run test:functional`; global-setup.js sets KUNJ_FUNCTIONAL_SKIP when Docker is unreachable. */
 export const functionalEnabled = process.env.KUNJ_FUNCTIONAL === '1' && !process.env.KUNJ_FUNCTIONAL_SKIP;
+
+/**
+ * KUNJ_FUNCTIONAL_REMOTE=1 (`npm run test:functional:remote`): every fixture runs its own `kunj serve` in
+ * front of this machine's Docker and sets `container.remote` to it, so each `kunj ct` the suite runs goes
+ * through the server and its protocol instead of the docker CLI. Tests that check the backend directly
+ * (docker inspect, labels) still see the same daemon.
+ */
+export const functionalRemote = process.env.KUNJ_FUNCTIONAL_REMOTE === '1';
+export const REMOTE_NAME = 'ft-serve';
 /** describe, or describe.skip unless the suite was asked for and Docker is up. */
 export const describeFunctional = functionalEnabled ? describe : describe.skip;
 
@@ -193,6 +202,8 @@ export class Fixture {
   repoId = '';
   port = 0;
   private daemon?: ChildProcess;
+  /** The fixture's `kunj serve` in remote mode; outlives reset(), unlike the tests' background processes */
+  private serve?: ChildProcess;
   private background: Background[] = [];
   private gitEnv: NodeJS.ProcessEnv;
 
@@ -252,7 +263,29 @@ export class Fixture {
     git(['clone', '-q', this.bare, this.clone], this.tmp, this.gitEnv);
     git(['remote', 'set-url', 'origin', this.originUrl], this.clone, this.gitEnv);
     git(['fetch', '-q', 'origin'], this.clone, this.gitEnv);
+    if (functionalRemote) await this.startServe();
     this.writeConfig({});
+  }
+
+  /** Remote mode: `kunj serve` on a free loopback port, registered as REMOTE_NAME in the fixture's HOME. */
+  private async startServe(): Promise<void> {
+    const child = spawn(process.execPath, [CLI, 'serve', '--listen', '127.0.0.1:0', '--allow-privileged', '--allow-runtime', 'sysbox-runc'], {
+      cwd: this.clone,
+      env: this.env(),
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    this.serve = child;
+    let stderr = '';
+    child.stderr!.on('data', d => (stderr += d.toString()));
+    const listening = /listening on 127\.0\.0\.1:(\d+)/;
+    await waitFor(() => {
+      if (child.exitCode !== null) throw new Error(`kunj serve exited (${child.exitCode}): ${stderr.slice(-2000)}`);
+      return listening.test(stderr);
+    }, 'kunj serve listening', 60_000);
+    const port = Number(listening.exec(stderr)![1]);
+    const token = fs.readFileSync(path.join(this.home, '.kunj', 'serve', 'token'), 'utf8').trim();
+    const remotes = { [REMOTE_NAME]: { url: `http://127.0.0.1:${port}`, token, addedAt: new Date().toISOString() } };
+    fs.writeFileSync(path.join(this.home, '.kunj', 'remotes.json'), JSON.stringify(remotes, null, 2) + '\n', { mode: 0o600 });
   }
 
   /** What isolates the CLI and git from the developer's own setup. */
@@ -288,7 +321,7 @@ export class Fixture {
    */
   writeConfig(config: { container?: Record<string, unknown>; [key: string]: unknown }): void {
     const { container, ...rest } = config;
-    const full = { ...rest, container: { env: [], keepFiles: false, ...(container ?? {}) } };
+    const full = { ...rest, container: { env: [], keepFiles: false, ...(functionalRemote ? { remote: REMOTE_NAME } : {}), ...(container ?? {}) } };
     fs.mkdirSync(path.join(this.home, '.kunj'), { recursive: true });
     fs.writeFileSync(path.join(this.home, '.kunj', 'config.json'), JSON.stringify(full, null, 2) + '\n');
   }
@@ -481,6 +514,7 @@ export class Fixture {
     await this.reset();
     try {
       this.daemon?.kill();
+      this.serve?.kill();
     } catch {
       // gone
     }

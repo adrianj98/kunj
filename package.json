@@ -22,6 +22,7 @@
     "test:remote": "KUNJ_TEST_REMOTE=1 jest src/lib/container --testTimeout=20000 --forceExit",
     "test:docker": "jest --runInBand --testPathIgnorePatterns=/node_modules/ --testMatch='**/__tests__/**/*.docker.test.ts'",
     "test:functional": "KUNJ_FUNCTIONAL=1 jest -c jest.functional.config.js",
+    "test:functional:remote": "KUNJ_FUNCTIONAL=1 KUNJ_FUNCTIONAL_REMOTE=1 jest -c jest.functional.config.js",
     "lint": "tsc --noEmit && tsc -p test/functional --noEmit",
     "bundle": "esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=.build/bundle.js --format=cjs",
     "compile": "npm run bundle && npx @yao-pkg/pkg .build/bundle.js --targets node20-macos-arm64 --output kunj",
