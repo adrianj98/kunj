@@ -184,7 +184,7 @@ export class ContainerNode extends vscode.TreeItem {
 
   private buildDescription(): string {
     const c = this.container;
-    const parts = [this.running ? 'container' : 'container · stopped'];
+    const parts = this.running ? ['container'] : ['container', 'stopped'];
     if (c.agent.running) parts.push(c.agent.state === 'waiting' ? 'agent waiting' : 'agent');
     if (c.workspace.dirty) parts.push('✎');
     if (c.workspace.ahead) parts.push(`↑${c.workspace.ahead}`);

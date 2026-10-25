@@ -603,6 +603,14 @@ describe('ContainerCommand', () => {
       expect(mockForwards).toEqual([{ pid: 4242, container: NAME, containerId: 'cid-1', port: 0, hostPort: 0, kind: 'forward' }]);
     });
 
+    it('forward --auto --detach reports the registered forwarder instead of starting a second', async () => {
+      backend.existing = [mainContainer('feat'), helperContainer('feat')];
+      mockForwards.push({ pid: 777, container: NAME, containerId: 'cid-1', port: 0, hostPort: 0, kind: 'forward' });
+      await new ContainerCommand().execute('forward', 'feat', [], { auto: true, detach: true, json: true });
+      expect(spawnDetached).not.toHaveBeenCalled();
+      expect(JSON.parse(stdout.join(''))).toEqual({ success: true, branch: 'feat', pid: 777, alreadyRunning: true });
+    });
+
     it('forward --auto and forward <port> refuse when the network helper is not running', async () => {
       backend.existing = [mainContainer('feat'), { ...helperContainer('feat'), state: 'exited' }];
       await new ContainerCommand().execute('forward', 'feat', [], { auto: true });

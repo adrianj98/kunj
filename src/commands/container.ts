@@ -891,9 +891,13 @@ export class ContainerCommand extends BaseCommand {
     const helper = await this.requireHelper(ctx, branch);
 
     if (options.detach) {
-      const pid = this.startForwarder(ctx, branch, main);
+      // One auto-forwarder per container: a second would forward every port again on other host ports
+      const existing = forwarderFor(main);
+      const pid = existing ?? this.startForwarder(ctx, branch, main);
       if (this.jsonMode) {
-        this.outputJSON({ success: true, branch, pid });
+        this.outputJSON({ success: true, branch, pid, ...(existing !== undefined ? { alreadyRunning: true } : {}) });
+      } else if (existing !== undefined) {
+        console.log(chalk.green(`✓ The ports of ${branch} are already forwarded in the background (pid ${pid})`));
       } else {
         console.log(chalk.green(`✓ Forwarding ports of ${branch} in the background (pid ${pid})`));
       }
