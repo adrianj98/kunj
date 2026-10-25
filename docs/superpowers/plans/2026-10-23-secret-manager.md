@@ -268,6 +268,14 @@
 - [x] **Step 5:** Run `npm test`, `npm run lint`, and `npm run test:docker` (it skips itself without Docker). Expected: PASS.
 - [x] **Step 6:** Commit: `git commit -m "Secrets in branch containers: env file, rendered files, secretsChanged"`.
 
+### After Task 8: the workspace app's Settings › Containers
+
+**Status: done** (outside the numbered tasks, from the spec's tokens decision). `ContainerTokens.swift` in
+KunjWorkspaceCore (`SecretListJson`, `TokenStatusJson`, `githubTokenSummary`, `claudeTokenSummary`,
+`claudeTokenSetupSpec`, `KunjSetting.containerUseGhToken`) with `ContainerTokensTests`, and the Containers
+section of `SettingsWindow`. Reviewed: a stored global `GH_TOKEN` does win over gh (the env merge comes
+before `withHostTokens`); `secret list --global` unlocking is that command's documented behaviour.
+
 ### Task 8: Migration prompts and docs
 
 **Status: done** (3bbe9af, hash named in 1f2c6b3); review fix (the printed command single-quotes a path the shell would split, e.g. a repo directory with a space) in the Review 8 commit. Rulings in the ledger. No later task: the plan is complete. As built: `keptEnvImportCommand(home?)` (exported from secret.ts, `~/` for the home directory, the rest shell-quoted via `shellQuote()` from config-vars.ts when it holds a character outside `[\w@%+=:,./-]`) is shared by the `list` hint and `SetupCommand.offerSecretImport()`; the hint shows when the repo vault has no entries (global secrets do not hide it), also under `No secrets`; setup asks only when the repo has no `secrets.enc` (no unlock to decide), runs `kunj secret import <keep>/.env --delete` (which asks again with the names), prints the command on no and warns on a failed import. User docs: `docs-site/src/content/docs/configuration/secrets.mdx`, plus links from agent, keep files, setup, files-and-data and container security pages.

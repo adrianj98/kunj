@@ -5,7 +5,12 @@ import KunjWorkspaceCore
 /// (the `theme` default View > Theme writes too, applied at once) and two agent toggles that are
 /// kunj's own settings (`agent.tmux`, `agent.tmuxStatus` in the global config), read with
 /// `kunj config --get <key> --global --json` and written with `kunj config --set <key>=<bool> --global`.
-/// A failed write shows inline and reverts the checkbox.
+/// A failed write shows inline and reverts the checkbox. Containers shows where a new container's
+/// GitHub token comes from (`kunj ct token status --json`, a stored global `GH_TOKEN` winning),
+/// the `container.useGhToken` toggle, and the Claude Code token (`kunj secret list --global
+/// --json`), set up in an action tab of the selected environment (`claudeTokenSetupSpec`) and
+/// removed with `kunj secret rm`. The app never sees a token: the hidden prompt of `kunj secret
+/// set` in the tab takes it.
 @MainActor
 final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
     static let kunjCommandKey = "kunjCommand"
@@ -13,7 +18,11 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
     /// The kunj command changed (after editing ends): rediscover kunj with it.
     var onKunjCommandChanged: () -> Void = {}
     /// The CLI the agent toggles use (nil until discovery: they are disabled).
-    var cli: KunjCLI? { didSet { if cli !== oldValue { loadAgentSettings() } } }
+    var cli: KunjCLI? { didSet { if cli !== oldValue { loadAgentSettings(); loadContainerSettings() } } }
+    /// The main window's selected environment (where Set Up… opens its action tab).
+    var selectedEnvironment: () -> Environment? = { nil }
+    /// Opens an action tab running `spec` in `env`; `onFinish` gets the exit code.
+    var openAction: (Environment, TerminalSpec, @escaping (Int32) -> Void) -> Void = { _, _, _ in }
 
     private let content = FillView(.clear)
     private let commandField = NSTextField()
@@ -22,6 +31,15 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
     private let statusBox = NSButton(checkboxWithTitle: "Show tmux status line", target: nil, action: nil)
     private let tmuxNote = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.caption), color: .clear)
     private let agentError = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.caption), color: .clear)
+    private let githubLine = makeLabel("…", font: Theme.sans(DesignTokens.TypeScale.small), color: .clear)
+    private let useGhBox = NSButton(checkboxWithTitle: "Use gh's GitHub token", target: nil, action: nil)
+    private let claudeLine = makeLabel("…", font: Theme.sans(DesignTokens.TypeScale.small), color: .clear)
+    private let setUpButton = NSButton(title: "Set Up…", target: nil, action: nil)
+    private let removeButton = NSButton(title: "Remove", target: nil, action: nil)
+    private let containerError = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.caption), color: .clear)
+    private var tokenStatus: TokenStatusJson?
+    private var globalSecrets: SecretListJson?
+    private var containerLoad = 0
     private var labels: [NSTextField] = []
     private var notes: [NSTextField] = []
     private var values: [KunjSetting: Bool] = [:]
@@ -43,6 +61,7 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         commandField.stringValue = UserDefaults.standard.string(forKey: Self.kunjCommandKey) ?? ""
         selectTheme()
         loadAgentSettings()
+        loadContainerSettings()
         if window?.isVisible != true { window?.center() }
         super.showWindow(sender)
     }
@@ -77,7 +96,7 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         themePopup.target = self
         themePopup.action = #selector(themeChosen)
         themePopup.setAccessibilityLabel("Theme")
-        for b in [tmuxBox, statusBox] { b.target = self; b.action = #selector(agentToggled(_:)) }
+        for b in [tmuxBox, statusBox, useGhBox] { b.target = self; b.action = #selector(agentToggled(_:)) }
         tmuxNote.lineBreakMode = .byWordWrapping
         tmuxNote.maximumNumberOfLines = 2
         agentError.lineBreakMode = .byWordWrapping
@@ -88,11 +107,34 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         agents.orientation = .vertical
         agents.alignment = .leading
         agents.spacing = 6
+
+        for b in [setUpButton, removeButton] { b.bezelStyle = .rounded; b.controlSize = .small; b.target = self }
+        setUpButton.action = #selector(setUpClaudeToken)
+        removeButton.action = #selector(removeClaudeToken)
+        setUpButton.setAccessibilityLabel("Set up the Claude Code token")
+        removeButton.setAccessibilityLabel("Remove the Claude Code token")
+        containerError.lineBreakMode = .byWordWrapping
+        containerError.maximumNumberOfLines = 3
+        containerError.preferredMaxLayoutWidth = 300
+        let githubTitle = label("GitHub token")
+        githubTitle.alignment = .left
+        let claudeTitle = label("Claude Code token")
+        claudeTitle.alignment = .left
+        let claudeRow = NSStackView(views: [claudeLine, setUpButton, removeButton])
+        claudeRow.orientation = .horizontal
+        claudeRow.spacing = 8
+        let containers = NSStackView(views: [githubTitle, githubLine, useGhBox, claudeTitle, claudeRow,
+                                             note("Containers get these tokens; the agent inside can use them."), containerError])
+        containers.orientation = .vertical
+        containers.alignment = .leading
+        containers.spacing = 6
+        containers.setCustomSpacing(12, after: useGhBox)
         let grid = NSGridView(views: [
             [label("kunj command"), commandField],
             [NSGridCell.emptyContentView, note("A command or path, e.g. node ~/src/kunj/dist/index.js. Empty: kunj on your login PATH.")],
             [label("Theme"), themePopup],
             [label("Agents"), agents],
+            [label("Containers"), containers],
         ])
         grid.translatesAutoresizingMaskIntoConstraints = false
         grid.rowSpacing = 10
@@ -102,6 +144,8 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         grid.row(at: 2).yPlacement = .center
         grid.row(at: 3).topPadding = 8
         grid.cell(atColumnIndex: 0, rowIndex: 3).yPlacement = .top
+        grid.row(at: 4).topPadding = 8
+        grid.cell(atColumnIndex: 0, rowIndex: 4).yPlacement = .top
         content.addSubview(grid)
         NSLayoutConstraint.activate([
             commandField.widthAnchor.constraint(equalToConstant: 300),
@@ -111,6 +155,7 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
             grid.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -24),
         ])
         renderAgents()
+        renderContainers()
     }
 
     private func apply(_ t: Theme) {
@@ -120,6 +165,9 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         for n in notes { n.textColor = t.color(\.muted) }
         tmuxNote.textColor = t.color(\.muted)
         agentError.textColor = t.color(\.red)
+        containerError.textColor = t.color(\.red)
+        githubLine.textColor = t.color(\.text)
+        claudeLine.textColor = t.color(\.text)
         selectTheme()
     }
 
@@ -180,11 +228,12 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         statusBox.isEnabled = cli != nil && status != nil && tmux == true && !writing
         tmuxNote.stringValue = tmux == false ? "Agents stop when their tab closes" : ""
         tmuxNote.isHidden = tmux != false
+        renderContainers()
     }
 
     @objc private func agentToggled(_ sender: NSButton) {
         guard let cli else { return }
-        let setting: KunjSetting = sender === tmuxBox ? .agentTmux : .agentTmuxStatus
+        let setting: KunjSetting = sender === tmuxBox ? .agentTmux : sender === useGhBox ? .containerUseGhToken : .agentTmuxStatus
         let value = sender.state == .on
         let previous = values[setting]
         values[setting] = value
@@ -205,6 +254,89 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
             }
             self.writing = false
             self.renderAgents()
+            // whether gh is asked changes where the GitHub token comes from
+            if setting == .containerUseGhToken { self.loadContainerSettings() }
+        }
+    }
+
+    // MARK: container tokens
+
+    /// Reads where the GitHub token comes from and the global secrets (both in the home
+    /// directory: outside a repository the token status is for github.com). A later load wins.
+    private func loadContainerSettings() {
+        containerLoad += 1
+        let load = containerLoad
+        guard let cli else { tokenStatus = nil; globalSecrets = nil; renderContainers(); return }
+        containerError.stringValue = ""
+        Task { @MainActor in
+            var errors: [String] = []
+            async let status: TokenStatusJson = cli.run(tokenStatusArgs, cwd: NSHomeDirectory(), timeout: 30)
+            async let list: SecretListJson = cli.run(globalSecretListArgs, cwd: NSHomeDirectory(), timeout: 60)
+            var s: TokenStatusJson?
+            var l: SecretListJson?
+            do { s = try await status } catch { errors.append("Could not read the GitHub token status: \(Self.message(error))") }
+            do { l = try await list } catch { errors.append("Could not read the stored secrets: \(Self.message(error))") }
+            guard load == self.containerLoad else { return }
+            self.tokenStatus = s
+            self.globalSecrets = l
+            self.containerError.stringValue = errors.joined(separator: "\n")
+            self.renderContainers()
+        }
+    }
+
+    private static func message(_ error: Error) -> String {
+        (error as? KunjCLIError)?.message ?? "\(error)"
+    }
+
+    private func renderContainers() {
+        githubLine.stringValue = githubTokenSummary(status: tokenStatus, secrets: globalSecrets) ?? (cli == nil ? "kunj not found" : "…")
+        let claude = claudeTokenSummary(secrets: globalSecrets)
+        claudeLine.stringValue = claude ?? (cli == nil ? "kunj not found" : "…")
+        let useGh = values[.containerUseGhToken]
+        useGhBox.state = (useGh ?? KunjSetting.containerUseGhToken.defaultValue) ? .on : .off
+        useGhBox.isEnabled = cli != nil && useGh != nil && !writing
+        setUpButton.isEnabled = cli != nil
+        removeButton.isEnabled = cli != nil && claude == "Stored secret"
+    }
+
+    @objc private func setUpClaudeToken() {
+        guard let cli else { return }
+        guard let env = selectedEnvironment() else {
+            let a = NSAlert()
+            a.messageText = "Select an environment first"
+            a.informativeText = "The Claude Code token is set up in a terminal tab of the selected environment. Select a worktree or container in the sidebar, then choose Set Up… again."
+            a.alertStyle = .informational
+            if let w = window { a.beginSheetModal(for: w) } else { a.runModal() }
+            return
+        }
+        let spec = claudeTokenSetupSpec(cli: cli, env: env, terminalEnv: ProcessInfo.processInfo.environment)
+        log("claude token setup tab in \(env.id)")
+        openAction(env, spec) { [weak self] _ in self?.loadContainerSettings() }
+    }
+
+    @objc private func removeClaudeToken() {
+        guard let cli, let window else { return }
+        let a = NSAlert()
+        a.messageText = "Remove the stored Claude Code token?"
+        a.informativeText = "New containers no longer get CLAUDE_CODE_OAUTH_TOKEN. Containers that have it keep it until they are rebuilt."
+        a.addButton(withTitle: "Remove")
+        a.addButton(withTitle: "Cancel")
+        a.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            self.containerError.stringValue = ""
+            Task { @MainActor in
+                do {
+                    let out = try await cli.runRaw(claudeTokenRemoveArgs, cwd: NSHomeDirectory(), stdin: nil, timeout: 60)
+                    if out.exit != 0 {
+                        throw KunjCLIError(code: .commandFailed,
+                                           message: out.stderr.split(separator: "\n").last.map(String.init) ?? "kunj exited with code \(out.exit)")
+                    }
+                    log("kunj secret rm \(claudeTokenName) --global")
+                } catch {
+                    self.containerError.stringValue = "Could not remove the token: \(Self.message(error))"
+                }
+                self.loadContainerSettings()
+            }
         }
     }
 }

@@ -409,6 +409,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settings == nil {
             let s = SettingsWindow()
             s.onKunjCommandChanged = { [weak self] in self?.reconnect() }
+            s.selectedEnvironment = { [weak self] in self?.windowController.selectedEnvironment }
+            // the action tab is in the main window, which comes forward so the prompt can be answered
+            s.openAction = { [weak self] env, spec, onFinish in
+                guard let self else { return }
+                self.windowController.window?.makeKeyAndOrderFront(nil)
+                self.runner.openAction(env, spec, onFinish)
+            }
             settings = s
         }
         settings?.cli = kunj
