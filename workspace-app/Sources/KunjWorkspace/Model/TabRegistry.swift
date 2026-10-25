@@ -38,6 +38,8 @@ final class TabRegistry {
     var fileAccess: FileAccess?
     /// An editor tab saved its file (the Changes column reloads).
     var onSaved: ((EditorTab) -> Void)?
+    /// Opens a file of an environment in an editor tab (a ⌘-click on a path in a terminal).
+    var onOpenFile: ((Environment, String) -> Void)?
     private var editorPage: MonacoWebView?
     /// The editor tab the editor page shows on screen (set by the TerminalColumn), so key presses
     /// in the page count as activity of its environment.
@@ -100,6 +102,7 @@ final class TabRegistry {
                               theme: theme)
         tab.onExit = { [weak self] t in self?.exited(t) }
         tab.onTitle = { [weak self] t in self?.onChange?(t.envId) }
+        tab.onOpenLink = { [weak self] t, link in self?.openLink(link, from: t, env: env) ?? false }
         add(tab)
         return tab
     }
@@ -153,6 +156,22 @@ final class TabRegistry {
             }
         }
         return tab
+    }
+
+    /// A ⌘-clicked file in a terminal opens in an editor tab: in a worktree the first candidate
+    /// that exists (else the default opener gets the link), in a container the first one (its
+    /// files are not on this Mac, and a missing one shows the editor's message).
+    private func openLink(_ link: String, from tab: TerminalTab, env: Environment) -> Bool {
+        guard let onOpenFile else { return false }
+        let root = env.kind == .container ? "/workspace" : env.path
+        guard let root else { return false }
+        let paths = terminalLinkPaths(link, root: root, cwd: tab.reportedDirectory)
+        let path = env.kind == .container
+            ? paths.first
+            : paths.first { FileManager.default.fileExists(atPath: root + "/" + $0) }
+        guard let path else { return false }
+        onOpenFile(env, path)
+        return true
     }
 
     /// Saves an editor tab (File > Save, ⌘S in the page); `onSaved` follows a save.
