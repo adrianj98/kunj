@@ -163,9 +163,13 @@ final class TabRegistry {
     /// files are not on this Mac, and a missing one shows the editor's message).
     private func openLink(_ link: String, from tab: TerminalTab, env: Environment) -> Bool {
         guard let onOpenFile else { return false }
-        let root = env.kind == .container ? "/workspace" : env.path
-        guard let root else { return false }
-        let paths = terminalLinkPaths(link, root: root, cwd: tab.reportedDirectory)
+        // a worktree's root and the shell's directory with symlinks resolved (`/tmp` → `/private/tmp`)
+        func real(_ path: String?) -> String? {
+            env.kind == .container ? path : path.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+        }
+        let cwd = tab.reportedDirectory.map { $0.hasPrefix("file://") ? URL(string: $0)?.path : $0 } ?? nil
+        guard let root = real(env.kind == .container ? "/workspace" : env.path) else { return false }
+        let paths = terminalLinkPaths(link, root: root, cwd: real(cwd))
         let path = env.kind == .container
             ? paths.first
             : paths.first { FileManager.default.fileExists(atPath: root + "/" + $0) }

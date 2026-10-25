@@ -316,7 +316,9 @@ final class PillView: NSButton {
     }
     required init?(coder: NSCoder) { fatalError() }
     @objc private func pressed() {
-        if let onClose, let event = NSApp.currentEvent, closeRect.contains(convert(event.locationInWindow, from: nil)) {
+        // only a click lands on the ×: Space on a focused pill selects it wherever the pointer is
+        if let onClose, let event = NSApp.currentEvent, [.leftMouseUp, .leftMouseDown].contains(event.type),
+           closeRect.contains(convert(event.locationInWindow, from: nil)) {
             onClose()
         } else {
             onPress?()
