@@ -157,6 +157,8 @@ the app quits. Containers always use tmux inside the container.
 
 To copy from a terminal where a program has the mouse (tmux with `mouse on`, or a full-screen agent),
 hold ⌥ (or ⇧) while you drag, then press ⌘C. The selection stays until you copy, click again or scroll.
+In a Shell tab a plain drag does this too, because tmux's own copy never reaches the Mac clipboard;
+the scroll wheel still scrolls tmux. In a Claude tab, Claude Code copies a drag itself when you let go.
 
 ## Tabs across launches
 

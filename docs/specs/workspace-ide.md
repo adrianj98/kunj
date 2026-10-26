@@ -87,7 +87,9 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   full-screen UI) a drag goes to it. A press with ⌥ or ⇧ turns SwiftTerm's `allowMouseReporting` off
   so the drag selects, until ⌘C, the next plain press or a scroll over the tab (`TerminalTab.mouseDown`/`copy`,
   a scroll-wheel monitor while it lasts; with reporting off the wheel would become arrow keys): with
-  reporting on, SwiftTerm drops the selection at the next linefeed.
+  reporting on, SwiftTerm drops the selection at the next linefeed. A shell tab does this on every press
+  (⌥ or not; a plain press keeps the mode): its tmux has the mouse, and tmux's copy-mode copy never
+  reached the Mac clipboard (no OSC 52 from tmux to the tab), so a plain drag copied nothing.
 - **File links in terminals:** ⌘-click on a path SwiftTerm detects (⌘ underlines it) opens it in an
   editor tab. `terminalLinkPaths()` (Core) drops a `:line[:col]`/`#L…` suffix and makes the path
   relative to the worktree, or `/workspace` in a container: a relative one against the shell's OSC 7

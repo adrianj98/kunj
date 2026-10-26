@@ -2,6 +2,16 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Workspace app: a plain drag selects in a shell tab
+
+- In a Shell tab (`kind == .shell`) every press gets the ⌥-drag treatment: mouse reporting off so the drag is
+  the app's selection and ⌘C copies it; a plain click keeps the mode, ⌘C or a scroll ends it.
+  Why: the user found copy in the shell still broken. tmux has `mouse on`, so a plain drag went to tmux's
+  copy mode, and tmux sent no OSC 52 to the tab, so nothing reached the Mac clipboard. Turning tmux's mouse
+  off instead was rejected: on tmux's alternate screen SwiftTerm would turn the wheel into ↑/↓ (shell history).
+- ⌘V: the menu, SwiftTerm's bracketed paste and the real `kunj worktree shell` session all pass a paste
+  through (checked in a pty); no change, pending what the user sees.
+
 ## 2026-10-25 — kunj serve: one-line errors for a bad --listen address
 
 - `kunj serve --listen` turns `EADDRNOTAVAIL` (an address this machine does not have) and `EADDRINUSE` (busy port)

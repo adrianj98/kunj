@@ -148,6 +148,8 @@ final class TerminalTab: LocalProcessTerminalView {
     /// not to a selection ⌘C could copy. With ⌥ (as in iTerm) or ⇧ held at the press the view
     /// selects instead, and mouse reporting stays off until ⌘C, the next plain click or a scroll
     /// over the tab: with it on, SwiftTerm drops the selection at the next line of output, before ⌘C.
+    /// A shell tab selects on every press, ⌥ or not: its mouse belongs to tmux (`mouse on`), whose own
+    /// copy never reaches the Mac clipboard, and a plain click there keeps the mode.
     private var selectingOverMouseReporting = false
     /// Ends the mode on a scroll over the tab, before SwiftTerm's `scrollWheel` (not overridable)
     /// handles it: with reporting off the wheel would become arrow keys (alternate scroll).
@@ -155,8 +157,9 @@ final class TerminalTab: LocalProcessTerminalView {
 
     override func mouseDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if !flags.intersection([.option, .shift]).isEmpty, getTerminal().mouseMode != .off,
-           allowMouseReporting {
+        let plain = flags.intersection([.option, .shift]).isEmpty
+        if plain && kind != .shell { endSelectingOverMouseReporting() }
+        if !plain || kind == .shell, getTerminal().mouseMode != .off, allowMouseReporting {
             selectingOverMouseReporting = true
             allowMouseReporting = false
             scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
@@ -167,8 +170,6 @@ final class TerminalTab: LocalProcessTerminalView {
                 }
                 return event
             }
-        } else if flags.intersection([.option, .shift]).isEmpty {
-            endSelectingOverMouseReporting()
         }
         super.mouseDown(with: event)
     }
