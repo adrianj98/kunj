@@ -52,6 +52,7 @@ page only says where each thing stands.
 | Workspace app: ⌘-click file paths in terminals open an editor tab; × on tabs and on the Changes and Files columns | [workspace-ide.md](workspace-ide.md#layout) | 50c5edb, b01b4b1 |
 | Workspace app: reopening restores every running agent tab of an environment, not just one | [workspace-ide.md](workspace-ide.md#layout) | 622c27e |
 | Remote containers: `kunj serve`, `RemoteKunjBackend`, `kunj remote`, `--remote` / `container.remote`, TTY over the Engine API, SSH tunnel | [remote-containers.md](remote-containers.md) | aab2a76, 8b4d3e2, fbb95e0, d1ad96c, 662b060, 125f6e2, b086c66, 3235471, 648bc7d, ffd0f1b, 78a8df6; merged to main 2653373 |
+| Workspace app: syntax colours in editor tabs; no false TypeScript import errors | [workspace-ide.md](workspace-ide.md) | dad2757 |
 
 ## In progress
 
