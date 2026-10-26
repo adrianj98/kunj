@@ -15,8 +15,10 @@ export interface RemoteEntry {
   ssh?: string;
   /** The server's port on the box (default 7433), with `ssh` */
   port?: number;
-  /** http(s) URL of the server; plain http only to a loopback address */
+  /** http(s) URL of the server; plain http only to a loopback address, unless `insecure` */
   url?: string;
+  /** Added with --allow-insecure-http: a plain http URL to a non-loopback address (a tailnet, a trusted LAN) */
+  insecure?: boolean;
   token: string;
   addedAt: string;
 }
@@ -62,8 +64,17 @@ export function checkRemoteName(name: string): void {
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost|\[::1\]|::1)$/;
 
-/** https anywhere; http only to loopback, so a plaintext LAN connection cannot be configured by accident. */
-export function checkRemoteUrl(url: string): URL {
+/** Whether the URL is plain http to a non-loopback address (the case --allow-insecure-http allows). */
+export function isInsecureUrl(url: URL): boolean {
+  return url.protocol === 'http:' && !LOOPBACK.test(url.hostname);
+}
+
+/**
+ * https anywhere; http only to loopback, so a plaintext LAN connection cannot be configured by accident.
+ * `allowInsecureHttp` (--allow-insecure-http) accepts http to any host, for networks that already
+ * encrypt (Tailscale, WireGuard) or that the user trusts.
+ */
+export function checkRemoteUrl(url: string, opts: { allowInsecureHttp?: boolean } = {}): URL {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -72,8 +83,8 @@ export function checkRemoteUrl(url: string): URL {
   }
   if (parsed.protocol === 'https:') return parsed;
   if (parsed.protocol === 'http:') {
-    if (LOOPBACK.test(parsed.hostname)) return parsed;
-    throw new ContainerError(`http:// is only accepted to a loopback address (${parsed.hostname} is not): use https://, or add the remote with --ssh and let kunj tunnel to it`, 'bad-remote');
+    if (LOOPBACK.test(parsed.hostname) || opts.allowInsecureHttp) return parsed;
+    throw new ContainerError(`http:// is only accepted to a loopback address (${parsed.hostname} is not): use https://, add the remote with --ssh and let kunj tunnel to it, or pass --allow-insecure-http on a network that already encrypts (Tailscale, WireGuard)`, 'bad-remote');
   }
   throw new ContainerError(`"${url}": expected http:// or https://`, 'bad-remote');
 }
@@ -100,6 +111,6 @@ export function requireRemote(name: string, file: string = getRemotesPath()): Re
 
 /** How a remote is reached, for listings: never the token. */
 export function describeRemote(entry: RemoteEntry): string {
-  if (entry.url) return entry.url;
+  if (entry.url) return entry.insecure ? `${entry.url} (unencrypted)` : entry.url;
   return `ssh ${entry.ssh} (port ${entry.port ?? DEFAULT_SERVE_PORT})`;
 }

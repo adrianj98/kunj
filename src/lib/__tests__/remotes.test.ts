@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { checkRemoteName, checkRemoteUrl, checkSshDestination, checkToken, describeRemote, readRemotes, requireRemote, writeRemotes } from '../remotes';
+import { checkRemoteName, checkRemoteUrl, isInsecureUrl, checkSshDestination, checkToken, describeRemote, readRemotes, requireRemote, writeRemotes } from '../remotes';
 
 describe('remotes.json', () => {
   let dir: string;
@@ -53,6 +53,16 @@ describe('remote validation', () => {
     expect(() => checkRemoteUrl('box:7433')).toThrow(expect.objectContaining({ code: 'bad-remote' }));
   });
 
+  it('urls: --allow-insecure-http accepts http to any host, nothing else', () => {
+    expect(() => checkRemoteUrl('http://100.64.0.7:7433')).toThrow(/--allow-insecure-http/);
+    const url = checkRemoteUrl('http://100.64.0.7:7433', { allowInsecureHttp: true });
+    expect(isInsecureUrl(url)).toBe(true);
+    expect(isInsecureUrl(checkRemoteUrl('http://box.tailnet.ts.net:7433', { allowInsecureHttp: true }))).toBe(true);
+    expect(isInsecureUrl(checkRemoteUrl('http://127.0.0.1:7433', { allowInsecureHttp: true }))).toBe(false);
+    expect(isInsecureUrl(checkRemoteUrl('https://box.example', { allowInsecureHttp: true }))).toBe(false);
+    expect(() => checkRemoteUrl('ftp://box', { allowInsecureHttp: true })).toThrow(/http/);
+  });
+
   it('ssh destinations and tokens', () => {
     expect(() => checkSshDestination('me@box')).not.toThrow();
     expect(() => checkSshDestination('box')).not.toThrow();
@@ -67,5 +77,6 @@ describe('remote validation', () => {
     expect(describeRemote({ ssh: 'me@box', token: 'secret', addedAt: '' })).toBe('ssh me@box (port 7433)');
     expect(describeRemote({ ssh: 'me@box', port: 9000, token: 'secret', addedAt: '' })).toBe('ssh me@box (port 9000)');
     expect(describeRemote({ url: 'https://box.example', token: 'secret', addedAt: '' })).toBe('https://box.example');
+    expect(describeRemote({ url: 'http://100.64.0.7:7433', insecure: true, token: 'secret', addedAt: '' })).toBe('http://100.64.0.7:7433 (unencrypted)');
   });
 });

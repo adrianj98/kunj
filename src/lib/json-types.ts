@@ -147,7 +147,8 @@ export interface ContainerListJson {
 
 /** `kunj remote list --json`: how each remote is reached; never its token. */
 export interface RemoteListJson {
-  remotes: Array<{ name: string; via: 'ssh' | 'url'; ssh?: string; port?: number; url?: string; addedAt: string }>;
+  /** `insecure`: a plain http URL to a non-loopback address, added with --allow-insecure-http */
+  remotes: Array<{ name: string; via: 'ssh' | 'url'; ssh?: string; port?: number; url?: string; insecure?: boolean; addedAt: string }>;
 }
 
 /** `kunj remote ping <name> --json` */

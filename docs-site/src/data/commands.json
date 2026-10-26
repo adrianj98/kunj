@@ -859,6 +859,11 @@
         "default": null
       },
       {
+        "flags": "--allow-insecure-http",
+        "description": "[add] Accept an http:// URL to a non-loopback address: the token, secrets and terminals travel unencrypted, so only on a network that already encrypts (Tailscale, WireGuard) or that you trust",
+        "default": null
+      },
+      {
         "flags": "--token <token>",
         "description": "[add|token] The server's token (lands in your shell history; prefer --token-stdin or the prompt)",
         "default": null
@@ -874,7 +879,7 @@
         "default": null
       }
     ],
-    "helpText": "Actions:\n  add <name> --ssh user@host [--port n]   a server reached through an SSH tunnel kunj opens\n  add <name> --url https://…             a server you put behind TLS yourself\n  list (default)                         the known remotes, without their tokens\n  remove <name>\n  ping <name>                            versions, features and Docker context of the server\n  token <name>                           replace the stored token\n\nThen kunj ct … --remote <name>, or kunj config --set container.remote=<name> in the repository,\nruns that repository's containers there. --remote local forces this machine's Docker.\nRemotes are kept in ~/.kunj/remotes.json (0600)."
+    "helpText": "Actions:\n  add <name> --ssh user@host [--port n]   a server reached through an SSH tunnel kunj opens\n  add <name> --url https://…             a server you put behind TLS yourself\n  add <name> --url http://… --allow-insecure-http\n                                         plain http over a network that already encrypts (a tailnet)\n  list (default)                         the known remotes, without their tokens\n  remove <name>\n  ping <name>                            versions, features and Docker context of the server\n  token <name>                           replace the stored token\n\nThen kunj ct … --remote <name>, or kunj config --set container.remote=<name> in the repository,\nruns that repository's containers there. --remote local forces this machine's Docker.\nRemotes are kept in ~/.kunj/remotes.json (0600)."
   },
   {
     "name": "repos",

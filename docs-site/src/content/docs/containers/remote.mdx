@@ -93,6 +93,12 @@ noticeably longer over the internet.
 - **A URL you put behind TLS** (`kunj remote add <name> --url https://box.example/kunj`), for a box
   behind your own reverse proxy or a mesh network. Plain `http://` is accepted only to a loopback
   address.
+- **Plain http over a network that already encrypts** (`kunj remote add <name> --url
+  http://100.64.0.7:7433 --allow-insecure-http`), such as a Tailscale tailnet or WireGuard. Start the
+  server with `kunj serve --listen <address>:7433 --allow-remote-listen` so it listens on that
+  network. kunj adds no encryption here: the token, secrets and terminals are only as private as the
+  network, so `add` warns and `kunj remote list` marks the remote `(unencrypted)`. On a tailnet,
+  `tailscale serve` gives you an `https://` URL instead and needs neither flag.
 
 Either way, every request carries the token. Anyone with the token controls the containers kunj
 makes on the box, so treat it like an SSH key: it lives in `~/.kunj/serve/token` on the box and in
@@ -110,7 +116,7 @@ with `--allow-privileged` or `--allow-runtime sysbox-runc`. It is not a general 
 kunj serve [--listen 127.0.0.1:7433] [--allow-privileged] [--allow-runtime sysbox-runc] [--verbose]
 kunj serve token [--rotate]
 
-kunj remote add <name> --ssh user@host [--port 7433] | --url https://… [--token-stdin]
+kunj remote add <name> --ssh user@host [--port 7433] | --url https://… [--allow-insecure-http] [--token-stdin]
 kunj remote list [--json]
 kunj remote ping <name> [--json]
 kunj remote token <name> [--token-stdin]

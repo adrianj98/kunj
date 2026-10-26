@@ -458,7 +458,7 @@ only `kunj-*` tags, needs `--allow-privileged` / `--allow-runtime` for those run
 (`inspectLabels`, `imageExists`, listings) openly. TTY execs (`shell`, `attach`, `agent`) go through the Docker
 Engine API on the server (`execTty()` in docker.ts, still the only module that touches Docker) and raw mode on
 the client (`Terminal` seam). `kunj remote add|list|remove|ping|token` keeps `~/.kunj/remotes.json` (0600;
-https anywhere, http only to loopback; tokens never listed); `--ssh` remotes get an `ssh -N -L` tunnel per
+https anywhere, http only to loopback unless `--allow-insecure-http`, which marks the entry `insecure`; tokens never listed); `--ssh` remotes get an `ssh -N -L` tunnel per
 process (tunnel.ts). `ct open` refuses on a remote (`remote-no-editor`); `ct list --json` reports
 `backend.kind/remote/features`; detached forwarders and bridges get `--remote`. Tests: `npm run test:remote`
 runs the container suites over the wire (`testBackend()` in remote-harness.ts; `itLocal` for the few that

@@ -28,6 +28,7 @@
 * [Container Prune](/containers/prune.md) - kunj ct prune plans and removes branch containers whose branch left origin, orphaned Docker objects and superseded images, failing safe at every rule.
 * [Docker-in-Docker](/containers/docker-in-docker.md) - Opt-in dockerd inside a branch container, via the sysbox runtime or privileged mode, on the kunj-sandbox-dind image.
 * [Host MCP Bridge](/containers/mcp-bridge.md) - Bridges a host stdio MCP server (v1 only a Chrome DevTools browser) into a branch container over a Unix socket, behind a deny-by-default request filter.
+* [Remotes](/containers/remotes.md) - The kunj serve machines a laptop knows in ~/.kunj/remotes.json, reached through an SSH tunnel or a URL, and the opt-in for plain http.
 
 # Blueprints
 

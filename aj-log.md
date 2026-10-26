@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — kunj remote add --allow-insecure-http
+
+- `kunj remote add <name> --url http://… --allow-insecure-http` accepts plain http to a non-loopback address; the
+  entry records `insecure: true`, `add` warns, `remote list` shows `(unencrypted)` and `--json` has `insecure`.
+  Why: the user wants to reach `kunj serve` without SSH, and on a tailnet or WireGuard the network already
+  encrypts, so requiring https on top was only in the way. It stays opt-in because kunj cannot tell such an
+  address from a plain LAN one, and the token is worth root on the box's Docker.
+- Docs: spec decision and transport section, docs-site remote page, CLAUDE.md, new okf page `containers/remotes.md`.
+
 ## 2026-10-25 — Workspace app: ⌥-drag selects in a terminal that has the mouse
 
 - `TerminalTab` turns mouse reporting off on a ⌥ or ⇧ press while a program has the mouse, until ⌘C or the next

@@ -123,7 +123,10 @@ proxy) is a transport detail the protocol does not see.
   through an SSH tunnel; the client runs `ssh -N -L <local>:127.0.0.1:7433 user@box` on demand (one per
   kunj process, reused for its lifetime, killed on exit) and talks HTTP to `127.0.0.1:<local>`. `kunj
   remote add <name> --url https://box.example/kunj` records a URL the user has put behind TLS
-  themselves; `http://` is accepted only for loopback addresses. Both forms need the token, taken from
+  themselves; `http://` is accepted only for loopback addresses, unless `--allow-insecure-http` is given
+  (for a network that already encrypts, such as a tailnet or WireGuard): the entry then records
+  `insecure: true`, `add` warns on stderr, `remote list` shows `(unencrypted)` and `--json` reports
+  `insecure`. The server side still needs `kunj serve --listen <addr> --allow-remote-listen`. Both forms need the token, taken from
   `--token`, `--token-stdin` or a prompt, never from argv history by default (`--token` warns).
 - **Where the token lives on the laptop:** `~/.kunj/remotes.json` (0600), like gh's `hosts.yml`. Not in
   the secrets vault: listings (`ct list`, `worktree list --containers`, `events`) never unlock the vault,
@@ -357,6 +360,11 @@ v1; if a listing turns out slow, the first batch is a `GET /v1/containers?label=
   keep files and hooks on the box and a way to keep them in step with the laptop.
 - **2026-10-24** Loopback plus SSH tunnel is the v1 transport; kunj opens the tunnel itself. No TLS code
   in kunj; a user who wants a URL puts it behind their own proxy. Plain `http://` only to loopback.
+- **2026-10-25** `kunj remote add --url http://… --allow-insecure-http` lets a plain http URL reach a
+  non-loopback address. Why: on a tailnet or WireGuard the network already encrypts, and requiring TLS
+  (or SSH) on top was the only thing in the way; kunj cannot tell such an address from a LAN one, so
+  it stays an explicit opt-in, marked in the entry and in listings, the client-side twin of
+  `--allow-remote-listen`.
 - **2026-10-24** One bearer token per server, in a 0600 file on each side, not in the secrets vault:
   the commands that use it most are the listings, which never unlock the vault.
 - **2026-10-24** Everything over the protocol, the terminal included; SSH is only a tunnel when the

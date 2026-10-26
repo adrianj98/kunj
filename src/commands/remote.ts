@@ -1,6 +1,6 @@
 // kunj remote: the kunj serve machines this laptop knows (src/lib/remotes.ts) and their tokens.
 //
-//   kunj remote add <name> --ssh user@box [--port 7433] | --url https://… [--token <t> | --token-stdin]
+//   kunj remote add <name> --ssh user@box [--port 7433] | --url https://… [--allow-insecure-http] [--token <t> | --token-stdin]
 //   kunj remote list [--json]
 //   kunj remote remove <name>
 //   kunj remote ping <name> [--json]
@@ -22,6 +22,7 @@ import {
   checkSshDestination,
   checkToken,
   describeRemote,
+  isInsecureUrl,
   getRemotesPath,
   readRemotes,
   requireRemote,
@@ -34,6 +35,7 @@ interface RemoteOptions {
   ssh?: string;
   port?: string;
   url?: string;
+  allowInsecureHttp?: boolean;
   token?: string;
   tokenStdin?: boolean;
 }
@@ -69,6 +71,7 @@ export class RemoteCommand extends BaseCommand {
         { flags: '--ssh <destination>', description: '[add] Reach the server through an SSH tunnel to user@host (the server listens on its loopback)' },
         { flags: '--port <port>', description: `[add] The server's port on the box, with --ssh (default ${DEFAULT_SERVE_PORT})` },
         { flags: '--url <url>', description: '[add] Reach the server at this URL (https://, or http:// to a loopback address)' },
+        { flags: '--allow-insecure-http', description: '[add] Accept an http:// URL to a non-loopback address: the token, secrets and terminals travel unencrypted, so only on a network that already encrypts (Tailscale, WireGuard) or that you trust' },
         { flags: '--token <token>', description: '[add|token] The server\'s token (lands in your shell history; prefer --token-stdin or the prompt)' },
         { flags: '--token-stdin', description: '[add|token] Read the token from stdin' },
       ],
@@ -77,6 +80,8 @@ export class RemoteCommand extends BaseCommand {
           'Actions:',
           '  add <name> --ssh user@host [--port n]   a server reached through an SSH tunnel kunj opens',
           '  add <name> --url https://…             a server you put behind TLS yourself',
+          '  add <name> --url http://… --allow-insecure-http',
+          '                                         plain http over a network that already encrypts (a tailnet)',
           '  list (default)                         the known remotes, without their tokens',
           '  remove <name>',
           '  ping <name>                            versions, features and Docker context of the server',
@@ -140,7 +145,7 @@ export class RemoteCommand extends BaseCommand {
     const names = Object.keys(remotes).sort();
     if (this.jsonMode) {
       const json: RemoteListJson = {
-        remotes: names.map(n => ({ name: n, via: remotes[n].url ? 'url' : 'ssh', ssh: remotes[n].ssh, port: remotes[n].ssh ? remotes[n].port ?? DEFAULT_SERVE_PORT : undefined, url: remotes[n].url, addedAt: remotes[n].addedAt })),
+        remotes: names.map(n => ({ name: n, via: remotes[n].url ? 'url' : 'ssh', ssh: remotes[n].ssh, port: remotes[n].ssh ? remotes[n].port ?? DEFAULT_SERVE_PORT : undefined, url: remotes[n].url, insecure: remotes[n].insecure || undefined, addedAt: remotes[n].addedAt })),
       };
       this.outputJSON(json);
       return;
@@ -157,9 +162,11 @@ export class RemoteCommand extends BaseCommand {
     checkRemoteName(name);
     if (!!opts.ssh === !!opts.url) throw new ContainerError('Give exactly one of --ssh user@host or --url https://…');
     const entry: RemoteEntry = { token: '', addedAt: new Date().toISOString() };
+    if (opts.allowInsecureHttp && !opts.url) throw new ContainerError('--allow-insecure-http goes with --url http://…');
     if (opts.url) {
-      checkRemoteUrl(opts.url);
+      const url = checkRemoteUrl(opts.url, { allowInsecureHttp: opts.allowInsecureHttp });
       entry.url = opts.url.replace(/\/+$/, '');
+      if (isInsecureUrl(url)) entry.insecure = true;
       if (opts.port) throw new ContainerError('--port goes with --ssh; put the port in the URL');
     } else {
       checkSshDestination(opts.ssh!);
@@ -171,6 +178,10 @@ export class RemoteCommand extends BaseCommand {
       }
     }
     entry.token = await this.tokenFrom(opts);
+    if (entry.insecure) {
+      // stderr, so also in --json mode: the one notice that the token will cross the network in the clear
+      console.error(chalk.yellow(`⚠ ${entry.url} is plain http: the token, secrets and terminal traffic cross the network unencrypted. Use it only over a network that encrypts (Tailscale, WireGuard) or that you trust.`));
+    }
     const remotes = readRemotes(this.file());
     const replaced = !!remotes[name];
     remotes[name] = entry;

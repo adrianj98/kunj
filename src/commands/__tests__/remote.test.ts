@@ -70,6 +70,24 @@ describe('kunj remote', () => {
     expect(Object.keys(readRemotes(file))).toEqual(['tls']);
   });
 
+  it('--allow-insecure-http adds a plain http remote to another host, marked and warned about', async () => {
+    await cmd().execute('add', 'tail', { url: 'http://100.64.0.7:7433/', allowInsecureHttp: true, tokenStdin: true });
+    expect(readRemotes(file).tail).toMatchObject({ url: 'http://100.64.0.7:7433', insecure: true, token: 'from-stdin' });
+    expect(stderr.join('\n')).toContain('unencrypted');
+    // https or loopback with the flag is not marked
+    await cmd().execute('add', 'tls', { url: 'https://box.example', allowInsecureHttp: true, tokenStdin: true });
+    expect(readRemotes(file).tls.insecure).toBeUndefined();
+    await expect(cmd().execute('add', 'ssh', { ssh: 'me@box', allowInsecureHttp: true, tokenStdin: true })).rejects.toThrow(/goes with --url/);
+    stderr.length = 0;
+    await cmd().execute('add', 'tail2', { url: 'http://100.64.0.8:7433', allowInsecureHttp: true, tokenStdin: true, json: true });
+    expect(stderr.join('\n')).toContain('unencrypted');
+    stdout.length = 0;
+    await cmd().execute('list', { json: true });
+    const json = JSON.parse(stdout.join(''));
+    expect(json.remotes.find((r: { name: string }) => r.name === 'tail')).toMatchObject({ insecure: true });
+    expect(json.remotes.find((r: { name: string }) => r.name === 'tls').insecure).toBeUndefined();
+  });
+
   it('--token warns about the shell history and replaces the token with `token`', async () => {
     await cmd().execute('add', 'box', { ssh: 'me@box', token: 'argv-token' });
     expect(stderr.join('\n')).toContain('shell history');
