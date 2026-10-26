@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-26 (terminal colours)
+* **Workspace app**: `apps/workspace-app.md` notes which terminal colours follow the theme.
+
 ## 2026-10-25 (shell selection)
 * **Workspace app**: `apps/workspace-app.md` notes ⌥-drag selection and plain-drag selection in shell tabs.
 

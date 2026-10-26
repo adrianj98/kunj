@@ -69,6 +69,9 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
   `TabRegistry.onOpenFile`); URLs and paths outside the environment go to SwiftTerm's default opener.
 * Selecting over mouse reporting (`TerminalTab.mouseDown`): ⌥/⇧-drag selects where a program has the
   mouse; a shell tab selects on every press, because tmux's `mouse on` copy never reaches the clipboard.
+* Terminal colours (`TerminalTab.apply`): background, text, cursor, selection and ANSI red/green/amber/blue
+  come from the theme, magenta and cyan are fixed real hues, and colours 16-255 are xterm's
+  (`ansi256PaletteStrategy = .xterm`), because SwiftTerm's default re-tinted them with the theme.
 * Tab pills have an × (`PillView.onClose`), and the Changes and Files bars a close button.
 * Shortcuts include New Shell (⌘T), New Session (⌘N), Search Sessions (⌘K), Show Changes, Show Files,
   Close Tab (⌘W) and Session 1-9.
