@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-26 — Workspace app: terminal colours are the ones programs ask for
+
+- `TerminalTab.apply` sets SwiftTerm's `ansi256PaletteStrategy` to `.xterm`. Why: the user saw green (and
+  red) come out grey/brown in a terminal tab. SwiftTerm's default `.base16Lab` rebuilds colours 16-255 by
+  blending the theme's 16 colours with the background, so any 256-colour output (tmux downsamples truecolor
+  to it, e.g. Claude Code's status line in an agent tab) became a muted theme tint.
+- ANSI magenta and cyan are real magenta/cyan instead of the theme's `link` (gold in warm) and `termAccent`
+  (blue). Background, foreground, cursor, selection and red/green/amber/blue still follow the theme.
+
 ## 2026-10-25 — Workspace app: a plain drag selects in a shell tab
 
 - In a Shell tab (`kind == .shell`) every press gets the ⌥-drag treatment: mouse reporting off so the drag is

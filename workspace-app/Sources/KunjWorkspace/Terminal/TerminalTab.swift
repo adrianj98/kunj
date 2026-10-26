@@ -100,19 +100,26 @@ final class TerminalTab: LocalProcessTerminalView {
         nativeForegroundColor = theme.color(\.termText)
         caretColor = theme.color(\.termAccent)
         selectedTextBackgroundColor = theme.color(\.termAccent, alpha: 0.3)
+        // SwiftTerm's default (.base16Lab) rebuilds colours 16-255 by blending the 16 below with the
+        // background, so a program's 256-colour green came out as a muted theme tint; keep xterm's
+        // cube and grey ramp so those colours are the ones the program asked for.
+        getTerminal().ansi256PaletteStrategy = .xterm
         installColors(Self.palette(theme))
     }
 
     /// The 16 ANSI colours from the theme: 8 (bright black) = termMuted, 4 and 12 (blue) = termAccent,
-    /// 2/10 = green, 3/11 = amber, 1/9 = red; the rest from the text ramp.
+    /// 2/10 = green, 3/11 = amber, 1/9 = red; magenta and cyan are real magenta and cyan (the theme
+    /// has neither); the rest from the text ramp.
     static func palette(_ t: Theme) -> [SwiftTerm.Color] {
-        func c(_ key: KeyPath<ThemeTokens, String>) -> SwiftTerm.Color {
-            let rgba = parseHex(t.tokens[keyPath: key]) ?? RGBA(r: 1, g: 0, b: 1, a: 1)
+        func c(_ key: KeyPath<ThemeTokens, String>) -> SwiftTerm.Color { hex(t.tokens[keyPath: key]) }
+        func hex(_ s: String) -> SwiftTerm.Color {
+            let rgba = parseHex(s) ?? RGBA(r: 1, g: 0, b: 1, a: 1)
             return SwiftTerm.Color(red: UInt16(rgba.r * 65535), green: UInt16(rgba.g * 65535),
                                    blue: UInt16(rgba.b * 65535))
         }
         let black = c(\.term), red = c(\.red), green = c(\.green), amber = c(\.amber), blue = c(\.termAccent)
-        let magenta = c(\.link), cyan = c(\.termAccent), white = c(\.termText)
+        let magenta = hex(t.isDark ? "#d670d6" : "#bc05bc"), cyan = hex(t.isDark ? "#29b8db" : "#0598bc")
+        let white = c(\.termText)
         return [black, red, green, amber, blue, magenta, cyan, white,
                 c(\.termMuted), red, green, amber, blue, magenta, cyan, c(\.text)]
     }
