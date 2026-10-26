@@ -8,12 +8,15 @@ public struct SavedTab: Codable, Equatable, Sendable {
     public var path: String?
     /// A shell tab's tmux session id (`TerminalSpec.session`); absent in files from before it.
     public var session: String?
+    /// An agent tab's `kunj agent --agent` name (`TerminalSpec.agent`); absent for the default agent.
+    public var agent: String?
 
-    public init(kind: TabKind, title: String, path: String?, session: String? = nil) {
+    public init(kind: TabKind, title: String, path: String?, session: String? = nil, agent: String? = nil) {
         self.kind = kind
         self.title = title
         self.path = path
         self.session = session
+        self.agent = agent
     }
 }
 

@@ -65,7 +65,9 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   file, a running or waiting agent, and the selection; each repository ends in an `N more…` row
   (11 px `faint`) that lists the rest too (`Show fewer`), and a search lists every match, so any
   environment can be opened. A row's right-click menu (`ActionRunner.rowMenu`) has the menu bar app's
-  row actions, opening into the panel: Open, New Shell, New Agent, Open in VS Code (and in a new
+  row actions, opening into the panel: Open, New Shell, New Agent, New Antigravity Agent (worktrees
+  only; `kunj agent --agent antigravity`, also Environment > Antigravity Agent ⌘⌥A, tab titled
+  `antigravity`), Open in VS Code (and in a new
   window for a worktree), Open / Copy Pull Request URL or Create Pull Request…, Start / Stop / Rebuild
   Container, Reveal in Finder, Copy Path (Container Name), Copy Branch Name, Close Session, and Delete
   Worktree… / Delete Container… (the same confirmation, with Force, as the overflow menu). The row
@@ -366,7 +368,8 @@ tab id, and Swift holds the path, so content from a container cannot steer a wri
 **Layout file** `~/.kunj/<reponame>/workspace.json` (`<reponame>` is `kunjName` from `kunj repos --json`,
 named after origin as kunj names the directory, not the folder; an older kunj without it: the folder
 without `.git`): `{ "<kind>:<branch>": { "tabs": [{ "kind": "shell|agent|editor",
-"title", "path"? }], "active", "lastActivity" } }` (keyed by kind too, because a worktree and a container
+"title", "path"?, "session"?, "agent"? }], "active", "lastActivity" } }` (`agent`: the `--agent` name
+of a non-default agent tab, so it reattaches with its title) (keyed by kind too, because a worktree and a container
 on the same branch are two environments), written atomically, debounced 500 ms; action tabs
 are never saved; entries or tabs that do not decode are skipped, not the whole file. On selecting an
 environment for the first time in a session, once it can run them (worktree present, container running;

@@ -18,9 +18,11 @@ public struct TerminalSpec: Equatable, Sendable {
     /// A shell tab's tmux session id (`kunj worktree shell|ct shell --session`): saved with the tab
     /// so a relaunch reattaches it, and ended (`--kill`) when the tab is closed.
     public var session: String?
+    /// An agent tab's `kunj agent --agent` name (`antigravity`); nil for the default agent.
+    public var agent: String?
 
     public init(executable: String, arguments: [String], cwd: String, environment: [String: String],
-                title: String, closeOnExitZero: Bool, session: String? = nil) {
+                title: String, closeOnExitZero: Bool, session: String? = nil, agent: String? = nil) {
         self.executable = executable
         self.arguments = arguments
         self.cwd = cwd
@@ -28,6 +30,19 @@ public struct TerminalSpec: Equatable, Sendable {
         self.title = title
         self.closeOnExitZero = closeOnExitZero
         self.session = session
+        self.agent = agent
+    }
+}
+
+/// The agents an agent tab can run besides the default (`agent.command`): `kunj agent --agent <name>`.
+public enum AgentChoice: String, CaseIterable, Sendable {
+    case antigravity
+
+    /// The tab's title and the menu's name.
+    public var title: String {
+        switch self {
+        case .antigravity: return "antigravity"
+        }
     }
 }
 
@@ -39,6 +54,8 @@ public enum TerminalSpecError: Error, Equatable, Sendable {
     case containerStopped(String)
     /// No process for this: a worktree without a path, an `editor` tab, or an empty action.
     case noWorktree
+    /// A named agent (`--agent`) in a container: `kunj ct agent` runs only `container.agentCommand`.
+    case agentNotInContainer
 
     /// The inline message the terminal column shows.
     public var message: String {
@@ -46,6 +63,7 @@ public enum TerminalSpecError: Error, Equatable, Sendable {
         case .worktreeMissing: return "The worktree directory is missing"
         case .containerStopped: return "Start the container first"
         case .noWorktree: return "There is nothing to run here"
+        case .agentNotInContainer: return "Only the default agent runs in a container"
         }
     }
 }
@@ -58,9 +76,11 @@ public enum TerminalSpecError: Error, Equatable, Sendable {
 /// Shells and agents are refused on a missing worktree or a stopped container; actions are not
 /// (`ct start` is how a stopped container starts). A shell with a `session` id runs through kunj
 /// (`kunj worktree shell <branch> --session <id>`, `kunj ct shell <branch> --session <id>`), which
-/// keeps it in a tmux session when tmux is there, so it outlives the app.
+/// keeps it in a tmux session when tmux is there, so it outlives the app. An `agent` name runs
+/// `kunj agent <branch> --agent <name>`, in worktrees only.
 public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: [String] = [], shell: String,
-                         terminalEnv: [String: String], cwd: String? = nil, session: String? = nil) throws -> TerminalSpec {
+                         terminalEnv: [String: String], cwd: String? = nil, session: String? = nil,
+                         agent: AgentChoice? = nil) throws -> TerminalSpec {
     let environment = ShellEnvironment.terminalEnvironment(path: cli.path, base: terminalEnv)
     func kunj(_ args: [String], title: String, closeOnExitZero: Bool = false) -> TerminalSpec {
         TerminalSpec(executable: "/usr/bin/env", arguments: cli.commandParts + args, cwd: cwd ?? env.repo.root,
@@ -81,8 +101,10 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
     case .worktree:
         guard env.exists, env.state != .missing else { throw TerminalSpecError.worktreeMissing }
         if kind == .agent {
-            var s = kunj(["agent", env.branch] + (session.map { ["--session", $0] } ?? []), title: "agent")
+            var s = kunj(["agent", env.branch] + (session.map { ["--session", $0] } ?? [])
+                         + (agent.map { ["--agent", $0.rawValue] } ?? []), title: agent?.title ?? "agent")
             s.session = session
+            s.agent = agent?.rawValue
             return s
         }
         guard let path = env.path else { throw TerminalSpecError.noWorktree }
@@ -95,6 +117,7 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
         return TerminalSpec(executable: shell, arguments: ["-l"], cwd: cwd ?? path, environment: environment,
                             title: URL(fileURLWithPath: shell).lastPathComponent, closeOnExitZero: false)
     case .container:
+        if kind == .agent, agent != nil { throw TerminalSpecError.agentNotInContainer }
         guard env.state == .running else { throw TerminalSpecError.containerStopped(env.branch) }
         var s = kunj(["ct", kind == .agent ? "agent" : "shell", env.branch] + (session.map { ["--session", $0] } ?? []),
                      title: kind == .agent ? "agent" : "shell")

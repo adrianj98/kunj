@@ -138,6 +138,21 @@ test('a bare branch name starts, and --command overrides the setting', async () 
   );
 });
 
+test('--agent antigravity runs agy, without the Claude hooks', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  await new AgentCommand().execute('feature-a', { agent: 'antigravity', session: 'ab12' });
+  const named = agentSessionName('app', 'github.com/acme/app', 'feature-a', 'ab12');
+  expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(
+    agentArgv(named, '/wt/feature-a', underRun('feature-a', 'agy'), { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: agentStateFile('/h/.kunj/app', named) }),
+  );
+});
+
+test('an unknown --agent is refused before anything starts', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  await expect(new AgentCommand().execute('feature-a', { agent: 'codex' })).rejects.toThrow(AgentError);
+  expect(runTmux).not.toHaveBeenCalled();
+});
+
 test('start without tmux runs the command directly, prints the hint, passes the exit code', async () => {
   tmuxSessions.mockResolvedValue('missing');
   (runTmux as jest.Mock).mockResolvedValueOnce(3);

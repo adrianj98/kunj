@@ -27,6 +27,20 @@ The command is `agent.command` (default `claude`); `--command <cmd>` overrides i
 agent starts in the worktree's directory with `KUNJ_BRANCH`, `KUNJ_REPO` and `KUNJ_WORKTREE` set.
 `kunj agent` needs a terminal, and works from inside a tmux pane too.
 
+## Antigravity
+
+`--agent antigravity` runs the [Antigravity CLI](https://antigravity.google/) (`agy`) instead of
+`agent.command`; `agent.antigravityCommand` (default `agy`) sets its command and flags.
+`--agent claude` runs Claude Code (`agent.command` when that runs claude, else `claude`).
+`--command` wins over both.
+
+```bash
+kunj agent fix/login --agent antigravity --session gemini
+```
+
+Only Claude Code tells kunj when it waits for input, so an Antigravity agent shows as running while
+its session lives, never as waiting. `kunj ct agent` runs only `container.agentCommand`.
+
 ## Secrets
 
 The agent gets the branch's host [secrets](../../configuration/secrets/) (`kunj secret`, whose targets include `host`) as

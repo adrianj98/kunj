@@ -6,9 +6,10 @@ private let cli = KunjCLI(command: "kunj", path: "/login/bin:/usr/bin:/bin")
 private let baseEnv = ["HOME": "/Users/demo", "LANG": "de_DE.UTF-8", "USER": "demo"]
 
 private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cwd: String? = nil,
-                  cli: KunjCLI = cli, terminalEnv: [String: String] = baseEnv, session: String? = nil) throws -> TerminalSpec {
+                  cli: KunjCLI = cli, terminalEnv: [String: String] = baseEnv, session: String? = nil,
+                  agent: AgentChoice? = nil) throws -> TerminalSpec {
     try terminalSpec(cli: cli, env: env, kind: kind, action: action, shell: "/bin/zsh", terminalEnv: terminalEnv,
-                     cwd: cwd, session: session)
+                     cwd: cwd, session: session, agent: agent)
 }
 
 @Suite struct TerminalSpecTests {
@@ -69,6 +70,18 @@ private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cw
         #expect(try spec(testWorktree(), .shell).session == nil)
         let id = newTabSession()
         #expect(id.count == 8 && id.allSatisfy { $0.isHexDigit } && id != newTabSession())
+    }
+
+    /// An Antigravity tab is `kunj agent --agent antigravity`, titled after it; containers refuse it
+    @Test func antigravityAgent() throws {
+        let s = try spec(testWorktree(), .agent, session: "a1", agent: .antigravity)
+        #expect(s.arguments == ["kunj", "agent", "feature/x", "--session", "a1", "--agent", "antigravity"])
+        #expect(s.title == "antigravity")
+        #expect(s.agent == "antigravity")
+        #expect(try spec(testWorktree(), .agent).agent == nil)
+        #expect(throws: TerminalSpecError.agentNotInContainer) {
+            _ = try spec(testContainer(), .agent, agent: .antigravity)
+        }
     }
 
     /// Each agent tab has its own session, so an environment can run many agents; an agent tab

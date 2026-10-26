@@ -13,6 +13,14 @@ export function registerAgentSettings(): void {
       examples: ['claude', 'claude --dangerously-skip-permissions'],
     },
     {
+      key: 'agent.antigravityCommand',
+      description: 'Command `kunj agent --agent antigravity` runs (the Antigravity CLI)',
+      type: 'string',
+      defaultValue: 'agy',
+      category: 'agent',
+      examples: ['agy', 'agy --dangerously-skip-permissions'],
+    },
+    {
       key: 'agent.tmux',
       description: 'Run agents in a tmux session (kunj agent, kunj ct agent) so they outlive the terminal and can be reattached; false runs them directly, like --no-tmux',
       type: 'boolean',

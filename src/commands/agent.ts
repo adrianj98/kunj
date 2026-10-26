@@ -9,12 +9,13 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentRunning, agentSessionName, agentSessionsOf, agentStateDir, agentStateFile, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, readAgentState, readTmuxSessions, loginShell, runTmux, withAgentHooks } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentSessionsOf, agentStateDir, agentStateFile, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, readAgentState, readTmuxSessions, loginShell, runTmux, withAgentHooks } from '../lib/agent-session';
 import type { AgentSessionJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
   json?: boolean;
   command?: string;
+  agent?: string;
   tmux?: boolean;
   session?: string;
   all?: boolean;
@@ -30,6 +31,7 @@ export class AgentCommand extends BaseCommand {
       arguments: '[action] [branch]',
       options: [
         { flags: '--command <cmd>', description: 'Command to run (default: the agent.command setting)' },
+        { flags: '--agent <name>', description: 'Agent to run: claude or antigravity (agent.antigravityCommand, default agy); --command wins' },
         { flags: '--no-tmux', description: 'Run the agent directly in this terminal, without a tmux session' },
         { flags: '--session <id>', description: "One of several agents of the worktree: its own tmux session (<agent session>-a-<id>; letters, digits, _ and -, up to 32)" },
         { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs)' },
@@ -46,6 +48,9 @@ export class AgentCommand extends BaseCommand {
         '--session <id> runs one more agent in the worktree, in its own tmux session; status, stop and',
         'start then act on that one. status without it reports every agent of the worktree; stop --all',
         'ends them all. stop with --session or --all exits 0 even when nothing ran.',
+        '',
+        '--agent antigravity runs the Antigravity CLI (agy) instead of agent.command. Only Claude Code',
+        'reports when it waits for input; another agent shows as running while its session lives.',
       ].join('\n'),
     });
   }
@@ -73,6 +78,8 @@ export class AgentCommand extends BaseCommand {
       throw new AgentError('no-worktree', `No worktree for ${name || 'the current directory'}; see kunj worktree list`);
     }
     const id = opts.session !== undefined ? checkShellSessionId(opts.session) : undefined;
+    // An unknown name fails before anything starts (a reattach ignores it: the session runs already)
+    if (opts.agent !== undefined) agentCommand(opts.agent, undefined);
     const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
     const base = agentSessionName(repo.name, repo.id, wt.branch);
     const session = agentSessionName(repo.name, repo.id, wt.branch, id);
@@ -129,7 +136,7 @@ export class AgentCommand extends BaseCommand {
     const kunjDir = getKunjDir();
     const stateFile = agentStateFile(kunjDir, session);
     fs.mkdirSync(agentStateDir(kunjDir), { recursive: true });
-    const command = withAgentHooks(opts.command || config.agent?.command || 'claude', stateFile, config.agent?.hooks !== false);
+    const command = withAgentHooks(opts.command || agentCommand(opts.agent, config.agent), stateFile, config.agent?.hooks !== false);
     const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile };
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;

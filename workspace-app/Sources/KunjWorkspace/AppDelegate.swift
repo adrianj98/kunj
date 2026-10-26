@@ -219,7 +219,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let tabs = registry.tabs(for: id)
             let active = registry.active(for: id)
             return (tabs.map { SavedTab(kind: $0.kind, title: $0.title, path: ($0 as? EditorTab)?.path,
-                                        session: ($0 as? TerminalTab)?.spec?.session) },
+                                        session: ($0 as? TerminalTab)?.spec?.session,
+                                        agent: ($0 as? TerminalTab)?.spec?.agent) },
                     tabs.firstIndex { $0 === active })
         }
         keeper.open = { [weak self] env, tab in
@@ -227,7 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let path = tab.path { self?.windowController.terminalColumn.registry.openEditor(env: env, path: path) }
             } else {
                 // a tab saved before sessions has none: the default agent session, a plain shell
-                _ = self?.startTab(env: env, kind: tab.kind, session: tab.session)
+                _ = self?.startTab(env: env, kind: tab.kind, session: tab.session,
+                                   agent: tab.agent.flatMap(AgentChoice.init(rawValue:)))
             }
         }
         keeper.activate = { [weak registry] id, index in
@@ -336,9 +338,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.representedObject = env
             self?.closeSession(item)
         }
-        runner.openAgent = { [weak self] env in
+        runner.openAgent = { [weak self] env, agent in
             self?.windowController.select(env.id)
-            self?.openTab(.agent)
+            self?.openTab(.agent, agent: agent)
         }
         // --demo renders the mockup, whose buttons are all enabled (its container has no host
         // worktree in DemoData, and nothing runs without kunj anyway)
@@ -351,6 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openShell(_ sender: Any?) { openTab(.shell) }
     @objc func openAgent(_ sender: Any?) { openTab(.agent) }
+    @objc func openAntigravityAgent(_ sender: Any?) { openTab(.agent, agent: .antigravity) }
 
     @objc func openInEditor(_ sender: Any?) {
         guard let env = windowController.selectedEnvironment else { return }
@@ -450,10 +453,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opens a new shell or agent in the selected environment, each in its own tmux session (an
     /// environment can run many agents); a refused spec (missing worktree, stopped container)
     /// shows inline in the column.
-    private func openTab(_ kind: TabKind) {
+    private func openTab(_ kind: TabKind, agent: AgentChoice? = nil) {
         guard let env = windowController.selectedEnvironment else { return }
         let column = windowController.terminalColumn
-        if startTab(env: env, kind: kind, session: newTabSession()) {
+        if startTab(env: env, kind: kind, session: newTabSession(), agent: agent) {
             DispatchQueue.main.async { column.focusActive() }
         }
     }
@@ -461,12 +464,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opens a `kind` tab in `env` (also one restored from the layout file); a refused spec shows
     /// inline in the column and opens nothing.
     @discardableResult
-    private func startTab(env: Environment, kind: TabKind, session: String?) -> Bool {
+    private func startTab(env: Environment, kind: TabKind, session: String?, agent: AgentChoice? = nil) -> Bool {
         let column = windowController.terminalColumn
         guard let cli = kunj else { return false }
         do {
             let spec = try terminalSpec(cli: cli, env: env, kind: kind, shell: Self.loginShell,
-                                        terminalEnv: ProcessInfo.processInfo.environment, session: session)
+                                        terminalEnv: ProcessInfo.processInfo.environment, session: session, agent: agent)
             column.registry.open(spec: spec, env: env, kind: kind)
             log("opened \(kind.rawValue) in \(env.id): \(spec.executable) \(spec.arguments.joined(separator: " ")) (cwd \(spec.cwd))")
             return true
@@ -676,11 +679,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Environment: the header's buttons (Shell ⌘T, Agent ⌘⇧A, Open in VS Code ⌘O, Create PR ⌘⇧P),
+    /// Antigravity Agent ⌘⌥A (worktrees only),
     /// New Session ⌘N, Search ⌘K and Switch to Session ⌘1–9.
     private func environmentMenu() -> NSMenu {
         let menu = NSMenu(title: "Environment")
         menu.addItem(withTitle: "New Shell", action: #selector(openShell(_:)), keyEquivalent: "t").target = self
         menu.addItem(withTitle: "Agent", action: #selector(openAgent(_:)), keyEquivalent: "A").target = self
+        let antigravity = menu.addItem(withTitle: "Antigravity Agent", action: #selector(openAntigravityAgent(_:)),
+                                       keyEquivalent: "a")
+        antigravity.keyEquivalentModifierMask = [.command, .option]
+        antigravity.target = self
         menu.addItem(withTitle: "Open in VS Code", action: #selector(openInEditor(_:)), keyEquivalent: "o").target = self
         menu.addItem(withTitle: "Create PR", action: #selector(createPR(_:)), keyEquivalent: "P").target = self
         menu.addItem(.separator())
@@ -734,6 +742,8 @@ extension AppDelegate: NSMenuItemValidation {
         switch item.action {
         case #selector(openShell(_:)), #selector(openAgent(_:)):
             return env != nil && kunj != nil && env?.state != .missing && env?.state != .stopped
+        case #selector(openAntigravityAgent(_:)):
+            return env?.kind == .worktree && kunj != nil && env?.state != .missing
         case #selector(nextTab(_:)), #selector(previousTab(_:)):
             return env.map { windowController.terminalColumn.registry.tabs(for: $0.id).count > 1 } ?? false
         case #selector(closeSession(_:)):

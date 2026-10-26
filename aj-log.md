@@ -2,6 +2,16 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Antigravity as an agent (kunj agent --agent, workspace app)
+
+- `kunj agent --agent antigravity` runs `agent.antigravityCommand` (new setting, default `agy`, the Antigravity CLI);
+  `--agent claude` runs Claude Code; an unknown name fails with `unknown-agent` before anything starts. Why: the user
+  wants to run Antigravity agents next to Claude ones per worktree, not switch `agent.command` for all of them.
+- Workspace app: Environment > Antigravity Agent ⌘⌥A and "New Antigravity Agent" in a row's menu (worktrees only; a
+  container refuses a named agent), tab titled `antigravity`; the saved tab keeps `agent` so it reattaches under
+  that title. Why: one tab per agent, chosen when it is opened.
+- Not done: no waiting state for agy (only Claude Code's hooks report it), no Antigravity in containers.
+
 ## 2026-10-25 — Workspace app: ignored files in the Files column
 
 - `FileLister` adds the `!!` entries of `git status --porcelain=v1 -z --ignored=matching` to the `git ls-files`

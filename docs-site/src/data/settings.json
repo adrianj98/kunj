@@ -1540,6 +1540,21 @@
     "sensitive": false
   },
   {
+    "key": "agent.antigravityCommand",
+    "type": "string",
+    "category": "agent",
+    "default": "agy",
+    "description": "Command `kunj agent --agent antigravity` runs (the Antigravity CLI)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "agy",
+      "agy --dangerously-skip-permissions"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "agent.tmux",
     "type": "boolean",
     "category": "agent",

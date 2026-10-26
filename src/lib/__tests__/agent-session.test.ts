@@ -272,3 +272,26 @@ describe('kunjSelf and hostRunArgv', () => {
     expect(hostRunArgv(undefined, ['/bin/zsh', '-l'])).toEqual([process.execPath, '/k/dist/index.js', 'run', '--hold', '--', '/bin/zsh', '-l']);
   });
 });
+
+describe('agentCommand', () => {
+  const { agentCommand, AgentError } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+
+  test('no name is agent.command, default claude', () => {
+    expect(agentCommand(undefined, undefined)).toBe('claude');
+    expect(agentCommand(undefined, { command: 'agy' })).toBe('agy');
+  });
+
+  test('claude keeps agent.command when it runs claude, else plain claude', () => {
+    expect(agentCommand('claude', { command: '/opt/bin/claude --dangerously-skip-permissions' })).toBe('/opt/bin/claude --dangerously-skip-permissions');
+    expect(agentCommand('claude', { command: 'aider' })).toBe('claude');
+  });
+
+  test('antigravity is agent.antigravityCommand, default agy', () => {
+    expect(agentCommand('antigravity', { command: 'claude' })).toBe('agy');
+    expect(agentCommand('antigravity', { antigravityCommand: 'agy --dangerously-skip-permissions' })).toBe('agy --dangerously-skip-permissions');
+  });
+
+  test('an unknown name is refused', () => {
+    expect(() => agentCommand('codex', undefined)).toThrow(AgentError);
+  });
+});

@@ -105,6 +105,9 @@ inside containers within about ten seconds.
 - **Shell** (⌘T) opens your login shell in the worktree, or `kunj ct shell <branch>` in a container.
 - **Agent** (⌘⇧A) runs `kunj agent <branch>` or `kunj ct agent <branch>` in a tab (see
   [Agents](#agents)).
+- **Antigravity Agent** (⌘⌥A, Environment menu, or a row's right-click menu) runs
+  `kunj agent <branch> --agent antigravity` in a worktree, the [Antigravity CLI](../worktrees/agent/#antigravity).
+  Its tab shows green while it runs; it never turns amber, because only Claude Code reports waiting.
 - **Open in VS Code** (⌘O) runs `kunj worktree open` or `kunj ct open`, so it uses
   `worktree.editorCommand` (Cursor and other editors work too).
 - **Create PR** (⌘⇧P) runs `kunj pr` in a tab of the worktree, which stays open so you can read the

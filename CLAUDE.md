@@ -147,7 +147,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj prompt-info` - Output PR# for shell prompts
 - `kunj worktree [list|add|remove|prune|open|path|pr|session|shell]` - Manage git worktrees (`add -c` creates the branch when it does not exist), their pull requests and editor sessions (used by the VS Code extension); `shell [branch] --session <id> [--kill]` is a login shell kept in a host tmux session (see Worktree agents below)
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
-- `kunj agent [start|status|stop] [branch] [--session <id>] [--all]` - Run one or more agents in host tmux sessions for a worktree (see Worktree agents below)
+- `kunj agent [start|status|stop] [branch] [--session <id>] [--all] [--agent claude|antigravity]` - Run one or more agents in host tmux sessions for a worktree (see Worktree agents below); `--agent antigravity` runs `agent.antigravityCommand` (default `agy`, the Antigravity CLI), which has no waiting state
 - `kunj container [start|shell|exec|agent|attach|open|forward|logs|list|stop|remove|prune|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj ct token status [--json]` - Where a new container's GitHub token comes from (`ContainerTokenStatusJson`; never prints the token)

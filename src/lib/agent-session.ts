@@ -13,7 +13,7 @@ import { kunjEntry } from './self';
 
 const execFileAsync = promisify(execFile);
 
-export type AgentErrorCode = 'tmux-missing' | 'no-tty' | 'not-running' | 'no-worktree' | 'bad-session-id';
+export type AgentErrorCode = 'tmux-missing' | 'no-tty' | 'not-running' | 'no-worktree' | 'bad-session-id' | 'unknown-agent';
 
 // Expected outcomes: printed without a stack trace
 export class AgentError extends Error {
@@ -232,6 +232,18 @@ export function claudeHookSettings(): string {
       SessionEnd: hook('rm -f "$KUNJ_AGENT_STATE"'),
     },
   });
+}
+
+// The agents `kunj agent --agent <name>` knows. No name: agent.command. claude: agent.command when it
+// runs claude (keeping its flags), else plain claude. antigravity: agent.antigravityCommand (agy).
+export const AGENT_NAMES = ['claude', 'antigravity'] as const;
+
+export function agentCommand(name: string | undefined, agent: { command?: string; antigravityCommand?: string } | undefined): string {
+  const configured = agent?.command?.trim() || 'claude';
+  if (name === undefined) return configured;
+  if (name === 'claude') return path.basename(configured.split(/\s+/)[0] ?? '') === 'claude' ? configured : 'claude';
+  if (name === 'antigravity') return agent?.antigravityCommand?.trim() || 'agy';
+  throw new AgentError('unknown-agent', `Unknown agent ${JSON.stringify(name)}: use ${AGENT_NAMES.join(' or ')}`);
 }
 
 // `command` with the hooks appended when it is claude (the setting agent.hooks, default on)

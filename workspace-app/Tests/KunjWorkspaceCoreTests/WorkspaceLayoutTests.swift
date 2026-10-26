@@ -27,6 +27,16 @@ private func sampleLayout() -> WorkspaceLayout {
         #expect(loadLayout(path: path).branches["worktree:main"]?.tabs == [SavedTab(kind: .shell, title: "zsh", path: nil)])
     }
 
+    /// An Antigravity agent tab keeps its agent name, so a relaunch reattaches it under its title
+    @Test func savedAgentTabKeepsItsAgent() throws {
+        let path = try tempDirectory().appendingPathComponent("workspace.json").path
+        var layout = WorkspaceLayout()
+        let tab = SavedTab(kind: .agent, title: "antigravity", path: nil, session: "a1", agent: "antigravity")
+        layout.branches["worktree:main"] = BranchLayout(tabs: [tab], active: 0)
+        try saveLayout(layout, path: path)
+        #expect(loadLayout(path: path).branches["worktree:main"]?.tabs == [tab])
+    }
+
     @Test func layoutPathAndKey() {
         #expect(layoutPath(repoName: "kunj", home: "/h") == "/h/.kunj/kunj/workspace.json")
         #expect(layoutKey(kind: .worktree, branch: "feature/x") == "worktree:feature/x")

@@ -19,7 +19,8 @@ final class ActionRunner {
     /// Selects an environment by id (a new session once it appears).
     var select: (String) -> Void = { _ in }
     /// Opens the agent in an environment (New session with "Start an agent").
-    var openAgent: (Environment) -> Void = { _ in }
+    /// A new agent tab in the environment: the default agent, or a named one (`--agent`).
+    var openAgent: (Environment, AgentChoice?) -> Void = { _, _ in }
     /// The sidebar row menu's New Shell and Close Session.
     var openShell: (Environment) -> Void = { _ in }
     var closeSession: (Environment) -> Void = { _ in }
@@ -170,7 +171,7 @@ final class ActionRunner {
             guard usable else { continue }
             pending.removeAll { $0.id == p.id }
             select(env.id)
-            if p.startAgent { openAgent(env) }
+            if p.startAgent { openAgent(env, nil) }
         }
     }
 
@@ -254,7 +255,8 @@ extension ActionRunner {
         }
         add("Open") { [weak self] in self?.select(env.id) }
         add("New Shell") { [weak self] in self?.select(env.id); self?.openShell(env) }
-        add("New Agent") { [weak self] in self?.openAgent(env) }
+        add("New Agent") { [weak self] in self?.openAgent(env, nil) }
+        if env.kind == .worktree { add("New Antigravity Agent") { [weak self] in self?.openAgent(env, .antigravity) } }
         menu.addItem(.separator())
         add("Open in VS Code", env.kind == .container ? .ctOpen : .worktreeOpen)
         add("Open in New VS Code Window", .worktreeOpenNewWindow)
