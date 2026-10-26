@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Workspace app: syntax colours in editor tabs, no false import errors
+
+- Editor tabs got muted syntax colours (`SYNTAX`/`syntaxRules()` in Resources/web/app.js); the Changes diff stays
+  monochrome like the mockup. Why: the theme was deliberately monochrome, so code in an editor tab looked unstyled.
+- TS/JS semantic validation is off (`monaco.typescript.*Defaults.setDiagnosticsOptions`). Why: Monaco sees one file
+  and no node_modules, so every import (`@jest/globals`, `./harness`) was underlined red.
+
 ## 2026-10-25 — Whole functional suite green through kunj serve
 
 - Remote mode: the server's PATH starts with the fixture's `scratch/bin`, so the docker-argv check (secrets never on a

@@ -44,6 +44,36 @@
     return String(hex).slice(0, 7) + h;
   }
 
+  // Editor tabs' token colours: desaturated, so code reads coloured without competing with the
+  // status colours.
+  const SYNTAX = {
+    dark: { keyword: 'c4a3d4', string: 'a9c79b', number: 'dfae86', type: '8fbfc8', tag: 'd59b9b', regexp: 'd9a07a' },
+    light: { keyword: '84509a', string: '4c7a3c', number: 'a35b22', type: '2c7380', tag: 'a34848', regexp: '9a5a1f' },
+  };
+  function syntaxRules(dark) {
+    const c = dark ? SYNTAX.dark : SYNTAX.light;
+    return [
+      { token: 'keyword', foreground: c.keyword },
+      { token: 'storage', foreground: c.keyword },
+      { token: 'string', foreground: c.string },
+      { token: 'string.escape', foreground: c.regexp },
+      { token: 'regexp', foreground: c.regexp },
+      { token: 'number', foreground: c.number },
+      { token: 'constant', foreground: c.number },
+      { token: 'type', foreground: c.type },
+      { token: 'type.identifier', foreground: c.type },
+      { token: 'annotation', foreground: c.type },
+      { token: 'string.key.json', foreground: c.type },
+      { token: 'key', foreground: c.type },
+      { token: 'attribute.name', foreground: c.number },
+      { token: 'attribute.value', foreground: c.string },
+      { token: 'tag', foreground: c.tag },
+      { token: 'metatag', foreground: c.tag },
+      { token: 'variable', foreground: c.tag },
+      { token: 'variable.predefined', foreground: c.tag },
+    ];
+  }
+
   let editor = null; // the diff editor (diff mode)
   let single = null; // a whole added or deleted file, one side only (diff mode)
   let models = [];
@@ -76,15 +106,15 @@
       const brackets = {};
       for (let i = 1; i <= 6; i++) brackets['editorBracketHighlight.foreground' + i] = t.text2;
       monaco.editor.defineTheme('kunj', {
-        // Code in the ramp's text colours only: status colours are the design's only chroma
-        // (DESIGN.md principle 4), and the mockup's diff is uncoloured.
+        // The diff is in the ramp's text colours only, as the mockup's is (status colours are the
+        // design's only chroma, DESIGN.md principle 4); editor tabs get muted syntax colours.
         base: t.dark ? 'vs-dark' : 'vs',
         inherit: false,
         rules: [
           { token: '', foreground: t.text2.slice(1) },
           { token: 'keyword', foreground: t.text2.slice(1) },
           { token: 'comment', foreground: t.muted.slice(1) },
-        ],
+        ].concat(mode === 'editor' ? syntaxRules(t.dark) : []),
         colors: Object.assign(brackets, {
           'editor.background': t.bg,
           'editor.foreground': t.text2,
@@ -324,6 +354,14 @@
       // Monaco measures the font when an editor is created: load it first.
       try { await document.fonts.load(`${FONT_SIZE}px 'JetBrains Mono'`); } catch (e) { /* fallback font */ }
       monaco.editor.defineTheme('kunj', { base: 'vs-dark', inherit: true, rules: [], colors: {} });
+      // The page sees one file and no node_modules, so every import would be an error: keep
+      // only syntax errors.
+      const ts = monaco.typescript;
+      if (ts) {
+        for (const d of [ts.typescriptDefaults, ts.javascriptDefaults]) {
+          d.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false });
+        }
+      }
       if (mode === 'diff') createDiff();
       else createEditor();
       post({ type: 'ready', mode });

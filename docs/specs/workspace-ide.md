@@ -335,7 +335,9 @@ HEAD, is an error the column shows, never a fallback to a local branch. Every gi
 Monaco's diff editor renders the selected file read-only (inline at the column's width, unchanged
 regions folded to 3 lines of context; a file with one empty side in a single-side editor with every
 line marked `+` or `−`); the Monaco theme is built from the tokens (`bg`, `addBg`, `faintest` line
-numbers) and leaves code monochrome. The page's functions take one argument object
+numbers) and leaves the diff's code monochrome; editor tabs (`?mode=editor`) add muted syntax colours
+(`SYNTAX` in app.js). TypeScript/JavaScript semantic diagnostics are off in both pages (the page has one
+file and no node_modules, so every import was an error); syntax errors still show. The page's functions take one argument object
 (`window.kunj.showDiff({original, modified, language, path})`). The column reloads 500 ms after a
 `git` event of its repository or a container `status` event (`EnvironmentStore.onRepoChanged`), keeps
 the selected path and the scope per environment, and refetches the selected file without re-sending
