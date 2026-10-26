@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Workspace app: ⌥-drag selects in a terminal that has the mouse
+
+- `TerminalTab` turns mouse reporting off on a ⌥ or ⇧ press while a program has the mouse, until ⌘C or the next
+  plain click. Why: with tmux `mouse on` (set on this Mac's tmux server) and Claude Code's full-screen UI, a drag
+  went to them, so there was no selection for ⌘C; reporting stays off after the drag because SwiftTerm clears the
+  selection on the next line of output while it is on.
+
 ## 2026-10-25 — Antigravity as an agent (kunj agent --agent, workspace app)
 
 - `kunj agent --agent antigravity` runs `agent.antigravityCommand` (new setting, default `agy`, the Antigravity CLI);

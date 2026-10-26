@@ -142,6 +142,37 @@ final class TerminalTab: LocalProcessTerminalView {
         super.requestOpenLink(source: source, link: link, params: params)
     }
 
+    // MARK: selection over mouse reporting
+
+    /// While a program has the mouse (tmux with `mouse on`, a full-screen agent), a drag goes to it,
+    /// not to a selection ⌘C could copy. With ⌥ (as in iTerm) or ⇧ held at the press the view
+    /// selects instead, and mouse reporting stays off until ⌘C or the next plain click: with it on,
+    /// SwiftTerm drops the selection at the next line of output, before ⌘C.
+    private var selectingOverMouseReporting = false
+
+    override func mouseDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if !flags.intersection([.option, .shift]).isEmpty, getTerminal().mouseMode != .off,
+           allowMouseReporting {
+            selectingOverMouseReporting = true
+            allowMouseReporting = false
+        } else if flags.intersection([.option, .shift]).isEmpty {
+            endSelectingOverMouseReporting()
+        }
+        super.mouseDown(with: event)
+    }
+
+    override func copy(_ sender: Any) {
+        super.copy(sender)
+        endSelectingOverMouseReporting()
+    }
+
+    private func endSelectingOverMouseReporting() {
+        guard selectingOverMouseReporting else { return }
+        selectingOverMouseReporting = false
+        allowMouseReporting = true
+    }
+
     fileprivate func programSetTitle(_ title: String) {
         programTitle = title.isEmpty ? nil : title
         onTitle?(self)
