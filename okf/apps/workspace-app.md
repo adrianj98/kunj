@@ -67,6 +67,8 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
 * ⌘-click on a file path in a terminal opens it in an editor tab (`terminalLinkPaths()` in
   `KunjWorkspaceCore/Terminal/TerminalLink.swift`, wired through `TerminalTab.onOpenLink` and
   `TabRegistry.onOpenFile`); URLs and paths outside the environment go to SwiftTerm's default opener.
+* Selecting over mouse reporting (`TerminalTab.mouseDown`): ⌥/⇧-drag selects where a program has the
+  mouse; a shell tab selects on every press, because tmux's `mouse on` copy never reaches the clipboard.
 * Tab pills have an × (`PillView.onClose`), and the Changes and Files bars a close button.
 * Shortcuts include New Shell (⌘T), New Session (⌘N), Search Sessions (⌘K), Show Changes, Show Files,
   Close Tab (⌘W) and Session 1-9.

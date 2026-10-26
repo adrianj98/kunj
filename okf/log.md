@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-25 (shell selection)
+* **Workspace app**: `apps/workspace-app.md` notes ⌥-drag selection and plain-drag selection in shell tabs.
+
 ## 2026-10-25 (token test)
 * **Workspace app**: `apps/workspace-app.md` lists `kunj ct token check --json` (Settings' Test) and
   `kunj ct token setup` (Set Up…) in place of the `secret set` chain.
