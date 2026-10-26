@@ -26,7 +26,8 @@ private final class FileItem: NSObject {
 /// The file explorer at the window's right edge (opened with the tab bar's Files pill or View >
 /// Show Files ⌘⇧E; closed by default): the Files bar (40 px like the Changes bar: `Files` in sans
 /// 12.5/500, the count in mono 11 `faint`, a `border` hairline under it) over the environment's
-/// files as a tree (`git ls-files` tracked + untracked, ignored left out; folders first). A
+/// files as a tree (tracked, untracked and ignored, see `FileLister`; folders first; ignored ones in
+/// `faint`, an ignored folder without its contents). A
 /// double-click (or Return) on a file opens it in an editor tab; on a folder opens or closes it.
 /// Open folders are kept per environment. It reloads when the environment changes and 1 s after a
 /// `git` event of its repository; closed, it lists nothing.
@@ -188,7 +189,8 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
                 let listing = try await source.files(env: env)
                 guard gen == self.generation else { return }
                 self.message.stringValue = listing.paths.isEmpty ? "No files" : ""
-                self.setItems(buildFileTree(listing.paths).map(FileItem.init), listed: env.id)
+                self.setItems(buildFileTree(listing.paths, directories: listing.ignoredDirectories,
+                                            ignored: listing.ignored).map(FileItem.init), listed: env.id)
                 self.count.stringValue = listing.truncated
                     ? "first \(listing.paths.count.formatted())" : listing.paths.count.formatted()
             } catch {
@@ -245,7 +247,8 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        (item as? FileItem)?.node.isDirectory ?? false
+        guard let node = (item as? FileItem)?.node else { return false }
+        return node.isDirectory && !node.children.isEmpty
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
@@ -300,10 +303,10 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
 }
 
 /// One row of the Files column (24 px): the name in sans 12 (`text` when selected, else `text2`;
-/// folders in `muted`), truncated with an ellipsis; the selected row is filled with `raised`, radius
+/// folders in `muted`, ignored entries in `faint`), truncated with an ellipsis; the selected row is filled with `raised`, radius
 /// 5, inset 6 px. Drawn in draw(_:) so cacheDisplay renders it.
 private final class FileRowView: NSTableCellView {
-    var node: FileNode? { didSet { needsDisplay = true; toolTip = node?.path; setAccessibilityLabel(node?.name) } }
+    var node: FileNode? { didSet { needsDisplay = true; toolTip = node.map { $0.ignored ? "\($0.path) (ignored by git)" : $0.path }; setAccessibilityLabel(node?.name) } }
     var selected = false { didSet { needsDisplay = true } }
     var theme: Theme { didSet { needsDisplay = true } }
 
@@ -324,7 +327,8 @@ private final class FileRowView: NSTableCellView {
         }
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingTail
-        let color = selected ? theme.color(\.text) : theme.color(node.isDirectory ? \.muted : \.text2)
+        let color = selected ? theme.color(\.text)
+            : theme.color(node.ignored ? \.faint : node.isDirectory ? \.muted : \.text2)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: Theme.sans(DesignTokens.TypeScale.small), .foregroundColor: color, .paragraphStyle: style,
         ]

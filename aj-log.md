@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Workspace app: ignored files in the Files column
+
+- `FileLister` adds the `!!` entries of `git status --porcelain=v1 -z --ignored=matching` to the `git ls-files`
+  listing (both run together); `buildFileTree` marks them and the column draws them in `faint`. An ignored folder
+  (`node_modules`, `dist`) is one entry without contents and no disclosure triangle. Why: the column left every
+  ignored file out, so `.env`, `.claude/settings.local.json` and the like were missing although they are on disk.
+
 ## 2026-10-25 — Workspace app: syntax colours in editor tabs, no false import errors
 
 - Editor tabs got muted syntax colours (`SYNTAX`/`syntaxRules()` in Resources/web/app.js); the Changes diff stays

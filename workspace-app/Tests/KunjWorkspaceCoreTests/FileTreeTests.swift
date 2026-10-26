@@ -39,8 +39,23 @@ private func git(_ args: [String], in dir: URL) throws {
         #expect(!tree[1].isDirectory && tree[1].children.isEmpty)
     }
 
-    /// Tracked and untracked files, never ignored ones (node_modules, build output)
-    @Test func worktreeListsTrackedAndUntrackedNotIgnored() async throws {
+    @Test func ignoredFoldersAreListedWithoutContentsAndMarked() {
+        let tree = buildFileTree([".env", "src/a.ts"], directories: ["node_modules", "src/dist"],
+                                 ignored: [".env", "node_modules", "src/dist"])
+        #expect(tree.map(\.name) == ["node_modules", "src", ".env"])
+        #expect(tree[0].ignored && tree[0].isDirectory && tree[0].children.isEmpty)
+        #expect(tree[1].children.map(\.path) == ["src/dist", "src/a.ts"])
+        #expect(tree[1].children[0].ignored && !tree[1].ignored && !tree[1].children[1].ignored)
+        #expect(tree[2].ignored)
+    }
+
+    @Test func ignoredEntriesAreParsedFromStatus() {
+        let out = "?? new.txt\u{0}R  b.txt\u{0}!! not-a-path\u{0}!! .env\u{0}!! node_modules/\u{0}"
+        #expect(parseIgnored(Data(out.utf8)) == [".env", "node_modules/"])
+    }
+
+    /// Tracked, untracked and ignored files; an ignored folder is one entry without its contents
+    @Test func worktreeListsTrackedUntrackedAndIgnored() async throws {
         let dir = try tempDirectory()
         try git(["init", "-q", "-b", "main"], in: dir)
         for (name, text) in [("tracked.txt", "a"), (".gitignore", "ignored.txt\nnode_modules/\n"),
@@ -52,7 +67,9 @@ private func git(_ args: [String], in dir: URL) throws {
         try git(["add", "tracked.txt", ".gitignore"], in: dir)
         let listing = try await FileLister(cli: KunjCLI(command: "kunj", path: "/usr/bin:/bin"))
             .list(env: diffTestEnvironment(path: dir.path))
-        #expect(listing.paths == [".gitignore", "new dir/untracked é.txt", "tracked.txt"])
+        #expect(listing.paths == [".gitignore", "ignored.txt", "new dir/untracked é.txt", "tracked.txt"])
+        #expect(listing.ignoredDirectories == ["node_modules"])
+        #expect(listing.ignored == ["ignored.txt", "node_modules"])
         #expect(!listing.truncated)
     }
 

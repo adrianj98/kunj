@@ -110,8 +110,9 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   Last commit); a file list (A/M/D letter, name, ± counts); Monaco's diff editor for the selected file.
   An × at the right of its bar closes it (the same toggle).
 - **Files column (right edge, hidden by default):** a file explorer of the selected environment
-  (`git ls-files` tracked + untracked, ignored files left out; through `kunj ct exec` in a running
-  container), folders first, opened with a `Files` pill after `Changes` in the tab bar or View > Show
+  (`git ls-files` tracked + untracked, plus the ignored entries of `git status --ignored=matching`
+  in `faint`, so `.env` shows while `node_modules` is one folder without its contents; through
+  `kunj ct exec` in a running container), folders first, opened with a `Files` pill after `Changes` in the tab bar or View > Show
   Files ⌘⇧E, 260 px wide at the window's right edge (the terminal and Changes columns keep 11:9 of
   the rest). A double-click (or Return) on a file opens an editor tab. Open folders are kept per
   environment for the session; it reloads 1 s after a `git` event of its repository; over 50,000
