@@ -102,20 +102,26 @@ public func tabsToSave(_ open: [SavedTab], active: Int?) -> (tabs: [SavedTab], a
 /// The tabs to reopen when an environment is selected for the first time in a session, and which
 /// one becomes active. nil while the environment cannot run them (a missing worktree, a stopped
 /// container): the caller tries again on a later selection, and must not save over the entry
-/// meanwhile. An agent tab comes back only while the agent runs (it reattaches to its tmux
-/// session; restoring one that ended would start a new agent), and only one of them. `kinds` are
-/// the kinds the app can reopen (editor tabs once they exist).
+/// meanwhile. An agent tab comes back only while its agent runs (it reattaches to its tmux
+/// session; restoring one that ended would start a new agent): each tab whose session is among
+/// `env.agentSessions`, once per session, or, when the sessions are not known (an older kunj),
+/// one tab while any agent runs. `kinds` are the kinds the app can reopen (editor tabs once they exist).
 public func restorePlan(_ entry: BranchLayout, env: Environment,
                         kinds: Set<TabKind> = [.shell, .agent]) -> (tabs: [SavedTab], active: Int?)? {
     guard env.state == .ok || env.state == .running else { return nil }
     let agentRuns = env.agent == .running || env.agent == .waiting
     var tabs: [SavedTab] = []
     var active: Int?
-    var hasAgent = false
+    var agentSessions: Set<String?> = []
     for (i, tab) in entry.tabs.enumerated() where kinds.contains(tab.kind) && tab.kind != .action {
         if tab.kind == .agent {
-            guard agentRuns, !hasAgent else { continue }
-            hasAgent = true
+            guard agentRuns, !agentSessions.contains(tab.session) else { continue }
+            if let running = env.agentSessions {
+                guard running.contains(where: { $0.id == tab.session }) else { continue }
+            } else if !agentSessions.isEmpty {
+                continue
+            }
+            agentSessions.insert(tab.session)
         }
         if i == entry.active { active = tabs.count }
         tabs.append(tab)

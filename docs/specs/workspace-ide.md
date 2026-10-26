@@ -369,7 +369,9 @@ are never saved; entries or tabs that do not decode are skipped, not the whole f
 environment for the first time in a session, once it can run them (worktree present, container running;
 until then its entry is not saved over), its tabs are restored with the titles of their specs: shell
 and agent tabs reattach to their tmux sessions by the saved `session` id (a shell without one
-restarts; an agent tab without one reattaches only while the default agent runs), editor tabs reopen
+restarts; each agent tab comes back only while its session is among the listing's `agent.sessions`,
+once per session, so an ended agent is not started again; with a kunj that reports no `sessions`,
+one agent tab while any agent runs), editor tabs reopen
 the file by its saved `path` (one that cannot be read closes). The app writes pending changes when it
 quits, and remembers the selected environment (`selectedEnvironment`), selected again after the first
 listing so its tabs reattach.

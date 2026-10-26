@@ -45,7 +45,8 @@ public func mergeEnvironments(
             agent: agent.map { agentActivity(running: $0.running, state: $0.state) } ?? .unknown,
             agentSession: agent?.session, dirty: w.status?.dirty, changedFiles: w.status?.changedFiles ?? w.changedFiles,
             ahead: w.status?.ahead, behind: w.status?.behind, upstream: w.status?.upstream,
-            pullRequest: w.pullRequest, ports: [], services: [], createdAt: nil, exists: w.exists, isMain: w.isMain)
+            pullRequest: w.pullRequest, ports: [], services: [], createdAt: nil, exists: w.exists, isMain: w.isMain,
+            agentSessions: agent?.sessions)
     }.sorted(by: byBranch)
 
     var backend = BackendState.docker
@@ -64,7 +65,8 @@ public func mergeEnvironments(
                 agentSession: nil, dirty: c.workspace.dirty, changedFiles: nil, ahead: c.workspace.ahead,
                 behind: nil, upstream: nil, pullRequest: nil,
                 ports: c.ports.map { PortInfo(container: $0.container, host: $0.host, kind: $0.kind, service: $0.service) },
-                services: c.services, createdAt: parseDate(c.createdAt), exists: true, isMain: false)
+                services: c.services, createdAt: parseDate(c.createdAt), exists: true, isMain: false,
+                agentSessions: running ? c.agent.sessions : nil)
         }.sorted(by: byBranch)
     }
     return RepoEnvironments(repo: repo, backend: backend, environments: trees + boxes)

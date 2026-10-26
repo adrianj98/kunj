@@ -192,6 +192,23 @@ private func repos(_ envs: [Environment]) -> [RepoEnvironments] {
         #expect(restorePlan(BranchLayout(tabs: [shell()], active: 7), env: env)?.active == nil)
     }
 
+    @Test func restoreReattachesEveryRunningAgentSession() {
+        let a = SavedTab(kind: .agent, title: "agent", path: nil, session: "aaaa1111")
+        let b = SavedTab(kind: .agent, title: "agent", path: nil, session: "bbbb2222")
+        let ended = SavedTab(kind: .agent, title: "agent", path: nil, session: "cccc3333")
+        var env = diffTestEnvironment(path: "/w")
+        env.agent = .running
+        env.agentSessions = [AgentSessionInfo(session: "kunj-x-a-aaaa1111", id: "aaaa1111"),
+                             AgentSessionInfo(session: "kunj-x-a-bbbb2222", id: "bbbb2222", state: "waiting"),
+                             AgentSessionInfo(session: "kunj-x", id: nil)]
+        let entry = BranchLayout(tabs: [a, shell(), b, ended, a, agentTab], active: 2)
+        let plan = restorePlan(entry, env: env)
+        #expect(plan?.tabs == [a, shell(), b, agentTab])
+        #expect(plan?.active == 2)
+        env.agentSessions = []
+        #expect(restorePlan(entry, env: env)?.tabs == [shell()])
+    }
+
     @Test func trackerPrimesThenReportsChangedAndNewEnvironments() {
         var tracker = ActivityTracker()
         let a = diffTestEnvironment(branch: "a", path: "/a")

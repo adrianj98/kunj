@@ -110,10 +110,27 @@ public struct AgentState: Decodable, Equatable, Sendable {
     public var running: Bool?
     public var session: String?
     public var state: String?
+    /// Every running agent session (absent from kunj before 1.3 and when tmux could not be asked)
+    public var sessions: [AgentSessionInfo]?
 
-    public init(running: Bool?, session: String?, state: String?) {
+    public init(running: Bool?, session: String?, state: String?, sessions: [AgentSessionInfo]? = nil) {
         self.running = running
         self.session = session
+        self.state = state
+        self.sessions = sessions
+    }
+}
+
+/// One running agent session: `id` is the `--session <id>` it was started with, nil for the
+/// default session.
+public struct AgentSessionInfo: Decodable, Equatable, Sendable {
+    public var session: String
+    public var id: String?
+    public var state: String?
+
+    public init(session: String, id: String?, state: String? = nil) {
+        self.session = session
+        self.id = id
         self.state = state
     }
 }
