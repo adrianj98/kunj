@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — Workspace app: restore every running agent tab
+
+- `restorePlan()` reopened at most one agent tab per environment, from before several agents per worktree. It now
+  reads `agent.sessions` from `worktree list`/`ct list` (`AgentSessionInfo`, `Environment.agentSessions`) and
+  reattaches each saved agent tab whose session still runs, once per session; older kunj without `sessions` keeps
+  the one-tab fallback. Why: reopening the app showed only one of several open agents.
+
 ## 2026-10-24 — Review fixes for the container rows
 
 - macOS: a container listing the app cannot decode no longer drops the repository's worktrees; port rows are

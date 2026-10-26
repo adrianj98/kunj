@@ -80,6 +80,8 @@ public struct Environment: Equatable, Identifiable, Sendable {
     public var agent: AgentActivity
     /// The host tmux session of `kunj agent` (worktrees only)
     public var agentSession: String?
+    /// The running agent sessions (worktrees and running containers); nil when not known
+    public var agentSessions: [AgentSessionInfo]?
     public var dirty: Bool?
     public var changedFiles: Int?
     public var ahead: Int?
@@ -96,7 +98,7 @@ public struct Environment: Equatable, Identifiable, Sendable {
                 containerName: String?, state: EnvState, agent: AgentActivity, agentSession: String?,
                 dirty: Bool?, changedFiles: Int?, ahead: Int?, behind: Int?, upstream: String?,
                 pullRequest: PullRequestInfo?, ports: [PortInfo], services: [ServiceState], createdAt: Date?,
-                exists: Bool, isMain: Bool) {
+                exists: Bool, isMain: Bool, agentSessions: [AgentSessionInfo]? = nil) {
         self.id = id
         self.kind = kind
         self.repo = repo
@@ -106,6 +108,7 @@ public struct Environment: Equatable, Identifiable, Sendable {
         self.state = state
         self.agent = agent
         self.agentSession = agentSession
+        self.agentSessions = agentSessions
         self.dirty = dirty
         self.changedFiles = changedFiles
         self.ahead = ahead
