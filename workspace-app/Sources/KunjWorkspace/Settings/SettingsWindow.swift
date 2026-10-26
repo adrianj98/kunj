@@ -36,6 +36,11 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
     private let claudeLine = makeLabel("…", font: Theme.sans(DesignTokens.TypeScale.small), color: .clear)
     private let setUpButton = NSButton(title: "Set Up…", target: nil, action: nil)
     private let removeButton = NSButton(title: "Remove", target: nil, action: nil)
+    private let testButton = NSButton(title: "Test", target: nil, action: nil)
+    /// The last Test's answer (`kunj ct token check`), green when the token works, red when not.
+    private let claudeCheck = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.caption), color: .clear)
+    private var checking = false
+    private var checkValid: Bool?
     private let containerError = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.caption), color: .clear)
     private var tokenStatus: TokenStatusJson?
     private var globalSecrets: SecretListJson?
@@ -108,7 +113,14 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         agents.alignment = .leading
         agents.spacing = 6
 
-        for b in [setUpButton, removeButton] { b.bezelStyle = .rounded; b.controlSize = .small; b.target = self }
+        for b in [setUpButton, testButton, removeButton] { b.bezelStyle = .rounded; b.controlSize = .small; b.target = self }
+        testButton.action = #selector(testClaudeToken)
+        testButton.setAccessibilityLabel("Test the Claude Code token")
+        testButton.toolTip = "Run Claude Code once with the token new containers get (kunj ct token check)"
+        claudeCheck.lineBreakMode = .byWordWrapping
+        claudeCheck.maximumNumberOfLines = 3
+        claudeCheck.preferredMaxLayoutWidth = 300
+        claudeCheck.isHidden = true
         setUpButton.action = #selector(setUpClaudeToken)
         removeButton.action = #selector(removeClaudeToken)
         setUpButton.setAccessibilityLabel("Set up the Claude Code token")
@@ -120,10 +132,10 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         githubTitle.alignment = .left
         let claudeTitle = label("Claude Code token")
         claudeTitle.alignment = .left
-        let claudeRow = NSStackView(views: [claudeLine, setUpButton, removeButton])
+        let claudeRow = NSStackView(views: [claudeLine, setUpButton, testButton, removeButton])
         claudeRow.orientation = .horizontal
         claudeRow.spacing = 8
-        let containers = NSStackView(views: [githubTitle, githubLine, useGhBox, claudeTitle, claudeRow,
+        let containers = NSStackView(views: [githubTitle, githubLine, useGhBox, claudeTitle, claudeRow, claudeCheck,
                                              note("Containers get these tokens; the agent inside can use them."), containerError])
         containers.orientation = .vertical
         containers.alignment = .leading
@@ -168,6 +180,7 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         containerError.textColor = t.color(\.red)
         githubLine.textColor = t.color(\.text)
         claudeLine.textColor = t.color(\.text)
+        renderCheck()
         selectTheme()
     }
 
@@ -297,18 +310,54 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         useGhBox.isEnabled = cli != nil && useGh != nil && !writing
         setUpButton.isEnabled = cli != nil
         removeButton.isEnabled = cli != nil && claude == "Stored secret"
+        testButton.isEnabled = cli != nil && !checking
+    }
+
+    /// Runs `kunj ct token check --json` in the home directory (the global token; a repo or branch
+    /// one would be found only in that repository) and shows its answer under the row.
+    @objc private func testClaudeToken() {
+        guard let cli, !checking else { return }
+        checking = true
+        checkValid = nil
+        claudeCheck.stringValue = "Checking with Claude Code…"
+        renderCheck()
+        renderContainers()
+        Task { @MainActor in
+            do {
+                let check: TokenCheckJson = try await cli.run(claudeTokenCheckArgs, cwd: NSHomeDirectory(), timeout: 120)
+                self.checkValid = check.claude.valid
+                self.claudeCheck.stringValue = claudeTokenCheckText(check)
+                log("kunj ct token check: \(check.claude.valid.map { "\($0)" } ?? "null")")
+            } catch {
+                self.checkValid = false
+                self.claudeCheck.stringValue = "Could not check the token: \(Self.message(error))"
+            }
+            self.checking = false
+            self.renderCheck()
+            self.renderContainers()
+        }
+    }
+
+    private func renderCheck() {
+        let t = ThemeManager.shared.current
+        claudeCheck.isHidden = claudeCheck.stringValue.isEmpty
+        claudeCheck.textColor = checking ? t.color(\.muted) : checkValid == true ? t.color(\.green)
+            : checkValid == false ? t.color(\.red) : t.color(\.muted)
+    }
+
+    /// The selected environment, whose tab runs a token action; nil (with an alert) when none is.
+    private func environmentForTokenTab(_ verb: String, button: String) -> Environment? {
+        if let env = selectedEnvironment() { return env }
+        let a = NSAlert()
+        a.messageText = "Select an environment first"
+        a.informativeText = "The Claude Code token is \(verb) in a terminal tab of the selected environment. Select a worktree or container in the sidebar, then choose \(button) again."
+        a.alertStyle = .informational
+        if let w = window { a.beginSheetModal(for: w) } else { a.runModal() }
+        return nil
     }
 
     @objc private func setUpClaudeToken() {
-        guard let cli else { return }
-        guard let env = selectedEnvironment() else {
-            let a = NSAlert()
-            a.messageText = "Select an environment first"
-            a.informativeText = "The Claude Code token is set up in a terminal tab of the selected environment. Select a worktree or container in the sidebar, then choose Set Up… again."
-            a.alertStyle = .informational
-            if let w = window { a.beginSheetModal(for: w) } else { a.runModal() }
-            return
-        }
+        guard let cli, let env = environmentForTokenTab("set up", button: "Set Up…") else { return }
         let spec = claudeTokenSetupSpec(cli: cli, env: env, terminalEnv: ProcessInfo.processInfo.environment)
         log("claude token setup tab in \(env.id)")
         openAction(env, spec) { [weak self] _ in self?.loadContainerSettings() }

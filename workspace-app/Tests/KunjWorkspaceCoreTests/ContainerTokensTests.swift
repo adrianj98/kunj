@@ -71,18 +71,26 @@ private let claudeHostOnly = #"{"secrets":[{"name":"CLAUDE_CODE_OAUTH_TOKEN","sc
         #expect(claudeTokenRemoveArgs == ["secret", "rm", "CLAUDE_CODE_OAUTH_TOKEN", "--global"])
     }
 
-    @Test func setupRunsClaudeThenTheHiddenPrompt() {
+    @Test func setupRunsKunjCtTokenSetup() {
         let cli = KunjCLI(command: "node /src/kunj/dist/index.js", path: "/login/bin:/usr/bin")
         let s = claudeTokenSetupSpec(cli: cli, env: testWorktree(), terminalEnv: ["HOME": "/Users/demo"])
-        #expect(s.executable == "/bin/sh")
-        // the kunj command parts are positional parameters, never spliced into the script
-        #expect(s.arguments == ["-c", "claude setup-token && \"$@\" secret set CLAUDE_CODE_OAUTH_TOKEN --global --targets container",
-                                "kunj-setup", "node", "/src/kunj/dist/index.js"])
+        #expect(s.executable == "/usr/bin/env")
+        #expect(s.arguments == ["node", "/src/kunj/dist/index.js", "ct", "token", "setup"])
         #expect(s.cwd == "/r/app")
         #expect(s.environment["PATH"] == "/login/bin:/usr/bin")
         #expect(s.title == "claude token")
         #expect(s.closeOnExitZero)
-        // nothing in argv looks like a token
-        #expect(!s.arguments.contains { $0.hasPrefix("sk-") })
+    }
+
+    @Test func checkResultText() throws {
+        func check(_ json: String) throws -> TokenCheckJson {
+            try JSONDecoder().decode(TokenCheckJson.self, from: Data(json.utf8))
+        }
+        #expect(claudeTokenCheckText(try check(#"{"claude":{"source":"secret","valid":true,"message":"The token works"}}"#))
+                == "✓ The token works")
+        #expect(claudeTokenCheckText(try check(#"{"claude":{"source":"secret","valid":false,"message":"401 OAuth access token is invalid"}}"#))
+                == "✗ 401 OAuth access token is invalid")
+        #expect(claudeTokenCheckText(try check(#"{"claude":{"source":null,"valid":null,"message":"No Claude Code token for containers: run kunj ct token setup"}}"#))
+                == "No Claude Code token for containers: run kunj ct token setup")
     }
 }

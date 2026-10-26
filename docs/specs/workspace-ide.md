@@ -400,9 +400,10 @@ kunj's default). Containers: where a new container's GitHub token comes from (`k
 --json`; a stored global container `GH_TOKEN` wins, and kunj then never asks gh), "Use gh's GitHub
 token" (`container.useGhToken`, the same way), and the Claude Code token (`kunj secret list --global
 --json`, which may unlock the vault): Set Up… opens an action tab in the selected environment running
-`claude setup-token && kunj secret set CLAUDE_CODE_OAUTH_TOKEN --global --targets container` (the kunj
-command as `"$@"`, never spliced into the script), whose hidden prompt takes the token, so the app never
-sees it; Remove runs `kunj secret rm CLAUDE_CODE_OAUTH_TOKEN --global` after asking. Changing the kunj command rediscovers kunj and rebuilds the store and the event
+`kunj ct token setup` (it takes the token from `claude setup-token`, checks and stores it, so the app
+never sees it); Test runs `kunj ct token check --json` in the home directory (timeout 120 s) and shows
+its `message` under the row, ✓ in `green` when `valid`, ✗ in `red` when not, `muted` when null
+(`TokenCheckJson`, `claudeTokenCheckText()`); Remove runs `kunj secret rm CLAUDE_CODE_OAUTH_TOKEN --global` after asking. Changing the kunj command rediscovers kunj and rebuilds the store and the event
 stream; open tabs keep the command they started with. They apply to agents
 started afterwards; a running session keeps its mode.
 

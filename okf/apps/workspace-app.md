@@ -52,7 +52,7 @@ language mode). It is the third consumer of the [JSON contract](/architecture/js
 | `worktree add <b> -c [--base <b>]`, `ct start <b> -c [--base <b>]` | New Session sheet (`newSessionPlan`) |
 | `pr` | Create PR (in the host worktree of the branch) |
 | `config --get <key> --global` / `config --set <key>=<v> --global` | Settings for `agent.tmux`, `agent.tmuxStatus`, `container.useGhToken` (`KunjSetting`) |
-| `ct token status`, `secret list --global`, `secret rm CLAUDE_CODE_OAUTH_TOKEN --global`, `secret set … --global --targets container` | Settings › Containers ([Tokens](/containers/tokens.md), [Secrets](/secrets/overview.md)) |
+| `ct token status`, `ct token check --json` (Test), `ct token setup` (Set Up…, in a tab), `secret list --global`, `secret rm CLAUDE_CODE_OAUTH_TOKEN --global` | Settings › Containers ([Tokens](/containers/tokens.md), [Secrets](/secrets/overview.md)) |
 
 Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `kunj <args>`), `run`
 (`--json`), `external`, `local` or `disabled(reason:)`, so an unavailable action shows why.

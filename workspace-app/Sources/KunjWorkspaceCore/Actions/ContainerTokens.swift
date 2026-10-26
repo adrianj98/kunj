@@ -55,14 +55,33 @@ public func claudeTokenSummary(secrets: SecretListJson?) -> String? {
     return hasContainerSecret(claudeTokenName, in: secrets) ? "Stored secret" : "Not set"
 }
 
-/// The Set Up… action tab: `claude setup-token`, then `kunj secret set CLAUDE_CODE_OAUTH_TOKEN
-/// --global --targets container`, whose hidden prompt takes the pasted token (never argv). kunj
-/// has no setup flow of its own, so `/bin/sh -c` chains them; the CLI's command parts are
-/// positional parameters (`"$@"`), never spliced into the script.
+/// `kunj ct token check --json`: one `claude -p` with the Claude Code token new containers get
+/// (`source`: `secret`, `env` or null; `valid` null when there is none or it could not be checked).
+public struct TokenCheckJson: Decodable, Equatable, Sendable {
+    public struct Claude: Decodable, Equatable, Sendable {
+        public var source: String?
+        public var valid: Bool?
+        public var message: String
+    }
+    public var claude: Claude
+}
+
+public let claudeTokenCheckArgs = ["ct", "token", "check"]
+
+/// Settings' line under the Claude Code token after Test.
+public func claudeTokenCheckText(_ check: TokenCheckJson) -> String {
+    switch check.claude.valid {
+    case true?: return "✓ " + check.claude.message
+    case false?: return "✗ " + check.claude.message
+    case nil: return check.claude.message
+    }
+}
+
+/// The Set Up… action tab: `kunj ct token setup`, which runs `claude setup-token`, takes the token
+/// from its output, checks it and stores it as the global container secret (it needs a terminal).
 public func claudeTokenSetupSpec(cli: KunjCLI, env: Environment, terminalEnv: [String: String]) -> TerminalSpec {
-    let script = "claude setup-token && \"$@\" secret set \(claudeTokenName) --global --targets container"
-    return TerminalSpec(executable: "/bin/sh", arguments: ["-c", script, "kunj-setup"] + cli.commandParts,
-                        cwd: env.repo.root,
-                        environment: ShellEnvironment.terminalEnvironment(path: cli.path, base: terminalEnv),
-                        title: "claude token", closeOnExitZero: true)
+    TerminalSpec(executable: "/usr/bin/env", arguments: cli.commandParts + ["ct", "token", "setup"],
+                 cwd: env.repo.root,
+                 environment: ShellEnvironment.terminalEnvironment(path: cli.path, base: terminalEnv),
+                 title: "claude token", closeOnExitZero: true)
 }

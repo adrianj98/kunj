@@ -1,5 +1,9 @@
 # Directory Update Log
 
+## 2026-10-25 (token test)
+* **Workspace app**: `apps/workspace-app.md` lists `kunj ct token check --json` (Settings' Test) and
+  `kunj ct token setup` (Set Up…) in place of the `secret set` chain.
+
 ## 2026-10-25 (workspace links)
 * **Workspace app**: `apps/workspace-app.md` gains ⌘-click file links in terminals and the close
   buttons on tabs and the Changes/Files columns.

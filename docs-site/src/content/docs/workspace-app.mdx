@@ -198,9 +198,11 @@ tabs, or the branch changing), kept in the same file.
 - **Containers**: where a new [branch container](../containers/overview/) gets its GitHub token
   (a [stored secret](../configuration/secrets/), `GH_TOKEN` in your environment, or your `gh` login),
   **Use gh's GitHub token** (`container.useGhToken`), and the **Claude Code token**. **Set Up…**
-  opens a tab in the selected session that runs `claude setup-token` and then
-  `kunj secret set CLAUDE_CODE_OAUTH_TOKEN --global --targets container`: paste the token at its hidden
-  prompt. New containers get it; existing ones need `kunj ct start <branch> --rebuild`. **Remove**
+  opens a tab in the selected session that runs
+  [`kunj ct token setup`](../containers/commands/): sign in through the browser, and kunj takes the
+  token from `claude setup-token`, checks it and stores it. **Test** runs `kunj ct token check`, one
+  short Claude Code request with only that token, and shows whether it works (green) or why not (red).
+  New containers get the token; existing ones need `kunj ct start <branch> --rebuild`. **Remove**
   deletes it. Reading the stored secrets may unlock the vault, so macOS can ask for Keychain access.
 
 <Aside type="note">
