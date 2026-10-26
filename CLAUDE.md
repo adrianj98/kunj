@@ -151,6 +151,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj container [start|shell|exec|agent|attach|open|forward|logs|list|stop|remove|prune|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
 - `kunj ct token status [--json]` - Where a new container's GitHub token comes from (`ContainerTokenStatusJson`; never prints the token)
+- `kunj ct token setup` / `check [--json]` - Store the Claude Code token for containers from `claude setup-token` (extracted from its output, checked first), and check it with one `claude -p` that has only that token (`ContainerTokenCheckJson`; src/lib/secrets/claude-token.ts)
 - `kunj secret [set|import|list|get|rm|env|apply]` - Encrypted secrets (global, repo, branch) and where they go: host commands, worktree files, branch containers (see Secrets under Branch Containers)
 - `kunj run [--branch b] [--hold] -- <cmd…>` - Run a host command with the branch's host secrets in its environment
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)

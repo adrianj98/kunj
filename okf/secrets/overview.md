@@ -51,6 +51,12 @@ Options: `--branch [branch]`, `--global` (cannot combine with `--branch`), `--ta
 Writes go through `modify()`: a read-modify-write of one scope's file. Only when neither vault file exists
 may a new key be made; a new file next to an existing one takes that file's kdf.
 
+Claude Code token: `kunj ct token setup` runs `claude setup-token` under `script`, extracts the `sk-ant-oat01-` token
+from the output (`extractClaudeToken`, rejoining a wrapped one), checks it and stores it as the global container secret
+`CLAUDE_CODE_OAUTH_TOKEN`; `kunj ct token check [--json]` (`ContainerTokenCheckJson`) runs one `claude -p --model haiku`
+with only that token (other credentials removed, throwaway `CLAUDE_CONFIG_DIR`). `secret set` of that name trims the
+value and refuses anything but one token (`claudeTokenProblem`). Module: `src/lib/secrets/claude-token.ts`.
+
 # JSON output
 
 Types in `src/lib/json-types.ts` (see [JSON Contract](/architecture/json-contract.md)); none ever holds a value.

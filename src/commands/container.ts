@@ -17,6 +17,8 @@
 //   kunj container blueprint init|snapshot|status|remove
 //   kunj container file read|write [branch] <path>
 //   kunj container token status                       where a new container's GitHub token comes from
+//   kunj container token setup                        claude setup-token, checked and stored for containers
+//   kunj container token check                        whether the Claude Code token for containers works
 //
 // `ct` is an alias. The command is on the fast path (src/commands/fast.ts): keep heavy
 // imports out of this module, and load inquirer lazily.
@@ -69,7 +71,7 @@ import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount
 import { KunjConfig } from '../types';
 import type { LoadSecretsOptions } from '../lib/secrets/resolve';
 import { vaultFiles, vaultStamp } from '../lib/secrets/vault';
-import type { ContainerJson, ContainerListJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, ShellKillJson } from '../lib/json-types';
+import type { ContainerJson, ContainerListJson, ContainerTokenCheckJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, ShellKillJson } from '../lib/json-types';
 
 interface ContainerOptions {
   json?: boolean;
@@ -110,7 +112,7 @@ interface Context {
 }
 
 const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'mcp', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file', 'token'];
-const TOKEN_ACTIONS = ['status'];
+const TOKEN_ACTIONS = ['status', 'setup', 'check'];
 const FILE_ACTIONS = ['read', 'write'];
 const BLUEPRINT_ACTIONS = ['init', 'snapshot', 'status', 'remove'];
 const WORKSPACE = '/workspace';
@@ -184,6 +186,8 @@ export class ContainerCommand extends BaseCommand {
         '  file read [branch] <path>            print a file of /workspace',
         '  file write [branch] <path>           write stdin to a file of /workspace (content on stdin)',
         '  token status                         where a new container\'s GitHub token comes from (never prints it)',
+        '  token setup                          run claude setup-token, check the token and store it for containers',
+        '  token check                          whether the Claude Code token for containers works (one claude -p)',
         '',
         'Blueprint (how a new container is set up: tools, setup and maintain commands):',
         '  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json',
@@ -1236,7 +1240,10 @@ export class ContainerCommand extends BaseCommand {
   // ---------------------------------------------------------------------
 
   private async token(sub: string | undefined, options: ContainerOptions): Promise<void> {
-    if ((sub || 'status').toLowerCase() !== 'status') {
+    const action = (sub || 'status').toLowerCase();
+    if (action === 'setup') return this.tokenSetup();
+    if (action === 'check') return this.tokenCheck();
+    if (action !== 'status') {
       throw new ContainerError(`Unknown token action '${sub}'. Expected one of: ${TOKEN_ACTIONS.join(', ')}`);
     }
     const config = await loadResolvedConfig(process.cwd());
@@ -1261,6 +1268,73 @@ export class ContainerCommand extends BaseCommand {
             : 'none: set GH_TOKEN (container.useGhToken is false, so gh is not asked)';
     console.log(`GitHub token: ${where}`);
     if (github.source === 'gh') console.log(chalk.gray('  The agent in the container can use it; container.useGhToken: false turns this off.'));
+  }
+
+  /**
+   * `claude setup-token` on this terminal, the token taken from what it prints (or pasted at a hidden
+   * prompt when it cannot be found), checked, and stored as a global container secret. A token that
+   * does not work is not stored.
+   */
+  private async tokenSetup(): Promise<void> {
+    if (this.jsonMode) throw new ContainerError('token setup is interactive and has no --json output');
+    if (!process.stdin.isTTY) throw new ContainerError('token setup needs a terminal: claude setup-token signs in through the browser');
+    const { CLAUDE_TOKEN_NAME, captureSetupToken, checkClaudeToken, claudeTokenProblem, extractClaudeToken } = await import('../lib/secrets/claude-token');
+    const { code, output } = await captureSetupToken();
+    if (code === 127) throw new ContainerError('claude setup-token could not be run: is Claude Code (claude) installed, and script on the PATH?');
+    let token = extractClaudeToken(output);
+    if (!token) {
+      console.log(chalk.yellow(code === 0 ? 'The token was not found in what claude printed.' : `claude setup-token exited with ${code}.`));
+      const { hiddenPrompt } = await import('../lib/secrets/keyprovider');
+      token = (await hiddenPrompt('Paste the token (or press Enter to stop): ').catch(() => '')).trim();
+      if (!token) throw new ContainerError('No token: nothing was stored');
+    }
+    const problem = claudeTokenProblem(token);
+    if (problem) throw new ContainerError(`${problem}: nothing was stored`);
+    console.log(chalk.gray('Checking the token with Claude Code…'));
+    const check = await checkClaudeToken(token);
+    if (check.valid === false) throw new ContainerError(`The token did not work (${check.message}): nothing was stored`);
+    const { SecretCommand } = await import('./secret');
+    await new SecretCommand({ isTTY: () => false, stdin: async () => token as string }).execute('set', [CLAUDE_TOKEN_NAME], { global: true, targets: 'container' });
+    if (check.valid === null) console.log(chalk.yellow(`  Not checked: ${check.message}`));
+    else console.log(chalk.green('✓ The token works.'));
+    console.log(chalk.gray(`  New containers get it as ${CLAUDE_TOKEN_NAME}; an existing one needs kunj ct start <branch> --rebuild.`));
+  }
+
+  /** One `claude -p` with the Claude Code token new containers of this branch would get. */
+  private async tokenCheck(): Promise<void> {
+    const { CLAUDE_TOKEN_NAME, checkClaudeToken } = await import('../lib/secrets/claude-token');
+    const { loadSecrets } = await import('../lib/secrets/resolve');
+    const branch = getRepoCommonRoot() ? (await getCurrentBranch().catch(() => '')) || undefined : undefined;
+    const stored = (await loadSecrets({ branch, target: 'container' })).find(e => e.name === CLAUDE_TOKEN_NAME && e.delivery.env);
+    let source: ContainerTokenCheckJson['claude']['source'] = null;
+    let token: string | undefined;
+    if (stored) {
+      source = 'secret';
+      token = stored.value;
+    } else {
+      const config = await loadResolvedConfig(process.cwd());
+      const root = getRepoCommonRoot() ?? '';
+      const fromEnv = forwardedEnv(config.container, process.env, { repoRoot: root, repoName: getRepoName() || path.basename(root), home: os.homedir() })[CLAUDE_TOKEN_NAME];
+      if (fromEnv) {
+        source = 'env';
+        token = fromEnv;
+      }
+    }
+    const claude: ContainerTokenCheckJson['claude'] =
+      token === undefined
+        ? { source, valid: null, message: 'No Claude Code token for containers: run kunj ct token setup' }
+        : { source, ...(await checkClaudeToken(token)) };
+    if (this.jsonMode) {
+      this.outputJSON({ claude } satisfies ContainerTokenCheckJson);
+      return;
+    }
+    const from = source === 'secret' ? 'stored secret' : source === 'env' ? 'host environment (container.env)' : 'none';
+    const mark = claude.valid === true ? chalk.green('✓') : claude.valid === false ? chalk.red('✗') : chalk.yellow('?');
+    console.log(`Claude Code token (${from}): ${mark} ${claude.message}`);
+    if (claude.valid === false) {
+      console.log(chalk.gray('  Run kunj ct token setup for a new one.'));
+      process.exitCode = 1;
+    }
   }
 
   // ---------------------------------------------------------------------

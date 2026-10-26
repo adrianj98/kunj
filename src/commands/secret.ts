@@ -16,6 +16,7 @@ import { parseDotenv, isSecretName } from '../lib/secrets/dotenv';
 import { SecretError } from '../lib/secrets/errors';
 import { getUnlock, GetUnlockOptions, hiddenPrompt } from '../lib/secrets/keyprovider';
 import { configuredMode, envOf, openVaults, resolveSecrets, SecretTarget } from '../lib/secrets/resolve';
+import { CLAUDE_TOKEN_NAME, claudeTokenProblem } from '../lib/secrets/claude-token';
 import { renderFiles, writeHostFiles } from '../lib/secrets/deliver';
 import { readVault, SecretEntry, vaultFiles, vaultKdf, writeVault } from '../lib/secrets/vault';
 import type { SecretApplyJson, SecretImportJson, SecretListJson, SecretWriteJson } from '../lib/json-types';
@@ -130,7 +131,13 @@ export class SecretCommand extends BaseCommand {
     checkName(name);
     const scope = await this.writeScope(opts);
     const shape = deliveryShape(scope, opts, undefined);
-    const value = await this.readValue(name);
+    let value = await this.readValue(name);
+    // A pasted Claude Code token: surrounding whitespace dropped, and anything but one token refused
+    if (name === CLAUDE_TOKEN_NAME) {
+      value = value.trim();
+      const problem = claudeTokenProblem(value);
+      if (problem) throw new Error(`${problem}: nothing was stored`);
+    }
     const entry: SecretEntry = { name, value, ...scopeField(scope), ...shape, updatedAt: new Date().toISOString() };
     await this.modify(scope, (entries) => [...entries.filter((e) => !sameSlot(e, name, scope)), entry]);
     if (this.jsonMode) this.outputJSON(writeJson(name, scope) satisfies SecretWriteJson);

@@ -187,6 +187,15 @@ export interface ContainerTokenStatusJson {
   github: { source: 'env' | 'gh' | null; enabled: boolean };
 }
 
+/**
+ * `kunj ct token check --json`: whether the Claude Code token new containers get works (one `claude -p`
+ * with it as the only credential). `source` is a stored container secret or container.env; `valid` is
+ * null when there is none or it could not be told. Never holds the token.
+ */
+export interface ContainerTokenCheckJson {
+  claude: { source: 'secret' | 'env' | null; valid: boolean | null; message: string };
+}
+
 // ---- kunj agent --json -----------------------------------------------------------------------
 
 export interface AgentStatusJson {

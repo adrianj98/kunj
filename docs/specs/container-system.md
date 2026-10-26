@@ -81,7 +81,7 @@ existing `.env` files. **Non-goals for v1:** sharing with a team, SOPS or commit
 repos cannot hold them), external vaults (1Password, AWS Secrets Manager), short-lived or per-container
 tokens. Nothing is ever written into the repository.
 
-Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in the host env, a GitHub origin's container gets `gh auth token --hostname <host>` as `GH_TOKEN` (`container.useGhToken`, default true; `kunj ct token status`).
+Shipped before the vault: with no `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` in the host env, a GitHub origin's container gets `gh auth token --hostname <host>` as `GH_TOKEN` (`container.useGhToken`, default true; `kunj ct token status`). The Claude Code token: `kunj ct token setup` runs `claude setup-token` under `script`, takes the `sk-ant-oat01-` token from its output (rejoined when the terminal wrapped it; a hidden prompt when it is not found), checks it and stores it as the global container secret `CLAUDE_CODE_OAUTH_TOKEN`; `kunj ct token check [--json]` (`ContainerTokenCheckJson`) runs one `claude -p --model haiku` with the token in its environment, other credentials removed and a throwaway `CLAUDE_CONFIG_DIR`; `kunj secret set CLAUDE_CODE_OAUTH_TOKEN` trims and refuses a value that is not one token (`src/lib/secrets/claude-token.ts`).
 
 ### Storage
 

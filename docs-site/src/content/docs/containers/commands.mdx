@@ -541,6 +541,24 @@ kunj ct token status --json
 `source` is `env`, `gh` or `null`; `enabled` is `container.useGhToken`. See
 [environment and secrets](../configuration/#environment-and-secrets).
 
+`kunj ct token setup` gives containers a Claude Code token. It runs `claude setup-token` in your
+terminal (you sign in in the browser), picks the token out of what it prints, checks that it works
+and stores it as the global [secret](../../configuration/secrets/) `CLAUDE_CODE_OAUTH_TOKEN` for
+containers. If the token cannot be found in the output you are asked to paste it. A token that does
+not work is not stored. New containers get it; an existing one needs `kunj ct start <branch> --rebuild`.
+
+`kunj ct token check` asks Claude Code once with the token new containers of this branch would get (a
+stored secret, else `container.env`), as its only credential: other API keys are left out and a
+throwaway Claude config directory is used, so your own Claude Code login cannot make a broken token
+pass. It exits 1 when the token does not work.
+
+```bash
+kunj ct token check --json
+# { "claude": { "source": "secret", "valid": true, "message": "The token works" } }
+```
+
+`valid` is `null` when there is no token or claude is not installed. Neither command prints the token.
+
 ## Getting work out
 
 There is no "copy out" command, on purpose: origin is the only channel. The agent (or you, through

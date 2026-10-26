@@ -87,6 +87,15 @@ jest.mock('../../lib/container/tokens', () => ({
 }));
 
 let mockConfirm = true;
+const mockStoredSecrets: Array<{ name: string; value: string; delivery: { env: boolean } }> = [];
+// Only the token check's lookup is replaced; ct start's secrets keep the real resolver
+const mockTokenSecrets = jest.fn();
+jest.mock('../../lib/secrets/resolve', () => {
+  const actual = jest.requireActual('../../lib/secrets/resolve');
+  return { ...actual, loadSecrets: (opts: unknown) => (mockTokenSecrets.getMockImplementation() ? mockTokenSecrets(opts) : actual.loadSecrets(opts)) };
+});
+const mockClaudeCheck = jest.fn(async (_token: string) => ({ valid: true, message: 'The token works' }));
+jest.mock('../../lib/secrets/claude-token', () => ({ ...jest.requireActual('../../lib/secrets/claude-token'), checkClaudeToken: (t: string) => mockClaudeCheck(t) }));
 jest.mock('inquirer', () => ({ __esModule: true, default: { prompt: jest.fn(async () => ({ ok: mockConfirm })) } }));
 
 jest.mock('../../lib/container/forward', () => ({
@@ -276,6 +285,31 @@ describe('ContainerCommand', () => {
     // Commander passes [] for the variadic and the Command object last
     await (cmd.execute as any).call(cmd, 'start', undefined, [], startOptions, {});
     expect(start).toHaveBeenLastCalledWith(undefined, startOptions);
+  });
+
+  it('token check --json checks the stored container token for the current branch, never printing it', async () => {
+    mockTokenSecrets.mockImplementation(async () => mockStoredSecrets);
+    mockStoredSecrets.splice(0, mockStoredSecrets.length, { name: 'CLAUDE_CODE_OAUTH_TOKEN', value: 'sk-ant-oat01-stored', delivery: { env: true } });
+    await new ContainerCommand().execute('token', 'check', { json: true });
+    expect(JSON.parse(stdout.join(''))).toEqual({ claude: { source: 'secret', valid: true, message: 'The token works' } });
+    expect(stdout.join('')).not.toContain('sk-ant-oat01-stored');
+    expect(mockTokenSecrets).toHaveBeenLastCalledWith({ branch: 'current', target: 'container' });
+    expect(mockClaudeCheck).toHaveBeenLastCalledWith('sk-ant-oat01-stored');
+
+    stdout.length = 0;
+    mockStoredSecrets.length = 0;
+    mockClaudeCheck.mockClear();
+    await new ContainerCommand().execute('token', 'check', { json: true });
+    expect(JSON.parse(stdout.join(''))).toEqual({ claude: { source: null, valid: null, message: expect.stringMatching(/kunj ct token setup/) } });
+    expect(mockClaudeCheck).not.toHaveBeenCalled();
+    mockTokenSecrets.mockReset();
+  });
+
+  it('token setup refuses --json and a missing terminal before running claude', async () => {
+    const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    await new ContainerCommand().execute('token', 'setup', { json: true });
+    expect(JSON.parse(stdout.join('')).error.message).toMatch(/interactive/);
+    exit.mockRestore();
   });
 
   it('token status --json prints where the GitHub token comes from, for origin\'s host', async () => {

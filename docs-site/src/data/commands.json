@@ -1004,9 +1004,9 @@
         "default": null
       },
       {
-        "flags": "--allow-runtime <name>",
-        "description": "Let clients use this --runtime, e.g. sysbox-runc (repeatable)",
-        "default": []
+        "flags": "--allow-runtime <names>",
+        "description": "Let clients use these --runtime values, e.g. sysbox-runc (comma-separated or repeated)",
+        "default": null
       },
       {
         "flags": "--context <name>",

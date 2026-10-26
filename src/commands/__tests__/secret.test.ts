@@ -159,6 +159,15 @@ describe('set', () => {
     expect(fs.existsSync(vaultFiles(dirs.kunj, dirs.global).global)).toBe(false);
   });
 
+  test('CLAUDE_CODE_OAUTH_TOKEN must be one Claude Code token: a doubled paste is refused, nothing written', async () => {
+    const token = 'sk-ant-oat01-' + 'a'.repeat(95);
+    await expect(cmd({ stdin: async () => `${token} ${token}` }).execute('set', ['CLAUDE_CODE_OAUTH_TOKEN'], { global: true }))
+      .rejects.toThrow(/2 tokens/);
+    expect(fs.existsSync(vaultFiles(dirs.kunj, dirs.global).global)).toBe(false);
+    await cmd({ stdin: async () => `${token}\n` }).execute('set', ['CLAUDE_CODE_OAUTH_TOKEN'], { global: true });
+    expect((await globalEntries())[0].value).toBe(token);
+  });
+
   test('--global with --file is refused (globals are env only), and nothing is written', async () => {
     await expect(cmd().execute('set', ['FOO'], { global: true, file: '.env' })).rejects.toThrow(/env only/);
     expect(fs.existsSync(vaultFiles(dirs.kunj, dirs.global).global)).toBe(false);
