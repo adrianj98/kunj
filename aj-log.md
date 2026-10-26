@@ -8,6 +8,8 @@ Changes made with Claude, and why.
   plain click. Why: with tmux `mouse on` (set on this Mac's tmux server) and Claude Code's full-screen UI, a drag
   went to them, so there was no selection for ⌘C; reporting stays off after the drag because SwiftTerm clears the
   selection on the next line of output while it is on.
+- A scroll over the tab also ends it (a local scroll-wheel monitor while the mode lasts). Why: review finding; with
+  reporting off, SwiftTerm's alternate scroll turns the wheel into arrow keys sent to the agent.
 
 ## 2026-10-25 — Antigravity as an agent (kunj agent --agent, workspace app)
 

@@ -146,9 +146,12 @@ final class TerminalTab: LocalProcessTerminalView {
 
     /// While a program has the mouse (tmux with `mouse on`, a full-screen agent), a drag goes to it,
     /// not to a selection ⌘C could copy. With ⌥ (as in iTerm) or ⇧ held at the press the view
-    /// selects instead, and mouse reporting stays off until ⌘C or the next plain click: with it on,
-    /// SwiftTerm drops the selection at the next line of output, before ⌘C.
+    /// selects instead, and mouse reporting stays off until ⌘C, the next plain click or a scroll
+    /// over the tab: with it on, SwiftTerm drops the selection at the next line of output, before ⌘C.
     private var selectingOverMouseReporting = false
+    /// Ends the mode on a scroll over the tab, before SwiftTerm's `scrollWheel` (not overridable)
+    /// handles it: with reporting off the wheel would become arrow keys (alternate scroll).
+    private var scrollMonitor: Any?
 
     override func mouseDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -156,6 +159,14 @@ final class TerminalTab: LocalProcessTerminalView {
            allowMouseReporting {
             selectingOverMouseReporting = true
             allowMouseReporting = false
+            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                MainActor.assumeIsolated {
+                    guard let self, event.window === self.window,
+                          self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else { return }
+                    self.endSelectingOverMouseReporting()
+                }
+                return event
+            }
         } else if flags.intersection([.option, .shift]).isEmpty {
             endSelectingOverMouseReporting()
         }
@@ -171,6 +182,8 @@ final class TerminalTab: LocalProcessTerminalView {
         guard selectingOverMouseReporting else { return }
         selectingOverMouseReporting = false
         allowMouseReporting = true
+        if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+        scrollMonitor = nil
     }
 
     fileprivate func programSetTitle(_ title: String) {

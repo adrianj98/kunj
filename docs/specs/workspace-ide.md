@@ -85,7 +85,8 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   new-tab.
 - **Selecting over mouse reporting:** while the program has the mouse (tmux `mouse on`, Claude Code's
   full-screen UI) a drag goes to it. A press with ⌥ or ⇧ turns SwiftTerm's `allowMouseReporting` off
-  so the drag selects, until ⌘C or the next plain press (`TerminalTab.mouseDown`/`copy`): with
+  so the drag selects, until ⌘C, the next plain press or a scroll over the tab (`TerminalTab.mouseDown`/`copy`,
+  a scroll-wheel monitor while it lasts; with reporting off the wheel would become arrow keys): with
   reporting on, SwiftTerm drops the selection at the next linefeed.
 - **File links in terminals:** ⌘-click on a path SwiftTerm detects (⌘ underlines it) opens it in an
   editor tab. `terminalLinkPaths()` (Core) drops a `:line[:col]`/`#L…` suffix and makes the path
