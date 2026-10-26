@@ -57,6 +57,7 @@ page only says where each thing stands.
 | Workspace app: syntax colours in editor tabs; no false TypeScript import errors | [workspace-ide.md](workspace-ide.md) | dad2757 |
 | Workspace app: ⌥-drag selects in a terminal whose program has the mouse | [workspace-ide.md](workspace-ide.md#layout) | f684bc6 |
 | Workspace app: a plain drag selects in a shell tab (tmux copy never reached the clipboard) | [workspace-ide.md](workspace-ide.md#layout) | 69b486e |
+| Workspace app: terminal shows programs' own 256 colours (theme no longer re-tints them) | [workspace-ide.md](workspace-ide.md#layout) | 2d4a3b3 |
 | Remote containers: `kunj remote add --url http://… --allow-insecure-http` (plain http over a tailnet or WireGuard) | [remote-containers.md](remote-containers.md#transport-and-auth) | ad5b992 |
 | Workspace app: ignored files (`.env`) in the Files column, ignored folders as one faint entry | [workspace-ide.md](workspace-ide.md) | 053fa54 |
 | Antigravity as an agent: `kunj agent --agent antigravity`, Antigravity Agent tabs in the workspace app (worktrees; no waiting state) | [workspace-ide.md](workspace-ide.md) | a18c172 |
