@@ -2,6 +2,11 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-25 — kunj serve: one-line errors for a bad --listen address
+
+- `kunj serve --listen` turns `EADDRNOTAVAIL` (an address this machine does not have) and `EADDRINUSE` (busy port)
+  into a one-line `ContainerError`. Why: the user ran it with an example tailnet address and got a Node stack trace.
+
 ## 2026-10-25 — kunj remote add --allow-insecure-http
 
 - `kunj remote add <name> --url http://… --allow-insecure-http` accepts plain http to a non-loopback address; the

@@ -159,7 +159,12 @@ export class ServeCommand extends BaseCommand {
         if (opts.verbose || /^(refused|unauthorized)/.test(line)) stderr(`${stamp()} ${line}`);
       },
     });
-    const address = await server.listen(listen.host, listen.port);
+    const address = await server.listen(listen.host, listen.port).catch((err: NodeJS.ErrnoException) => {
+      // a plain message, not a stack trace: the common mistakes are an address this machine does not have and a busy port
+      if (err.code === 'EADDRNOTAVAIL') throw new ContainerError(`--listen ${listen.host}:${listen.port}: ${listen.host} is not an address of this machine (see ifconfig)`);
+      if (err.code === 'EADDRINUSE') throw new ContainerError(`--listen ${listen.host}:${listen.port}: the port is already in use (another kunj serve?)`);
+      throw err;
+    });
 
     if (created) {
       stderr(chalk.yellow('New token (shown once; kunj serve token prints it again):'));

@@ -86,6 +86,17 @@ describe('kunj serve', () => {
     expect(isFastCommand('remote')).toBe(true);
   });
 
+  it('says so in one line when the address is not this machine\'s or the port is taken', async () => {
+    await expect(command(() => {}).execute({ listen: '203.0.113.9:0', allowRemoteListen: true })).rejects.toThrow(/not an address of this machine/);
+    const busy = require('net').createServer();
+    await new Promise<void>(r => busy.listen(0, '127.0.0.1', () => r()));
+    try {
+      await expect(command(() => {}).execute({ listen: `127.0.0.1:${busy.address().port}` })).rejects.toThrow(/already in use/);
+    } finally {
+      busy.close();
+    }
+  });
+
   it('refuses a non-loopback listen address without the flag, before touching Docker', async () => {
     const cmd = command(() => {
       throw new Error('must not listen');
