@@ -20,6 +20,7 @@ page only says where each thing stands.
 | [workspace-ide.md](workspace-ide.md) | Phase 3: the workspace app and its CLI contract (`kunj agent`, `kunj events`, `kunj ct file`, JSON types) | Shipped (CLI contract and the native app v1) |
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
 | [remote-containers.md](remote-containers.md) | `kunj serve` on the Docker host, `RemoteKunjBackend`, `kunj remote`, the wire protocol, auth over an SSH tunnel | Shipped (SSH to a real second machine not yet tried) |
+| [multi-remote-containers.md](multi-remote-containers.md) | A repository's containers across this Mac and several remotes: `ct list` and branch lookup ask every one; the workspace app's remote picker | Spec written |
 
 ## Done
 
@@ -49,6 +50,7 @@ page only says where each thing stands.
 | Native IDE spike: SwiftTerm handles five live Claude TUIs (6% CPU idle), Monaco diff in one WKWebView in under 1 s, menu shortcuts work with the webview focused; caveat: hidden tabs still parse on the main thread | [spikes/native-ide/REPORT.md](../../spikes/native-ide/REPORT.md) | 1c2aaa3, 1730cd1, 0e41a24 |
 | Secret manager: `kunj secret` (encrypted global, repo and branch secrets; `.env` import), `kunj run`, delivery to host commands, agents, new worktrees and branch containers, the kept `.env` import hint and `kunj setup` offer, user docs, the workspace app's Settings › Containers (GitHub token source, `container.useGhToken`, Claude Code token), `kunj ct token setup|check` (Claude Code token extracted from `claude setup-token` and validated); plan `docs/superpowers/plans/2026-10-23-secret-manager.md` | [container-system.md](container-system.md#secrets) | c2a722f, d2c82e4, 1429ed9, bc006de, 8901b6b, 6b63a50, 009958c, a10f544, 6c08cd1, 70b398d, 4a15833, 8fd3733, 20c95f9, 45a9e6b, 3bbe9af |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | 4d99265, 60206aa, df59f3f, 2e76fd8, 0ebd0ed, d3031e0, 6e7e330 |
+| Multi-remote containers: the fleet, `ct list` and branch lookup across every remote, events, the workspace app's "Run on" picker | [multi-remote-containers.md](multi-remote-containers.md) | Spec written; implementation waits for the uncommitted serve/container.ts work of another session |
 | Workspace app: ⌘-click file paths in terminals open an editor tab; × on tabs and on the Changes and Files columns | [workspace-ide.md](workspace-ide.md#layout) | 50c5edb, b01b4b1 |
 | Workspace app: reopening restores every running agent tab of an environment, not just one | [workspace-ide.md](workspace-ide.md#layout) | 622c27e |
 | Remote containers: `kunj serve`, `RemoteKunjBackend`, `kunj remote`, `--remote` / `container.remote`, TTY over the Engine API, SSH tunnel | [remote-containers.md](remote-containers.md) | aab2a76, 8b4d3e2, fbb95e0, d1ad96c, 662b060, 125f6e2, b086c66, 3235471, 648bc7d, ffd0f1b, 78a8df6; merged to main 2653373 |
