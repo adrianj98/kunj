@@ -41,6 +41,8 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
     private let claudeCheck = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.caption), color: .clear)
     private var checking = false
     private var checkValid: Bool?
+    /// Bumped when the stored token changes (Set Up…, Remove): a check still running then is dropped.
+    private var checkGeneration = 0
     private let containerError = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.caption), color: .clear)
     private var tokenStatus: TokenStatusJson?
     private var globalSecrets: SecretListJson?
@@ -318,6 +320,7 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
     @objc private func testClaudeToken() {
         guard let cli, !checking else { return }
         checking = true
+        let generation = checkGeneration
         checkValid = nil
         claudeCheck.stringValue = "Checking with Claude Code…"
         renderCheck()
@@ -325,17 +328,31 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         Task { @MainActor in
             do {
                 let check: TokenCheckJson = try await cli.run(claudeTokenCheckArgs, cwd: NSHomeDirectory(), timeout: 120)
+                guard generation == self.checkGeneration else { return self.checkDone() }
                 self.checkValid = check.claude.valid
                 self.claudeCheck.stringValue = claudeTokenCheckText(check)
                 log("kunj ct token check: \(check.claude.valid.map { "\($0)" } ?? "null")")
             } catch {
+                guard generation == self.checkGeneration else { return self.checkDone() }
                 self.checkValid = false
                 self.claudeCheck.stringValue = "Could not check the token: \(Self.message(error))"
             }
-            self.checking = false
-            self.renderCheck()
-            self.renderContainers()
+            self.checkDone()
         }
+    }
+
+    private func checkDone() {
+        checking = false
+        renderCheck()
+        renderContainers()
+    }
+
+    /// The stored token changed: the last Test's answer no longer applies.
+    private func clearCheck() {
+        checkGeneration += 1
+        checkValid = nil
+        claudeCheck.stringValue = ""
+        checkDone()
     }
 
     private func renderCheck() {
@@ -360,7 +377,7 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
         guard let cli, let env = environmentForTokenTab("set up", button: "Set Up…") else { return }
         let spec = claudeTokenSetupSpec(cli: cli, env: env, terminalEnv: ProcessInfo.processInfo.environment)
         log("claude token setup tab in \(env.id)")
-        openAction(env, spec) { [weak self] _ in self?.loadContainerSettings() }
+        openAction(env, spec) { [weak self] _ in self?.clearCheck(); self?.loadContainerSettings() }
     }
 
     @objc private func removeClaudeToken() {
@@ -381,6 +398,7 @@ final class SettingsWindow: NSWindowController, NSTextFieldDelegate {
                                            message: out.stderr.split(separator: "\n").last.map(String.init) ?? "kunj exited with code \(out.exit)")
                     }
                     log("kunj secret rm \(claudeTokenName) --global")
+                    self.clearCheck()
                 } catch {
                     self.containerError.stringValue = "Could not remove the token: \(Self.message(error))"
                 }
