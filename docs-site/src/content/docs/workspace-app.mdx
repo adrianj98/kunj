@@ -179,6 +179,27 @@ select an environment after launching, its shells and agents reattach, and its f
 are not restored. The time on each sidebar row is your last activity there (typing in one of its
 tabs, or the branch changing), kept in the same file.
 
+## Sessions
+
+**Window > Sessions** (⌘⇧S) lists every tmux session kunj started on your Mac: agents and shells, the
+worktree each belongs to, what is running in it, which terminal is attached (the app, Terminal, iTerm2,
+VS Code), and its CPU and memory. Tick **Containers** to add the sessions inside running branch
+containers. It refreshes every five seconds while it is open.
+
+Sessions outlive their tabs on purpose, so they pile up. The window marks two kinds of orphan:
+
+- **worktree removed**: the session's worktree no longer exists;
+- **idle**: nothing attached and no activity for a day.
+
+Sort by CPU or memory to find one that is still working hard. **End Selected** and **End Orphans** end
+sessions after asking; a session that is open in a tab says **Tab open** and End Orphans leaves it
+alone. Right-click a row to copy its tmux name or an attach command. From a terminal:
+
+```bash
+kunj sessions                  # list them
+kunj sessions kill --orphans   # end every orphaned one
+```
+
 ## Shortcuts
 
 | Keys | Does |
@@ -197,6 +218,7 @@ tabs, or the branch changing), kept in the same file.
 | ⌘⇧] / ⌘⇧[ | Next / previous tab |
 | ⌘W | Close the tab |
 | ⌘S | Save the file |
+| ⌘⇧S | Sessions window |
 | ⌘, | Settings |
 
 ## Settings and themes

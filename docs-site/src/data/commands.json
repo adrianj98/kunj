@@ -1107,6 +1107,46 @@
     "helpText": "Actions:\n  (default)        run the server until Ctrl-C; prints the token the first time\n  token            print the token (kunj remote add <name> … needs it on the laptop)\n\nThe server listens on this machine's loopback. From the laptop, reach it through an SSH tunnel kunj\nopens (kunj remote add box --ssh user@box) or a URL you have put behind TLS (--url https://…).\nAnyone with the token controls the containers kunj makes here, so keep it like an SSH key.\nThe token is in ~/.kunj/serve/token (0600)."
   },
   {
+    "name": "sessions",
+    "usage": "sessions [action] [names...]",
+    "description": "List and end kunj's tmux sessions (agents and shells), with what is attached and their CPU and memory",
+    "arguments": "[action] [names...]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--containers",
+        "description": "[list] Also the sessions inside running branch containers",
+        "default": null
+      },
+      {
+        "flags": "--idle-hours <n>",
+        "description": "[list] Hours without activity or a terminal before a session counts as idle (default 24)",
+        "default": null
+      },
+      {
+        "flags": "--orphans",
+        "description": "[kill] Every orphaned host session (worktree gone, or idle)",
+        "default": null
+      },
+      {
+        "flags": "--container <name>",
+        "description": "[kill] The names are sessions in this branch container",
+        "default": null
+      },
+      {
+        "flags": "--if-detached",
+        "description": "[kill] Leave a session running when a terminal is attached to it now (--orphans always does)",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Actions:\n  list (default)   Every kunj session: worktree or container, attached terminals, CPU, memory, orphan state\n  kill <name...>   End sessions; only names kunj gives (kunj-*, kunjsh-*, or agent*/sh-* in a container)\n\nOrphans: worktree-gone (its worktree was removed) or idle (no terminal attached and no activity\nfor --idle-hours). CPU is ps's percentage, 100 = one core."
+  },
+  {
     "name": "setup",
     "usage": "setup",
     "description": "Set up kunj aliases and shell configuration",

@@ -24,6 +24,7 @@ export { ContainerCommand } from './container';
 export { AgentCommand } from './agent';
 export { HooksCommand } from './hooks';
 export { ReposCommand } from './repos';
+export { SessionsCommand } from './sessions';
 export { EventsCommand } from './events';
 export { SearchCommand } from './search';
 export { SecretCommand } from './secret';
@@ -61,6 +62,7 @@ import { ContainerCommand } from './container';
 import { AgentCommand } from './agent';
 import { HooksCommand } from './hooks';
 import { ReposCommand } from './repos';
+import { SessionsCommand } from './sessions';
 import { EventsCommand } from './events';
 import { SearchCommand } from './search';
 import { SecretCommand } from './secret';
@@ -99,6 +101,7 @@ export function getAllCommands(): BaseCommand[] {
     new AgentCommand(),
     new HooksCommand(),
     new ReposCommand(),
+    new SessionsCommand(),
     new EventsCommand(),
     new SearchCommand(),
     new SecretCommand(),

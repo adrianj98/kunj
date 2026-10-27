@@ -27,7 +27,7 @@ export interface ContainerNames {
 }
 
 // Docker names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*; branchToDirName leaves #, @, unicode etc. in
-function dockerSafe(s: string): string {
+export function dockerSafe(s: string): string {
   return s.replace(/[^a-zA-Z0-9_.-]+/g, '-').replace(/-{2,}/g, '-').replace(/^[^a-zA-Z0-9]+/, '').replace(/[-.]+$/, '');
 }
 

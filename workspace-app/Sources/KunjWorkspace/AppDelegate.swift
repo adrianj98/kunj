@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Header buttons, the overflow menu, port links and New session.
     private let runner = ActionRunner()
     private var settings: SettingsWindow?
+    private var sessionsWindow: SessionsWindow?
     private var newSessionSheet: NewSessionSheet?
     /// `--theme <name>`: this run's theme (not saved), for screenshots against light.png/graphite.png.
     private let themeArgument: ThemeChoice?
@@ -147,6 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.windowController.filesColumn.searchPanel.source = KunjSearchSource(cli: cli)
                 self.windowController.terminalColumn.registry.fileAccess = FileAccess(cli: cli)
                 self.settings?.cli = cli
+                self.sessionsWindow?.cli = cli
                 self.windowController.header.show(self.windowController.selectedEnvironment)
             }
             await loadEnvironments(cli: cli)
@@ -454,6 +456,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings?.window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Window > Sessions (⌘⇧S): kunj's tmux sessions, their terminals, CPU and memory, and orphans.
+    @objc func showSessions(_ sender: Any?) {
+        if sessionsWindow == nil {
+            let w = SessionsWindow()
+            w.cwd = { [weak self] in
+                guard let self else { return nil }
+                return self.windowController.selectedEnvironment?.repo.root
+                    ?? (self.store?.repos ?? self.windowController.repos).first?.repo.root
+            }
+            w.tabSessionIds = { [weak self] in
+                Set(self?.windowController.terminalColumn.registry.allTerminals.compactMap { $0.spec?.session } ?? [])
+            }
+            sessionsWindow = w
+        }
+        sessionsWindow?.cli = kunj
+        sessionsWindow?.showWindow(nil)
+        sessionsWindow?.window?.makeKeyAndOrderFront(nil)
+    }
+
     /// The kunj command changed in Settings: stop the event stream, drop the store and discover
     /// kunj again with the new command (open tabs keep running with the command they started with).
     private func reconnect() {
@@ -468,6 +489,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         kunj = nil
         kunjStatus = nil
         settings?.cli = nil
+        sessionsWindow?.cli = nil
         windowController.render(repos: [])
         windowController.setKunjVersion("")
         windowController.showListingError(nil)
@@ -769,6 +791,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu(title: "Window")
         menu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         menu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Sessions", action: #selector(showSessions(_:)), keyEquivalent: "S").target = self
         NSApp.windowsMenu = menu
         return menu
     }

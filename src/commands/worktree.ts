@@ -218,7 +218,7 @@ export class WorktreeCommand extends BaseCommand {
     if (name) {
       const config = await loadResolvedConfig(process.cwd());
       if (config.agent?.tmux !== false && (await readTmuxSessions()) !== 'missing') {
-        const argv = agentArgv(name, wt.path, hostRunArgv(branch, [shell, '-l']), {}, { status: config.agent?.tmuxStatus === true });
+        const argv = agentArgv(name, wt.path, hostRunArgv(branch, [shell, '-l']), {}, { status: config.agent?.tmuxStatus === true, worktree: wt.path });
         process.exitCode = await runTmux(argv, wt.path, env);
         return;
       }

@@ -1190,6 +1190,49 @@ export class ContainerCommand extends BaseCommand {
     }
   }
 
+  /**
+   * Run `script` (SESSIONS_SCRIPT) as the sandbox user in every running branch container of every
+   * repository; stdout null when the exec failed. For `kunj sessions --containers`.
+   */
+  async sessionsExec(script: string, signal?: AbortSignal): Promise<Array<{ container: string; repoId: string | null; branch: string | null; stdout: string | null }>> {
+    this.jsonMode = true;
+    try {
+      const ctx = await this.context({});
+      const running = (await ctx.backend.list({}))
+        .filter(c => c.labels[LABEL.repo] && this.isMain(c) && c.state === 'running')
+        .filter(c => !c.labels[LABEL.branch]?.endsWith(':snapshot'));
+      return await mapLimit(running, 4, async c => {
+        const base = { container: c.name, repoId: c.labels[LABEL.repo] ?? null, branch: c.labels[LABEL.branch] ?? null };
+        if (signal?.aborted) return { ...base, stdout: null };
+        try {
+          const r = await ctx.backend.exec(c.id, ['sh', '-c', script], { user: this.userOf(c) || undefined, timeoutMs: 5000 });
+          return { ...base, stdout: r.exitCode === 0 ? r.stdout : null };
+        } catch {
+          return { ...base, stdout: null };
+        }
+      });
+    } finally {
+      await this.closeBackends();
+    }
+  }
+
+  /** End tmux session `session` (already checked against CONTAINER_SESSION) in the running branch container `name`. */
+  async killContainerSession(name: string, session: string, ifDetached = false, detachedScript = ''): Promise<void> {
+    this.jsonMode = true;
+    try {
+      const ctx = await this.context({});
+      const c = (await ctx.backend.list({})).find(x => x.name === name && x.labels[LABEL.repo] && this.isMain(x));
+      if (!c) throw new ContainerError(`No branch container named ${name}`);
+      if (c.state !== 'running') throw new ContainerError(`${name} is not running`);
+      const cmd = ifDetached ? ['sh', '-c', detachedScript, 'sh', session] : ['tmux', 'kill-session', '-t', `=${session}`];
+      const r = await ctx.backend.exec(c.id, cmd, { user: this.userOf(c) || undefined, timeoutMs: 5000 });
+      if (r.exitCode === 3) throw new ContainerError('a terminal is attached; left running');
+      if (r.exitCode !== 0) throw new ContainerError(`No session ${session} in ${name}`);
+    } finally {
+      await this.closeBackends();
+    }
+  }
+
   /** Kill docker calls still running (a wedged daemon) and close remote tunnels, so the process can exit */
   abortDockerCalls(): void {
     if (this.backend instanceof LocalDockerBackend) this.backend.killChildren();

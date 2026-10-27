@@ -328,3 +328,58 @@ export interface SearchSourceJson {
   /** The search failed here (the others still ran) */
   error?: string;
 }
+
+/** A terminal attached to a tmux session: its tty, the tmux client's pid, and the app it runs in (`Kunj Workspace`, `Terminal`, `iTerm2`, `Code`; null when unknown). */
+export interface SessionAttachJson {
+  tty: string;
+  pid: number;
+  via: string | null;
+}
+
+/**
+ * One of kunj's tmux sessions (`kunj sessions list --json`): a host agent (`kunj-…`) or shell
+ * (`kunjsh-…`), or one in a container (`agent`, `agent-<id>`, `sh-<id>`, with `container` set).
+ * `worktree` is null for a host session whose worktree is gone (`orphan: 'worktree-gone'`) and for
+ * container sessions. `usage` adds up the session's process trees (null when ps could not be read);
+ * `cpu` is ps's percentage (100 = one core), a recent average on macOS.
+ * `orphan: 'idle'`: no terminal attached and no activity for more than `idleHours`.
+ */
+export interface TmuxSessionJson {
+  name: string;
+  kind: 'agent' | 'shell';
+  /** The `--session <id>` it was started with; null for the default agent session */
+  id: string | null;
+  repo: { name: string; root: string } | null;
+  worktree: { path: string; branch: string | null } | null;
+  /** The worktree's branch, or the branch the container was created for */
+  branch: string | null;
+  container: string | null;
+  /** The first pane's current command and directory */
+  command: string | null;
+  cwd: string | null;
+  createdAt: string | null;
+  lastActivityAt: string | null;
+  attached: SessionAttachJson[];
+  usage: { cpu: number; memoryBytes: number } | null;
+  orphan: 'worktree-gone' | 'idle' | null;
+}
+
+/** `kunj sessions list --json`: `tmux` says whether the host's tmux could be asked. */
+export interface SessionsJson {
+  tmux: 'ok' | 'missing' | 'failed';
+  idleHours: number;
+  /** Host and (with --containers) container sessions, by repo, container and branch */
+  sessions: TmuxSessionJson[];
+  /** With --containers: each running branch container asked; available false when Docker could not be */
+  containers?: {
+    available: boolean;
+    message?: string;
+    items: Array<{ container: string; repo: string | null; branch: string | null; tmux: 'ok' | 'missing' | 'failed'; count: number }>;
+  };
+}
+
+/** `kunj sessions kill --json`: the sessions ended, and the ones that could not be (refused or failed). */
+export interface SessionsKillJson {
+  killed: string[];
+  failed: Array<{ name: string; container: string | null; error: string }>;
+}

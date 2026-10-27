@@ -2,6 +2,21 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-27 — tmux sessions window (`kunj sessions`)
+
+- New `kunj sessions [list|kill]` (src/lib/sessions.ts, src/commands/sessions.ts, `SessionsJson`) and
+  the workspace app's Window > Sessions (⌘⇧S): every kunj tmux session with its worktree or container,
+  attached terminals (and which app), CPU and memory over its process tree, and orphan state
+  (worktree-gone, idle); End Selected / End Orphans. Why: the user saw sessions getting orphaned and
+  wanted to manage them and see what is attached and how much CPU and memory each uses (the first run
+  found 9 sessions of removed worktrees and one agent at 96% CPU).
+- Host agent and shell sessions are now tagged with the tmux user option `@kunj_worktree` (their
+  worktree path), so a session is found after its worktree changes branch. Why: the user asked whether
+  sessions are tagged; names alone carry the branch.
+- Review fixes: never an orphan while attached; a failed `git worktree list` or a differently spelled
+  tag path no longer marks a live session worktree-gone; `kill --if-detached` (implied by `--orphans`,
+  used by End Orphans) re-checks attachment right before each kill.
+
 ## 2026-10-27 — alertd-core blueprint (outside this repo, not committed)
 
 - `~/.kunj/alertd-core/blueprint.json` and the develop worktree's `.kunj/blueprint.json`: the

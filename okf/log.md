@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-27 (tmux sessions)
+* **New page**: `features/tmux-sessions.md` covers `kunj sessions`, the `@kunj_worktree` tag and the workspace app's Sessions window.
+
 ## 2026-10-27 (search follow-ups)
 * **Apps**: `apps/workspace-app.md`: a search match opens with the match selected across emoji (UTF-16 columns), `-searchOpen` launch argument.
 

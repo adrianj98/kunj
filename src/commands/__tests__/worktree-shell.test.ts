@@ -106,6 +106,7 @@ test('--session: new-session -A in the worktree, no KUNJ_ agent variables, TMUX 
   expect(argv).toEqual([
     'tmux', '-u', 'new-session', '-A', '-s', session, '-c', '/wt/feature-a', ...hostRunArgv('feature-a', ['/bin/zsh', '-l']),
     ';', 'set-option', '-t', session, 'window-size', 'latest', ';', 'set-option', '-t', session, 'status', 'off',
+    ';', 'set-option', '-t', session, '@kunj_worktree', '/wt/feature-a',
   ]);
   expect(session).toMatch(/^kunjsh-.*-sh-tab1$/);
   expect(cwd).toBe('/wt/feature-a');
@@ -120,7 +121,7 @@ test('--session: new-session -A in the worktree, no KUNJ_ agent variables, TMUX 
 test('--session with agent.tmuxStatus keeps the status line', async () => {
   config.mockResolvedValue({ agent: { tmuxStatus: true } });
   await new WorktreeCommand().execute('shell', 'feature-a', { session: 'tab1' } as any);
-  expect(run.mock.calls[0][0].slice(-2)).toEqual(['status', 'on']);
+  expect(run.mock.calls[0][0].slice(-8, -6)).toEqual(['status', 'on']);
 });
 
 test('--session without tmux runs the login shell directly, without a hint', async () => {

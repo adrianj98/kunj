@@ -135,13 +135,18 @@ export function agentRunning(sessions: string[] | null, name: string): boolean |
 // -e (tmux 3.2+): a new session's environment comes from the tmux server, not this client, so the
 // variables must be given here or a running server hands it an earlier agent's values.
 // An array command is run by tmux as argv, without a shell in between.
-export function agentArgv(name: string, cwd: string, command: string | string[], env: Record<string, string>, opts: { status?: boolean } = {}): string[] {
+// `worktree` tags a host session with the user option @kunj_worktree (SESSION_WORKTREE_OPTION), so
+// `kunj sessions` finds its worktree whatever branch it has checked out since.
+export function agentArgv(name: string, cwd: string, command: string | string[], env: Record<string, string>, opts: { status?: boolean; worktree?: string } = {}): string[] {
   const vars = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-  return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, ...vars, ...(Array.isArray(command) ? command : [command]), ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', opts.status ? 'on' : 'off'];
+  const tag = opts.worktree ? [';', 'set-option', '-t', name, SESSION_WORKTREE_OPTION, opts.worktree] : [];
+  return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, ...vars, ...(Array.isArray(command) ? command : [command]), ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', opts.status ? 'on' : 'off', ...tag];
 }
 
+export const SESSION_WORKTREE_OPTION = '@kunj_worktree';
+
 // A login shell in the session (no KUNJ_* variables: it is not an agent)
-export function shellArgv(name: string, cwd: string, shell: string, opts: { status?: boolean } = {}): string[] {
+export function shellArgv(name: string, cwd: string, shell: string, opts: { status?: boolean; worktree?: string } = {}): string[] {
   return agentArgv(name, cwd, [shell, '-l'], {}, opts);
 }
 

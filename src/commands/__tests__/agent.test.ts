@@ -91,7 +91,7 @@ test('start runs tmux in the worktree with agent.command', async () => {
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('start', 'feature-a', {});
   const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile };
-  expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', underRun('feature-a', claudeWithHooks), vars), '/wt/feature-a', expect.objectContaining(vars));
+  expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', underRun('feature-a', claudeWithHooks), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(vars));
   // tmux takes a new session's environment from its server, not this client: the values go in argv
   expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(expect.arrayContaining(['-e', 'KUNJ_BRANCH=feature-a', '-e', 'KUNJ_WORKTREE=/wt/feature-a']));
 });
@@ -134,7 +134,7 @@ test('a bare branch name starts, and --command overrides the setting', async () 
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('feature-a', { command: 'aider' });
   expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(
-    agentArgv(session, '/wt/feature-a', underRun('feature-a', 'aider'), { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile }),
+    agentArgv(session, '/wt/feature-a', underRun('feature-a', 'aider'), { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile }, { worktree: '/wt/feature-a' }),
   );
 });
 
@@ -143,7 +143,7 @@ test('--agent antigravity runs agy, without the Claude hooks', async () => {
   await new AgentCommand().execute('feature-a', { agent: 'antigravity', session: 'ab12' });
   const named = agentSessionName('app', 'github.com/acme/app', 'feature-a', 'ab12');
   expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(
-    agentArgv(named, '/wt/feature-a', underRun('feature-a', 'agy'), { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: agentStateFile('/h/.kunj/app', named) }),
+    agentArgv(named, '/wt/feature-a', underRun('feature-a', 'agy'), { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: agentStateFile('/h/.kunj/app', named) }, { worktree: '/wt/feature-a' }),
   );
 });
 
@@ -223,7 +223,7 @@ test('agent.tmuxStatus true keeps the tmux status line', async () => {
   tmuxSessions.mockResolvedValue([]);
   (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'aider', tmuxStatus: true } });
   await new AgentCommand().execute('start', 'feature-a', {});
-  expect((runTmux as jest.Mock).mock.calls[0][0].slice(-2)).toEqual(['status', 'on']);
+  expect((runTmux as jest.Mock).mock.calls[0][0].slice(-8, -6)).toEqual(['status', 'on']);
 });
 
 test('stop without tmux fails with tmux-missing', async () => {
@@ -292,7 +292,7 @@ describe('--session: several agents per worktree', () => {
     await new AgentCommand().execute('start', 'feature-a', { session: 'two' } as any);
     const file = agentStateFile('/h/.kunj/app', two);
     const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: file };
-    expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', underRun('feature-a', withAgentHooks('claude', file, true)), vars), '/wt/feature-a', expect.objectContaining(vars));
+    expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', underRun('feature-a', withAgentHooks('claude', file, true)), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(vars));
     expect(two).toBe(session + '-a-two');
   });
 

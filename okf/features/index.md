@@ -21,6 +21,7 @@ User-facing capabilities of the kunj CLI outside branch containers and secrets.
 * [Editor Sessions](/features/editor-sessions.md) - A global registry of which editor windows have which worktree open, kept in ~/.kunj/worktree-sessions.json and pruned by PID liveness.
 * [Keep Files](/features/keep-files.md) - Files deliberately left out of git (such as .env) stored per repository under ~/.kunj/<repo>/keep/ and copied into every new worktree.
 * [PR Lookup Cache](/features/pr-lookup-cache.md) - How the worktree listing finds each branch's pull request with one gh or glab call per repository, cached for 60 seconds in ~/.kunj/pr-cache.json.
+* [tmux sessions](/features/tmux-sessions.md) - kunj sessions lists kunj's tmux sessions (host and container) with owner, attached terminals, CPU, memory and orphans, and ends them; the workspace app's Sessions window.
 * [Search](/features/search.md) - kunj search greps every worktree (uncommitted work included) and, on request, branches without a worktree, running branch containers, commit messages and work logs; SearchJson for the apps.
 
 # Agents and Shells

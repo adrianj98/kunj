@@ -1,0 +1,118 @@
+{
+  "tmux": "ok",
+  "idleHours": 24,
+  "sessions": [
+    {
+      "name": "kunj-alertd-core-chore-speedupplaywrite-731fa0-a-4b76c757",
+      "kind": "agent",
+      "id": "4b76c757",
+      "repo": {
+        "name": "alertd-core",
+        "root": "/r/alertd-core.git"
+      },
+      "worktree": null,
+      "branch": null,
+      "container": null,
+      "command": "node",
+      "cwd": "/r/alertd-core.git/kunj/worktrees/chore-speedupplaywrite",
+      "createdAt": "2026-10-27T01:11:31.000Z",
+      "lastActivityAt": "2026-10-27T05:37:34.000Z",
+      "attached": [],
+      "usage": {
+        "cpu": 0.3,
+        "memoryBytes": 156221440
+      },
+      "orphan": "worktree-gone"
+    },
+    {
+      "name": "kunj-alertd-core-develop-b08dd7-a-112c36ec",
+      "kind": "agent",
+      "id": "112c36ec",
+      "repo": {
+        "name": "alertd-core",
+        "root": "/r/alertd-core.git"
+      },
+      "worktree": {
+        "path": "/r/alertd-core.git/kunj/worktrees/develop",
+        "branch": "develop"
+      },
+      "branch": "develop",
+      "container": null,
+      "command": "node",
+      "cwd": "/r/alertd-core.git/kunj/worktrees/develop",
+      "createdAt": "2026-10-26T20:27:20.000Z",
+      "lastActivityAt": "2026-10-27T22:14:40.000Z",
+      "attached": [
+        {
+          "tty": "/dev/ttys001",
+          "pid": 4242,
+          "via": "Kunj Workspace"
+        }
+      ],
+      "usage": {
+        "cpu": 0.8,
+        "memoryBytes": 79872000
+      },
+      "orphan": null
+    },
+    {
+      "name": "kunjsh-alertd-core-develop-b08dd7-sh-a19dddbc",
+      "kind": "shell",
+      "id": "a19dddbc",
+      "repo": {
+        "name": "alertd-core",
+        "root": "/r/alertd-core.git"
+      },
+      "worktree": {
+        "path": "/r/alertd-core.git/kunj/worktrees/develop",
+        "branch": "develop"
+      },
+      "branch": "develop",
+      "container": null,
+      "command": "zsh",
+      "cwd": "/r/alertd-core.git/kunj/worktrees/develop",
+      "createdAt": "2026-10-27T18:25:18.000Z",
+      "lastActivityAt": "2026-10-27T22:12:52.000Z",
+      "attached": [],
+      "usage": {
+        "cpu": 0,
+        "memoryBytes": 11190272
+      },
+      "orphan": null
+    },
+    {
+      "name": "agent-two",
+      "kind": "agent",
+      "id": "two",
+      "repo": {
+        "name": "alertd-core",
+        "root": "/r/alertd-core.git"
+      },
+      "worktree": null,
+      "branch": "feature/x",
+      "container": "kunj-alertd-core-feature-x-1a2b3c",
+      "command": "claude",
+      "cwd": "/workspace",
+      "createdAt": "2026-10-27T10:00:00.000Z",
+      "lastActivityAt": "2026-10-27T11:00:00.000Z",
+      "attached": [],
+      "usage": {
+        "cpu": 12.5,
+        "memoryBytes": 524288000
+      },
+      "orphan": null
+    }
+  ],
+  "containers": {
+    "available": true,
+    "items": [
+      {
+        "container": "kunj-alertd-core-feature-x-1a2b3c",
+        "repo": "alertd-core",
+        "branch": "feature/x",
+        "tmux": "ok",
+        "count": 1
+      }
+    ]
+  }
+}

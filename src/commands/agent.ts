@@ -152,7 +152,7 @@ export class AgentCommand extends BaseCommand {
     // Host secrets: in tmux, `kunj run` unlocks the vault inside the session (new-session -e would put
     // the values in argv; KUNJ_* stay there); directly, the same resolution in-process.
     if (!direct) {
-      const argv = agentArgv(session, wt.path, hostRunArgv(wt.branch, [loginShell(), '-lc', command]), vars, { status: config.agent?.tmuxStatus === true });
+      const argv = agentArgv(session, wt.path, hostRunArgv(wt.branch, [loginShell(), '-lc', command]), vars, { status: config.agent?.tmuxStatus === true, worktree: wt.path });
       process.exitCode = await runTmux(argv, wt.path, { ...env, ...vars });
       return;
     }

@@ -21,6 +21,7 @@ page only says where each thing stands.
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
 | [remote-containers.md](remote-containers.md) | `kunj serve` on the Docker host, `RemoteKunjBackend`, `kunj remote`, the wire protocol, auth over an SSH tunnel | Shipped (SSH to a real second machine not yet tried) |
 | [multi-remote-containers.md](multi-remote-containers.md) | A repository's containers across this Mac and several remotes: `ct list` and branch lookup ask every one; the workspace app's remote picker | Spec written |
+| [tmux-sessions.md](tmux-sessions.md) | `kunj sessions`: kunj's tmux sessions with owner, attached terminals, CPU, memory, orphans; `kill`; the workspace app's Sessions window | Shipped |
 | [search.md](search.md) | `kunj search`: worktrees (default), branches, containers, commits and work logs; `SearchJson`; the workspace app's Search panel | Shipped (CLI, workspace app); VS Code to do |
 
 ## Done
