@@ -27,3 +27,6 @@ Thumbs.db
 .env.*.local
 # Keep the VS Code extension launch config
 !vscode-extension/.vscode/
+
+# impeccable design plugin (local settings and cache)
+.impeccable/

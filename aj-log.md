@@ -2,6 +2,14 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-26 — Committed the kunj serve hardening; .impeccable ignored
+
+- Committed another session's finished, uncommitted `kunj serve` work (cc94eb0): the guard refuses host-path
+  volumes, foreign volumes and networks and extra capabilities; remote tunnels close when a command ends.
+  Why: the user asked for it to be committed; typecheck clean, full test suite passes (one shell test only
+  fails when run inside a kunj agent session, which leaks `KUNJ_BRANCH`/`KUNJ_AGENT_STATE` into it).
+- `.impeccable/` in `.gitignore`. Why: it is the impeccable design plugin's local settings and cache.
+
 ## 2026-10-26 — Workspace app: terminal colours are the ones programs ask for
 
 - `TerminalTab.apply` sets SwiftTerm's `ansi256PaletteStrategy` to `.xterm`. Why: the user saw green (and
