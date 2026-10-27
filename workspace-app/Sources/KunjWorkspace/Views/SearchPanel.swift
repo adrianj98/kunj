@@ -279,10 +279,12 @@ final class SearchPanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         setItems(tree.map(SearchItem.init))
         // everything open: a result is read, not browsed
         for item in items { outline.expandItem(item, expandChildren: true) }
-        if openFirstMatch, let row = (0..<outline.numberOfRows).first(where: {
+        // only this result: one without matches must not open a later search's
+        let open = openFirstMatch
+        openFirstMatch = false
+        if open, let row = (0..<outline.numberOfRows).first(where: {
             if case .match = (outline.item(atRow: $0) as? SearchItem)?.node.kind { return true } else { return false }
         }) {
-            openFirstMatch = false
             outline.selectRowIndexes([row], byExtendingSelection: false)
             clicked()
         }
