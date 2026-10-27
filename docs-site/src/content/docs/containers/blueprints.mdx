@@ -157,6 +157,9 @@ credentials, packs it into a git bundle and clones that inside the container. Tw
 - **Private package registries** are not reachable during `setup` if they need a secret, since no
   secrets are forwarded into a snapshot. Install those packages in `maintain` instead, which runs in
   the real container with its forwarded environment.
+- **Git LFS files** are left as pointer files in the snapshot. A container made from it runs
+  `git lfs pull` with its own token, but presets and `setup` only ever see the pointers: a build step
+  that reads an LFS file belongs in `maintain`.
 
 With `--no-bundle`, `kunj ct blueprint snapshot` clones origin inside the container instead, which
 only works when origin is public.

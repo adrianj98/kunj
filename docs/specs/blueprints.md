@@ -153,7 +153,8 @@ Resuming never builds; it runs `maintain`. Per new start the order is seed → k
    URLs, `GIT_LFS_SKIP_SMUDGE=1` so LFS files stay pointers: the snapshot has no credentials) and
    removed before the commit. `--no-bundle` clones origin instead (public origins only). A container
    seeded from the snapshot also checks out with smudging off, then runs `git lfs pull` (a failure is
-   a warning on stderr) with its own token.
+   a warning on stderr) with its own token. Known limit: presets and `setup` in the snapshot build see
+   LFS pointers, so a build step that reads an LFS file belongs in `maintain`.
 4. Presets as root, then `setup` as the sandbox user, then the devcontainer's post commands.
 5. `/workspace` is copied to `/opt/kunj/seed` as root (without the seed markers) and the container is
    committed with the presets' environment as `ENV` and labels `kunj.repo`,
