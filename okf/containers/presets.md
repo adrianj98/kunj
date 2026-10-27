@@ -80,6 +80,7 @@ Each script's header names the domains it needs under `container.network.allow` 
 | `kunj_tree` | `/opt/kunj/seed` during a snapshot, else `/workspace` |
 | `kunj_check_words <BRE>` | second validation of every word of `KUNJ_TOOL_VERSION` (after `TOOL_WORD` in blueprint.ts) |
 | `kunj_need <cmd>` | fail when the image lacks a command |
+| `kunj_need_pkg <cmd> [pkg]` | apt-get install `pkg` (default `cmd`) when the command is missing, then `kunj_need`; bun uses it for `unzip` |
 | `kunj_done <version>` | writes `<name>.result` and prints `installed <name> <version>` |
 
 Presets must install outside the home (`$KUNJ_PREFIX`, default `/usr/local`, or `/opt`): the home is a

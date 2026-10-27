@@ -2,6 +2,12 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-26 — bun preset installs unzip
+
+- `_lib.sh` gains `kunj_need_pkg <cmd> [pkg]` (apt-get install when missing); the bun preset uses it for
+  `unzip`. Why: alertd-core's snapshot failed with "bun: needs unzip in the image"; kunj's sandbox image
+  has no unzip, so the bun preset could never work on it.
+
 ## 2026-10-26 — Blueprint tools "*" and LFS in snapshots
 
 - A tool value `"*"` is read as `true` (any version). Why: the user's alertd-core blueprint has

@@ -99,6 +99,7 @@ next start rebuilds the snapshot with it.
 | `kunj_done <version>` | Reports what was installed; call it last. Prints `installed <name> <version>`. |
 | `kunj_check_words <regex>` | Exits with an error unless every word of `KUNJ_TOOL_VERSION` matches the basic regular expression (as a whole word). Use it before passing the value to a command. |
 | `kunj_need <command>` | Exits with an error naming the command when the image does not have it. |
+| `kunj_need_pkg <command> [package]` | Installs the Debian package (default: the command's name) with `apt-get` when the command is missing, then checks it like `kunj_need`. |
 | `kunj_arch` | `x86_64` or `aarch64` (fails on other machines). `kunj_arch_node` gives `x64`/`arm64`, `kunj_arch_deb` gives `amd64`/`arm64`. |
 | `kunj_tree` | The directory that holds the repository's files while presets run, for reading version files. |
 | `$KUNJ_PREFIX` | `/usr/local`. |

@@ -60,6 +60,16 @@ kunj_check_words() {
 
 kunj_need() { command -v "$1" >/dev/null 2>&1 || { echo "$KUNJ_TOOL_NAME: needs $1 in the image" >&2; exit 1; }; }
 
+# Like kunj_need, but installs Debian package $2 (default $1) with apt-get when the command is missing.
+kunj_need_pkg() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${2:-$1}" >/dev/null \
+      && rm -rf /var/lib/apt/lists/*
+  fi
+  kunj_need "$1"
+}
+
 # Last step of every preset: kunj reads the version from $KUNJ_RESULT_DIR/<name>.result.
 kunj_done() {
   _d="${KUNJ_RESULT_DIR:-/tmp/kunj-presets}"

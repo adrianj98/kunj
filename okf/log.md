@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-26 (kunj_need_pkg)
+* **Containers**: `containers/presets.md` lists `kunj_need_pkg`; the bun preset installs unzip.
+
 ## 2026-10-26 (blueprint tools "*", LFS)
 * **Containers**: `containers/blueprints.md` notes `"*"` tool values and LFS handling in snapshot seeds.
 

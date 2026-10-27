@@ -3,7 +3,7 @@
 # Allowlist mode needs bun.sh and github.com, objects.githubusercontent.com in container.network.allow.
 set -eu
 . "$(dirname "$0")/_lib.sh"
-kunj_need curl; kunj_need unzip; kunj_need bash
+kunj_need curl; kunj_need_pkg unzip; kunj_need bash
 want="${KUNJ_TOOL_VERSION:-}"
 want="${want#v}"
 export BUN_INSTALL=$KUNJ_PREFIX
