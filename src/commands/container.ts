@@ -47,6 +47,8 @@ import { BridgeRecord, bridgeFor, installMcpConfig, mcpServers, portHint, readBr
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerError } from '../lib/container/errors';
 import { readWorkspaceFile, validateWorkspacePath, writeWorkspaceFile } from '../lib/container/files';
+import { grepContainer, mapLimit } from '../lib/search';
+import type { SearchQuery } from '../lib/search';
 import { ContainerNames, LABEL, containerNames, isMain, optionsLabel, repoIdFromUrl } from '../lib/container/names';
 import {
   StartError,
@@ -71,7 +73,7 @@ import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount
 import { KunjConfig } from '../types';
 import type { LoadSecretsOptions } from '../lib/secrets/resolve';
 import { vaultFiles, vaultStamp } from '../lib/secrets/vault';
-import type { ContainerJson, ContainerListJson, ContainerTokenCheckJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, ShellKillJson } from '../lib/json-types';
+import type { ContainerJson, ContainerListJson, ContainerTokenCheckJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, SearchSourceJson, ShellKillJson } from '../lib/json-types';
 
 interface ContainerOptions {
   json?: boolean;
@@ -1149,6 +1151,38 @@ export class ContainerCommand extends BaseCommand {
     this.jsonMode = true;
     try {
       return (await this.collectList(options)).json;
+    } finally {
+      await this.closeBackends();
+    }
+  }
+
+  /**
+   * For `kunj search --in containers`: `git grep` in /workspace of this repository's running branch
+   * containers (of `branches` when given), as the sandbox user. A stopped container is not started.
+   */
+  async searchJson(q: SearchQuery, branches: string[] = []): Promise<{ sources: SearchSourceJson[]; searched: number; stopped: string[] }> {
+    this.jsonMode = true;
+    try {
+      const ctx = await this.context({});
+      const mains = (await ctx.backend.list({ [LABEL.repo]: ctx.repo.id }))
+        .filter(c => this.isMain(c))
+        // A snapshot being built (`<branch>:snapshot`) is not a branch's container
+        .filter(c => !c.labels[LABEL.branch]?.endsWith(':snapshot'))
+        .filter(c => branches.length === 0 || branches.includes(c.labels[LABEL.branch]));
+      const running = mains.filter(c => c.state === 'running');
+      const sources = await mapLimit(running, 4, async (c): Promise<SearchSourceJson> => {
+        const base = { kind: 'container' as const, branch: c.labels[LABEL.branch] ?? null, container: c.name };
+        try {
+          return { ...base, ...(await grepContainer(ctx.backend, c.id, this.userOf(c) || undefined, q)) };
+        } catch (error) {
+          return { ...base, matches: [], truncated: false, error: error instanceof Error ? error.message : String(error) };
+        }
+      });
+      return {
+        sources,
+        searched: running.length,
+        stopped: mains.filter(c => c.state !== 'running').map(c => c.labels[LABEL.branch]).sort(),
+      };
     } finally {
       await this.closeBackends();
     }

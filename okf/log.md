@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-27
+* **Search**: new `features/search.md` for `kunj search` (src/lib/search.ts, src/commands/search.ts, `ContainerCommand.searchJson`, `SearchJson`).
+
 ## 2026-10-27 (blueprint aliases)
 * **Containers**: `containers/blueprints.md` documents the `aliases` key and `/etc/profile.d/kunj-aliases.sh`.
 
