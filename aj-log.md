@@ -2,6 +2,17 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-26 — kunj icon
+
+- The user's icon (yellow tile, `>` prompt and a sparkle) is in `assets/icon/` (`kunj-icon.svg`, and
+  `kunj-icon-small.svg` with heavier strokes for 32 px and below). `scripts/gen-icons.sh` renders it with
+  headless Chrome into `AppIcon.icns` for the menu bar app and the Workspace app (tile at Apple's 824/1024
+  grid so it sits with other Dock icons), `vscode-extension/media/icon.png` and `docs-site/public/favicon.svg`.
+  Outputs are committed so building the apps needs no Chrome. Why: nothing had a real icon (VS Code had
+  placeholder squares, the apps none, the docs and landing page a 🌿 emoji).
+- Both Info.plists name `AppIcon`; both bundle.sh copy the icns. The docs logo and the landing page's favicon
+  and brand mark use the small SVG.
+
 ## 2026-10-26 — Committed the kunj serve hardening; .impeccable ignored
 
 - Committed another session's finished, uncommitted `kunj serve` work (cc94eb0): the guard refuses host-path

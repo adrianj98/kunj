@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-26 (icon)
+* **New page**: `apps/icon.md` covers the icon sources, `scripts/gen-icons.sh` and where each output goes.
+
 ## 2026-10-26 (serve guard)
 * **Containers**: `containers/remotes.md` gains "What the server refuses" (volumes, networks, capabilities) and tunnel closing.
 
