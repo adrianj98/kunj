@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-27 — alertd-core blueprint (outside this repo, not committed)
+
+- `~/.kunj/alertd-core/blueprint.json` and the develop worktree's `.kunj/blueprint.json`: the
+  `alias sso=…` setup step became `"aliases": {"sso": …}`, and the misplaced `container.files` moved to
+  `~/.kunj/alertd-core/config.json`. Why: the unquoted alias line exited 1 and failed every snapshot
+  build; both copies are now identical so they hash the same (4a9fe5348cd8).
+
 ## 2026-10-27 — Blueprint `aliases`
 
 - New blueprint key `aliases: { name: command }`. `provisionNew()` writes them as root, after the
