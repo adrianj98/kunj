@@ -55,7 +55,8 @@ fails with `Image not found`.
 `src/container/sandbox/Dockerfile`: `debian:bookworm-slim` with git, git-lfs, curl, tmux, socat, iproute2,
 procps, zsh, openssh-client, gnupg, Node 22 from NodeSource, `gh`, and `@anthropic-ai/claude-code` installed
 globally under `/usr`. It copies `git-credential-kunj` to `/usr/local/bin` and `zshrc` to `/etc/zsh/zshrc`
-(sources `/etc/profile.d/*.sh`, so preset tool env applies), creates user `dev` (uid 1000, zsh) and
+(sources `/etc/profile.d/*.sh`, so preset tool env applies), turns off zsh's new-user wizard in
+`/etc/zsh/zshenv` (zsh runs it before zshrc, and the home volume has no `~/.zshrc`), creates user `dev` (uid 1000, zsh) and
 `/workspace`, sets `NPM_CONFIG_PREFIX=/home/dev/.npm-global`, `LANG=C.UTF-8`, `TERM=xterm-256color`, and
 runs as `dev`. It has no sudo and no iptables: the helper owns the firewall.
 

@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-26 (zsh wizard)
+* **Containers**: `containers/images.md` notes the new-user wizard is turned off in `/etc/zsh/zshenv`.
+
 ## 2026-10-26 (icon)
 * **New page**: `apps/icon.md` covers the icon sources, `scripts/gen-icons.sh` and where each output goes.
 
