@@ -30,8 +30,10 @@ snapshot. This phase is provisioning only: no lint, test or run commands and no 
 ### The file
 
 JSONC at `.kunj/blueprint.json`. The file can be edited by the agent on its branch, so it may only
-describe what runs inside the sandbox: nothing in it can widen the firewall, forward secrets or choose
-the base image.
+describe what runs inside the sandbox: nothing in it can widen the firewall or forward secrets. It may
+name the base image (`image`), as devcontainer.json already can; the firewall lives in the network
+helper and the capabilities are dropped whatever the image, and an image it names is refused when it
+runs as root, like a devcontainer's.
 
 ```jsonc
 {
@@ -40,6 +42,7 @@ the base image.
   "maintain":  ["pnpm install --frozen-lockfile"],
   "lockfiles": ["pnpm-lock.yaml"],
   "notes":     "free text shown by status",
+  "image":     "sandbox",
   "services":  { "postgres": { "image": "postgres:16", "env": { "POSTGRES_PASSWORD": "dev" }, "port": 5432 } }
 }
 ```
@@ -51,6 +54,7 @@ the base image.
 | `maintain` | Run the same way on every start after the seed, to absorb lockfile drift; skipped right after `setup` in the same run. A failure is a warning. |
 | `lockfiles` | Paths whose blob ids are part of the hash. Default: whichever known names exist at the repo root (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `go.sum`, `Cargo.lock`, `Gemfile.lock`, `requirements*.txt`). |
 | `notes` | Free text, shown by `status`. |
+| `image` | The base image: `sandbox` (kunj's own, ignoring any devcontainer.json) or an image reference (refused at start when it runs as root). Precedence: `--image`, then `image`, then `container.image`, then the devcontainer, then the sandbox. Naming it skips the devcontainer entirely, its compose services too. `blueprint init` writes `sandbox`, since the presets install onto it, and keeps the image of a file it overwrites. |
 | `services` | Sidecar services; see [container-phase-2.md](container-phase-2.md). |
 
 Unknown keys warn once and are ignored.

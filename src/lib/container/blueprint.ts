@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
-import { Labels } from './backend';
+import { Labels, isImageRef } from './backend';
 import { parseJsonc } from './devcontainer';
 import { imageRepoName } from './image';
 import { LABEL } from './names';
@@ -29,12 +29,17 @@ export interface Blueprint {
   maintain: string[];
   lockfiles: string[];
   notes?: string;
+  /** The base image: `sandbox` (kunj's own, whatever devcontainer the repository has) or an image
+   * reference; over container.image and the devcontainer, under --image */
+  image?: string;
   /** Sidecar services; first in precedence over container.services and the devcontainer's compose file */
   services?: ServiceSpec[];
   ignoredKeys: string[];
 }
 
-const KNOWN_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes', 'services']);
+const KNOWN_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes', 'image', 'services']);
+
+export const SANDBOX_IMAGE_KEYWORD = 'sandbox';
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every(x => typeof x === 'string');
@@ -76,6 +81,9 @@ export function parseBlueprint(text: string, source: string): Blueprint {
     lockfiles = obj.lockfiles;
   }
   if (obj.notes !== undefined && typeof obj.notes !== 'string') throw new Error(`${source}: notes must be a string`);
+  if (obj.image !== undefined && (typeof obj.image !== 'string' || (obj.image !== SANDBOX_IMAGE_KEYWORD && !isImageRef(obj.image)))) {
+    throw new Error(`${source}: image must be "${SANDBOX_IMAGE_KEYWORD}" or an image reference`);
+  }
 
   const services = parseServices(obj.services, source);
 
@@ -85,6 +93,7 @@ export function parseBlueprint(text: string, source: string): Blueprint {
     maintain: commandList(obj, 'maintain', source),
     lockfiles,
     notes: obj.notes as string | undefined,
+    ...(obj.image !== undefined ? { image: obj.image as string } : {}),
     ...(services.length ? { services } : {}),
     ignoredKeys: Object.keys(obj).filter(k => !KNOWN_KEYS.has(k)).sort(),
   };

@@ -42,6 +42,15 @@ describe('parseBlueprint', () => {
     expect(bp.ignoredKeys).toEqual(['alpha', 'zeta']);
   });
 
+  it('takes "sandbox" or an image reference as image', () => {
+    expect(parseBlueprint('{"image": "sandbox"}', 'x.json').image).toBe('sandbox');
+    expect(parseBlueprint('{"image": "ghcr.io/o/img:1"}', 'x.json').image).toBe('ghcr.io/o/img:1');
+    expect(parseBlueprint('{}', 'x.json').image).toBeUndefined();
+    for (const bad of ['"-rf"', '"a b"', '1']) {
+      expect(() => parseBlueprint(`{"image": ${bad}}`, 'x.json')).toThrow('x.json: image must be "sandbox" or an image reference');
+    }
+  });
+
   it('rejects non-array setup with the key named', () => {
     expect(() => parseBlueprint('{"setup": "yarn"}', 'x.json')).toThrow('x.json: setup must be an array of strings');
   });

@@ -1156,6 +1156,7 @@ describe('ContainerCommand', () => {
       const text = fs.readFileSync(file, 'utf8');
       expect(text.endsWith('}\n')).toBe(true);
       expect(JSON.parse(text)).toEqual({
+        image: 'sandbox',
         tools: { node: '24', apt: ['jq', 'git-lfs'] },
         setup: ['npm ci', 'npm run build'],
         maintain: ['npm ci'],
@@ -1181,14 +1182,15 @@ describe('ContainerCommand', () => {
       expect(fs.readFileSync(file, 'utf8')).toBe('{"setup":["make"]}\n');
     });
 
-    it('blueprint init keeps the notes of the file it overwrites', async () => {
+    it('blueprint init keeps the notes and image of the file it overwrites', async () => {
       const file = path.join(mockRoot, '.kunj', 'blueprint.json');
       fs.mkdirSync(path.dirname(file));
-      fs.writeFileSync(file, '{ "setup": ["make"], "notes": "ask Ada about the db" }\n');
+      fs.writeFileSync(file, '{ "setup": ["make"], "notes": "ask Ada about the db", "image": "my/img:1" }\n');
       await new ContainerCommand().execute('blueprint', 'init', [], { yes: true });
       const written = JSON.parse(fs.readFileSync(file, 'utf8'));
       expect(written.setup).toEqual(['npm ci', 'npm run build']);
       expect(written.notes).toBe('ask Ada about the db');
+      expect(written.image).toBe('my/img:1');
     });
 
     it('status and snapshot resolve the working tree first and no longer ask to push', async () => {

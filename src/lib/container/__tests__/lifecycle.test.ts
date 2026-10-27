@@ -883,6 +883,29 @@ describe('startContainer', () => {
     expect(warnings.some(w => w.includes('postCreateCommand failed'))).toBe(true);
   });
 
+  it('skips the devcontainer when the blueprint names an image', async () => {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: tmp, env: GIT_ENV });
+    git('init', '-q');
+    fs.writeFileSync(path.join(tmp, '.devcontainer.json'), '{ "image": "node:22", "remoteUser": "node" }');
+    git('add', '.');
+    git('commit', '-qm', 'dc');
+    git('update-ref', `refs/remotes/origin/${BRANCH}`, 'HEAD');
+    const withImage = (image: string): ResolvedBlueprint => {
+      const text = JSON.stringify({ image });
+      return { blueprint: parseBlueprint(text, 'bp'), source: 'host', path: 'bp', text };
+    };
+
+    const sandbox = await startContainer(backend(), options({ blueprint: withImage('sandbox'), noSnapshot: true }));
+    expect(sandbox.image).toBe(SANDBOX_IMAGE(VERSION));
+
+    // An image named by the repository runs as a non-root user, as a devcontainer's must
+    const b = backend();
+    b.existingImages.add('bp/img:2');
+    b.execResults.set('id -u', { exitCode: 0, stdout: '0\n' });
+    await expect(startContainer(b, options({ blueprint: withImage('bp/img:2'), noSnapshot: true })))
+      .rejects.toThrow("The blueprint's image bp/img:2 runs as root");
+  });
+
   it('warns before building a devcontainer Dockerfile changed on this branch', async () => {
     const git = (...args: string[]) => execFileSync('git', args, { cwd: tmp, env: GIT_ENV });
     git('init', '-q');
@@ -1481,6 +1504,17 @@ describe('baseImageTag', () => {
   it('is the image a start resolves without a snapshot: the setting, else the sandbox', async () => {
     await expect(baseImageTag(options())).resolves.toBe(SANDBOX_IMAGE(VERSION));
     await expect(baseImageTag(options({ config: { container: { image: 'my/img:1' } } as KunjConfig }))).resolves.toBe('my/img:1');
+  });
+
+  it("puts the blueprint's image over container.image, and --image over both", async () => {
+    const withImage = (image: string): ResolvedBlueprint => {
+      const text = JSON.stringify({ image });
+      return { blueprint: parseBlueprint(text, 'bp'), source: 'host', path: 'bp', text };
+    };
+    const config = { container: { image: 'my/img:1' } } as KunjConfig;
+    await expect(baseImageTag(options({ config, blueprint: withImage('bp/img:2') }))).resolves.toBe('bp/img:2');
+    await expect(baseImageTag(options({ config, blueprint: withImage('sandbox') }))).resolves.toBe(SANDBOX_IMAGE(VERSION));
+    await expect(baseImageTag(options({ config, blueprint: withImage('bp/img:2'), imageOverride: 'cli:3' }))).resolves.toBe('cli:3');
   });
 });
 

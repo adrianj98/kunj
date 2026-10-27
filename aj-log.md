@@ -2,6 +2,18 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-26 — Blueprint `image` key
+
+- `.kunj/blueprint.json` takes `image`: `"sandbox"` (kunj's sandbox) or an image reference. Precedence:
+  `--image` > blueprint `image` > `container.image` > devcontainer > sandbox; naming one skips the
+  devcontainer (and its compose services). A referenced image is refused when it runs as root, like a
+  devcontainer image. `kunj ct blueprint init` writes `"image": "sandbox"` and keeps an existing image.
+  Why: alertd-core's devcontainer.json names `mcr.microsoft.com/vscode/devcontainers/typescript-node`, so
+  `blueprint snapshot` failed on an image that was not pulled (and its features are ignored anyway). The
+  user asked for the blueprint to override the image and for `init` to write one. The spec had said a
+  blueprint may not choose the image; devcontainer.json already could, the firewall is in the helper and
+  capabilities are dropped regardless, so the spec now says so.
+
 ## 2026-10-26 — Container shells: no zsh new-user wizard
 
 - The sandbox image turns off `zsh-newuser-install` in `/etc/zsh/zshenv` instead of `/etc/zsh/zshrc`.

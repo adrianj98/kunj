@@ -34,6 +34,7 @@ as hostile; the host checkout and `~/.kunj` are trusted.
 | `maintain` | same; run on every start except one that just ran `setup`; a failure is a warning |
 | `lockfiles` | paths for the hash; default `KNOWN_LOCKFILES` plus root `requirements*.txt` |
 | `notes` | free text, shown by `blueprint status`, kept by `init` |
+| `image` | `"sandbox"` (`SANDBOX_IMAGE_KEYWORD`) or an `isImageRef()` reference. `baseSource()` in lifecycle.ts: `--image` > `image` > `container.image` > devcontainer > sandbox; any `image` skips `readDevcontainer()` (so no compose services; `declaredServices()` skips it too). A reference becomes a `setting` source with `fromBlueprint`, which `checkImage()` refuses when uid is 0. `init` writes `sandbox`, keeps an existing value |
 | `services` | [sidecar services](/containers/services.md), highest precedence |
 
 Unknown keys are kept in `ignoredKeys` and printed by `status`.
@@ -62,7 +63,7 @@ worktree), the base image tag and the presets' content hashes. Start, `snapshot`
 
 | Command | Behaviour |
 | --- | --- |
-| `kunj ct blueprint init [--global] [--yes]` | `inferBlueprint()` on the checkout, prints its reasons, prompts for tools/setup/maintain (TTY), validates, writes `.kunj/blueprint.json` (or `~/.kunj/<repo>/blueprint.json` with `--global`); refuses to overwrite without `--yes` or confirmation; keeps existing `notes` |
+| `kunj ct blueprint init [--global] [--yes]` | `inferBlueprint()` on the checkout, prints its reasons, prompts for tools/setup/maintain (TTY), validates, writes `.kunj/blueprint.json` (or `~/.kunj/<repo>/blueprint.json` with `--global`) with `"image": "sandbox"`; refuses to overwrite without `--yes` or confirmation; keeps existing `notes` and `image` |
 | `kunj ct blueprint status [--base] [--blueprint]` (default) | source, path, hash, current snapshot or stale/none, notes, ignored keys; `--json`: `{ source, path, hash, snapshot, stale, others, notes }` |
 | `kunj ct blueprint snapshot` | build ahead of time; see [snapshots](/containers/snapshots.md) |
 | `kunj ct blueprint remove` | `removeSnapshots()`; `--json`: `{ removed }` |

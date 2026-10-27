@@ -31,6 +31,8 @@ The blueprint is `.kunj/blueprint.json` in the repository. Comments and trailing
   "maintain": ["pnpm install --frozen-lockfile"],
   // Files whose change means the snapshot is out of date
   "lockfiles": ["pnpm-lock.yaml"],
+  // The base image: kunj's sandbox, whatever devcontainer.json says
+  "image": "sandbox",
   // Shown by `kunj ct blueprint status`
   "notes": "E2E tests need the API on :4000 - run `pnpm dev:api` first"
 }
@@ -43,10 +45,12 @@ The blueprint is `.kunj/blueprint.json` in the repository. Comments and trailing
 | `maintain` | array of commands | Run the same way on every later start of a container, to absorb drift between the snapshot and the branch. A failure is a warning, not an error. Migrations against [services](../services/) go here, written so they can run again: `setup`'s only reach the snapshot build's temporary services. |
 | `lockfiles` | array of paths | Paths from the repository root that decide when the snapshot is stale. When omitted, kunj looks for the usual ones: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `requirements*.txt`, `go.sum`, `Cargo.lock`, `Gemfile.lock`. |
 | `notes` | string | Free text for people, shown by `status`. kunj does nothing else with it. |
+| `image` | string | The base image: `sandbox` for kunj's own sandbox image, or an image reference such as `ghcr.io/acme/dev:3`. It wins over `container.image` and the repository's devcontainer.json (whose compose services are then not started too); only `--image` wins over it. An image named here must not run as root. `blueprint init` writes `sandbox`, because the presets install onto it. |
 
-Unknown keys are ignored, and `status` lists them. The blueprint can only describe commands that run
-inside the container: nothing in it can widen the firewall, forward a secret or change the image,
-so it is safe for the agent to be able to edit it.
+Unknown keys are ignored, and `status` lists them. Nothing in the blueprint can widen the firewall
+or forward a secret, so it is safe for the agent to be able to edit it. It can pick the base image,
+as devcontainer.json can, but the firewall runs in a separate helper container and the container's
+capabilities are dropped whatever the image.
 
 ## Create one
 
@@ -83,7 +87,7 @@ would reinstall everything on every start.
 | `--yes` | Accept the proposal without prompting, and overwrite an existing file. |
 | `--global` | Write `~/.kunj/<repo>/blueprint.json` instead: a blueprint for your machine only, not committed. |
 
-Overwriting an existing blueprint keeps its `notes`. Commit the file so everyone's containers, and
+Overwriting an existing blueprint keeps its `notes` and `image`. Commit the file so everyone's containers, and
 the snapshots built from origin, use it.
 
 ## How a container uses it
@@ -127,7 +131,7 @@ The snapshot's hash covers:
 
 - the blueprint's text;
 - the lockfiles' contents **on origin's default branch** (not your current branch);
-- the base image the snapshot is built on (the sandbox image or your devcontainer image);
+- the base image the snapshot is built on (the blueprint's `image`, the sandbox image or your devcontainer image);
 - the presets the blueprint uses.
 
 Change any of them and the next new container rebuilds the snapshot. A branch whose lockfile

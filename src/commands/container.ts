@@ -63,7 +63,7 @@ import {
 import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
 import { CONTAINER_AGENT_STATE_FILE, agentArgv, checkShellSessionId, withAgentHooks } from '../lib/agent-session';
 import { parseOrigin, stripUserinfo } from '../lib/container/seed';
-import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
+import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, SANDBOX_IMAGE_KEYWORD, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
 import { precheckDind } from '../lib/container/dind';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
@@ -1433,11 +1433,14 @@ export class ContainerCommand extends BaseCommand {
 
     // Notes are written by hand and never inferred, so an overwrite keeps them
     let notes: string | undefined;
+    // The presets install onto kunj's sandbox, so a new blueprint names it; an overwrite keeps the old image
+    let image = SANDBOX_IMAGE_KEYWORD;
     let hadServices = false;
     if (exists) {
       try {
         const old = parseBlueprint(fs.readFileSync(file, 'utf8'), file);
         notes = old.notes;
+        image = old.image ?? image;
         hadServices = !!old.services?.length;
       } catch {
         // an unreadable or invalid file has nothing worth keeping
@@ -1470,12 +1473,14 @@ export class ContainerCommand extends BaseCommand {
       setup = commandsText(answers.setup);
       maintain = commandsText(answers.maintain);
     } else {
+      this.progress(`  image     ${image}`);
       this.progress(`  tools     ${formatTools(tools) || chalk.gray('none')}`);
       this.progress(`  setup     ${setup.join(', ') || chalk.gray('none')}`);
       this.progress(`  maintain  ${maintain.join(', ') || chalk.gray('none')}`);
     }
 
     const doc: Record<string, unknown> = {
+      image,
       ...(Object.keys(tools).length ? { tools } : {}),
       setup,
       maintain,

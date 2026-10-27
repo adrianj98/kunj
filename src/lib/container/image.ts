@@ -15,6 +15,8 @@ export interface ImageSource {
   /** User to run as; '' means the image's own USER (no --user is passed). */
   user: string;
   spec?: DevcontainerSpec;
+  /** A `setting` image named by the repository's blueprint: refused when it runs as root, like a devcontainer's */
+  fromBlueprint?: boolean;
   /** The kunj image this one is built FROM (the DinD image's sandbox): ensured before the build */
   base?: ImageSource;
 }

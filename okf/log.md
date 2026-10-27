@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-26 (blueprint image)
+* **Containers**: `containers/blueprints.md` documents the blueprint `image` key, its precedence and `init` writing `sandbox`.
+
 ## 2026-10-26 (zsh wizard)
 * **Containers**: `containers/images.md` notes the new-user wizard is turned off in `/etc/zsh/zshenv`.
 

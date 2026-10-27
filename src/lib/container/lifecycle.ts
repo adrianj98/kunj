@@ -10,7 +10,7 @@ import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutErro
 import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch, optionsLabel } from './names';
 import { ImageSource, credentialHelperSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
 import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devcontainer';
-import { Blueprint, ResolvedBlueprint, SEED_DIR, computeBlueprintHash, resolveBlueprint } from './blueprint';
+import { Blueprint, ResolvedBlueprint, SANDBOX_IMAGE_KEYWORD, SEED_DIR, computeBlueprintHash, resolveBlueprint } from './blueprint';
 import { Preset, orderTools, resolvePresets } from './presets';
 import { FoundSnapshot, findSnapshot, maintain, provisionNew } from './provision';
 import { ComposeSource, ServiceOwner, ServiceSpec, findServices, resolveServices, resumeServices, serviceNames, serviceRemoval, servicesOf, startServices, stopServices } from './services';
@@ -236,11 +236,16 @@ interface BlueprintPlan {
 
 async function baseSource(
   options: StartOptions,
-  warn: (m: string) => void
+  warn: (m: string) => void,
+  resolved: ResolvedBlueprint | null
 ): Promise<{ input: Parameters<typeof resolveImage>[0]; base: ImageSource; devcontainer: ResolveDevcontainer | null }> {
-  const setting = options.imageOverride || options.config.container?.image || '';
+  // --image, then the blueprint's image ("sandbox": kunj's own, no devcontainer), then container.image
+  const bpImage = options.imageOverride ? undefined : resolved?.blueprint.image;
+  const setting = options.imageOverride || (bpImage
+    ? (bpImage === SANDBOX_IMAGE_KEYWORD ? '' : bpImage)
+    : options.config.container?.image || '');
   let devcontainer: ResolveDevcontainer | null = null;
-  if (!setting) {
+  if (!setting && !bpImage) {
     const ref = hostRef(options.branch, options.create, options.base);
     if (options.create && !ref.startsWith('refs/')) {
       // origin/<base> may never have been fetched; the container clones it fresh anyway
@@ -259,7 +264,8 @@ async function baseSource(
     }
   }
   const input = { setting, devcontainer, repoName: options.repo.name, kunjVersion: options.kunjVersion };
-  const plain = resolveImage(input);
+  const resolvedImage = resolveImage(input);
+  const plain = bpImage && setting ? { ...resolvedImage, fromBlueprint: true } : resolvedImage;
   // Docker-in-Docker swaps the sandbox for the image built on it; snapshots hash and build on it too
   const base = dindMode(options.config.container) === 'off' ? plain : dindSource(plain, options.kunjVersion);
   return { input, base, devcontainer };
@@ -267,7 +273,7 @@ async function baseSource(
 
 /** The image a start would use without a blueprint snapshot; the snapshot hashes the same tag. */
 export async function baseImageTag(options: StartOptions, warn: (m: string) => void = () => {}): Promise<string> {
-  return (await baseSource(options, warn)).base.tag;
+  return (await baseSource(options, warn, await loadBlueprint(options))).base.tag;
 }
 
 async function resolveSource(
@@ -275,8 +281,8 @@ async function resolveSource(
   options: StartOptions,
   warn: (m: string) => void
 ): Promise<{ source: ImageSource; plan: BlueprintPlan | null; services: ServiceSpec[] }> {
-  const { input, base, devcontainer } = await baseSource(options, warn);
   const resolved = await step('setup', () => loadBlueprint(options));
+  const { input, base, devcontainer } = await baseSource(options, warn, resolved);
   // Checked before anything is created, so a bad definition fails the start cleanly
   const services = await step('setup', () =>
     resolveServices(backend, {
@@ -479,10 +485,10 @@ async function undoUp(backend: ContainerBackend, names: ContainerNames, mainId: 
 
 const NETHELPER_TAG = (version: string) => resolveHelperImage(version).tag;
 
-/** Refuse root (the branch can edit devcontainer.json) and warn about missing tools. */
+/** Refuse root (the branch can edit devcontainer.json and the blueprint) and warn about missing tools. */
 async function checkImage(backend: ContainerBackend, id: string, source: ImageSource, warn: (m: string) => void): Promise<void> {
   if (source.kind === 'sandbox') return;
-  if (source.kind === 'devcontainer') {
+  if (source.kind === 'devcontainer' || source.fromBlueprint) {
     let uid: string;
     try {
       const r = await backend.exec(id, ['id', '-u'], { user: source.user || undefined });
@@ -492,7 +498,9 @@ async function checkImage(backend: ContainerBackend, id: string, source: ImageSo
       throw new StartError(`remoteUser "${source.user}" does not exist in the image (${message(err)})`, 'image');
     }
     if (uid === '0') {
-      throw new StartError('The devcontainer image runs as root; set remoteUser to a non-root user', 'image');
+      throw new StartError(source.fromBlueprint
+        ? `The blueprint's image ${source.tag} runs as root; give it a non-root USER`
+        : 'The devcontainer image runs as root; set remoteUser to a non-root user', 'image');
     }
   }
   const r = await backend.exec(id, ['sh', '-c', 'for t in git tmux socat; do command -v $t >/dev/null 2>&1 || echo $t; done'], {
@@ -1104,7 +1112,8 @@ async function declaredServices(
   try {
     // As the container was made: a start with an image setting read no devcontainer, one without did.
     // A snapshot (or an older container without the record) does not say, so the current setting decides.
-    const fromSetting = imageKind === 'setting' || ((imageKind === undefined || imageKind === 'blueprint') && !!options.config.container?.image);
+    const fromSetting = imageKind === 'setting' || !!blueprint?.blueprint.image ||
+      ((imageKind === undefined || imageKind === 'blueprint') && !!options.config.container?.image);
     const devcontainer = fromSetting ? null : await readDevcontainer(hostRef(options.branch, false, undefined), options.cwd);
     return await resolveServices(backend, {
       blueprint: blueprint?.blueprint.services,
