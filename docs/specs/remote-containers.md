@@ -230,12 +230,16 @@ container to know which images are in use).
   replaced under its name by a foreign one passes for up to 2 s, to a token holder who could exec into
   kunj's containers anyway. Volumes and networks in
   `remove` must carry `kunj.repo` too.
-- `run`: the spec's labels must include `kunj.repo` and only `kunj.*` keys; `privileged` and `runtime`
-  are refused unless the server was started with `--allow-privileged` / `--allow-runtime sysbox-runc`,
-  and `features.dockerInDocker` reports only what is allowed, so the client's `checkDind()` refuses
-  before it tries. `spec.image` is whatever the branch chose (a devcontainer, `container.image`).
-  `spec.publish` is allowed: docker.ts binds published ports to the box's loopback, where they are
-  useless from the laptop but harmless; `forward` is the way to reach a port.
+- `run`: the spec's labels must include `kunj.repo` and only `kunj.*` keys; `privileged`, `securityOpt`,
+  capabilities outside kunj's main/helper sets (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`,
+  `NET_ADMIN`, `NET_RAW`) and `runtime` are refused unless the server was started with
+  `--allow-privileged` / `--allow-runtime sysbox-runc`, and `features.dockerInDocker` reports only what
+  is allowed, so the client's `checkDind()` refuses before it tries. Volumes in `spec.volumes` must be
+  named volumes (never host paths) mounted at absolute paths, and any existing volume must carry
+  `kunj.repo`; `spec.networkOf` must also name a kunj container. `spec.image` is whatever the branch
+  chose (a devcontainer, `container.image`). `spec.publish` is allowed: docker.ts binds published ports
+  to the box's loopback, where they are useless from the laptop but harmless; `forward` is the way to
+  reach a port.
 - `buildImage`, `commitContainer`, `removeImage`: the whole reference must start with `kunj-` (kunj's
   tags have no registry or namespace, so `evil.example/kunj-x` is refused). `imageExists` is
   open (lifecycle asks about the branch's image, whatever it is).
@@ -277,9 +281,10 @@ container to know which images are in use).
   then its one TTY exec is the WebSocket channel above, kunj itself relaying between SwiftTerm's pty and
   the socket. tmux stays inside the container, so a reopened tab reattaches as locally. Nothing in the
   apps changes. For an `--ssh` remote the tunnel's `ssh` must never prompt from a GUI: keys through the
-  agent (macOS gives GUI apps `SSH_AUTH_SOCK`), and `kunj remote add --ssh` connects once,
-  interactively, so the host key is in `known_hosts` before any app session; a prompt that does appear
-  lands in the terminal tab, where it can be answered. A `--url` remote has no such step.
+  agent (macOS gives GUI apps `SSH_AUTH_SOCK`), and `kunj remote add --ssh` prints a hint to run
+  `kunj remote ping <name>` interactively first so the host key is in `known_hosts` before any app
+  session; a prompt that does appear lands in the terminal tab, where it can be answered. A `--url`
+  remote has no such step.
 - **The SSH tunnel** (`openTunnel()`): `ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30
   -L 127.0.0.1:<free>:127.0.0.1:<port> -- <destination>`, stdin left to this process so a prompt can be
   answered where there is a terminal, up once the local port accepts a connection (ssh listens only
@@ -350,7 +355,7 @@ v1; if a listing turns out slow, the first batch is a `GET /v1/containers?label=
 4. TTY exec: `execTty()` in docker.ts over the Engine API; the client's raw-mode terminal and resize;
    `shell`, `attach` and `agent` against a remote.
 5. The SSH tunnel; `kunj events` per-repo remotes; `spawnDetached` with `--remote`.
-6. Docker and functional tests; docs-site page; `kunj setup` asks about a remote when `ct` is used.
+6. Docker and functional tests; docs-site page; `kunj setup` prints a tip for remote container setup.
 7. Later: Remote-SSH editor attach, TLS, per-user tokens.
 
 ## Decisions

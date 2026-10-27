@@ -60,13 +60,14 @@ describe('kunj serve: unary routes', () => {
 
   afterEach(() => server.close());
 
-  it('refuses a missing or wrong token before touching the backend', async () => {
+  it('refuses a missing or wrong token before touching the backend, and rate-limits unauthorized log lines per address', async () => {
     expect((await request(port, 'GET', '/v1/info', undefined, null)).status).toBe(401);
     const wrong = await request(port, 'GET', '/v1/info', undefined, 'nope');
     expect(wrong).toEqual({ status: 401, body: { error: { code: 'unauthorized', message: 'unauthorized' } } });
     expect(fake.calls).toEqual([]);
     expect(logged.join('\n')).not.toContain(TOKEN);
     expect(logged.join('\n')).not.toContain('nope');
+    expect(logged.filter(l => l.startsWith('unauthorized request from'))).toHaveLength(1);
   });
 
   it('describes itself', async () => {
@@ -90,11 +91,21 @@ describe('kunj serve: unary routes', () => {
     expect(fake.callsOf('run')).toEqual([[s]]);
   });
 
-  it('refuses a run without kunj.repo, with a foreign label, privileged or a runtime', async () => {
+  it('refuses a run without kunj.repo, with a foreign label, privileged, unallowed capabilities/securityOpt, host or foreign volumes, foreign networkOf, or a runtime', async () => {
+    fake.volumes.add('foreign-vol');
+    fake.volumeLabels.set('foreign-vol', { app: 'db' });
+    fake.existing.push({ id: 'c2', name: 'foreign-ct', state: 'running', image: 'i', createdAt: 't', labels: { app: 'db' }, ports: [] });
     const cases: Array<[Partial<ContainerSpec>, RegExp]> = [
       [{ labels: { 'kunj.branch': 'b' } }, /kunj.repo/],
       [{ labels: { 'kunj.repo': 'r', 'com.example': 'x' } }, /only kunj\.\* labels/],
       [{ privileged: true }, /--allow-privileged/],
+      [{ capabilities: ['SYS_ADMIN'] }, /capability SYS_ADMIN is not allowed/],
+      [{ securityOpt: ['apparmor=unconfined'] }, /securityOpt is not allowed/],
+      [{ volumes: [{ name: '/etc/shadow', path: '/mnt' }] }, /volume \/etc\/shadow: host paths are not allowed/],
+      [{ volumes: [{ name: '../etc', path: '/mnt' }] }, /volume \.\.\/etc: host paths are not allowed/],
+      [{ volumes: [{ name: 'kunj-vol', path: 'relative/path' }] }, /target path relative\/path must be absolute/],
+      [{ volumes: [{ name: 'foreign-vol', path: '/mnt' }] }, /volume foreign-vol is not kunj's/],
+      [{ networkOf: 'foreign-ct' }, /foreign-ct is not a kunj container/],
       [{ runtime: 'sysbox-runc' }, /--allow-runtime sysbox-runc/],
     ];
     for (const [over, message] of cases) {
@@ -107,11 +118,28 @@ describe('kunj serve: unary routes', () => {
     expect(logged.some(l => l.startsWith('refused POST /v1/containers'))).toBe(true);
   });
 
-  it('allows privileged and a runtime when the server was started with the flags', async () => {
+  it('allows kunj capabilities, kunj volumes and kunj networkOf without --allow-privileged', async () => {
+    fake.volumes.add('kunj-vol');
+    fake.volumeLabels.set('kunj-vol', { 'kunj.repo': 'r' });
+    fake.existing.push({ id: 'c1', name: 'kunj-net', state: 'running', image: 'i', createdAt: 't', labels: { 'kunj.repo': 'r' }, ports: [] });
+    const r = await request(
+      port,
+      'POST',
+      '/v1/containers',
+      spec({
+        capabilities: ['CHOWN', 'NET_ADMIN'],
+        volumes: [{ name: 'kunj-vol', path: '/workspace' }, { name: 'new-kunj-vol', path: '/cache' }],
+        networkOf: 'kunj-net',
+      }),
+    );
+    expect(r.status).toBe(200);
+  });
+
+  it('allows privileged, capabilities, securityOpt and a runtime when the server was started with the flags', async () => {
     await server.close();
     server = createServeServer({ backend: fake, token: TOKEN, version: '1', allowPrivileged: true, allowRuntimes: ['sysbox-runc'] });
     port = (await server.listen('127.0.0.1', 0)).port;
-    expect((await request(port, 'POST', '/v1/containers', spec({ privileged: true }))).status).toBe(200);
+    expect((await request(port, 'POST', '/v1/containers', spec({ privileged: true, capabilities: ['SYS_ADMIN'], securityOpt: ['seccomp=unconfined'] }))).status).toBe(200);
     expect((await request(port, 'POST', '/v1/containers', spec({ runtime: 'sysbox-runc' }))).status).toBe(200);
   });
 

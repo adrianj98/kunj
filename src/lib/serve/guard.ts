@@ -31,6 +31,9 @@ const REPO_LABEL = 'kunj.repo';
 // Short: a kunj container removed out of band and replaced under the same name is let through for
 // at most this long (the token holder could exec into kunj's containers anyway)
 const CACHE_MS = 2000;
+const VOLUME_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+// Capabilities kunj's main container (MAIN_CAPABILITIES) and network helper use; anything else needs --allow-privileged
+const ALLOWED_CAPABILITIES = new Set(['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID', 'NET_ADMIN', 'NET_RAW']);
 
 function refused(message: string): ServeError {
   return new ServeError(403, 'remote-refused', message);
@@ -79,7 +82,7 @@ export class Guard {
     if (!tag || !tag.startsWith(IMAGE_TAG_PREFIX) || tag.includes('/')) throw refused(`${tag || '(empty)'} is not a kunj image`);
   }
 
-  runSpec(spec: ContainerSpec): void {
+  async runSpec(spec: ContainerSpec): Promise<void> {
     if (!isKunjLabels(spec.labels)) throw refused('a container must carry the kunj.repo label');
     for (const key of Object.keys(spec.labels)) {
       if (!key.startsWith('kunj.')) throw refused(`label ${key}: only kunj.* labels may be set`);
@@ -87,6 +90,35 @@ export class Guard {
     if (spec.privileged && !this.flags.allowPrivileged) throw refused('privileged containers are off on this server (kunj serve --allow-privileged)');
     if (spec.runtime && !this.flags.allowRuntimes.includes(spec.runtime)) {
       throw refused(`runtime ${spec.runtime} is not allowed on this server (kunj serve --allow-runtime ${spec.runtime})`);
+    }
+    if (!this.flags.allowPrivileged) {
+      for (const cap of spec.capabilities ?? []) {
+        if (!ALLOWED_CAPABILITIES.has(cap)) {
+          throw refused(`capability ${cap} is not allowed on this server (kunj serve --allow-privileged)`);
+        }
+      }
+      if (spec.securityOpt?.length) {
+        throw refused('securityOpt is not allowed on this server (kunj serve --allow-privileged)');
+      }
+    }
+    for (const v of spec.volumes) {
+      if (!v || typeof v.name !== 'string' || typeof v.path !== 'string') {
+        throw new ServeError(400, 'bad-request', 'expected volume { name, path }');
+      }
+      if (/^[/.~]/.test(v.name) || v.name.includes('/') || !VOLUME_NAME.test(v.name)) {
+        throw refused(`volume ${v.name || '(empty)'}: host paths are not allowed, only named volumes`);
+      }
+      if (!v.path.startsWith('/')) {
+        throw refused(`volume ${v.name}: target path ${v.path} must be absolute`);
+      }
+    }
+    if (spec.networkOf) await this.container(spec.networkOf);
+    if (spec.volumes.length) {
+      const known = new Map((await this.lookup.volumes()).map(v => [v.name, v.labels]));
+      for (const v of spec.volumes) {
+        const labels = known.get(v.name);
+        if (labels && !isKunjLabels(labels)) throw refused(`volume ${v.name} is not kunj's`);
+      }
     }
     // spec.image is any image the branch chose (a devcontainer, container.image): not restricted.
     // Published ports bind to the server's loopback (docker.ts), useless from the laptop but harmless.

@@ -135,6 +135,24 @@ describe('RemoteKunjBackend: streams', () => {
       expect(aborted).toBe(true);
       h = await startHarness(); // for afterEach
     });
+
+    it('aborts an in-flight exec when io.signal fires on the client', async () => {
+      let serverAborted = false;
+      const execStarted = new Promise<void>(resolve => {
+        h.fake.execHandler = (_id, _cmd, io) => {
+          io.signal!.addEventListener('abort', () => (serverAborted = true));
+          resolve();
+          return new Promise(res => io.signal!.addEventListener('abort', () => res({ exitCode: 137, stdout: '' })));
+        };
+      });
+      const controller = new AbortController();
+      const exec = h.remote.exec('kunj-r-b-1', ['sleep', '10'], { signal: controller.signal });
+      await execStarted;
+      controller.abort();
+      await expect(exec).rejects.toThrow('exec aborted');
+      await new Promise(r => setTimeout(r, 50));
+      expect(serverAborted).toBe(true);
+    });
   });
 
   describe('TTY tail', () => {
@@ -220,6 +238,27 @@ describe('RemoteKunjBackend: streams', () => {
       expect(opts).toMatchObject({ follow: true, tail: 10 });
       // A client that leaves a follow ends it on the box
       expect(opts.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('resolves a followed log stream when opts.signal aborts', async () => {
+      let serverAborted = false;
+      const started = new Promise<void>(resolve => {
+        h.fake.logs = (_id, opts) =>
+          new Promise<void>(res => {
+            opts?.signal?.addEventListener('abort', () => {
+              serverAborted = true;
+              res();
+            });
+            resolve();
+          });
+      });
+      const controller = new AbortController();
+      const done = h.remote.logs('kunj-r-b-1', { follow: true, signal: controller.signal, onLine: () => {} });
+      await started;
+      controller.abort();
+      await expect(done).resolves.toBeUndefined();
+      await new Promise(r => setTimeout(r, 50));
+      expect(serverAborted).toBe(true);
     });
   });
 

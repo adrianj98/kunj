@@ -148,7 +148,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     expect(spec.command, isStringArray, 'command');
     spec.publish = Array.isArray(spec.publish) ? spec.publish : [];
     spec.volumes = Array.isArray(spec.volumes) ? spec.volumes : [];
-    guard.runSpec(spec);
+    await guard.runSpec(spec);
     guard.forget(spec.name);
     return { id: await backend.run(spec) };
   });
@@ -195,7 +195,16 @@ export function createServeServer(opts: ServeOptions): ServeServer {
   });
 
   // ---- streaming bodies ----
-  const streamOpts: StreamOptions = { backend, guard, token: opts.token, log };
+  const unauthorizedAt = new Map<string, number>();
+  const logUnauthorized = (what: string, address: string | undefined) => {
+    const addr = address ?? '?';
+    const now = Date.now();
+    const last = unauthorizedAt.get(addr);
+    if (last !== undefined && now - last < 60_000) return;
+    unauthorizedAt.set(addr, now);
+    log(`${what} from ${addr}`);
+  };
+  const streamOpts: StreamOptions = { backend, guard, token: opts.token, log, logUnauthorized };
   route('POST', '/v1/containers/:id/copy', (req, p, url) => serveCopyIn(req, p.id, url, streamOpts));
   route('POST', '/v1/images/:tag/build', (req, p) => serveBuild(req, p.tag, streamOpts));
 
@@ -231,7 +240,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     const finish = (status: number) => log(`${req.method} ${url.pathname} ${status} ${Date.now() - started}ms`);
     res.on('finish', () => finish(res.statusCode));
     if (!tokenMatches(bearerOf(req), opts.token)) {
-      log(`unauthorized request from ${req.socket.remoteAddress ?? '?'}`);
+      logUnauthorized('unauthorized request', req.socket.remoteAddress);
       req.resume();
       return sendError(res, new ServeError(401, 'unauthorized', 'unauthorized'));
     }

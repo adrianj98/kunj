@@ -37,7 +37,7 @@ import { shellQuote } from '../lib/config-vars';
 import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
-import { selectBackend } from '../lib/container/select-backend';
+import { BackendSelection, remoteNameOf, selectBackend } from '../lib/container/select-backend';
 import { ContainerStatus, describeGuard, emptyStatus, forwardedEnv } from '../lib/container/env';
 import { githubTokenSource } from '../lib/container/tokens';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
@@ -131,6 +131,7 @@ export type SecretsUnlock = Partial<Pick<LoadSecretsOptions, 'mode' | 'env' | 'p
 
 export class ContainerCommand extends BaseCommand {
   private backend?: ContainerBackend;
+  private readonly selections = new Map<string, BackendSelection>();
   private readonly secretsUnlock: SecretsUnlock;
 
   constructor(deps: { secretsUnlock?: SecretsUnlock } = {}) {
@@ -248,12 +249,22 @@ export class ContainerCommand extends BaseCommand {
         const jsonCode = (error as { jsonCode?: unknown } | null)?.jsonCode;
         const code = error instanceof StartError ? error.code : error instanceof HookError ? 'hook' : typeof jsonCode === 'string' ? jsonCode : 'error';
         process.stdout.write(JSON.stringify({ error: { code, message } }) + '\n');
+        await this.closeBackends();
         process.exit(1);
       }
       // Every failure here is an outcome to report, not a crash: one line, no stack trace
       console.error(chalk.red(`✗ ${message}`));
       process.exitCode = 1;
+    } finally {
+      await this.closeBackends();
     }
+  }
+
+  /** Close any remote tunnels opened by this command. */
+  async closeBackends(): Promise<void> {
+    const open = [...this.selections.values()];
+    this.selections.clear();
+    await Promise.all(open.map(s => s.close().catch(() => undefined)));
   }
 
   // "docker ps failed: …" says little when the daemon is down; `docker info` says that clearly.
@@ -335,7 +346,13 @@ export class ContainerCommand extends BaseCommand {
     // Credentials in the remote URL stay on the host (seed.ts strips them too)
     const originUrl = stripUserinfo(getOriginUrl() || '');
     const repo = { root, name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root), originUrl };
-    const selection = await selectBackend({ remote: options.remote, context: options.context, config });
+    const remote = remoteNameOf(options, config);
+    const key = remote ? `remote:${remote}` : `docker:${options.context || config.container?.dockerContext || ''}`;
+    let selection = this.selections.get(key);
+    if (!selection) {
+      selection = await selectBackend({ remote: options.remote, context: options.context, config });
+      this.selections.set(key, selection);
+    }
     this.backend = selection.backend;
     return { config, repo, backend: this.backend, dockerContext: selection.dockerContext, remote: selection.remote };
   }
@@ -1130,12 +1147,17 @@ export class ContainerCommand extends BaseCommand {
   async listJson(options: { status?: boolean; context?: string; remote?: string } = {}): Promise<ContainerListJson> {
     // Its caller prints one JSON document: any progress or warning goes to stderr
     this.jsonMode = true;
-    return (await this.collectList(options)).json;
+    try {
+      return (await this.collectList(options)).json;
+    } finally {
+      await this.closeBackends();
+    }
   }
 
-  /** Kill docker calls still running (a wedged daemon), so the process can exit */
+  /** Kill docker calls still running (a wedged daemon) and close remote tunnels, so the process can exit */
   abortDockerCalls(): void {
     if (this.backend instanceof LocalDockerBackend) this.backend.killChildren();
+    void this.closeBackends();
   }
 
   private async collectList(options: ContainerOptions): Promise<{ json: ContainerListJson; mains: ContainerInfo[]; helpers: Map<string, ContainerInfo> }> {

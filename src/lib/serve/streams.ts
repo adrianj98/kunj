@@ -30,6 +30,7 @@ export interface StreamOptions {
   guard: Guard;
   token: string;
   log: (line: string) => void;
+  logUnauthorized?: (what: string, address: string | undefined) => void;
 }
 
 /** A Writable that sends each chunk as a frame and completes the write when the socket took it. */
@@ -132,6 +133,12 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
   let tty: TtySession | undefined;
   // The newest resize, kept until the pty exists
   let size: { cols: number; rows: number } | undefined;
+  let failFrame = (_err: Error) => {};
+  const frameFailed = new Promise<never>((_, reject) => {
+    failFrame = reject;
+  });
+  // Avoid an unhandled rejection if frameFailed rejects after serveExec already settled
+  frameFailed.catch(() => undefined);
   const requestText = firstMessage(ws);
 
   ws.on('message', (data: RawData, binary: boolean) => {
@@ -148,7 +155,17 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
       }
       return;
     }
-    const { channel, data: bytes } = decodeFrame(rawToBuffer(data));
+    let decoded: { channel: Channel; data: Buffer };
+    try {
+      decoded = decodeFrame(rawToBuffer(data));
+    } catch (err) {
+      stdin.destroy();
+      gone.abort();
+      tty?.close();
+      failFrame(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    const { channel, data: bytes } = decoded;
     if (channel !== CHANNEL.stdin) return;
     if (bytes.length === 0) {
       stdin.end();
@@ -164,7 +181,14 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
     tty?.close();
   });
 
-  const request = checkExecRequest(JSON.parse(await requestText));
+  const text = await Promise.race([requestText, frameFailed]);
+  let parsedRequest: unknown;
+  try {
+    parsedRequest = JSON.parse(text);
+  } catch {
+    throw new ServeError(400, 'bad-request', 'exec request is not JSON');
+  }
+  const request = checkExecRequest(parsedRequest);
   await opts.guard.container(id);
 
   if (request.tty) {
@@ -186,7 +210,7 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
     // never ends is given a moment, then ended)
     const drained = new Promise<void>(resolve => stdout.once('finish', resolve));
     tty.stdout.pipe(stdout);
-    const exitCode = await tty.wait();
+    const exitCode = await Promise.race([tty.wait(), frameFailed]);
     await Promise.race([drained, new Promise<void>(resolve => setTimeout(resolve, 2000))]);
     if (!stdout.writableFinished) {
       // Detach first: a pty byte piped after end() would be a write after end
@@ -213,7 +237,7 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
     timeoutMs: request.timeoutMs,
     signal: gone.signal,
   };
-  const result = await opts.backend.exec(id, request.cmd, io);
+  const result = await Promise.race([opts.backend.exec(id, request.cmd, io), frameFailed]);
   // A backend that answered in the result rather than the stream (the fake does): same bytes, same channel
   if (result.stdout) await new Promise<void>((resolve, reject) => stdout.write(result.stdout, err => (err ? reject(err) : resolve())));
   // Everything written before the exit was sent with a callback, so it is on the wire before this
@@ -264,7 +288,8 @@ export function attachWebSockets(server: http.Server, opts: StreamOptions): { cl
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://kunj.invalid');
     if (!tokenMatches(bearerOf(req), opts.token)) {
-      opts.log(`unauthorized upgrade from ${req.socket.remoteAddress ?? '?'}`);
+      if (opts.logUnauthorized) opts.logUnauthorized('unauthorized upgrade', req.socket.remoteAddress);
+      else opts.log(`unauthorized upgrade from ${req.socket.remoteAddress ?? '?'}`);
       socket.write('HTTP/1.1 401 Unauthorized\r\nconnection: close\r\ncontent-length: 0\r\n\r\n');
       socket.destroy();
       return;

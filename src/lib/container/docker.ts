@@ -558,7 +558,7 @@ export class LocalDockerBackend implements ContainerBackend {
       ...(opts.workdir ? { WorkingDir: opts.workdir } : {}),
       Env: Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${v}`),
     });
-    const execId: string = created.Id;
+    const execId = encodeURIComponent(String(created.Id ?? ''));
     const endpoint = await this.engineEndpoint();
 
     // Start with the connection hijacked: after the 101 the socket carries the pty's bytes both ways
@@ -584,11 +584,14 @@ export class LocalDockerBackend implements ContainerBackend {
       req.end(data);
     });
 
-    const stdout = new PassThrough();
+    const stdout = new PassThrough({ highWaterMark: 1024 * 1024 });
     socket.pipe(stdout);
     let closed = false;
+    let finishing = false;
     const exit = new Promise<number>((resolve, reject) => {
       const finish = async () => {
+        if (finishing) return;
+        finishing = true;
         // The process has ended when its connection does; its exit code is in the exec's state
         try {
           // The daemon marks the exec not Running a moment after the connection ends; 30 s is generous
@@ -609,6 +612,7 @@ export class LocalDockerBackend implements ContainerBackend {
       });
       socket.on('error', err => (closed ? undefined : reject(new Error(`docker exec failed: ${err.message}`))));
     });
+    exit.catch(() => undefined);
     await this.engineCall('POST', `/exec/${execId}/resize?h=${opts.rows}&w=${opts.cols}`).catch(() => undefined);
 
     return {

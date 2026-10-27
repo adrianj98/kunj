@@ -270,8 +270,12 @@ export class RemoteKunjBackend implements ContainerBackend {
     if (opts.follow) params.set('follow', '1');
     if (opts.tail !== undefined) params.set('tail', String(opts.tail));
     const onLine = opts.onLine ?? ((stream: 'stdout' | 'stderr', line: string) => process[stream].write(line + '\n'));
+    const { signal } = opts;
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) return resolve();
       const ws = this.socket(`/v1/containers/${encodeURIComponent(id)}/logs?${params}`);
+      const onAbort = () => ws.close();
+      signal?.addEventListener('abort', onAbort, { once: true });
       let failed: Error | undefined;
       ws.on('message', (data: RawData, binary: boolean) => {
         if (binary) return;
@@ -281,11 +285,24 @@ export class RemoteKunjBackend implements ContainerBackend {
           failed = new Error(control.error);
           return;
         }
-        const line = JSON.parse(text) as { stream: 'stdout' | 'stderr'; line: string };
-        onLine(line.stream, line.line);
+        try {
+          const line = JSON.parse(text) as { stream: 'stdout' | 'stderr'; line: string };
+          onLine(line.stream, line.line);
+        } catch {
+          failed = new RemoteError(`remote ${this.name}: malformed log frame`, 'remote-protocol');
+          ws.close();
+        }
       });
-      ws.on('error', err => reject(this.wsError(err)));
-      ws.on('close', () => (failed ? reject(failed) : resolve()));
+      ws.on('error', err => {
+        signal?.removeEventListener('abort', onAbort);
+        if (signal?.aborted) return resolve();
+        reject(this.wsError(err));
+      });
+      ws.on('close', () => {
+        signal?.removeEventListener('abort', onAbort);
+        if (signal?.aborted) return resolve();
+        return failed ? reject(failed) : resolve();
+      });
     });
   }
 
@@ -304,10 +321,16 @@ export class RemoteKunjBackend implements ContainerBackend {
           failed = new Error(`docker events failed: ${control.error}`);
           return;
         }
-        onEvent(JSON.parse(text) as BackendEvent);
+        try {
+          onEvent(JSON.parse(text) as BackendEvent);
+        } catch {
+          failed = new RemoteError(`remote ${this.name}: malformed event frame`, 'remote-protocol');
+          ws.close();
+        }
       });
       ws.on('error', err => {
         signal.removeEventListener('abort', onAbort);
+        if (signal.aborted) return resolve();
         reject(this.wsError(err));
       });
       ws.on('close', () => {
@@ -330,10 +353,12 @@ export class RemoteKunjBackend implements ContainerBackend {
     const size = () => ({ cols: (stdout as Terminal['stdout']).columns || 80, rows: (stdout as Terminal['stdout']).rows || 24 });
     const request: ExecRequest = { cmd, user: io.user, workdir: io.workdir, env: io.env, tty: true, stdin: true };
     return new Promise((resolve, reject) => {
+      if (io.signal?.aborted) return reject(new Error('exec aborted'));
       const ws = this.socket(`/v1/containers/${encodeURIComponent(id)}/exec`);
       let settled = false;
       let exitCode: number | undefined;
       let failure: Error | undefined;
+      let draining = false;
       let unsubscribe = () => {};
       const wasRaw = !!stdin.isRaw;
       const rawMode = (on: boolean) => {
@@ -348,9 +373,14 @@ export class RemoteKunjBackend implements ContainerBackend {
       const onEnd = () => {
         if (ws.readyState === WebSocket.OPEN) ws.send(encodeFrame(CHANNEL.stdin, ''), { binary: true });
       };
+      const onAbort = () => {
+        finish(() => reject(new Error('exec aborted')));
+        ws.close();
+      };
       const finish = (fn: () => void) => {
         if (settled) return;
         settled = true;
+        io.signal?.removeEventListener('abort', onAbort);
         stdin.off('data', onData);
         stdin.off('end', onEnd);
         stdin.pause();
@@ -359,6 +389,7 @@ export class RemoteKunjBackend implements ContainerBackend {
         restore();
         fn();
       };
+      io.signal?.addEventListener('abort', onAbort, { once: true });
 
       ws.on('open', () => {
         ws.send(JSON.stringify(request));
@@ -374,19 +405,28 @@ export class RemoteKunjBackend implements ContainerBackend {
         stdin.resume();
       });
       ws.on('message', (data: RawData, binary: boolean) => {
-        if (binary) {
-          const { channel, data: bytes } = decodeFrame(rawToBuffer(data));
-          if (channel === CHANNEL.stdout || channel === CHANNEL.stderr) {
-            if (!stdout.write(bytes)) {
-              ws.pause();
-              stdout.once('drain', () => ws.resume());
+        try {
+          if (binary) {
+            const { channel, data: bytes } = decodeFrame(rawToBuffer(data));
+            if (channel === CHANNEL.stdout || channel === CHANNEL.stderr) {
+              if (!stdout.write(bytes) && !draining) {
+                draining = true;
+                ws.pause();
+                stdout.once('drain', () => {
+                  draining = false;
+                  if (!settled) ws.resume();
+                });
+              }
             }
+            return;
           }
-          return;
+          const control = parseControl(rawToString(data));
+          if ('exit' in control) exitCode = control.exit;
+          else if ('error' in control) failure = new Error(control.error);
+        } catch (err) {
+          failure = err instanceof Error ? err : new Error(String(err));
+          ws.close();
         }
-        const control = parseControl(rawToString(data));
-        if ('exit' in control) exitCode = control.exit;
-        else if ('error' in control) failure = new Error(control.error);
       });
       ws.on('error', err => finish(() => reject(this.wsError(err))));
       ws.on('close', () =>
@@ -462,14 +502,21 @@ export class RemoteKunjBackend implements ContainerBackend {
       timeoutMs: io.timeoutMs,
     };
     return new Promise((resolve, reject) => {
+      if (io.signal?.aborted) return reject(new Error('exec aborted'));
       const ws = this.socket(`/v1/containers/${encodeURIComponent(id)}/exec`);
       const collected: Buffer[] = [];
+      const draining = new Set<NodeJS.WritableStream>();
       let settled = false;
       let exitCode: number | undefined;
       let failure: Error | undefined;
+      const onAbort = () => {
+        finish(() => reject(new Error('exec aborted')));
+        ws.close();
+      };
       const finish = (fn: () => void) => {
         if (settled) return;
         settled = true;
+        io.signal?.removeEventListener('abort', onAbort);
         if (stdinStream) {
           stdinStream.off('data', onStdinData);
           stdinStream.off('end', onStdinEnd);
@@ -477,6 +524,7 @@ export class RemoteKunjBackend implements ContainerBackend {
         }
         fn();
       };
+      io.signal?.addEventListener('abort', onAbort, { once: true });
 
       // stdin → frames; the source waits for each frame to reach the socket (send's callback)
       const onStdinData = (chunk: Buffer | string) => {
@@ -491,15 +539,19 @@ export class RemoteKunjBackend implements ContainerBackend {
         if (ws.readyState === WebSocket.OPEN) ws.send(encodeFrame(CHANNEL.stdin, ''), { binary: true });
       };
 
-      // frames → io streams; the socket waits while a stream is behind
+      // frames → io streams; the socket waits while any stream is behind
       const deliver = (target: NodeJS.WritableStream | undefined, bytes: Buffer, collect: boolean) => {
         if (!target) {
           if (collect) collected.push(bytes);
           return;
         }
-        if (!target.write(bytes)) {
+        if (!target.write(bytes) && !draining.has(target)) {
+          draining.add(target);
           ws.pause();
-          target.once('drain', () => ws.resume());
+          target.once('drain', () => {
+            draining.delete(target);
+            if (draining.size === 0 && !settled) ws.resume();
+          });
         }
       };
 
@@ -513,18 +565,23 @@ export class RemoteKunjBackend implements ContainerBackend {
         }
       });
       ws.on('message', (data: RawData, binary: boolean) => {
-        if (binary) {
-          const { channel, data: bytes } = decodeFrame(rawToBuffer(data));
-          if (channel === CHANNEL.stdout) deliver(stdout, bytes, true);
-          else if (channel === CHANNEL.stderr) deliver(stderr, bytes, false);
-          return;
-        }
-        const control = parseControl(rawToString(data));
-        if ('exit' in control) exitCode = control.exit;
-        else if ('error' in control) {
-          failure = control.error === 'timeout'
-            ? new ExecTimeoutError(`docker exec timed out after ${io.timeoutMs} ms`)
-            : new Error(control.error);
+        try {
+          if (binary) {
+            const { channel, data: bytes } = decodeFrame(rawToBuffer(data));
+            if (channel === CHANNEL.stdout) deliver(stdout, bytes, true);
+            else if (channel === CHANNEL.stderr) deliver(stderr, bytes, false);
+            return;
+          }
+          const control = parseControl(rawToString(data));
+          if ('exit' in control) exitCode = control.exit;
+          else if ('error' in control) {
+            failure = control.error === 'timeout'
+              ? new ExecTimeoutError(`docker exec timed out after ${io.timeoutMs} ms`)
+              : new Error(control.error);
+          }
+        } catch (err) {
+          failure = err instanceof Error ? err : new Error(String(err));
+          ws.close();
         }
       });
       ws.on('error', err => finish(() => reject(this.wsError(err))));
