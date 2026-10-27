@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- Spike page: monaco-vscode-api (editor only) with TextMate, VS Code themes and languages.
+     Loaded by the Swift harness as kunj://app/index.html; posts its result to messageHandlers.spike. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>monaco-vscode-api spike</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1b19; }
+  #editor { position: absolute; left: 0; top: 0; width: 50%; bottom: 0; }
+  #diff { position: absolute; left: 50%; top: 0; right: 0; bottom: 0; }
+</style>
+</head>
+<body>
+<div id="editor"></div><div id="diff"></div>
+<script type="module" src="./src/main.ts"></script>
+</body>
+</html>

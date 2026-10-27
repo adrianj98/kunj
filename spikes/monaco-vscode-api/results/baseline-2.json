@@ -1,0 +1,41 @@
+{
+  "coi" : false,
+  "console" : [
+    "occlusion detection switch: true"
+  ],
+  "failedRequests" : [
+
+  ],
+  "page" : {
+    "crossOriginIsolated" : false,
+    "diffOk" : true,
+    "errors" : [
+
+    ],
+    "marks" : {
+      "diff" : 506,
+      "done" : 507,
+      "editor" : 309,
+      "initialized" : 190,
+      "script" : 14,
+      "theme" : 212,
+      "tokenised" : 507
+    },
+    "notes" : {
+      "diffChanges" : 3,
+      "languages" : 91,
+      "swiftTokenClasses" : 7,
+      "swiftTokenised" : true,
+      "tsTokenClasses" : 8,
+      "tsTokenised" : true
+    },
+    "ok" : true,
+    "workers" : [
+
+    ]
+  },
+  "requests" : 25,
+  "root" : "\/Users\/adrian\/projects\/kunj\/.git\/kunj\/worktrees\/monaco-vscode-api\/spikes\/monaco-vscode-api\/baseline",
+  "swiftWallMs" : 3959,
+  "webContentFootprintMB" : 316
+}

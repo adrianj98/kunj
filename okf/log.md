@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-27 (monaco-vscode-api spike)
+* **Apps**: `apps/workspace-app.md` notes the monaco-vscode-api spike and its result.
+
 ## 2026-10-27 (blueprint aliases)
 * **Containers**: `containers/blueprints.md` documents the `aliases` key and `/etc/profile.d/kunj-aliases.sh`.
 

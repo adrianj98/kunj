@@ -499,7 +499,11 @@ From the architecture review (2026-10-23):
   reopen) has no place in the Architecture or the plan yet.
 - [ ] Two WKWebViews may cost two Monaco web processes (the spike measured 340–420 MB for one);
   measure, and fall back to one view hosting both modes if it doubles.
-- [ ] Monaco 0.57's AMD build is deprecated; moving to the ESM build is a later cost.
+- [ ] Monaco 0.57's AMD build is deprecated; moving to the ESM build is a later cost. The
+  monaco-vscode-api spike (`spikes/monaco-vscode-api/REPORT.md`, 2026-10-27) found option B (its
+  editor-only use: TextMate grammars, VS Code themes, language detection by file name) works in a
+  WKWebView from the `kunj` scheme at about the same memory and load time; adopting it means a Vite
+  build, VS Code colour themes instead of `defineTheme`, and new language ids (`shellscript`).
 
 From the scaffold (Task 2):
 

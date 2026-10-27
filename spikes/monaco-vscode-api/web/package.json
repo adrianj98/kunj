@@ -1,0 +1,36 @@
+{
+  "name": "kunj-monaco-vscode-spike",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@codingame/monaco-vscode-api": "38.0.4",
+    "@codingame/monaco-vscode-configuration-service-override": "38.0.4",
+    "@codingame/monaco-vscode-languages-service-override": "38.0.4",
+    "@codingame/monaco-vscode-textmate-service-override": "38.0.4",
+    "@codingame/monaco-vscode-theme-service-override": "38.0.4",
+    "@codingame/monaco-vscode-theme-defaults-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-typescript-basics-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-javascript-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-json-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-markdown-basics-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-swift-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-python-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-go-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-rust-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-yaml-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-css-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-html-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-shellscript-default-extension": "38.0.4",
+    "@codingame/monaco-vscode-docker-default-extension": "38.0.4",
+    "monaco-editor": "npm:@codingame/monaco-vscode-editor-api@38.0.4"
+  },
+  "devDependencies": {
+    "@codingame/esbuild-import-meta-url-plugin": "1.0.3",
+    "typescript": "5.9.3",
+    "vite": "8.3.5"
+  }
+}

@@ -34,6 +34,10 @@ language mode). It is the third consumer of the [JSON contract](/architecture/js
 | `Resources/web/` | Monaco page: `?mode=diff` (Changes) and `?mode=editor` (editor tabs) |
 | `web/` | npm package pinning `monaco-editor` 0.57.0; `copy-monaco.js` copies `min/vs` into `Resources/web/vs` |
 
+A spike in `spikes/monaco-vscode-api/` (2026-10-27) ran `@codingame/monaco-vscode-api` 38 as an editor only
+(TextMate, VS Code themes, language extensions) in a WKWebView from the same `kunj` scheme: it works, at
+about the same memory and load time; `monaco.editor.defineTheme` is not available there. Not adopted yet.
+
 # kunj commands it runs
 
 | Command | Purpose |

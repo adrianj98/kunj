@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- Baseline: the workspace app's current Monaco (monaco-editor 0.57.0, AMD min/vs, Monarch
+     tokenizers) doing the same work as the spike page, for the timing and memory comparison. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>baseline</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1b19; }
+  #editor { position: absolute; left: 0; top: 0; width: 50%; bottom: 0; }
+  #diff { position: absolute; left: 50%; top: 0; right: 0; bottom: 0; }
+</style>
+</head>
+<body>
+<div id="editor"></div><div id="diff"></div>
+<script src="baseline.js"></script>
+</body>
+</html>

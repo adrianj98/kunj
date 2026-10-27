@@ -1,0 +1,75 @@
+{
+  "coi" : false,
+  "console" : [
+    "occlusion detection switch: true"
+  ],
+  "failedRequests" : [
+
+  ],
+  "page" : {
+    "crossOriginIsolated" : false,
+    "diffOk" : true,
+    "errors" : [
+
+    ],
+    "marks" : {
+      "diff" : 388,
+      "done" : 1019,
+      "editor" : 234,
+      "extensions" : 47,
+      "initialized" : 46,
+      "script" : 1,
+      "theme" : 124,
+      "tokenised" : 709
+    },
+    "notes" : {
+      "backgroundAfterSwitch" : "rgb(28, 27, 25)",
+      "defineTheme" : "threw: TypeError: pM.get(lj).defineTheme is not a function. (In 'pM.get(lj).defineTheme(e,t)', 'pM.get(lj).defineTheme' is undefined)",
+      "diffChanges" : 3,
+      "dom" : {
+        "cssRules" : 2594,
+        "editorRect" : "{\"x\":0,\"y\":0,\"width\":600,\"height\":700,\"top\":0,\"right\":600,\"bottom\":700,\"left\":0}",
+        "firstLineColor" : "rgb(232, 226, 214)",
+        "firstLineFont" : "",
+        "firstLineText" : "\/\/ A TypeScript sample",
+        "layout" : "{\"width\":600,\"height\":700,\"glyphMarginLeft\":0,\"glyphMarginWidth\":19,\"glyphMarginDecorationLaneCount\":1,\"lineNumbersLeft\":19,\"lineNumbersWidth\":38,\"decorationsLeft\":57,\"decorationsWidth\":26,\"contentLef",
+        "lines" : 13,
+        "monacoEditors" : 4,
+        "styleSheets" : 12,
+        "styleTags" : 11,
+        "tree" : "monaco-editor no-minimap-shadow enable-user-select mac standalone  showUnused showDeprecated vs-dark | overflow-guard | inputarea monaco-mouse-cursor-text | monaco-editor-background textAreaCover margin | margin | glyph-margin | margin-view-zones | margin-view-overlays | current-line current-line-margin-both | line-numbers active-line-number | line-numbers | line-numbers | line-numbers | line-numbers | cldr codicon codicon-folding-expanded | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | glyph-margin-widgets | monaco-scrollable-element editor-scrollable vs-dark mac | lines-content monaco-editor-background | view-overlays",
+        "viewLines" : 13,
+        "visible" : "[{\"startLineNumber\":1,\"startColumn\":1,\"endLineNumber\":13,\"endColumn\":1}]"
+      },
+      "editorBackground" : "rgb(28, 27, 25)",
+      "languageByUri" : {
+        ".zshrc" : "shellscript",
+        "Dockerfile" : "dockerfile",
+        "Package.swift" : "swift",
+        "x.go" : "go",
+        "x.md" : "markdown",
+        "x.rs" : "rust",
+        "x.sh" : "shellscript",
+        "x.tsx" : "typescriptreact",
+        "x.unknown" : "plaintext",
+        "x.yml" : "yaml"
+      },
+      "languages" : 1,
+      "swiftTokenClasses" : 5,
+      "swiftTokenised" : true,
+      "tsLanguageId" : "typescript",
+      "tsTokenClasses" : 6,
+      "tsTokenised" : true
+    },
+    "ok" : true,
+    "userAgent" : "Mozilla\/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit\/605.1.15 (KHTML, like Gecko)",
+    "workers" : [
+      "editorWorkerService",
+      "TextMateWorker"
+    ]
+  },
+  "requests" : 74,
+  "root" : "\/Users\/adrian\/projects\/kunj\/.git\/kunj\/worktrees\/monaco-vscode-api\/spikes\/monaco-vscode-api\/web\/dist",
+  "swiftWallMs" : 4913,
+  "webContentFootprintMB" : 337
+}
