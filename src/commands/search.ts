@@ -116,8 +116,9 @@ export class SearchCommand extends BaseCommand {
       mapLimit(worktrees, WORKTREE_CONCURRENCY, wt => searchWorktree(wt, q)),
       scopes.includes('branches') ? searchBranches(cwd, listing.worktrees, q, branches, options.origin === true) : null,
       scopes.includes('containers') ? searchContainers(q, branches) : null,
-      scopes.includes('commits') ? searchCommits(cwd, q, branches) : undefined,
-      scopes.includes('logs') ? searchWorkLogs(getWorkLogDir(), q) : undefined,
+      // A pattern git or JavaScript cannot read fails its own scope, not the whole search
+      scopes.includes('commits') ? settle(() => searchCommits(cwd, q, branches)) : undefined,
+      scopes.includes('logs') ? settle(async () => searchWorkLogs(getWorkLogDir(), q)) : undefined,
     ]);
 
     const sources = [...worktreeSources, ...(branchResult?.sources ?? []), ...(containerResult?.sources ?? [])].filter(
@@ -129,9 +130,17 @@ export class SearchCommand extends BaseCommand {
       searched: { worktrees: worktrees.length, branches: branchResult?.searched ?? 0, containers: containerResult?.searched ?? 0 },
       sources,
       ...(containerResult ? { containers: containerResult.status } : {}),
-      ...(commits ? { commits } : {}),
-      ...(logs ? { logs } : {}),
+      ...(commits ? { commits: commits.value ?? [], ...(commits.error ? { commitsError: commits.error } : {}) } : {}),
+      ...(logs ? { logs: logs.value ?? [], ...(logs.error ? { logsError: logs.error } : {}) } : {}),
     } satisfies SearchJson;
+  }
+}
+
+async function settle<T>(fn: () => Promise<T>): Promise<{ value?: T; error?: string }> {
+  try {
+    return { value: await fn() };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -187,15 +196,19 @@ async function searchContainers(
   // Loaded only for this scope: the container module is large and asks Docker
   const { ContainerCommand } = await import('./container');
   const command = new ContainerCommand();
+  // Stops the execs not yet started too: killing the running docker children alone lets the
+  // queued ones start, and the process waits for them
+  const abort = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   try {
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
+        abort.abort();
         command.abortDockerCalls();
         reject(new Error(`Docker did not answer within ${CONTAINER_SEARCH_TIMEOUT_MS / 1000}s`));
       }, CONTAINER_SEARCH_TIMEOUT_MS);
     });
-    const r = await Promise.race([command.searchJson(q, branches), timeout]);
+    const r = await Promise.race([command.searchJson(q, branches, abort.signal), timeout]);
     return { sources: r.sources, searched: r.searched, status: { available: true, stopped: r.stopped } };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -234,11 +247,13 @@ function printResult(result: SearchJson): void {
     else if (c.stopped.length) console.log(chalk.gray(`Containers not running (not searched): ${c.stopped.join(', ')}\n`));
   }
 
-  if (result.commits) {
+  if (result.commitsError) console.log(chalk.yellow(`Commits not searched: ${result.commitsError}\n`));
+  if (result.logsError) console.log(chalk.yellow(`Work logs not searched: ${result.logsError}\n`));
+  if (result.commits && !result.commitsError) {
     printCommits(result.commits, highlight);
     total += result.commits.length;
   }
-  if (result.logs) {
+  if (result.logs && !result.logsError) {
     printLogs(result.logs, highlight);
     total += result.logs.length;
   }

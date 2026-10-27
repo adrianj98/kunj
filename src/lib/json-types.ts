@@ -303,6 +303,9 @@ export interface SearchJson {
   containers?: { available: boolean; message?: string; stopped: string[] };
   commits?: CommitMatch[];
   logs?: LogMatch[];
+  /** The commits or logs scope failed (e.g. a pattern git log or JavaScript cannot read); its list is then empty */
+  commitsError?: string;
+  logsError?: string;
 }
 
 /**

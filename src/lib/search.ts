@@ -137,14 +137,14 @@ function toMatch(r: GrepRecord, re: RegExp | null): GrepMatch {
 
 /**
  * Run `git <args>` in `cwd` and collect the records, `limit` per rev (or in all without revs). git
- * grep exits 1 when nothing matched; anything above that is an error. Output past `ceiling` records
- * ends the process.
+ * grep exits 1 when nothing matched; anything above that is an error. The process is ended once every
+ * rev (the one key '' without revs) has more than `limit`: a rev's own cap never cuts another's.
  */
-function runGrep(cwd: string, args: string[], revs: string[], limit: number, ceiling: number): Promise<{ byRev: Map<string, GrepRecord[]>; truncated: Set<string>; error?: string }> {
+function runGrep(cwd: string, args: string[], revs: string[], limit: number): Promise<{ byRev: Map<string, GrepRecord[]>; truncated: Set<string>; error?: string }> {
+  const keys = revs.length || 1;
   return new Promise(resolve => {
     const byRev = new Map<string, GrepRecord[]>();
     const truncated = new Set<string>();
-    let seen = 0;
     let buffer = '';
     let stderr = '';
     let stopped = false;
@@ -171,9 +171,12 @@ function runGrep(cwd: string, args: string[], revs: string[], limit: number, cei
       const key = record.rev ?? '';
       const list = byRev.get(key) ?? [];
       byRev.set(key, list);
-      if (list.length >= limit) truncated.add(key);
-      else list.push(record);
-      if (++seen >= ceiling) stop();
+      if (list.length >= limit) {
+        truncated.add(key);
+        if (truncated.size >= keys) stop();
+      } else {
+        list.push(record);
+      }
     };
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
@@ -190,9 +193,10 @@ function runGrep(cwd: string, args: string[], revs: string[], limit: number, cei
     child.on('error', e => finish(e.message));
     child.on('close', code => {
       if (stopped) {
-        // Ended by the ceiling or the timeout: what was read stands
+        // Every rev full: what was read stands. Else the timeout: every rev may have lost matches
+        if (truncated.size >= keys) return finish();
         for (const key of byRev.keys()) truncated.add(key);
-        return finish(seen >= ceiling ? undefined : `git grep did not finish within ${GREP_TIMEOUT_MS / 1000}s`);
+        return finish(`git grep did not finish within ${GREP_TIMEOUT_MS / 1000}s`);
       }
       if (buffer) take(buffer);
       finish(code === 0 || code === 1 ? undefined : stderr.trim().split('\n')[0] || `git grep exited with ${code}`);
@@ -203,7 +207,7 @@ function runGrep(cwd: string, args: string[], revs: string[], limit: number, cei
 /** One worktree's files, the uncommitted and untracked (not ignored) ones included */
 export async function grepWorktree(worktreePath: string, q: SearchQuery): Promise<GrepResult> {
   const re = searchRegExp(q);
-  const r = await runGrep(worktreePath, grepArgs(q, { untracked: true }), [], q.maxCount, q.maxCount + 1);
+  const r = await runGrep(worktreePath, grepArgs(q, { untracked: true }), [], q.maxCount);
   return { matches: (r.byRev.get('') ?? []).map(m => toMatch(m, re)), truncated: r.truncated.size > 0, error: r.error };
 }
 
@@ -212,7 +216,7 @@ export async function grepRefs(cwd: string, refs: string[], q: SearchQuery): Pro
   const results = new Map<string, GrepResult>();
   if (refs.length === 0) return { results };
   const re = searchRegExp(q);
-  const r = await runGrep(cwd, grepArgs(q, { revs: refs }), refs, q.maxCount, q.maxCount * refs.length + refs.length);
+  const r = await runGrep(cwd, grepArgs(q, { revs: refs }), refs, q.maxCount);
   for (const ref of refs) {
     const found = r.byRev.get(ref);
     if (found) results.set(ref, { matches: found.map(m => toMatch(m, re)), truncated: r.truncated.has(ref) });
@@ -224,7 +228,7 @@ export async function grepRefs(cwd: string, refs: string[], q: SearchQuery): Pro
  * /workspace of a running branch container, as its sandbox user. The output is cut in the
  * container (`head`) so a common pattern does not stream megabytes over a remote backend.
  */
-export async function grepContainer(backend: ContainerBackend, id: string, user: string | undefined, q: SearchQuery): Promise<GrepResult> {
+export async function grepContainer(backend: ContainerBackend, id: string, user: string | undefined, q: SearchQuery, signal?: AbortSignal): Promise<GrepResult> {
   const re = searchRegExp(q);
   const git = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...grepArgs(q, { untracked: true })];
   // `sh -c` gets the line limit as $0 and git's argv as "$@": nothing from the query is parsed by the
@@ -235,6 +239,7 @@ export async function grepContainer(backend: ContainerBackend, id: string, user:
     user,
     workdir: '/workspace',
     timeoutMs: GREP_TIMEOUT_MS,
+    signal,
   });
   const status = Number(/kunj-grep-exit=(\d+)/.exec(r.stdout)?.[1] ?? r.exitCode);
   // 1: nothing matched; above 128: git was ended by head closing the pipe (SIGPIPE)

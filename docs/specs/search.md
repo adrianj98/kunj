@@ -53,7 +53,9 @@ kunj search <pattern> [paths...] [-e <pattern>] [--in <scopes>] [--all] [-i] [-F
   `containers: { available: false, message }`, never a failed search. Like `kunj ct list`, a running
   container is exec'd in without waiting for READY.
 - **Failures stay local:** a worktree or container whose search fails is a source with `error`; the
-  others still report. The `branches` scope is one git call, so its failure is one source with
+  others still report. A failed `commits` or `logs` scope (a pattern `git log` or JavaScript cannot
+  read) gives `commitsError` / `logsError` and an empty list. When the container search times out, the
+  execs not yet started are not started (an `AbortSignal` into `searchJson`), so the process can exit. The `branches` scope is one git call, so its failure is one source with
   `branch: null`.
 - **Columns** are recomputed in JavaScript from the pattern (characters, not git's bytes) together with
   the match's `length`, for highlighting; when JavaScript cannot read the pattern git's column is kept

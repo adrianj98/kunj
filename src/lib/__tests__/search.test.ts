@@ -173,6 +173,19 @@ describe('against a real repository', () => {
     expect(results.get('refs/heads/idle')!.matches).toEqual([{ path: 'a.txt', line: 1, column: 1, length: 6, text: 'needle one' }]);
   });
 
+  it("one ref's cap never hides another ref's matches", async () => {
+    git(repo, 'checkout', '-q', 'idle');
+    fs.writeFileSync(path.join(repo, 'many.txt'), 'needle\n'.repeat(20));
+    git(repo, 'add', 'many.txt');
+    git(repo, 'commit', '-qm', 'many');
+    git(repo, 'checkout', '-q', 'main');
+    // refs/heads/idle sorts first: its 21 matches come before side's one
+    const { results } = await grepRefs(repo, ['refs/heads/idle', 'refs/heads/side'], q('needle', { maxCount: 2 }));
+    expect(results.get('refs/heads/idle')).toMatchObject({ truncated: true });
+    expect(results.get('refs/heads/idle')!.matches).toHaveLength(2);
+    expect(results.get('refs/heads/side')).toMatchObject({ truncated: false, matches: [expect.objectContaining({ path: 'a.txt' })] });
+  });
+
   it('searches commit messages', async () => {
     expect((await searchCommits(repo, q('NEEDLE', { ignoreCase: true }), [])).map(c => c.subject)).toEqual(['first needle']);
     expect(await searchCommits(repo, q('absent'), ['side'])).toEqual([]);

@@ -1159,8 +1159,9 @@ export class ContainerCommand extends BaseCommand {
   /**
    * For `kunj search --in containers`: `git grep` in /workspace of this repository's running branch
    * containers (of `branches` when given), as the sandbox user. A stopped container is not started.
+   * Once `signal` aborts no new exec starts and the running ones end.
    */
-  async searchJson(q: SearchQuery, branches: string[] = []): Promise<{ sources: SearchSourceJson[]; searched: number; stopped: string[] }> {
+  async searchJson(q: SearchQuery, branches: string[] = [], signal?: AbortSignal): Promise<{ sources: SearchSourceJson[]; searched: number; stopped: string[] }> {
     this.jsonMode = true;
     try {
       const ctx = await this.context({});
@@ -1172,8 +1173,9 @@ export class ContainerCommand extends BaseCommand {
       const running = mains.filter(c => c.state === 'running');
       const sources = await mapLimit(running, 4, async (c): Promise<SearchSourceJson> => {
         const base = { kind: 'container' as const, branch: c.labels[LABEL.branch] ?? null, container: c.name };
+        if (signal?.aborted) return { ...base, matches: [], truncated: false, error: 'not searched (timed out)' };
         try {
-          return { ...base, ...(await grepContainer(ctx.backend, c.id, this.userOf(c) || undefined, q)) };
+          return { ...base, ...(await grepContainer(ctx.backend, c.id, this.userOf(c) || undefined, q, signal)) };
         } catch (error) {
           return { ...base, matches: [], truncated: false, error: error instanceof Error ? error.message : String(error) };
         }

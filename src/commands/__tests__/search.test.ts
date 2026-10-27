@@ -78,7 +78,7 @@ it('limits to --current or --branch', async () => {
   (search.grepWorktree as jest.Mock).mockClear();
   const json = await (stdout = [], run('x', { branch: 'main, other', in: 'worktrees,containers' }));
   expect((search.grepWorktree as jest.Mock).mock.calls.map(c => c[0])).toEqual(['/wt/main']);
-  expect(mockSearchJson).toHaveBeenCalledWith(expect.anything(), ['main', 'other']);
+  expect(mockSearchJson).toHaveBeenCalledWith(expect.anything(), ['main', 'other'], expect.any(AbortSignal));
   expect(json.query.branches).toEqual(['main', 'other']);
 });
 
@@ -93,6 +93,19 @@ it('--all searches every scope; branches are those without a worktree', async ()
   expect(json.commits).toEqual([]);
   expect(json.logs).toEqual([]);
   expect(search.searchWorkLogs).toHaveBeenCalledWith('/logs', expect.anything());
+});
+
+it('a commits or logs failure fails only that scope', async () => {
+  (search.searchCommits as jest.Mock).mockRejectedValue(new Error('fatal: bad regex'));
+  (search.searchWorkLogs as jest.Mock).mockImplementation(() => { throw new Error('cannot read the pattern'); });
+  const json = await run('x', { in: 'worktrees,commits,logs' });
+  expect(json.sources.map((s: any) => s.branch)).toEqual(['main']);
+  expect(json).toMatchObject({ commits: [], commitsError: 'fatal: bad regex', logs: [], logsError: 'cannot read the pattern' });
+});
+
+it('passes an abort signal to the container search', async () => {
+  await run('x', { in: 'containers' });
+  expect(mockSearchJson.mock.calls[0][2]).toBeInstanceOf(AbortSignal);
 });
 
 it('reports Docker being down instead of failing the search', async () => {
