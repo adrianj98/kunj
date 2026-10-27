@@ -71,7 +71,7 @@ page only says where each thing stands.
 | Antigravity as an agent: `kunj agent --agent antigravity`, Antigravity Agent tabs in the workspace app (worktrees; no waiting state) | [workspace-ide.md](workspace-ide.md) | a18c172 |
 | Workspace app: Settings › Containers **Test** for the Claude Code token (`kunj ct token check --json`), Set Up… through `kunj ct token setup` | [workspace-ide.md](workspace-ide.md#layout) | 14778e6 |
 | `kunj search`: every worktree by default; `--in branches,containers,commits,logs` / `--all`; `SearchJson` | [search.md](search.md) | 4b23f81 |
-| Workspace app: Search mode in the Files column (⌘⇧F), the selected worktree or container by default, all worktrees (and containers) from its menu; a match opens at its line | [search.md](search.md#workspace-app) | this commit |
+| Workspace app: Search mode in the Files column (⌘⇧F), the selected worktree or container by default, all worktrees (and containers) from its menu; a match opens at its line | [search.md](search.md#workspace-app) | 4f97760 |
 
 ## In progress
 
