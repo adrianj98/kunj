@@ -57,6 +57,7 @@ page only says where each thing stands.
 | Workspace app: syntax colours in editor tabs; no false TypeScript import errors | [workspace-ide.md](workspace-ide.md) | dad2757 |
 | Workspace app: ⌥-drag selects in a terminal whose program has the mouse | [workspace-ide.md](workspace-ide.md#layout) | f684bc6 |
 | Workspace app: a plain drag selects in a shell tab (tmux copy never reached the clipboard) | [workspace-ide.md](workspace-ide.md#layout) | 69b486e |
+| Container shells no longer open zsh's new-user wizard (stub moved to /etc/zsh/zshenv) | [branch-containers.md](branch-containers.md) | 294ea02 |
 | kunj icon: app icons (menu bar app, Workspace app), VS Code icon, docs and landing favicon/logo from `assets/icon/` via `scripts/gen-icons.sh` | — | 1405575 |
 | kunj serve hardening: named volumes only, kunj volumes/networks only, no extra capabilities without --allow-privileged; tunnels closed per command | [remote-containers.md](remote-containers.md) | cc94eb0 |
 | Workspace app: terminal shows programs' own 256 colours (theme no longer re-tints them) | [workspace-ide.md](workspace-ide.md#layout) | 2d4a3b3 |
