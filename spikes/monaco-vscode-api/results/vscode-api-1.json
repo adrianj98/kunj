@@ -13,14 +13,14 @@
 
     ],
     "marks" : {
-      "diff" : 441,
-      "done" : 1065,
-      "editor" : 226,
-      "extensions" : 46,
-      "initialized" : 45,
-      "script" : 0,
-      "theme" : 139,
-      "tokenised" : 753
+      "diff" : 610,
+      "done" : 1130,
+      "editor" : 481,
+      "extensions" : 306,
+      "initialized" : 306,
+      "script" : 270,
+      "theme" : 382,
+      "tokenised" : 821
     },
     "notes" : {
       "backgroundAfterSwitch" : "rgb(28, 27, 25)",
@@ -37,7 +37,7 @@
         "monacoEditors" : 4,
         "styleSheets" : 12,
         "styleTags" : 11,
-        "tree" : "monaco-editor no-minimap-shadow enable-user-select mac standalone  showUnused showDeprecated vs-dark | overflow-guard | inputarea monaco-mouse-cursor-text | monaco-editor-background textAreaCover margin | margin | glyph-margin | margin-view-zones | margin-view-overlays | current-line current-line-margin-both | line-numbers active-line-number | line-numbers | line-numbers | line-numbers | line-numbers | cldr codicon codicon-folding-expanded | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | glyph-margin-widgets | monaco-scrollable-element editor-scrollable vs-dark mac | lines-content monaco-editor-background | view-overlays",
+        "tree" : "monaco-editor no-minimap-shadow enable-user-select mac standalone  showUnused showDeprecated vs-dark | overflow-guard | inputarea monaco-mouse-cursor-text | monaco-editor-background textAreaCover margin | margin | glyph-margin | margin-view-zones | margin-view-overlays | current-line current-line-margin-both | line-numbers active-line-number | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | line-numbers | glyph-margin-widgets | monaco-scrollable-element editor-scrollable vs-dark mac | lines-content monaco-editor-background | view-overlays",
         "viewLines" : 13,
         "visible" : "[{\"startLineNumber\":1,\"startColumn\":1,\"endLineNumber\":13,\"endColumn\":1}]"
       },
@@ -58,7 +58,7 @@
       "swiftTokenClasses" : 5,
       "swiftTokenised" : true,
       "tsLanguageId" : "typescript",
-      "tsTokenClasses" : 6,
+      "tsTokenClasses" : 5,
       "tsTokenised" : true
     },
     "ok" : true,
@@ -70,6 +70,10 @@
   },
   "requests" : 74,
   "root" : "\/Users\/adrian\/projects\/kunj\/.git\/kunj\/worktrees\/monaco-vscode-api\/spikes\/monaco-vscode-api\/web\/dist",
-  "swiftWallMs" : 4790,
-  "webContentFootprintMB" : 335
+  "swiftWallMs" : 4603,
+  "webContentFootprintMB" : 336,
+  "workersCreated" : [
+    "editor.worker-C1cdR9gZ.js",
+    "worker-BTV3EcVs.js"
+  ]
 }

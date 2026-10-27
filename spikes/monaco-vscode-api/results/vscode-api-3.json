@@ -13,14 +13,14 @@
 
     ],
     "marks" : {
-      "diff" : 388,
-      "done" : 1019,
-      "editor" : 234,
-      "extensions" : 47,
-      "initialized" : 46,
-      "script" : 1,
-      "theme" : 124,
-      "tokenised" : 709
+      "diff" : 585,
+      "done" : 1204,
+      "editor" : 447,
+      "extensions" : 296,
+      "initialized" : 296,
+      "script" : 264,
+      "theme" : 369,
+      "tokenised" : 897
     },
     "notes" : {
       "backgroundAfterSwitch" : "rgb(28, 27, 25)",
@@ -70,6 +70,10 @@
   },
   "requests" : 74,
   "root" : "\/Users\/adrian\/projects\/kunj\/.git\/kunj\/worktrees\/monaco-vscode-api\/spikes\/monaco-vscode-api\/web\/dist",
-  "swiftWallMs" : 4913,
-  "webContentFootprintMB" : 337
+  "swiftWallMs" : 4585,
+  "webContentFootprintMB" : 355,
+  "workersCreated" : [
+    "editor.worker-C1cdR9gZ.js",
+    "worker-BTV3EcVs.js"
+  ]
 }

@@ -25,9 +25,9 @@ import { whenReady as ShellscriptReady } from '@codingame/monaco-vscode-shellscr
 import { whenReady as DockerReady } from '@codingame/monaco-vscode-docker-default-extension'
 import * as monaco from 'monaco-editor'
 
-const t0 = performance.now()
+// ms since navigation start (performance.now()), as in baseline.js, so the bundle's own load is counted.
 const marks: Record<string, number> = {}
-const mark = (name: string) => { marks[name] = Math.round(performance.now() - t0) }
+const mark = (name: string) => { marks[name] = Math.round(performance.now()) }
 const errors: string[] = []
 const workers: string[] = []
 const notes: Record<string, unknown> = {}
@@ -215,7 +215,7 @@ async function main() {
 
 main().then((diffOk) => {
   mark('done')
-  const result = { ok: diffOk && errors.length === 0, diffOk, marks, workers, notes, errors, crossOriginIsolated: self.crossOriginIsolated, userAgent: navigator.userAgent }
+  const result = { ok: diffOk && errors.length === 0 && notes.tsTokenised === true && notes.swiftTokenised === true, diffOk, marks, workers, notes, errors, crossOriginIsolated: self.crossOriginIsolated, userAgent: navigator.userAgent }
   ;(window as any).spikeResult = result
   post({ type: 'result', result })
 }).catch((e) => {

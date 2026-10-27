@@ -75,6 +75,7 @@ final class Spike: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNa
     var webView: WKWebView!
     var consoleLines: [String] = []
     var activity: NSObjectProtocol?
+    var workersCreated: [String] = []
 
     func applicationDidFinishLaunching(_ n: Notification) {
         let config = WKWebViewConfiguration()
@@ -82,6 +83,12 @@ final class Spike: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNa
         config.userContentController.add(self, name: "spike")
         // Console warnings and errors reach Swift too, so the report shows what the page complained about.
         config.userContentController.addUserScript(WKUserScript(source: """
+            const OrigWorker = window.Worker;
+            window.Worker = function (url, opts) {
+              try { window.webkit.messageHandlers.spike.postMessage({ type: 'worker', url: String(url).split('/').pop().slice(0, 80) }) } catch (e) {}
+              return new OrigWorker(url, opts);
+            };
+            window.Worker.prototype = OrigWorker.prototype;
             for (const level of ['warn', 'error']) {
               const orig = console[level];
               console[level] = (...a) => {
@@ -117,6 +124,7 @@ final class Spike: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNa
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any] else { return }
         switch body["type"] as? String {
+        case "worker": workersCreated.append(body["url"] as? String ?? "?")
         case "console": consoleLines.append("\(body["level"] ?? ""): \(body["text"] ?? "")")
         case "result":
             let page = body["result"] as? [String: Any] ?? [:]
@@ -139,6 +147,7 @@ final class Spike: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNa
             "webContentFootprintMB": pid.flatMap(footprintMB).map { (($0 * 10).rounded()) / 10 } ?? -1,
             "requests": handler.served.count,
             "failedRequests": handler.failed,
+            "workersCreated": workersCreated,
             "console": Array(consoleLines.prefix(40)),
         ]
         if !(page["ok"] as? Bool ?? false) { result["ok"] = false }

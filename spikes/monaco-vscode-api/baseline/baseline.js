@@ -1,8 +1,8 @@
 // Same samples and checks as web/src/main.ts, on the AMD build with defineTheme.
 (function () {
-  const t0 = performance.now();
+  // ms since navigation start, as in web/src/main.ts.
   const marks = {};
-  const mark = (n) => { marks[n] = Math.round(performance.now() - t0); };
+  const mark = (n) => { marks[n] = Math.round(performance.now()); };
   const errors = [];
   const notes = {};
   window.addEventListener('error', (e) => errors.push('error: ' + e.message));
@@ -47,7 +47,7 @@
       mark('tokenised');
       notes.languages = monaco.languages.getLanguages().length;
       mark('done');
-      const result = { ok: diffOk && errors.length === 0, diffOk, marks, workers: [], notes, errors, crossOriginIsolated: self.crossOriginIsolated };
+      const result = { ok: diffOk && errors.length === 0 && notes.tsTokenised && notes.swiftTokenised, diffOk, marks, notes, errors, crossOriginIsolated: self.crossOriginIsolated };
       window.spikeResult = result;
       post({ type: 'result', result });
     });

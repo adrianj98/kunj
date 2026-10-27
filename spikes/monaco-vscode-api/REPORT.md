@@ -8,7 +8,8 @@ the app's custom scheme?
 
 **Answer: yes.** Both editors render, TextMate colours every language tried, the diff runs in the
 editor worker, a kunj theme registered as a VS Code colour-theme extension applies and switches live,
-and nothing needs cross-origin isolation. Memory and load time are about the same as today. Two
+and nothing needs cross-origin isolation. It costs about 0.4 s more to first coloured code (most of
+it parsing the 7 MB bundle) and about 30 MB more memory than today. Two
 things in `app.js` must change: theming (`defineTheme` is gone) and, optionally, the language table.
 
 Machine: Apple Silicon MacBook Pro, macOS 26, Swift 6.4, the WebKit that ships with macOS 26. Versions:
@@ -36,30 +37,36 @@ right (`hideUnchangedRegions`), then wait until both show more than a handful of
 
 ## Results
 
-Three runs each, alternating; times are ms from the page script starting.
+Three runs each, alternating; times are ms since navigation start (`performance.now()` on both
+pages, so the bundle or AMD loader fetch is inside every span). `script` is when the page's own code
+first runs: for monaco-vscode-api that is after its bundle has loaded and evaluated, for the baseline
+before `loader.js`.
 
 | | Baseline (AMD 0.57, Monarch) | monaco-vscode-api 38 (TextMate) |
 |---|---|---|
-| Services ready (`initialized`) | 184 / 190 / 176 | 45 / 37 / 46 |
-| Diff computed (`diff`) | 505 / 506 / 577 | 441 / 403 / 388 |
-| Both editors coloured (`tokenised`) | 558 / 507 / 629 | 753 / 766 / 709 |
-| WebContent footprint | 311 / 316 / 302 MB | 335 / 336 / 337 MB |
+| Page code runs (`script`) | 67 / 9 / 5 | 270 / 220 / 264 |
+| Services ready (`initialized`) | 218 / 136 / 109 | 306 / 250 / 296 |
+| Diff computed (`diff`) | 585 / 392 / 313 | 610 / 488 / 585 |
+| Both editors coloured (`tokenised`) | 586 / 392 / 314 | 821 / 803 / 897 |
+| WebContent footprint | 314 / 312 / 314 MB | 336 / 334 / 355 MB |
 | Requests to the scheme handler | 25 | 74 (grammars and theme JSON load on demand) |
 | On disk | `min/vs` 25 MB | `dist` 11 MB (8.5 MB of JS; main chunk 7.3 MB, 1.9 MB gzip) |
-| Workers | none created by this page (TS worker not asked for) | `editorWorkerService`, `TextMateWorker` (module workers, onig wasm) |
+| Workers created (counted by the harness wrapping `Worker`) | 2 (blob URLs: editor worker and TypeScript worker) | 2: `editor.worker`, TextMate `worker` (module workers, onig wasm) |
 
 ```mermaid
 xychart-beta
-  title "Ready to coloured (ms, mean of 3)"
+  title "Navigation to coloured (ms, mean of 3)"
   x-axis ["baseline diff", "vscode-api diff", "baseline coloured", "vscode-api coloured"]
-  y-axis "ms" 0 --> 800
-  bar [529, 411, 565, 743]
+  y-axis "ms" 0 --> 900
+  bar [430, 561, 431, 840]
 ```
 
-TextMate colours about 180 ms later than Monarch because the grammar JSON and the oniguruma wasm load
-and compile in a worker; it does not block the main thread. Memory is +25 MB (8%) for the WebContent
-process. The page also loads 14 language extensions; trimming that list trims the grammars, not the
-7 MB core.
+First coloured code comes about 0.4 s later: ~250 ms is loading and evaluating the 7 MB bundle before
+any page code runs, the rest is the grammar JSON and the oniguruma wasm compiling in the TextMate
+worker (off the main thread). The page loads once per web view, so this is a launch cost, not a
+per-file one. Memory is about +30 MB (9%) for the WebContent process. The page also loads 14 language
+extensions; trimming that list trims the grammars, not the 7 MB core. (A first version of this table
+started the clock when each page's script ran, which hid the bundle load; corrected after review.)
 
 Screenshot (`screenshots/vscode-api.png`): TypeScript and Swift are coloured by their VS Code grammars
 with the spike's kunj token colours; the inline diff has word-level highlights and `+`/`−` gutters.
@@ -114,4 +121,5 @@ with the spike's kunj token colours; the inline diff has word-level highlights a
 Adopt option B in the workspace app as the AMD→ESM move: port `app.js` to a Vite-built module, turn
 `tokens.json` themes into generated VS Code colour themes, drop the extension table in favour of
 URI-based language detection, map worker labels explicitly, and await the extensions before the
-`ready` message. Then measure the two-view case in the app itself.
+`ready` message. Then measure the two-view case and the launch cost in the app itself; if the 0.4 s shows, load the
+page at launch before the Changes column is opened.

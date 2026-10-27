@@ -13,13 +13,13 @@
 
     ],
     "marks" : {
-      "diff" : 505,
-      "done" : 558,
-      "editor" : 321,
-      "initialized" : 184,
-      "script" : 3,
-      "theme" : 205,
-      "tokenised" : 558
+      "diff" : 585,
+      "done" : 586,
+      "editor" : 388,
+      "initialized" : 218,
+      "script" : 67,
+      "theme" : 241,
+      "tokenised" : 586
     },
     "notes" : {
       "diffChanges" : 3,
@@ -29,13 +29,14 @@
       "tsTokenClasses" : 8,
       "tsTokenised" : true
     },
-    "ok" : true,
-    "workers" : [
-
-    ]
+    "ok" : true
   },
   "requests" : 25,
   "root" : "\/Users\/adrian\/projects\/kunj\/.git\/kunj\/worktrees\/monaco-vscode-api\/spikes\/monaco-vscode-api\/baseline",
-  "swiftWallMs" : 4176,
-  "webContentFootprintMB" : 311
+  "swiftWallMs" : 4815,
+  "webContentFootprintMB" : 314,
+  "workersCreated" : [
+    "ea465ebd-dfcc-41c5-89c5-9726218362ac",
+    "c6ff37df-a33c-4583-a1af-27d11ae44743"
+  ]
 }

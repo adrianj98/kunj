@@ -502,7 +502,7 @@ From the architecture review (2026-10-23):
 - [ ] Monaco 0.57's AMD build is deprecated; moving to the ESM build is a later cost. The
   monaco-vscode-api spike (`spikes/monaco-vscode-api/REPORT.md`, 2026-10-27) found option B (its
   editor-only use: TextMate grammars, VS Code themes, language detection by file name) works in a
-  WKWebView from the `kunj` scheme at about the same memory and load time; adopting it means a Vite
+  WKWebView from the `kunj` scheme for about +30 MB and +0.4 s to first coloured code; adopting it means a Vite
   build, VS Code colour themes instead of `defineTheme`, and new language ids (`shellscript`).
 
 From the scaffold (Task 2):
