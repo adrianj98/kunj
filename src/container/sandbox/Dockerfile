@@ -28,6 +28,7 @@ COPY zshrc /etc/zsh/zshrc
 
 RUN chmod 0755 /usr/local/bin/git-credential-kunj \
  && chmod 0644 /etc/zsh/zshrc \
+ && printf '\n# kunj: zsh would run its first-run wizard (no ~/.zshrc in the home volume) right after\n# this file and before /etc/zsh/zshrc, so it is turned off here\nzsh-newuser-install() { :; }\n' >> /etc/zsh/zshenv \
  && useradd -m -u 1000 -s /bin/zsh dev \
  && mkdir -p /workspace \
  && chown dev:dev /workspace

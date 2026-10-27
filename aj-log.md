@@ -2,6 +2,14 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-26 — Container shells: no zsh new-user wizard
+
+- The sandbox image turns off `zsh-newuser-install` in `/etc/zsh/zshenv` instead of `/etc/zsh/zshrc`.
+  Why: the user still got zsh's setup wizard in container shells. zsh runs it (no `~/.zshrc` in the home
+  volume) after zshenv and before zshrc, so the stub in zshrc came too late (reproduced under `script`).
+  The running driveday containers were patched by hand; new images get it from the Dockerfile, which also
+  changes the image hash, so the next `ct start` builds the new image and blueprint snapshot.
+
 ## 2026-10-26 — kunj icon
 
 - The user's icon (yellow tile, `>` prompt and a sparkle) is in `assets/icon/` (`kunj-icon.svg`, and

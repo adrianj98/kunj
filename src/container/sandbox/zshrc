@@ -2,8 +2,7 @@
 # It lives here, not in ~/.zshrc, because the home directory is a volume the image cannot seed.
 # A user's own ~/.zshrc (container.files) is sourced after this file and wins.
 
-# Debian's first-run wizard would block the first `kunj ct shell`
-zsh-newuser-install() { :; }
+# The first-run wizard is turned off in /etc/zsh/zshenv (Dockerfile): zsh runs it before this file.
 
 # Presets record their tool environment (JAVA_HOME, COREPACK_HOME, ...) here
 # (N): no error when no preset has written a file yet
