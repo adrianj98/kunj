@@ -85,6 +85,7 @@ Launch arguments (after the executable):
 | `--loading` | With `--demo`: the startup state (spinner, "Loading sessions…", "Finding kunj") instead of the demo data |
 | `-kunjCommand "<command>"` | The kunj command for this run (`node /path/dist/index.js` for a dev build) |
 | `-searchQuery "<text>"` | After the first listing, opens Find in Files and searches `text` in the selected environment, or with `-searchScope worktrees\|everywhere` wider (with `--screenshot`, to check the Search panel) |
+| `-searchOpen YES` | With `-searchQuery`, opens the first match as a click would (an editor tab at the line, the match selected); `--screenshot` then waits 4 s instead of 1 |
 | `-openTabs "<env id>#<kind>,…"` | After the first listing, selects each environment and opens the tab (`kunj\|worktree\|main#shell,kunj\|worktree\|main#agent`); an entry without `#kind` only selects, which restores its saved tabs. For checking PTYs live without assistive access |
 
 The kunj command is the `kunjCommand` default (Settings, or

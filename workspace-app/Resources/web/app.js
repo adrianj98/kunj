@@ -234,8 +234,15 @@
     /** Shows the tab `id`'s file with line `line` centred and `length` characters from `column` selected (a search match). */
     revealLine({ id, line, column, length }) {
       if (!api.showFile({ id })) return false;
-      const col = Math.max(1, column || 1);
-      code.setSelection(new monaco.Selection(line, col, line, col + Math.max(0, length || 0)));
+      // kunj counts characters (code points); Monaco counts UTF-16 units, so an emoji before the
+      // match would shift the selection
+      const model = code.getModel();
+      line = Math.min(Math.max(1, line || 1), model.getLineCount());
+      const chars = Array.from(model.getLineContent(line));
+      const start = Math.min(Math.max(1, column || 1) - 1, chars.length);
+      const col = chars.slice(0, start).join('').length + 1;
+      const len = chars.slice(start, start + Math.max(0, length || 0)).join('').length;
+      code.setSelection(new monaco.Selection(line, col, line, col + len));
       code.revealLineInCenter(line);
       return true;
     },

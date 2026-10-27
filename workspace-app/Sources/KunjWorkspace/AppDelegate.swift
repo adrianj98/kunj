@@ -105,7 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     && self?.windowController.changesColumn.diffView.ready != true {
                     try? await Task.sleep(nanoseconds: 100_000_000)
                 }
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                // -searchOpen: the search and the editor tab's Monaco page come after discovery
+                let wait: UInt64 = UserDefaults.standard.bool(forKey: "searchOpen") ? 4 : 1
+                try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
                 self?.windowController.snapshotPNG { data in
                     if let data {
                         FileManager.default.createFile(atPath: screenshotPath, contents: data)
@@ -280,12 +282,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// `-searchQuery "<text>"` opens Find in Files with `text` searched in the selected environment
     /// (or `-searchScope worktrees|everywhere`) after the first listing (with `--screenshot`, to check
-    /// the panel without a person at the keyboard).
+    /// the panel without a person at the keyboard); `-searchOpen YES` then opens the first match.
     private func searchFromArguments() {
         let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         guard let text = arguments["searchQuery"] as? String else { return }
         findInFiles(nil)
         let scope = (arguments["searchScope"] as? String).flatMap(SearchScope.init(rawValue:)) ?? .environment
+        windowController.filesColumn.searchPanel.openFirstMatch = UserDefaults.standard.bool(forKey: "searchOpen")
         windowController.filesColumn.searchPanel.search(text, scope: scope)
     }
 

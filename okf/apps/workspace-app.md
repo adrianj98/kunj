@@ -80,12 +80,12 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
 * Tab pills have an × (`PillView.onClose`), and the Changes and Files bars a close button.
 * The Files column has a Search mode (Find in Files ⌘⇧F, `SearchPanel`): `kunj search` in the selected
   worktree or container by default, all worktrees (and containers) from its scope menu; a match opens
-  an editor tab at its line (`EditorTab.reveal`, `revealLine` on the editor page). Model in
+  an editor tab at its line with the match selected (`EditorTab.reveal`, `revealLine` on the editor page, which turns kunj's character columns into UTF-16). Model in
   `KunjWorkspaceCore/Search/Search.swift`.
 * Shortcuts include New Shell (⌘T), New Session (⌘N), Search Sessions (⌘K), Show Changes, Show Files,
   Close Tab (⌘W) and Session 1-9.
 * Launch arguments: `--demo`, `--screenshot <png>`, `--theme warm|light|graphite`,
-  `--changes`/`--no-changes`, `--files`/`--no-files`, `--loading`, `-kunjCommand`, `-openTabs`, `-searchQuery`.
+  `--changes`/`--no-changes`, `--files`/`--no-files`, `--loading`, `-kunjCommand`, `-openTabs`, `-searchQuery`, `-searchOpen`.
 * The kunj command is the `kunjCommand` default, else `kunj` on the login shell's PATH (`$SHELL -l -i`,
   5 s cap, then `$SHELL -l`).
 

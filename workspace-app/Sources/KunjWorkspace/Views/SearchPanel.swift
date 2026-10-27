@@ -36,6 +36,8 @@ final class SearchPanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     var source: SearchSource?
     /// A match was chosen: open it.
     var onOpen: ((SearchTarget, Environment) -> Void)?
+    /// Opens the first match of the next result as a click would (the `-searchOpen` launch argument)
+    var openFirstMatch = false
     /// Esc on an empty field.
     var onEscape: (() -> Void)?
     private(set) var environment: Environment?
@@ -277,6 +279,13 @@ final class SearchPanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         setItems(tree.map(SearchItem.init))
         // everything open: a result is read, not browsed
         for item in items { outline.expandItem(item, expandChildren: true) }
+        if openFirstMatch, let row = (0..<outline.numberOfRows).first(where: {
+            if case .match = (outline.item(atRow: $0) as? SearchItem)?.node.kind { return true } else { return false }
+        }) {
+            openFirstMatch = false
+            outline.selectRowIndexes([row], byExtendingSelection: false)
+            clicked()
+        }
     }
 
     private func setItems(_ items: [SearchItem]) {

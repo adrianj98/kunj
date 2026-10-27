@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-27 (search follow-ups)
+* **Apps**: `apps/workspace-app.md`: a search match opens with the match selected across emoji (UTF-16 columns), `-searchOpen` launch argument.
+
 ## 2026-10-27 (monaco-vscode-api spike)
 * **Apps**: `apps/workspace-app.md` notes the monaco-vscode-api spike and its result.
 
