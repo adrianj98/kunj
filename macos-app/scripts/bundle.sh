@@ -40,6 +40,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/KunjBar"
 sed "s/__VERSION__/$VERSION/g" Resources/Info.plist > "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Ad-hoc signed unless CODESIGN_IDENTITY names a certificate. macOS ties the
 # Accessibility grant (Organize Windows) to the signature, and an ad-hoc one changes
 # with every build; a self-signed "Kunj Dev" certificate keeps the grant across builds.

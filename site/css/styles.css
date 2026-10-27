@@ -125,7 +125,7 @@ code, pre { font-family: var(--mono); }
   display: flex; align-items: center; gap: 20px;
 }
 .brand { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-weight: 700; font-size: 1.2rem; }
-.brand-mark { font-size: 1.15rem; }
+.brand-mark { width: 1.4rem; height: 1.4rem; display: block; }
 .brand-name { color: var(--text); }
 .brand-caret { color: var(--mint); animation: blink 1.1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
@@ -382,7 +382,7 @@ code, pre { font-family: var(--mono); }
   max-width: var(--maxw); margin: 0 auto; padding: 60px 24px 30px;
   display: grid; grid-template-columns: 1.4fr 2fr; gap: 40px;
 }
-.footer-brand .brand-mark { font-size: 1.4rem; }
+.footer-brand .brand-mark { width: 1.7rem; height: 1.7rem; }
 .footer-brand .brand-name { font-family: var(--mono); font-weight: 700; font-size: 1.3rem; }
 .footer-brand p { color: var(--text-dim); margin-top: 12px; max-width: 320px; font-size: 0.92rem; }
 .footer-cols { display: grid; grid-template-columns: repeat(3,1fr); gap: 24px; }

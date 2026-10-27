@@ -71,6 +71,7 @@ exes=()
 for b in "${bins[@]}"; do exes+=("$b/KunjWorkspace"); done
 lipo -create "${exes[@]}" -output "$APP/Contents/MacOS/KunjWorkspace"
 sed "s/__VERSION__/$VERSION/g" Resources/Info.plist > "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # SwiftTerm's resource bundle (Shaders.metal for the runtime-compiled Metal renderer)
 cp -R "$BINDIR"/SwiftTerm_SwiftTerm.bundle "$APP/Contents/Resources/" 2>/dev/null || true
 cp -R Resources/web "$APP/Contents/Resources/web"
