@@ -377,11 +377,11 @@ final class SearchField: BoxView, NSTextFieldDelegate {
     var onChange: ((String) -> Void)?
     var theme: Theme { didSet { apply() } }
 
-    init(placeholder: String, theme: Theme) {
+    init(placeholder: String, badge shortcut: String = "⌘K", theme: Theme) {
         self.theme = theme
         self.placeholder = placeholder
         icon = IconView(.search, size: 13, color: theme.color(\.muted))
-        badge = BadgeView(text: "⌘K", theme: theme)
+        badge = BadgeView(text: shortcut, theme: theme)
         super.init(radius: DesignTokens.Radius.card)
         field.isBordered = false
         field.drawsBackground = false
@@ -431,8 +431,15 @@ final class SearchField: BoxView, NSTextFieldDelegate {
         onChange?("")
     }
 
-    /// Esc clears the search; a second Esc on an empty field leaves it.
+    /// Return pressed in the field (the Search panel searches at once).
+    var onSubmit: (() -> Void)?
+
+    /// Esc clears the search; a second Esc on an empty field leaves it. Return goes to `onSubmit`.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.insertNewline(_:)), let onSubmit {
+            onSubmit()
+            return true
+        }
         guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
         if field.stringValue.isEmpty { onEscape?() } else { clear() }
         return true

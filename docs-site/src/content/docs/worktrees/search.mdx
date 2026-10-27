@@ -1,0 +1,75 @@
+---
+title: Search
+description: Search the files of every worktree at once, and on request branches without a worktree, branch containers, commit messages and work logs.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import CommandReference from '../../../components/CommandReference.astro';
+
+`kunj search` looks for a pattern in every worktree of the repository you are in, including work you
+have not committed yet, and groups what it finds by branch:
+
+```bash
+kunj search "retryCount"
+```
+
+```
+● feature/retries  current worktree · ~/code/app/.git/kunj/worktrees/feature-retries
+  src/lib/http.ts
+       42:  const retryCount = options.retries ?? 3;
+
+● main  worktree · ~/code/app
+  src/lib/http.ts
+       40:  const retryCount = 3;
+
+2 matches (searched 4 worktrees)
+```
+
+Untracked files are searched, and files your `.gitignore` excludes (such as `node_modules`) are not.
+The pattern is an extended regular expression, as with `grep -E`.
+
+## Narrowing the search
+
+```bash
+kunj search -i todo src/ "*.md"     # ignore case; only under src/ and Markdown files
+kunj search -F "a.b(c)"             # a fixed string, not a regex
+kunj search -w id                   # whole words only
+kunj search parse --current         # only the worktree you are in
+kunj search parse -b main,release   # only these branches
+```
+
+Paths after the pattern are git pathspecs. A pattern that starts with `-` goes after `-e`
+(`kunj search -e -v`). `-m, --max-count` (default 200) caps the matches shown per
+worktree; a worktree with more says so.
+
+## More places to look
+
+`--in` adds other scopes (comma-separated), and `--all` searches all of them:
+
+| Scope | Searches |
+| --- | --- |
+| `worktrees` | every worktree (the default) |
+| `branches` | the committed files of local branches that have no worktree; add `--origin` for origin's branches you have not checked out |
+| `containers` | `/workspace` of each running [branch container](../../containers/overview/), including the agent's uncommitted work |
+| `commits` | commit messages on every branch |
+| `logs` | your [work logs](../../work-logs/work-log/) |
+
+```bash
+kunj search "flaky" --in commits,logs
+kunj search "TODO(auth)" --in worktrees,containers
+kunj search "oldApi" --all
+```
+
+<Aside>
+Stopped containers are not started to be searched; kunj lists them instead. If Docker is not running,
+the other scopes still give their results.
+</Aside>
+
+## In the apps
+
+`kunj search --json` prints the results as JSON, which the workspace app reads. The format is part of
+kunj's published JSON contract (`SearchJson`).
+
+<CommandReference name="search" optionsOnly />

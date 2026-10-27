@@ -24,6 +24,8 @@ final class EditorTab: WorkspaceTab {
 
     private let access: FileAccess
     private let page: MonacoWebView
+    /// A spot to show once the file reached the page (a search match opened before it loaded).
+    private var pendingReveal: (line: Int, column: Int, length: Int)?
 
     init(id: String, env: Environment, path: String, access: FileAccess, page: MonacoWebView) {
         self.id = id
@@ -55,6 +57,17 @@ final class EditorTab: WorkspaceTab {
         openedDigest = digest(text)
         dirty = false
         loaded = true
+        if let spot = pendingReveal {
+            pendingReveal = nil
+            reveal(line: spot.line, column: spot.column, length: spot.length)
+        }
+    }
+
+    /// Shows this tab's file at `line`, with the match (`length` characters from `column`) selected;
+    /// before the file loaded, once it has.
+    func reveal(line: Int, column: Int, length: Int) {
+        guard loaded else { pendingReveal = (line, column, length); return }
+        Task { await page.call("revealLine", ["id": id, "line": line, "column": column, "length": length]) }
     }
 
     /// Shows this tab's file in the page.

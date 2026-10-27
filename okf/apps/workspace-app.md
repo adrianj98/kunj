@@ -50,6 +50,7 @@ about +30 MB and +0.4 s to first coloured code; `monaco.editor.defineTheme` is n
 | `worktree shell <b> --session <id> [--kill]`, `worktree shell <b> --kill` | Persistent shell tabs ([Persistent Shells](/features/persistent-shells.md)) |
 | `ct agent <b> [--session <id>] [--kill]`, `ct shell <b> [--session <id>] [--kill]` | Same, in a container ([Container Agents](/containers/container-agents.md)) |
 | `ct exec <b> -- git …` | Container diffs (`DiffService`) |
+| `search --regexp=<q> [-F] [-i] [-w] --in worktrees\|containers [--branch=<b>]` | The Files column's Search mode ([Search](/features/search.md)) |
 | `ct file read <b> <path>`, `ct file write <b> <path>` | Editor tabs on a container ([Container Files](/containers/files.md)) |
 | `ct start <b> [--rebuild]`, `ct stop`, `ct remove`, `ct open`, `ct prune` | Header and overflow actions (`actionPlan`) |
 | `worktree open <path> [--new-window]`, `worktree remove <path>` | Worktree actions |
@@ -77,10 +78,14 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
   come from the theme, magenta and cyan are fixed real hues, and colours 16-255 are xterm's
   (`ansi256PaletteStrategy = .xterm`), because SwiftTerm's default re-tinted them with the theme.
 * Tab pills have an × (`PillView.onClose`), and the Changes and Files bars a close button.
+* The Files column has a Search mode (Find in Files ⌘⇧F, `SearchPanel`): `kunj search` in the selected
+  worktree or container by default, all worktrees (and containers) from its scope menu; a match opens
+  an editor tab at its line (`EditorTab.reveal`, `revealLine` on the editor page). Model in
+  `KunjWorkspaceCore/Search/Search.swift`.
 * Shortcuts include New Shell (⌘T), New Session (⌘N), Search Sessions (⌘K), Show Changes, Show Files,
   Close Tab (⌘W) and Session 1-9.
 * Launch arguments: `--demo`, `--screenshot <png>`, `--theme warm|light|graphite`,
-  `--changes`/`--no-changes`, `--files`/`--no-files`, `--loading`, `-kunjCommand`, `-openTabs`.
+  `--changes`/`--no-changes`, `--files`/`--no-files`, `--loading`, `-kunjCommand`, `-openTabs`, `-searchQuery`.
 * The kunj command is the `kunjCommand` default, else `kunj` on the login shell's PATH (`$SHELL -l -i`,
   5 s cap, then `$SHELL -l`).
 

@@ -2,14 +2,16 @@ import AppKit
 import KunjWorkspaceCore
 
 /// A small text button in a header row (the diff header's `Edit`): sans 11.5 in `muted`, `text`
-/// on a `raised` fill on hover, 22 px high, `faint` when disabled.
+/// on a `raised` fill on hover, 22 px high, `faint` when disabled. `isOn` (an option toggle, the
+/// Files column's mode) draws it as hovered for good.
 final class HeaderTextButton: NSButton {
     var theme: Theme? { didSet { needsDisplay = true } }
     var onPress: (() -> Void)?
-    private let label: String
+    var label: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     private let labelFont = Theme.sans(11.5)
     private var hovering = false { didSet { needsDisplay = true } }
     override var isEnabled: Bool { didSet { needsDisplay = true } }
+    var isOn = false { didSet { needsDisplay = true; setAccessibilityValue(isOn ? "on" : "off") } }
 
     init(_ label: String) {
         self.label = label
@@ -35,7 +37,7 @@ final class HeaderTextButton: NSButton {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let theme else { return }
-        let hot = isEnabled && (hovering || isHighlighted)
+        let hot = isEnabled && (hovering || isHighlighted || isOn)
         if hot {
             theme.color(\.raised).setFill()
             let r = DesignTokens.Radius.control

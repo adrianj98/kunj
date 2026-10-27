@@ -55,6 +55,9 @@ before you start, commit small, and push.
 - Test files follow the pattern `*.test.ts`
 - Uses Jest with ts-jest preset
 - Run single test file: `npm test -- path/to/test.test.ts`
+- Jest's haste map ignores every path containing `/.git/`, so it finds no tests in a worktree under
+  `.git/kunj/worktrees/`: run them from a copy (`rsync` without `node_modules`, `dist`, `.git`, then
+  symlink `node_modules`) or from the main checkout
 
 ## Architecture
 
@@ -156,6 +159,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj run [--branch b] [--hold] -- <cmd…>` - Run a host command with the branch's host secrets in its environment
 - `kunj hooks [list|add|run|path]` - Inspect, scaffold and test hooks (see Hooks below)
 - `kunj repos [list|add|remove|prune]` - Repositories kunj has been used in (used by the macOS app)
+- `kunj search <pattern> [paths…] [--in worktrees,branches,containers,commits,logs] [--all] [-i] [-F] [-w] [-b <branches>] [--current]` - Search every worktree (uncommitted work included) with `git grep`, and on request branches without a worktree, running branch containers, commit messages and work logs; `SearchJson` (src/lib/search.ts, docs/specs/search.md). On the fast path; the container module is loaded only for `--in containers`
 - `kunj events [--json] [--repo <path>...]` - Stream changes to worktrees, containers and agents as NDJSON (see Events below)
 - `kunj install [vscode|macos|workspace|all]` - Download the VS Code extension / macOS app / Workspace app from the GitHub release and install them (also offered at the end of `kunj setup`)
 
@@ -183,7 +187,7 @@ extension and the macOS app, which show them as rows like worktrees (docs/specs/
 The container module is imported lazily only then, Docker is asked concurrently with git, and Docker
 being down gives `available: false`, never a failed listing.
 
-**Performance:** `src/index.ts` has a fast path (`src/commands/fast.ts`) that loads only the requested command for `worktree`, `repos` and `prompt-info`, because importing the full registry pulls in AWS, LangChain and Jira and costs ~1s. A listing makes one `git rev-parse`, one `git worktree list` and one `git status --porcelain=v2 --branch` per worktree. Keep it that way: don't add per-worktree subprocesses or heavy top-level imports to these modules.
+**Performance:** `src/index.ts` has a fast path (`src/commands/fast.ts`) that loads only the requested command for `worktree`, `repos`, `search` and `prompt-info`, because importing the full registry pulls in AWS, LangChain and Jira and costs ~1s. A listing makes one `git rev-parse`, one `git worktree list` and one `git status --porcelain=v2 --branch` per worktree. Keep it that way: don't add per-worktree subprocesses or heavy top-level imports to these modules.
 
 **Keep files:** files deliberately left out of git (e.g. `.env`) can be stored per repository in `~/.kunj/{reponame}/keep/` under their path relative to the worktree root (src/lib/keep.ts). `addWorktree()` applies them to every newly created worktree, and `kunj worktree keep apply [-a]` re-applies them to the current worktree (or all of them).
 
@@ -192,7 +196,7 @@ being down gives `available: false`, never a failed listing.
 The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
 
 **Workspace app contract:** the types in src/lib/json-types.ts (`WorktreeListJson`, `ContainerListJson`,
-`ReposJson`, `ErrorJson`, `AgentStatusJson`, `AgentStopJson`, `FileReadJson`, `FileWriteJson`, `EventJson`) are the
+`ReposJson`, `ErrorJson`, `AgentStatusJson`, `AgentStopJson`, `FileReadJson`, `FileWriteJson`, `EventJson`, `SearchJson`) are the
 published, type-only JSON contract (`types` in package.json; consumers import `from 'kunj'`). Commands build their
 JSON against these types (`satisfies` or a type annotation) so the compiler checks it, and fields are only ever added, never renamed or
 removed. Consumers: the VS Code extension, the macOS app and the workspace app. Errors in `--json` mode are

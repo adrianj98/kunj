@@ -1,0 +1,119 @@
+{
+  "query": {
+    "pattern": "needle",
+    "ignoreCase": true,
+    "fixed": true,
+    "word": false,
+    "paths": [],
+    "maxCount": 200,
+    "scopes": [
+      "worktrees",
+      "containers"
+    ],
+    "branches": []
+  },
+  "repoRoot": "/r/app",
+  "searched": {
+    "worktrees": 2,
+    "branches": 0,
+    "containers": 1
+  },
+  "sources": [
+    {
+      "kind": "worktree",
+      "branch": "main",
+      "path": "/r/app",
+      "isCurrent": true,
+      "matches": [
+        {
+          "path": "README.md",
+          "line": 1,
+          "column": 1,
+          "length": 6,
+          "text": "needle"
+        },
+        {
+          "path": "src/a.ts",
+          "line": 1,
+          "column": 5,
+          "length": 6,
+          "text": "let needle = 1"
+        },
+        {
+          "path": "src/a.ts",
+          "line": 2,
+          "column": 4,
+          "length": 6,
+          "text": "// Needle here"
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "kind": "worktree",
+      "branch": "feature/x",
+      "path": "/r/app-feat",
+      "isCurrent": false,
+      "matches": [
+        {
+          "path": "README.md",
+          "line": 1,
+          "column": 1,
+          "length": 6,
+          "text": "needle"
+        },
+        {
+          "path": "new.ts",
+          "line": 1,
+          "column": 7,
+          "length": 6,
+          "text": "const needle = 2"
+        },
+        {
+          "path": "src/a.ts",
+          "line": 1,
+          "column": 5,
+          "length": 6,
+          "text": "let needle = 1"
+        },
+        {
+          "path": "src/a.ts",
+          "line": 2,
+          "column": 4,
+          "length": 6,
+          "text": "// Needle here"
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "kind": "container",
+      "branch": "feature/x",
+      "container": "kunj-app-feature-x-1a2b3c",
+      "matches": [
+        {
+          "path": "src/b.ts",
+          "line": 3,
+          "column": 7,
+          "length": 6,
+          "text": "const needle = 3"
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "kind": "container",
+      "branch": "broken",
+      "container": "kunj-app-broken-9f8e7d",
+      "matches": [],
+      "truncated": false,
+      "error": "git grep failed in the container (exit 128)"
+    }
+  ],
+  "containers": {
+    "available": true,
+    "stopped": [
+      "old"
+    ]
+  }
+}

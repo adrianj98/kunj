@@ -142,6 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.windowController.setKunjVersion(status.label)
                 self.windowController.changesColumn.source = DiffService(cli: cli)
                 self.windowController.filesColumn.source = FileListerSource(cli: cli)
+                self.windowController.filesColumn.searchPanel.source = KunjSearchSource(cli: cli)
                 self.windowController.terminalColumn.registry.fileAccess = FileAccess(cli: cli)
                 self.settings?.cli = cli
                 self.windowController.header.show(self.windowController.selectedEnvironment)
@@ -198,6 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.events = events
         store.start(events: events)
         openTabsFromArguments()
+        searchFromArguments()
     }
 
     /// The layout file's keeper, wired to the store, the registry and the window: selecting an
@@ -274,6 +276,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             windowController.select(String(entry[..<hash]))
             openTab(kind)
         }
+    }
+
+    /// `-searchQuery "<text>"` opens Find in Files with `text` searched in the selected environment
+    /// (or `-searchScope worktrees|everywhere`) after the first listing (with `--screenshot`, to check
+    /// the panel without a person at the keyboard).
+    private func searchFromArguments() {
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        guard let text = arguments["searchQuery"] as? String else { return }
+        findInFiles(nil)
+        let scope = (arguments["searchScope"] as? String).flatMap(SearchScope.init(rawValue:)) ?? .environment
+        windowController.filesColumn.searchPanel.search(text, scope: scope)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -392,6 +405,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard n >= 1, n <= ids.count else { NSSound.beep(); return }
         windowController.select(ids[n - 1])
         windowController.terminalColumn.focusActive()
+    }
+
+    /// View > Find in Files (⌘⇧F): the Files column (opened when closed) in Search mode, the query
+    /// field focused.
+    @objc func findInFiles(_ sender: Any?) {
+        if !windowController.filesVisible {
+            windowController.setFilesVisible(true, animated: true)
+            // -searchQuery opens it for this run only, like --files
+            if sender != nil { UserDefaults.standard.set(true, forKey: Self.showFilesKey) }
+        }
+        windowController.filesColumn.setMode(.search)
+        windowController.filesColumn.searchPanel.focus()
     }
 
     /// View > Show/Hide Files (⌘⇧E) and the tab bar's pill; saved app-wide.
@@ -626,6 +651,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.changesColumn.onEdit = open
         // a double-click (or Return) on a file in the Files column
         windowController.filesColumn.onOpen = open
+        // a match in the Search panel: in its environment (the selected one, or another worktree or
+        // container of the repository when the scope is wider), at its line
+        windowController.filesColumn.searchPanel.onOpen = { [weak self, weak column] target, from in
+            guard let self, let column else { return }
+            let id = environmentId(repo: from.repo.name, kind: target.kind, branch: target.branch)
+            guard let env = id == from.id ? from : self.store?.environment(id: id) else {
+                column.showMessage("\(target.branch) is not in the list of environments")
+                return
+            }
+            if env.id != self.windowController.selectedEnvironment?.id { self.windowController.select(env.id) }
+            column.showMessage(nil)
+            column.registry.openEditor(env: env, path: target.path,
+                                       at: (target.line, target.column, target.length)) { [weak column] reason in
+                column?.showMessage(reason)
+            }
+            DispatchQueue.main.async { column.focusActive() }
+        }
+        windowController.filesColumn.searchPanel.onEscape = { [weak column] in column?.focusActive() }
         // a ⌘-click on a file path in a terminal
         column.registry.onOpenFile = open
         column.registry.onSaved = { [weak windowController] tab in
@@ -675,6 +718,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Show Changes", action: #selector(toggleChanges(_:)), keyEquivalent: "C").target = self
         menu.addItem(withTitle: "Show Files", action: #selector(toggleFiles(_:)), keyEquivalent: "E").target = self
+        menu.addItem(withTitle: "Find in Files", action: #selector(findInFiles(_:)), keyEquivalent: "F").target = self
         return menu
     }
 

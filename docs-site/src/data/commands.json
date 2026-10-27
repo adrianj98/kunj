@@ -927,6 +927,71 @@
     "helpText": "Put -- before the command so its own options are not read as kunj's:\n  kunj run -- npm run dev\n  kunj run --branch feature/x -- $SHELL -l\n\nThe command gets the global, repo and branch secrets whose targets include host and that are\ndelivered as environment variables. File deliveries are written into this worktree first (a file\ngit does not ignore is skipped with a warning). The exit code is the command's."
   },
   {
+    "name": "search",
+    "usage": "search [pattern] [paths...]",
+    "description": "Search the files of every worktree (and branches, containers, commits, work logs)",
+    "arguments": "[pattern] [paths...]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-e, --regexp <pattern>",
+        "description": "The pattern (for one that starts with -); every argument is then a path",
+        "default": null
+      },
+      {
+        "flags": "--in <scopes>",
+        "description": "Comma-separated scopes to search: worktrees, branches, containers, commits, logs (default: worktrees)",
+        "default": null
+      },
+      {
+        "flags": "-a, --all",
+        "description": "Search every scope",
+        "default": null
+      },
+      {
+        "flags": "-i, --ignore-case",
+        "description": "Ignore case",
+        "default": null
+      },
+      {
+        "flags": "-F, --fixed-strings",
+        "description": "The pattern is a fixed string, not an extended regex",
+        "default": null
+      },
+      {
+        "flags": "-w, --word-regexp",
+        "description": "Match whole words only",
+        "default": null
+      },
+      {
+        "flags": "-b, --branch <names>",
+        "description": "Only these branches (comma-separated), in every scope",
+        "default": null
+      },
+      {
+        "flags": "--current",
+        "description": "Only the current worktree",
+        "default": null
+      },
+      {
+        "flags": "--origin",
+        "description": "[branches] Also origin's branches that have no local branch",
+        "default": null
+      },
+      {
+        "flags": "-m, --max-count <n>",
+        "description": "Matches kept per worktree, branch or container, and commits and log lines in all (default 200)",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Scopes:\n  worktrees    every worktree, uncommitted and untracked files included (.gitignore is respected)\n  branches     committed tree of each local branch without a worktree (--origin adds origin-only ones)\n  containers   /workspace of each running branch container (stopped ones are not started)\n  commits      commit messages on all branches\n  logs         the work logs (kunj log)\n\nPaths are git pathspecs, e.g. kunj search TODO src/ \"*.md\"\nA pattern that starts with - goes after -e: kunj search -e -foo"
+  },
+  {
     "name": "secret",
     "usage": "secret [action] [args...]",
     "description": "Manage encrypted secrets and where they are delivered",

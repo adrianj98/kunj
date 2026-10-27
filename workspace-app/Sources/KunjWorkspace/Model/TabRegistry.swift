@@ -133,16 +133,20 @@ final class TabRegistry {
     var hasEditorView: Bool { editorPage != nil }
 
     /// Opens `path` of `env` in an editor tab and makes it active (an open tab of that file is
-    /// activated instead). The file loads in the background; when it cannot be read (or is binary
-    /// or too large) the tab closes and `failed` gets the reason. nil before kunj is discovered.
+    /// activated instead), showing `at` (a search match) when given. The file loads in the
+    /// background; when it cannot be read (or is binary or too large) the tab closes and `failed`
+    /// gets the reason. nil before kunj is discovered.
     @discardableResult
-    func openEditor(env: Environment, path: String, failed: @escaping (String) -> Void = { _ in }) -> EditorTab? {
+    func openEditor(env: Environment, path: String, at spot: (line: Int, column: Int, length: Int)? = nil,
+                    failed: @escaping (String) -> Void = { _ in }) -> EditorTab? {
         if let open = tabs(for: env.id).lazy.compactMap({ $0 as? EditorTab }).first(where: { $0.path == path }) {
             activate(open)
+            if let spot { open.reveal(line: spot.line, column: spot.column, length: spot.length) }
             return open
         }
         guard let access = fileAccess else { return nil }
         let tab = EditorTab(id: nextId(env: env, kind: .editor), env: env, path: path, access: access, page: editorView)
+        if let spot { tab.reveal(line: spot.line, column: spot.column, length: spot.length) }
         add(tab)
         onChange?(env.id)
         Task { @MainActor in

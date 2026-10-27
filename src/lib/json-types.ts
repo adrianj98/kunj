@@ -13,6 +13,7 @@ import type { ContainerStatus } from './container/env';
 import type { ServiceState } from './container/services';
 import type { PruneOrphan } from './container/prune';
 import type { DindMode } from './container/dind';
+import type { SearchScope, GrepMatch, CommitMatch, LogMatch } from './search';
 
 /** What a command prints (as JSON) when it fails in `--json` mode: `kunj ct` always gives { code, message } (code 'error' when the error has none); `kunj agent` and `kunj events` give it for errors with a `jsonCode`; the other commands a plain message string (BaseCommand's generic path is opt-in). */
 export interface ErrorJson {
@@ -274,4 +275,56 @@ export interface SecretImportJson {
 /** `kunj secret apply --json`: worktree path -> the files rendered into it. */
 export interface SecretApplyJson {
   applied: Record<string, string[]>;
+}
+
+// ---- kunj search --json ----------------------------------------------------------------------
+
+/**
+ * `kunj search <pattern> --json`. `sources` holds every worktree, branch and container that matched
+ * or failed (never the ones searched without a match); `searched` counts all of them. `commits`,
+ * `logs` and `containers` are present only when their scope was asked for.
+ */
+export interface SearchJson {
+  query: {
+    pattern: string;
+    ignoreCase: boolean;
+    fixed: boolean;
+    word: boolean;
+    paths: string[];
+    maxCount: number;
+    scopes: SearchScope[];
+    /** --branch: the branches the search was limited to (empty: all) */
+    branches: string[];
+  };
+  repoRoot: string;
+  searched: { worktrees: number; branches: number; containers: number };
+  sources: SearchSourceJson[];
+  /** The containers scope: available false (with a message) when Docker could not be asked; `stopped` the branches whose container was not running */
+  containers?: { available: boolean; message?: string; stopped: string[] };
+  commits?: CommitMatch[];
+  logs?: LogMatch[];
+  /** The commits or logs scope failed (e.g. a pattern git log or JavaScript cannot read); its list is then empty */
+  commitsError?: string;
+  logsError?: string;
+}
+
+/**
+ * Where matches were found. `worktree`: `path` is the worktree (match paths are relative to it);
+ * `branch`: `ref` is the committed tree searched (`refs/heads/x`, or `refs/remotes/origin/x` with
+ * `remote`); `container`: `container` is its name, match paths are relative to /workspace.
+ */
+export interface SearchSourceJson {
+  kind: 'worktree' | 'branch' | 'container';
+  /** null for a detached worktree */
+  branch: string | null;
+  path?: string;
+  ref?: string;
+  remote?: boolean;
+  container?: string;
+  isCurrent?: boolean;
+  matches: GrepMatch[];
+  /** More matches than maxCount: only the first ones are listed */
+  truncated: boolean;
+  /** The search failed here (the others still ran) */
+  error?: string;
 }

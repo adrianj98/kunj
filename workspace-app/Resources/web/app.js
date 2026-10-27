@@ -231,6 +231,15 @@
       return true;
     },
 
+    /** Shows the tab `id`'s file with line `line` centred and `length` characters from `column` selected (a search match). */
+    revealLine({ id, line, column, length }) {
+      if (!api.showFile({ id })) return false;
+      const col = Math.max(1, column || 1);
+      code.setSelection(new monaco.Selection(line, col, line, col + Math.max(0, length || 0)));
+      code.revealLineInCenter(line);
+      return true;
+    },
+
     closeFile({ id }) {
       const f = files.get(id);
       if (!f) return false;

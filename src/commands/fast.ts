@@ -22,6 +22,7 @@ const FAST_COMMANDS: Record<string, () => Promise<BaseCommand>> = {
   run: async () => new (await import('./run')).RunCommand(),
   serve: async () => new (await import('./serve')).ServeCommand(),
   remote: async () => new (await import('./remote')).RemoteCommand(),
+  search: async () => new (await import('./search')).SearchCommand(),
   'prompt-info': async () => new (await import('./prompt-info')).PromptInfoCommand(),
 };
 

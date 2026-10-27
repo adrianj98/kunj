@@ -84,6 +84,7 @@ Launch arguments (after the executable):
 | `--files` / `--no-files` | The Files column open or closed for this run, not saved (`--demo` leaves it closed unless `--files`) |
 | `--loading` | With `--demo`: the startup state (spinner, "Loading sessions…", "Finding kunj") instead of the demo data |
 | `-kunjCommand "<command>"` | The kunj command for this run (`node /path/dist/index.js` for a dev build) |
+| `-searchQuery "<text>"` | After the first listing, opens Find in Files and searches `text` in the selected environment, or with `-searchScope worktrees\|everywhere` wider (with `--screenshot`, to check the Search panel) |
 | `-openTabs "<env id>#<kind>,…"` | After the first listing, selects each environment and opens the tab (`kunj\|worktree\|main#shell,kunj\|worktree\|main#agent`); an entry without `#kind` only selects, which restores its saved tabs. For checking PTYs live without assistive access |
 
 The kunj command is the `kunjCommand` default (Settings, or
@@ -109,11 +110,12 @@ terminals, not the editor page.
 | `Sources/KunjWorkspaceCore/Terminal/` | `TerminalSpec` (shell, agent and action tabs, refused with a reason for a missing worktree or stopped container), `tabDot`, `exitCode(waitStatus:)`, `HiddenFeedScheduler` (hidden tabs fed under a 4 ms budget) |
 | `Sources/KunjWorkspaceCore/Diff/` | `DiffService` (scopes base/uncommitted/last, via `git` or `kunj ct exec`), `DiffModel`, `ChangesList` (row names), `GitRunner` |
 | `Sources/KunjWorkspaceCore/Files/` | `FileAccess` (worktree fs or `kunj ct file`), `EditorSave` (`saveDecision`, `editorRefusal`) |
+| `Sources/KunjWorkspaceCore/Search/` | `Search.swift`: the `kunj search --json` mirror, `searchArguments`, `searchTree`, `searchSummary` |
 | `Sources/KunjWorkspaceCore/Layout/` | `WorkspaceLayout`, `LayoutStore` (debounced atomic writes), `restorePlan`, `ActivityTracker` |
 | `Sources/KunjWorkspaceCore/Actions/` | `actionPlan` (what is enabled, with the reason), `newSessionPlan`, `runOutcome`, `KunjSetting` |
 | `Sources/KunjWorkspaceCore/Design/` | `DesignTokens` (generated), `HexColor`, `RelativeTime` |
 | `Sources/KunjWorkspace/AppDelegate.swift` | Launch arguments, menus and shortcuts, discovery, wiring of the store, tabs and layout, quit (stops `kunj events`, closes every tab) |
-| `Sources/KunjWorkspace/Views/` | `MainWindowController` (window chrome, snapshot) and the sidebar, header, tab bar, terminal column, Changes column and status bar |
+| `Sources/KunjWorkspace/Views/` | `MainWindowController` (window chrome, snapshot) and the sidebar, header, tab bar, terminal column, Changes column, Files column with its `SearchPanel`, and status bar |
 | `Sources/KunjWorkspace/Terminal/`, `Model/` | `TerminalTab` (SwiftTerm), `TabRegistry` (tabs per environment), `LayoutKeeper` (layout file, `lastActivity`) |
 | `Sources/KunjWorkspace/Editor/` | `MonacoWebView` (the `kunj://` page, one-object page functions), `EditorTab` |
 | `Sources/KunjWorkspace/Actions/`, `Sheets/`, `Settings/` | `ActionRunner` (header, overflow menu, alerts), `NewSessionSheet`, `SettingsWindow` |

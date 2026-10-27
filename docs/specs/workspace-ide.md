@@ -128,6 +128,20 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   files only the first 50,000 are listed. One app-wide setting (`showFiles`), remembered; closed it
   lists nothing. An × at the right of its bar closes it. `FileLister`/`buildFileTree` in Core,
   `FilesColumn` in the app.
+- **Search (the Files column's second mode):** `Files` and `Search` are toggles in its bar; View >
+  Find in Files ⌘⇧F opens the column in Search mode with the field focused. A search field (`⌘⇧F`
+  badge), the options `Aa` (match case; ignore case by default), `W` (whole words), `.*` (regex;
+  fixed string by default) and the scope menu: `This worktree`/`This container` (default),
+  `All worktrees`, `Worktrees & containers`. It runs `kunj search --regexp=<q> … --json` in the repo
+  root (`searchArguments`: `--in worktrees|containers --branch=<b>` for the default scope) 400 ms after
+  typing stops (2 characters at least), at once on Return or an option change, and again when the
+  selected environment changes (the wider scopes only on a change of repository). A summary line
+  (`8 matches in 6 files · not running: old`), then files with their matches (one node per
+  environment when the scope is wider; branch sources are left out, the app cannot open a committed
+  tree), the match on a `raised2` fill. A click on a match (or Return) opens an editor tab at the line
+  with the match selected (`revealLine` on the editor page, `EditorTab.reveal`), selecting the match's
+  environment first when it is another one. An older kunj gets "Search needs a newer kunj". Spec:
+  [search.md](search.md#workspace-app); `Search/Search.swift` in Core, `SearchPanel` in the app.
 - **Status bar:** container name or worktree path · uptime · services · forwards; right side the agent
   state and the ⌘1–9 hint.
 - **Editor tab** (v1): a changed file of the environment, edited in Monaco (see Editor tabs).
