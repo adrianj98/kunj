@@ -36,8 +36,8 @@ final class SearchPanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     var source: SearchSource?
     /// A match was chosen: open it.
     var onOpen: ((SearchTarget, Environment) -> Void)?
-    /// Opens the first match of the next result as a click would (the `-searchOpen` launch argument)
-    var openFirstMatch = false
+    /// The search whose first match opens as a click would (the `-searchOpen` launch argument); no other one does
+    private var openFirstOf: Int?
     /// Esc on an empty field.
     var onEscape: (() -> Void)?
     private(set) var environment: Environment?
@@ -160,13 +160,16 @@ final class SearchPanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         field.field.currentEditor()?.selectAll(nil)
     }
 
-    /// Puts `text` in the field and searches it now (in `scope`).
-    func search(_ text: String, scope: SearchScope = .environment) {
+    /// Puts `text` in the field and searches it now (in `scope`); `openFirst` opens its first match.
+    func search(_ text: String, scope: SearchScope = .environment, openFirst: Bool = false) {
         field.field.stringValue = text
         query.text = text
         query.scope = scope
         updateControls()
+        let before = generation
         run()
+        // only when run() started a search (it bumps the generation)
+        openFirstOf = openFirst && generation != before ? generation : nil
     }
 
     /// The selected environment. With the default scope a new one is searched again; the wider
@@ -254,7 +257,7 @@ final class SearchPanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             do {
                 let result = try await source.search(q, env: env)
                 guard gen == self.generation else { return }
-                self.show(result, grouped: q.scope != .environment)
+                self.show(result, grouped: q.scope != .environment, openFirst: gen == self.openFirstOf)
             } catch {
                 guard gen == self.generation else { return }
                 log("search: \(error)")
@@ -272,17 +275,14 @@ final class SearchPanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         setItems([])
     }
 
-    private func show(_ result: SearchJson, grouped: Bool) {
+    private func show(_ result: SearchJson, grouped: Bool, openFirst: Bool) {
         let tree = searchTree(result, grouped: grouped)
         summary.stringValue = searchSummary(result)
         message.stringValue = tree.isEmpty ? "No matches" : ""
         setItems(tree.map(SearchItem.init))
         // everything open: a result is read, not browsed
         for item in items { outline.expandItem(item, expandChildren: true) }
-        // only this result: one without matches must not open a later search's
-        let open = openFirstMatch
-        openFirstMatch = false
-        if open, let row = (0..<outline.numberOfRows).first(where: {
+        if openFirst, let row = (0..<outline.numberOfRows).first(where: {
             if case .match = (outline.item(atRow: $0) as? SearchItem)?.node.kind { return true } else { return false }
         }) {
             outline.selectRowIndexes([row], byExtendingSelection: false)

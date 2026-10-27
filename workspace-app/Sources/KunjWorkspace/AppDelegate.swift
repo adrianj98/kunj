@@ -288,8 +288,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let text = arguments["searchQuery"] as? String else { return }
         findInFiles(nil)
         let scope = (arguments["searchScope"] as? String).flatMap(SearchScope.init(rawValue:)) ?? .environment
-        windowController.filesColumn.searchPanel.openFirstMatch = UserDefaults.standard.bool(forKey: "searchOpen")
-        windowController.filesColumn.searchPanel.search(text, scope: scope)
+        windowController.filesColumn.searchPanel.search(text, scope: scope,
+                                                         openFirst: UserDefaults.standard.bool(forKey: "searchOpen"))
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
