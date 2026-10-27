@@ -30,6 +30,7 @@ page only says where each thing stands.
 | Blueprints and snapshots | [blueprints.md](blueprints.md) | — |
 | Blueprint `image` key (sandbox or an image, over container.image and the devcontainer) | [blueprints.md](blueprints.md) | de46ded |
 | Blueprint `"*"` tool values; snapshot seeds skip LFS smudge, containers `git lfs pull` | [blueprints.md](blueprints.md) | f3a4222 |
+| bun preset installs unzip (`kunj_need_pkg`) | [blueprints.md](blueprints.md) | 872fa13 |
 | Sidecar services | [container-phase-2.md](container-phase-2.md) | ed136b3, 6273c61 |
 | `kunj ct open` (editor attach) | [container-phase-2.md](container-phase-2.md) | 93b7ed3, f635113 |
 | `kunj ct forward --auto` | [container-phase-2.md](container-phase-2.md) | 5710902, b88466c |
