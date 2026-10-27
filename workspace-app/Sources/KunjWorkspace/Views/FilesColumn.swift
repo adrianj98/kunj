@@ -24,24 +24,30 @@ private final class FileItem: NSObject {
 }
 
 /// The file explorer at the window's right edge (opened with the tab bar's Files pill or View >
-/// Show Files ⌘⇧E; closed by default): the Files bar (40 px like the Changes bar: `Files` in sans
-/// 12.5/500, the count in mono 11 `faint`, a `border` hairline under it) over the environment's
+/// Show Files ⌘⇧E; closed by default): the Files bar (40 px like the Changes bar: the `Files` and
+/// `Search` modes, the count in mono 11 `faint`, a `border` hairline under it) over the environment's
 /// files as a tree (tracked, untracked and ignored, see `FileLister`; folders first; ignored ones in
 /// `faint`, an ignored folder without its contents). A
 /// double-click (or Return) on a file opens it in an editor tab; on a folder opens or closes it.
 /// Open folders are kept per environment. It reloads when the environment changes and 1 s after a
-/// `git` event of its repository; closed, it lists nothing.
+/// `git` event of its repository; closed, it lists nothing. In Search mode (Find in Files ⌘⇧F) the
+/// `SearchPanel` takes the place of the tree.
 final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
+    enum Mode { case files, search }
+
     var theme: Theme { didSet { apply() } }
+    private(set) var mode = Mode.files
     private(set) var environment: Environment?
     /// Set once kunj is discovered (or by `--demo`).
     var source: FilesSource? { didSet { reload() } }
     var isActive = false {
         didSet {
             guard isActive != oldValue else { return }
+            searchPanel.isActive = isActive && mode == .search
             if isActive { reload() } else { pendingReload?.cancel(); pendingReload = nil; generation += 1 }
         }
     }
+    let searchPanel: SearchPanel
     /// A file was opened (double-click or Return): show it in an editor tab.
     var onOpen: ((Environment, String) -> Void)?
     /// The × at the bar's right: close the column.
@@ -54,7 +60,8 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
 
     private let bar = FillView(.clear)
     private let barLine = FillView(.clear)
-    private let title = makeLabel("Files", font: Theme.sans(12.5, weight: .medium), color: .clear)
+    private let filesTab = HeaderTextButton("Files")
+    private let searchTab = HeaderTextButton("Search")
     private let count = makeLabel("", font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
     private let message = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.small), color: .clear)
     private let outline = NSOutlineView()
@@ -69,11 +76,17 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
 
     init(theme: Theme) {
         self.theme = theme
+        searchPanel = SearchPanel(theme: theme)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         buildOutline()
-        for v in [bar, barLine, scroll, message] as [NSView] { addSubview(v) }
-        for v in [title, count, closeButton] as [NSView] { bar.addSubview(v) }
+        for v in [bar, barLine, scroll, message, searchPanel] as [NSView] { addSubview(v) }
+        for v in [filesTab, searchTab, count, closeButton] as [NSView] { bar.addSubview(v) }
+        filesTab.toolTip = "Files (⌘⇧E)"
+        searchTab.toolTip = "Search in files (⌘⇧F)"
+        filesTab.onPress = { [weak self] in self?.setMode(.files) }
+        searchTab.onPress = { [weak self] in self?.setMode(.search) }
+        searchPanel.isHidden = true
         closeButton.toolTip = "Close the Files column (⌘⇧E)"
         closeButton.onPress = { [weak self] in self?.onClose() }
         count.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -86,10 +99,12 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             bar.leadingAnchor.constraint(equalTo: leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: trailingAnchor),
             bar.heightAnchor.constraint(equalToConstant: DesignTokens.Layout.tabbarHeight),
-            title.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 16),
-            title.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            count.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 10),
-            count.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
+            filesTab.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8),
+            filesTab.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            searchTab.leadingAnchor.constraint(equalTo: filesTab.trailingAnchor, constant: 2),
+            searchTab.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            count.leadingAnchor.constraint(equalTo: searchTab.trailingAnchor, constant: 8),
+            count.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             count.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
             closeButton.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -10),
             closeButton.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
@@ -105,8 +120,29 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             message.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -20),
             message.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
             message.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+            searchPanel.topAnchor.constraint(equalTo: barLine.bottomAnchor),
+            searchPanel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            searchPanel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            searchPanel.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        updateTabs()
         apply()
+    }
+
+    /// Files (the tree) or Search; the hidden one stops loading.
+    func setMode(_ mode: Mode) {
+        guard mode != self.mode else { return }
+        self.mode = mode
+        updateTabs()
+        searchPanel.isActive = isActive && mode == .search
+        if mode == .search { searchPanel.focus() } else { reload() }
+    }
+
+    private func updateTabs() {
+        filesTab.isOn = mode == .files
+        searchTab.isOn = mode == .search
+        searchPanel.isHidden = mode != .search
+        for v in [scroll, message, count] as [NSView] { v.isHidden = mode != .files }
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
@@ -146,6 +182,7 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     func show(_ env: Environment?) {
         let previous = environment
         environment = env
+        searchPanel.show(env)
         guard let env else {
             generation += 1
             pendingReload?.cancel()
@@ -170,7 +207,7 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     }
 
     private func scheduleReload() {
-        guard isActive else { return }
+        guard isActive, mode == .files else { return }
         pendingReload?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.reload() }
         pendingReload = work
@@ -180,7 +217,7 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     private func reload() {
         pendingReload?.cancel()
         pendingReload = nil
-        guard isActive, let env = environment, let source else { return }
+        guard isActive, mode == .files, let env = environment, let source else { return }
         generation += 1
         let gen = generation
         if items.isEmpty { message.stringValue = "Loading files…" }
@@ -288,7 +325,9 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     private func apply() {
         bar.color = theme.color(\.bg)
         barLine.color = theme.color(\.border)
-        title.textColor = theme.color(\.text)
+        filesTab.theme = theme
+        searchTab.theme = theme
+        searchPanel.theme = theme
         count.textColor = theme.color(\.faint)
         closeButton.color = theme.color(\.muted)
         closeButton.hoverFill = theme.color(\.raised)

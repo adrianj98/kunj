@@ -9,7 +9,7 @@ extension read its `--json` output.
 | Part | State |
 | --- | --- |
 | CLI: `kunj search`, `SearchJson` | Shipped |
-| Workspace app: Search panel | To do (see [Workspace app](#workspace-app)) |
+| Workspace app: Search panel | Shipped (see [Workspace app](#workspace-app)) |
 | VS Code extension: quick pick | To do |
 
 ## Command
@@ -87,10 +87,14 @@ kunj search <pattern> [paths...] [-e <pattern>] [--in <scopes>] [--all] [-i] [-F
 
 ## Workspace app
 
-A Search panel for the selected environment. By default it searches that environment only: a
-worktree with `kunj search <q> --json --branch <b> --in worktrees`, a container with
-`--in containers --branch <b>`. A scope menu widens it to all worktrees, branches, containers, commits
-and logs. Results open in an editor tab at the line. Design and status: [workspace-ide.md](workspace-ide.md).
+The Files column's Search mode (⌘⇧F). By default it searches the selected environment only: a
+worktree with `kunj search --regexp=<q> --in worktrees --branch=<b> --json`, a container with
+`--in containers --branch=<b>` (option values in `--opt=value` form, so a query or branch starting
+with `-` is never an option). The scope menu widens it to all worktrees, or worktrees and containers;
+branches, commits and logs stay CLI-only because the app cannot open a committed tree or a log in an
+editor tab. A match opens in an editor tab at its line, in its own environment. Fixed string and
+ignore case by default (`Aa`, `W`, `.*` toggle them). Details: [workspace-ide.md](workspace-ide.md)
+(Files column).
 
 ## Not done
 

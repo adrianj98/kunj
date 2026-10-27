@@ -92,7 +92,13 @@ is slow to start, the window shows a spinner with "Loading sessions…" and the 
 - **Files** (hidden until you open it with the **Files** pill or ⌘⇧E), at the window's right
   edge: the branch's files as a tree, without the ones git ignores. Double-click a file to edit it
   in a tab. In a container it lists `/workspace`, so the container must be running. The × at the
-  right of its bar closes it.
+  right of its bar closes it. Its **Search** mode (⌘⇧F) searches the files of the selected
+  worktree or container with [`kunj search`](../worktrees/search/), uncommitted work included: type
+  at least two characters, or press Return. **Aa** matches case, **W** whole words, **.\*** reads
+  the text as a regular expression. The menu at the right widens the search to all the
+  repository's worktrees, or its worktrees and running containers, with the results under each
+  branch. Click a match to open the file at that line (in its own session, when it is another
+  one).
 - **Status bar.** The worktree path or container name, uptime, services and forwarded ports; the
   agent state on the right.
 
@@ -186,6 +192,7 @@ tabs, or the branch changing), kept in the same file.
 | ⌘⇧P | Create PR |
 | ⌘⇧C | Show or hide Changes |
 | ⌘⇧E | Show or hide Files |
+| ⌘⇧F | Search in files (Esc on an empty field goes back to the terminal) |
 | ⌘⇧W | Close the session (all its tabs and tmux sessions) |
 | ⌘⇧] / ⌘⇧[ | Next / previous tab |
 | ⌘W | Close the tab |

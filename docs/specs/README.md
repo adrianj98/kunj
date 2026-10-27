@@ -21,7 +21,7 @@ page only says where each thing stands.
 | [organize-windows.md](organize-windows.md) | Organize Windows in the macOS menu bar app | Shipped |
 | [remote-containers.md](remote-containers.md) | `kunj serve` on the Docker host, `RemoteKunjBackend`, `kunj remote`, the wire protocol, auth over an SSH tunnel | Shipped (SSH to a real second machine not yet tried) |
 | [multi-remote-containers.md](multi-remote-containers.md) | A repository's containers across this Mac and several remotes: `ct list` and branch lookup ask every one; the workspace app's remote picker | Spec written |
-| [search.md](search.md) | `kunj search`: worktrees (default), branches, containers, commits and work logs; `SearchJson`; the workspace app's Search panel | Shipped (CLI); app to do |
+| [search.md](search.md) | `kunj search`: worktrees (default), branches, containers, commits and work logs; `SearchJson`; the workspace app's Search panel | Shipped (CLI, workspace app); VS Code to do |
 
 ## Done
 
@@ -71,18 +71,19 @@ page only says where each thing stands.
 | Antigravity as an agent: `kunj agent --agent antigravity`, Antigravity Agent tabs in the workspace app (worktrees; no waiting state) | [workspace-ide.md](workspace-ide.md) | a18c172 |
 | Workspace app: Settings › Containers **Test** for the Claude Code token (`kunj ct token check --json`), Set Up… through `kunj ct token setup` | [workspace-ide.md](workspace-ide.md#layout) | 14778e6 |
 | `kunj search`: every worktree by default; `--in branches,containers,commits,logs` / `--all`; `SearchJson` | [search.md](search.md) | 4b23f81 |
+| Workspace app: Search mode in the Files column (⌘⇧F), the selected worktree or container by default, all worktrees (and containers) from its menu; a match opens at its line | [search.md](search.md#workspace-app) | this commit |
 
 ## In progress
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Search in the workspace app: a Search panel defaulting to the selected worktree or container | [search.md](search.md#workspace-app) | CLI shipped (see Done) |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
 
 ## To do
 
 | Work | Spec | Notes |
 | --- | --- | --- |
+| Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
 | Remote containers: try an `--ssh` remote against a real second machine (and a Linux Docker host) | [remote-containers.md](remote-containers.md) | Everything so far ran with `kunj serve` on the same Mac |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
