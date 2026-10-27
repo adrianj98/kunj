@@ -31,3 +31,13 @@ docs/specs/remote-containers.md.
 `insecure: true` (`isInsecureUrl()`), `add` warns on stderr, `remote list` shows `(unencrypted)` and
 `remote list --json` reports `insecure`. The rule is only checked at `add`; the client sends to whatever
 URL the entry holds. The server must also listen there: `kunj serve --listen <addr> --allow-remote-listen`.
+
+# What the server refuses
+
+`Guard.runSpec()` (src/lib/serve/guard.ts) checks every container a client asks `kunj serve` to create:
+labels must include `kunj.repo` and be `kunj.*` only; volumes must be named volumes (never host paths)
+mounted at absolute paths, and an existing volume must carry `kunj.repo`; `networkOf` must name a kunj
+container; `privileged`, `securityOpt` and capabilities outside kunj's own set (`CHOWN`, `DAC_OVERRIDE`,
+`FOWNER`, `SETUID`, `SETGID`, `NET_ADMIN`, `NET_RAW`) need `--allow-privileged`, and `runtime` needs
+`--allow-runtime`. On the client, `kunj ct` keeps one backend per remote per command and closes its SSH
+tunnel when the command ends (`ContainerCommand.closeBackends()`).

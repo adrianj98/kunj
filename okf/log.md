@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-26 (serve guard)
+* **Containers**: `containers/remotes.md` gains "What the server refuses" (volumes, networks, capabilities) and tunnel closing.
+
 ## 2026-10-26 (terminal colours)
 * **Workspace app**: `apps/workspace-app.md` notes which terminal colours follow the theme.
 
