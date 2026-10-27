@@ -13,6 +13,7 @@ import { SEED_MARKER } from '../seed';
 import { describeGuard } from '../env';
 import { ResolvedBlueprint, blueprintHash, parseBlueprint, snapshotTag } from '../blueprint';
 import { Preset } from '../presets';
+import { ALIASES_FILE } from '../provision';
 import { planSnapshot } from '../snapshot';
 import { KunjConfig } from '../../../types';
 import { TokenLookup } from '../tokens';
@@ -1274,6 +1275,25 @@ describe('blueprint start', () => {
     expect(seedScriptOf(b)).toContain('git clone');
     expect(opts.warnings).toEqual([]);
     expect(result.blueprint).toMatchObject({ hash: hashOf(r), snapshot: null, stale: false, toolsRun: ['apt'], setupRan: true, maintainRan: false });
+  });
+
+  it('writes the blueprint aliases as root after the presets and before setup', async () => {
+    const b = backend();
+    await startContainer(b, bpOptions({ blueprint: blueprint({ aliases: { sso: "aws sso login --use-device-code", q: "echo 'x'" } }), noSnapshot: true }));
+    const execs = b.callsOf('exec') as Array<[string, string[], { user?: string }]>;
+    const at = execs.findIndex(e => e[1].includes(ALIASES_FILE));
+    expect(at).toBeGreaterThan(-1);
+    expect(execs[at][2].user).toBe('root');
+    expect(execs[at][1][4]).toBe(ALIASES_FILE);
+    expect(execs[at][1][5]).toBe(`# Written by kunj from the blueprint's aliases\nalias sso='aws sso login --use-device-code'\nalias q='echo '\\''x'\\'''\n`);
+    expect(execs.findIndex(e => e[1].join(' ').includes('kunj-presets/apt.sh'))).toBeLessThan(at);
+    expect(execs.findIndex(e => e[1][2] === 'yarn install --immutable')).toBeGreaterThan(at);
+  });
+
+  it('writes no aliases file without aliases', async () => {
+    const b = backend();
+    await startContainer(b, bpOptions({ blueprint: blueprint(), noSnapshot: true }));
+    expect((b.callsOf('exec') as Array<[string, string[]]>).some(e => e[1].includes(ALIASES_FILE))).toBe(false);
   });
 
   it('maintain still runs after presets when there is no setup', async () => {

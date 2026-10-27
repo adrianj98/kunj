@@ -372,8 +372,8 @@ with `--folder-uri vscode-remote://attached-container+<hex of {"containerName":"
 attached window forwards host git credentials and the SSH/GPG agents into the container, so `open` always
 prints `EDITOR_CREDENTIALS_WARNING` (editor.ts); kunj does not change the extension's behaviour.
 
-**Blueprints:** `.kunj/blueprint.json` (`tools`, `setup`, `maintain`, `lockfiles`, `notes`, `image`, `services`) says how a
-new container is set up. `image` (`sandbox` or a reference, `init` writes `sandbox`) wins over `container.image`
+**Blueprints:** `.kunj/blueprint.json` (`tools`, `setup`, `maintain`, `lockfiles`, `notes`, `image`, `services`, `aliases`) says how a
+new container is set up. `aliases` go to `/etc/profile.d/kunj-aliases.sh` as root after the presets (interactive shells only). `image` (`sandbox` or a reference, `init` writes `sandbox`) wins over `container.image`
 and the devcontainer, which it then skips; only `--image` beats it, and a referenced image may not run as root. Design: docs/specs/blueprints.md. Modules:
 `blueprint.ts` (parse/validate, resolve, hash, tags, labels), `presets.ts` (lookup and order),
 `infer.ts` (`blueprint init`), `provision.ts` (find a snapshot, run presets + `setup` on a new

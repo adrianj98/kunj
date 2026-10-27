@@ -1,6 +1,7 @@
 // The blueprint's part of a container start: finding its snapshot, and running presets, `setup`
 // and `maintain` in a container. Kept out of lifecycle.ts, which calls these in its start order.
 import { ContainerBackend, ExecIO } from './backend';
+import { shellQuote } from '../config-vars';
 import { Blueprint, SNAPSHOT_REPO } from './blueprint';
 import { LABEL } from './names';
 import { Preset, runPresets } from './presets';
@@ -43,8 +44,26 @@ export async function runCommands(
   return null;
 }
 
+/** Outside the home volume, so a snapshot keeps it; login shells and kunj's zshrc source it */
+export const ALIASES_FILE = '/etc/profile.d/kunj-aliases.sh';
+
+export function aliasesScript(aliases: Record<string, string>): string {
+  const lines = Object.keys(aliases).map(name => `alias ${name}=${shellQuote(aliases[name])}`);
+  return `# Written by kunj from the blueprint's aliases\n${lines.join('\n')}\n`;
+}
+
+/** The blueprint's aliases as root; the file is passed as an argument, never parsed by the shell. */
+export async function writeAliases(backend: ContainerBackend, id: string, aliases: Record<string, string>): Promise<void> {
+  const r = await backend.exec(
+    id,
+    ['sh', '-c', 'mkdir -p "$(dirname "$1")" && printf %s "$2" > "$1" && chmod 644 "$1"', 'sh', ALIASES_FILE, aliasesScript(aliases)],
+    { user: 'root' }
+  );
+  if (r.exitCode !== 0) throw new Error(`writing the blueprint's aliases failed (exit ${r.exitCode})`);
+}
+
 /**
- * A new container without a snapshot: the presets as root, then `setup` in the workspace as the
+ * A new container without a snapshot: the presets and aliases as root, then `setup` in the workspace as the
  * user (`io.user`). Throws on the first failure, which the caller turns into a failed start.
  */
 export async function provisionNew(
@@ -58,6 +77,7 @@ export async function provisionNew(
 ): Promise<{ toolsRun: string[]; tools: Array<{ name: string; version: string }>; setupRan: boolean }> {
   const output = { stdout: io.stdout, stderr: io.stderr };
   const installed = presets.length ? await runPresets(backend, id, presets, blueprint.tools, toolUser, output, warn) : [];
+  if (blueprint.aliases) await writeAliases(backend, id, blueprint.aliases);
   const failed = await runCommands(backend, id, blueprint.setup, io);
   if (failed) throw new Error(`setup command failed (exit ${failed.exitCode}): ${failed.command}`);
   return { toolsRun: installed.map(t => t.name), tools: installed, setupRan: blueprint.setup.length > 0 };

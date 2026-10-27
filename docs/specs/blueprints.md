@@ -43,6 +43,7 @@ runs as root, like a devcontainer's.
   "lockfiles": ["pnpm-lock.yaml"],
   "notes":     "free text shown by status",
   "image":     "sandbox",
+  "aliases":   { "sso": "aws sso login --use-device-code" },
   "services":  { "postgres": { "image": "postgres:16", "env": { "POSTGRES_PASSWORD": "dev" }, "port": 5432 } }
 }
 ```
@@ -56,6 +57,7 @@ runs as root, like a devcontainer's.
 | `notes` | Free text, shown by `status`. |
 | `image` | The base image: `sandbox` (kunj's own, ignoring any devcontainer.json) or an image reference (refused at start when it runs as root). Precedence: `--image`, then `image`, then `container.image`, then the devcontainer, then the sandbox. Naming it skips the devcontainer entirely, its compose services too. `blueprint init` writes `sandbox`, since the presets install onto it, and keeps the image of a file it overwrites. |
 | `services` | Sidecar services; see [container-phase-2.md](container-phase-2.md). |
+| `aliases` | Name → one-line command. Written as root after the presets, before `setup`, to `/etc/profile.d/kunj-aliases.sh` (outside the home volume, so the snapshot keeps it), single-quoted. Login shells and the sandbox's `/etc/zsh/zshrc` source it, after zshrc's own aliases, so a blueprint alias wins over `ll` or `gs`. Aliases only exist in interactive shells: `kunj ct exec -- <alias>` runs no shell and will not find them. Names match `ALIAS_NAME`, `[A-Za-z0-9_][A-Za-z0-9_.+-]*`. An alias line in `setup` does nothing, since each step is its own shell. |
 
 Unknown keys warn once and are ignored.
 

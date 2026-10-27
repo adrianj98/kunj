@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-27 — Blueprint `aliases`
+
+- New blueprint key `aliases: { name: command }`. `provisionNew()` writes them as root, after the
+  presets and before `setup`, to `/etc/profile.d/kunj-aliases.sh`, so the snapshot keeps them. The
+  sandbox zshrc now defines its own aliases before sourcing `/etc/profile.d`, so a blueprint alias
+  replaces `ll`/`gs`. Why: the user tried `alias sso=…` as a `setup` step for alertd-core, which
+  can't work (each step is its own shell, and the home directory isn't in the snapshot), and asked
+  for an alias section.
+
 ## 2026-10-26 — bun preset installs unzip
 
 - `_lib.sh` gains `kunj_need_pkg <cmd> [pkg]` (apt-get install when missing); the bun preset uses it for

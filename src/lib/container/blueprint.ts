@@ -34,12 +34,17 @@ export interface Blueprint {
   image?: string;
   /** Sidecar services; first in precedence over container.services and the devcontainer's compose file */
   services?: ServiceSpec[];
+  /** Shell aliases for interactive shells in the container, written to /etc/profile.d at setup */
+  aliases?: Record<string, string>;
   ignoredKeys: string[];
 }
 
-const KNOWN_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes', 'image', 'services']);
+const KNOWN_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes', 'image', 'services', 'aliases']);
 
 export const SANDBOX_IMAGE_KEYWORD = 'sandbox';
+
+/** An alias name zsh, bash and sh all accept */
+export const ALIAS_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.+-]*$/;
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every(x => typeof x === 'string');
@@ -92,6 +97,20 @@ export function parseBlueprint(text: string, source: string): Blueprint {
 
   const services = parseServices(obj.services, source);
 
+  const aliases: Record<string, string> = {};
+  if (obj.aliases !== undefined) {
+    if (!obj.aliases || typeof obj.aliases !== 'object' || Array.isArray(obj.aliases)) {
+      throw new Error(`${source}: aliases must be an object`);
+    }
+    for (const [name, value] of Object.entries(obj.aliases as Record<string, unknown>)) {
+      if (!ALIAS_NAME.test(name)) throw new Error(`${source}: aliases.${name} is not a valid alias name`);
+      if (typeof value !== 'string' || value.trim() === '' || /[\n\r]/.test(value)) {
+        throw new Error(`${source}: aliases.${name} must be a one-line command`);
+      }
+      aliases[name] = value;
+    }
+  }
+
   return {
     tools,
     setup: commandList(obj, 'setup', source),
@@ -100,6 +119,7 @@ export function parseBlueprint(text: string, source: string): Blueprint {
     notes: obj.notes as string | undefined,
     ...(obj.image !== undefined ? { image: obj.image as string } : {}),
     ...(services.length ? { services } : {}),
+    ...(Object.keys(aliases).length ? { aliases } : {}),
     ignoredKeys: Object.keys(obj).filter(k => !KNOWN_KEYS.has(k)).sort(),
   };
 }

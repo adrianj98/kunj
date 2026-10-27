@@ -4,7 +4,13 @@
 
 # The first-run wizard is turned off in /etc/zsh/zshenv (Dockerfile): zsh runs it before this file.
 
-# Presets record their tool environment (JAVA_HOME, COREPACK_HOME, ...) here
+# Before /etc/profile.d, so the blueprint's aliases (kunj-aliases.sh) can replace these
+alias ls='ls --color=auto'
+alias ll='ls -la'
+alias gs='git status -sb'
+alias gl='git log --oneline -20'
+
+# Presets record their tool environment (JAVA_HOME, COREPACK_HOME, ...) here, the blueprint its aliases
 # (N): no error when no preset has written a file yet
 for f in /etc/profile.d/*.sh(N); do [ -r "$f" ] && . "$f"; done
 
@@ -22,10 +28,6 @@ setopt prompt_subst
 PROMPT='%F{cyan}kunj%f ▸ %F{green}${KUNJ_BRANCH:-?}%f %F{blue}%~%f %(?.%F{green}.%F{red})❯%f '
 RPROMPT='%F{240}sandbox%f'
 
-alias ls='ls --color=auto'
-alias ll='ls -la'
-alias gs='git status -sb'
-alias gl='git log --oneline -20'
 bindkey -e
 
 # Shells open in the home directory; the code is in /workspace

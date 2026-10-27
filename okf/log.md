@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-27 (blueprint aliases)
+* **Containers**: `containers/blueprints.md` documents the `aliases` key and `/etc/profile.d/kunj-aliases.sh`.
+
 ## 2026-10-26 (kunj_need_pkg)
 * **Containers**: `containers/presets.md` lists `kunj_need_pkg`; the bun preset installs unzip.
 

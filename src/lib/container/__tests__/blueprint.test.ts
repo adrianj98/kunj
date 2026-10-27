@@ -75,6 +75,20 @@ describe('parseBlueprint', () => {
     expect(parseBlueprint(JSON.stringify({ tools: ok }), 'x.json').tools).toEqual(ok);
   });
 
+  it('takes aliases as one-line commands under shell-safe names', () => {
+    const bp = parseBlueprint('{"aliases": {"sso": "aws sso login --use-device-code", "ll": "ls -la"}}', 'x.json');
+    expect(bp.aliases).toEqual({ sso: 'aws sso login --use-device-code', ll: 'ls -la' });
+    expect(parseBlueprint('{}', 'x.json').aliases).toBeUndefined();
+    expect(parseBlueprint('{"aliases": {}}', 'x.json').aliases).toBeUndefined();
+    expect(() => parseBlueprint('{"aliases": ["sso"]}', 'x.json')).toThrow('x.json: aliases must be an object');
+    for (const name of ['a b', '-x', 'a=b', 'a;b', '$(id)']) {
+      expect(() => parseBlueprint(JSON.stringify({ aliases: { [name]: 'x' } }), 'x.json')).toThrow(`x.json: aliases.${name} is not a valid alias name`);
+    }
+    for (const value of ['', '  ', 'a\nb', 1]) {
+      expect(() => parseBlueprint(JSON.stringify({ aliases: { s: value } }), 'x.json')).toThrow('x.json: aliases.s must be a one-line command');
+    }
+  });
+
   it('reads "*" as any version, like true', () => {
     expect(parseBlueprint('{"tools": {"bun": "*", "node": "24"}}', 'x.json').tools).toEqual({ bun: true, node: '24' });
   });

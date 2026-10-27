@@ -36,6 +36,7 @@ as hostile; the host checkout and `~/.kunj` are trusted.
 | `notes` | free text, shown by `blueprint status`, kept by `init` |
 | `image` | `"sandbox"` (`SANDBOX_IMAGE_KEYWORD`) or an `isImageRef()` reference. `baseSource()` in lifecycle.ts: `--image` > `image` > `container.image` > devcontainer > sandbox; any `image` skips `readDevcontainer()` (so no compose services; `declaredServices()` skips it too). A reference becomes a `setting` source with `fromBlueprint`, which `checkImage()` refuses when uid is 0. `init` writes `sandbox`, keeps an existing value |
 | `services` | [sidecar services](/containers/services.md), highest precedence |
+| `aliases` | object; names `ALIAS_NAME`, values one-line non-empty strings. `provisionNew()` calls `writeAliases()` as root after the presets and before `setup`: `aliasesScript()` (`alias n='v'`, `shellQuote`) goes to `ALIASES_FILE` = `/etc/profile.d/kunj-aliases.sh` as an argv value. The sandbox zshrc defines its aliases before sourcing `/etc/profile.d`, so the blueprint's win |
 
 Unknown keys are kept in `ignoredKeys` and printed by `status`.
 
