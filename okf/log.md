@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-26 (blueprint tools "*", LFS)
+* **Containers**: `containers/blueprints.md` notes `"*"` tool values and LFS handling in snapshot seeds.
+
 ## 2026-10-26 (blueprint image)
 * **Containers**: `containers/blueprints.md` documents the blueprint `image` key, its precedence and `init` writing `sandbox`.
 

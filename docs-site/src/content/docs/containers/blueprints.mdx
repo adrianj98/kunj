@@ -40,7 +40,7 @@ The blueprint is `.kunj/blueprint.json` in the repository. Comments and trailing
 
 | Key | Type | Meaning |
 |---|---|---|
-| `tools` | object | Preset name → version or option (a string, an array of strings, or `true`). Each one runs a [preset](../presets/) as root. Values may contain only plain words: no options (`-x`), paths or shell characters. |
+| `tools` | object | Preset name → version or option (a string, an array of strings, or `true`; `"*"` means the same as `true`, any version). Each one runs a [preset](../presets/) as root. Values may contain only plain words: no options (`-x`), paths or shell characters. |
 | `setup` | array of commands | Run in order, in `/workspace`, as the container's user, through a login shell. Runs once, when the snapshot is built. The first failure stops it. |
 | `maintain` | array of commands | Run the same way on every later start of a container, to absorb drift between the snapshot and the branch. A failure is a warning, not an error. Migrations against [services](../services/) go here, written so they can run again: `setup`'s only reach the snapshot build's temporary services. |
 | `lockfiles` | array of paths | Paths from the repository root that decide when the snapshot is stale. When omitted, kunj looks for the usual ones: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `requirements*.txt`, `go.sum`, `Cargo.lock`, `Gemfile.lock`. |

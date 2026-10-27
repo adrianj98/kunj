@@ -1112,7 +1112,7 @@ async function declaredServices(
   try {
     // As the container was made: a start with an image setting read no devcontainer, one without did.
     // A snapshot (or an older container without the record) does not say, so the current setting decides.
-    const fromSetting = imageKind === 'setting' || !!blueprint?.blueprint.image ||
+    const fromSetting = imageKind === 'setting' || (imageKind !== 'devcontainer' && !!blueprint?.blueprint.image) ||
       ((imageKind === undefined || imageKind === 'blueprint') && !!options.config.container?.image);
     const devcontainer = fromSetting ? null : await readDevcontainer(hostRef(options.branch, false, undefined), options.cwd);
     return await resolveServices(backend, {

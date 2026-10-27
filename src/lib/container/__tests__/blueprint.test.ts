@@ -74,6 +74,10 @@ describe('parseBlueprint', () => {
     const ok = { yarn: 'corepack', node: '22.12', go: 'lts', apt: ['jq', 'libc6:arm64', 'g++'], playwright: 'chromium firefox', bun: true };
     expect(parseBlueprint(JSON.stringify({ tools: ok }), 'x.json').tools).toEqual(ok);
   });
+
+  it('reads "*" as any version, like true', () => {
+    expect(parseBlueprint('{"tools": {"bun": "*", "node": "24"}}', 'x.json').tools).toEqual({ bun: true, node: '24' });
+  });
 });
 
 describe('resolution', () => {

@@ -2,6 +2,17 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-26 — Blueprint tools "*" and LFS in snapshots
+
+- A tool value `"*"` is read as `true` (any version). Why: the user's alertd-core blueprint has
+  `"bun": "*"`, which TOOL_WORD rejected.
+- Snapshot seeds skip LFS smudging (`GIT_LFS_SKIP_SMUDGE=1` for the bundle clone and for a copy from the
+  snapshot); a container from the snapshot then runs `git lfs pull` with its token, failure only a warning.
+  Why: alertd-core's snapshot failed cloning the bundle: an LFS file (the Pulsar tarball) tried to
+  download over SSH with no credentials ("Host key verification failed").
+- Review fix: resume reads the devcontainer's services again when the container was made from the
+  devcontainer, even if the blueprint now names an image (the recorded kind decides).
+
 ## 2026-10-26 — Blueprint `image` key
 
 - `.kunj/blueprint.json` takes `image`: `"sandbox"` (kunj's sandbox) or an image reference. Precedence:

@@ -419,6 +419,16 @@ describe('seedScript', () => {
     }
   });
 
+  it('checks out LFS pointers from a bundle or a snapshot copy, and the copy pulls the content', () => {
+    const fromBundle = seedScript({ ...base, branch: 'main', bundlePath: '/b' });
+    expect(fromBundle).toContain('export GIT_LFS_SKIP_SMUDGE=1');
+    expect(fromBundle).not.toContain('git lfs pull');
+    const fromSnapshot = seedScript({ ...base, seedFrom: '/opt/kunj/seed' });
+    expect(fromSnapshot.indexOf('export GIT_LFS_SKIP_SMUDGE=1')).toBeLessThan(fromSnapshot.indexOf('git switch'));
+    expect(fromSnapshot).toContain('GIT_LFS_SKIP_SMUDGE=0 git lfs pull ||');
+    expect(seedScript(base)).not.toContain('GIT_LFS_SKIP_SMUDGE');
+  });
+
   it('bundlePath clones the bundle without fetching and refuses create', () => {
     const s = seedScript({ ...base, branch: 'main', bundlePath: '/tmp/kunj-origin.bundle' });
     expect(s).toContain("if [ ! -d /workspace/.git ]; then git clone --no-checkout -b 'main' '/tmp/kunj-origin.bundle' /workspace; fi");

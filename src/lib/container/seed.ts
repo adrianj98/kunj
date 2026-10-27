@@ -211,6 +211,9 @@ export function seedScript(input: SeedInput): string {
       `git config --global --add ${q(`url.https://${input.originHost}/.insteadOf`)} ${q(`ssh://git@${input.originHost}/`)}`
     );
   }
+  // A snapshot's bundle clone has no credentials for LFS, and a copy of the snapshot moving its branch
+  // must not need them either: both check out pointers, and the copy pulls the content at the end
+  if (input.seedFrom || bundle) lines.push('export GIT_LFS_SKIP_SMUDGE=1');
   if (input.seedFrom) {
     // Only an empty workspace or a copy of ours cut short is replaced, never a checkout (the seed
     // marker is an ignored file `git clean -x` removes, so it cannot decide this)
@@ -269,7 +272,12 @@ export function seedScript(input: SeedInput): string {
       lines.push(`git switch ${branch}`);
     }
   }
-  if (input.seedFrom) lines.push(`rm -f ${SEED_FRESH}`);
+  if (input.seedFrom) {
+    lines.push(
+      `if command -v git-lfs >/dev/null 2>&1 && [ -n "$(git lfs ls-files 2>/dev/null | head -n 1)" ]; then GIT_LFS_SKIP_SMUDGE=0 git lfs pull || echo 'kunj: git lfs pull failed; run it in the container' >&2; fi`
+    );
+    lines.push(`rm -f ${SEED_FRESH}`);
+  }
   for (const name of input.seedFrom ? [SEED_MARKER_EXCLUDE, SEED_COPYING, SEED_FRESH] : [SEED_MARKER_EXCLUDE]) {
     lines.push(`grep -qx ${name} .git/info/exclude 2>/dev/null || echo ${name} >> .git/info/exclude`);
   }

@@ -67,6 +67,11 @@ export function parseBlueprint(text: string, source: string): Blueprint {
       if (typeof value !== 'string' && value !== true && !isStringArray(value)) {
         throw new Error(`${source}: tools.${key} must be a string, an array of strings or true`);
       }
+      // "*" is any version, as true is
+      if (value === '*') {
+        tools[key] = true;
+        continue;
+      }
       // Values reach root-run preset scripts as words: none may look like an option or a path
       const words = value === true ? [] : Array.isArray(value) ? value : value.trim().split(/\s+/);
       const bad = words.find(w => !TOOL_WORD.test(w));

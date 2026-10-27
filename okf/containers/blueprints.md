@@ -29,7 +29,7 @@ as hostile; the host checkout and `~/.kunj` are trusted.
 
 | Key | Rule (`parseBlueprint()`, JSONC via `parseJsonc()`) |
 | --- | --- |
-| `tools` | object; keys `^[a-z0-9-]+$` (preset names); value a string, string array or `true`; every word must match `TOOL_WORD` (no leading `-`, no `/`, no whitespace or shell metacharacters) |
+| `tools` | object; keys `^[a-z0-9-]+$` (preset names); value a string, string array or `true` (`"*"` is stored as `true`); every word must match `TOOL_WORD` (no leading `-`, no `/`, no whitespace or shell metacharacters) |
 | `setup` | non-empty strings; run once as the sandbox user with `sh -lc` in `/workspace` (snapshot, or a new container without one) |
 | `maintain` | same; run on every start except one that just ran `setup`; a failure is a warning |
 | `lockfiles` | paths for the hash; default `KNOWN_LOCKFILES` plus root `requirements*.txt` |
@@ -101,3 +101,6 @@ worktree), the base image tag and the presets' content hashes. Start, `snapshot`
 [4] [src/commands/container.ts](/src/commands/container.ts)
 [5] [docs/specs/blueprints.md](/docs/specs/blueprints.md)
 [6] [CLAUDE.md](/CLAUDE.md)
+
+
+Git LFS: `seedScript()` exports `GIT_LFS_SKIP_SMUDGE=1` for a bundle clone (snapshot build, no credentials) and for a copy from the snapshot, which then runs `GIT_LFS_SKIP_SMUDGE=0 git lfs pull` when the repo has LFS files (failure only warns). A plain origin clone smudges as usual.

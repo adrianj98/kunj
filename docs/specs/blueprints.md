@@ -49,7 +49,7 @@ runs as root, like a devcontainer's.
 
 | Key | Meaning |
 | --- | --- |
-| `tools` | Preset name → `true`, a string, or a list (for `apt`). Installed as root before `setup`. Every word must match `TOOL_WORD`, `[A-Za-z0-9][A-Za-z0-9._+:=~@-]*`, so a value can never become an option or a path. |
+| `tools` | Preset name → `true` (or `"*"`, read as `true`: any version), a string, or a list (for `apt`). Installed as root before `setup`. Every word must match `TOOL_WORD`, `[A-Za-z0-9][A-Za-z0-9._+:=~@-]*`, so a value can never become an option or a path. |
 | `setup` | Shell commands run once with `sh -lc` in `/workspace` as the sandbox user, in order; the first failure stops. |
 | `maintain` | Run the same way on every start after the seed, to absorb lockfile drift; skipped right after `setup` in the same run. A failure is a warning. |
 | `lockfiles` | Paths whose blob ids are part of the hash. Default: whichever known names exist at the repo root (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `go.sum`, `Cargo.lock`, `Gemfile.lock`, `requirements*.txt`). |
@@ -150,7 +150,10 @@ Resuming never builds; it runs `maintain`. Per new start the order is seed → k
    and there is no docker volume.
 3. The bundle is streamed in as the sandbox user to `/tmp/kunj-origin.bundle`, cloned
    (`seedScript({ bundlePath })`: `origin` reset to the real URL, no fetch, submodules from their own
-   URLs) and removed before the commit. `--no-bundle` clones origin instead (public origins only).
+   URLs, `GIT_LFS_SKIP_SMUDGE=1` so LFS files stay pointers: the snapshot has no credentials) and
+   removed before the commit. `--no-bundle` clones origin instead (public origins only). A container
+   seeded from the snapshot also checks out with smudging off, then runs `git lfs pull` (a failure is
+   a warning on stderr) with its own token.
 4. Presets as root, then `setup` as the sandbox user, then the devcontainer's post commands.
 5. `/workspace` is copied to `/opt/kunj/seed` as root (without the seed markers) and the container is
    committed with the presets' environment as `ENV` and labels `kunj.repo`,
