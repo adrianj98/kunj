@@ -103,7 +103,7 @@ export function parseBlueprint(text: string, source: string): Blueprint {
       throw new Error(`${source}: aliases must be an object`);
     }
     for (const [name, value] of Object.entries(obj.aliases as Record<string, unknown>)) {
-      if (!ALIAS_NAME.test(name)) throw new Error(`${source}: aliases.${name} is not a valid alias name`);
+      if (!ALIAS_NAME.test(name) || name === '__proto__') throw new Error(`${source}: aliases.${name} is not a valid alias name`);
       if (typeof value !== 'string' || value.trim() === '' || /[\n\r]/.test(value)) {
         throw new Error(`${source}: aliases.${name} must be a one-line command`);
       }

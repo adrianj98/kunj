@@ -1431,8 +1431,9 @@ export class ContainerCommand extends BaseCommand {
       }
     }
 
-    // Notes are written by hand and never inferred, so an overwrite keeps them
+    // Notes and aliases are written by hand and never inferred, so an overwrite keeps them
     let notes: string | undefined;
+    let aliases: Record<string, string> | undefined;
     // The presets install onto kunj's sandbox, so a new blueprint names it; an overwrite keeps the old image
     let image = SANDBOX_IMAGE_KEYWORD;
     let hadServices = false;
@@ -1440,6 +1441,7 @@ export class ContainerCommand extends BaseCommand {
       try {
         const old = parseBlueprint(fs.readFileSync(file, 'utf8'), file);
         notes = old.notes;
+        aliases = old.aliases;
         image = old.image ?? image;
         hadServices = !!old.services?.length;
       } catch {
@@ -1486,6 +1488,7 @@ export class ContainerCommand extends BaseCommand {
       maintain,
       ...(inferred.lockfiles.length ? { lockfiles: inferred.lockfiles } : {}),
       ...(notes !== undefined ? { notes } : {}),
+      ...(aliases ? { aliases } : {}),
     };
     const text = JSON.stringify(doc, null, 2) + '\n';
     try {

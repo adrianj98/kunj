@@ -1182,15 +1182,16 @@ describe('ContainerCommand', () => {
       expect(fs.readFileSync(file, 'utf8')).toBe('{"setup":["make"]}\n');
     });
 
-    it('blueprint init keeps the notes and image of the file it overwrites', async () => {
+    it('blueprint init keeps the notes, image and aliases of the file it overwrites', async () => {
       const file = path.join(mockRoot, '.kunj', 'blueprint.json');
       fs.mkdirSync(path.dirname(file));
-      fs.writeFileSync(file, '{ "setup": ["make"], "notes": "ask Ada about the db", "image": "my/img:1" }\n');
+      fs.writeFileSync(file, '{ "setup": ["make"], "notes": "ask Ada about the db", "image": "my/img:1", "aliases": {"sso": "aws sso login"} }\n');
       await new ContainerCommand().execute('blueprint', 'init', [], { yes: true });
       const written = JSON.parse(fs.readFileSync(file, 'utf8'));
       expect(written.setup).toEqual(['npm ci', 'npm run build']);
       expect(written.notes).toBe('ask Ada about the db');
       expect(written.image).toBe('my/img:1');
+      expect(written.aliases).toEqual({ sso: 'aws sso login' });
     });
 
     it('status and snapshot resolve the working tree first and no longer ask to push', async () => {

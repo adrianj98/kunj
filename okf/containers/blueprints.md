@@ -64,7 +64,7 @@ worktree), the base image tag and the presets' content hashes. Start, `snapshot`
 
 | Command | Behaviour |
 | --- | --- |
-| `kunj ct blueprint init [--global] [--yes]` | `inferBlueprint()` on the checkout, prints its reasons, prompts for tools/setup/maintain (TTY), validates, writes `.kunj/blueprint.json` (or `~/.kunj/<repo>/blueprint.json` with `--global`) with `"image": "sandbox"`; refuses to overwrite without `--yes` or confirmation; keeps existing `notes` and `image` |
+| `kunj ct blueprint init [--global] [--yes]` | `inferBlueprint()` on the checkout, prints its reasons, prompts for tools/setup/maintain (TTY), validates, writes `.kunj/blueprint.json` (or `~/.kunj/<repo>/blueprint.json` with `--global`) with `"image": "sandbox"`; refuses to overwrite without `--yes` or confirmation; keeps existing `notes`, `image` and `aliases` |
 | `kunj ct blueprint status [--base] [--blueprint]` (default) | source, path, hash, current snapshot or stale/none, notes, ignored keys; `--json`: `{ source, path, hash, snapshot, stale, others, notes }` |
 | `kunj ct blueprint snapshot` | build ahead of time; see [snapshots](/containers/snapshots.md) |
 | `kunj ct blueprint remove` | `removeSnapshots()`; `--json`: `{ removed }` |
