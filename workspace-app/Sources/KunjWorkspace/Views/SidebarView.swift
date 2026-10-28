@@ -18,6 +18,8 @@ final class SidebarView: NSView {
     var rowMenu: (Environment) -> NSMenu? = { _ in nil }
     /// Repository roots whose `N more…` row is expanded (for this run).
     private var expanded: Set<String> = []
+    /// The summed CPU and memory of each worktree's kunj sessions, by standardized path.
+    var usage: [String: SessionUsage] = [:] { didSet { list.rows.forEach { $0.usage = usageOf($0.environment) } } }
     /// When the environment was last active (Task 8 persists it); nil shows no time.
     var lastActivity: (String) -> Date? = { _ in nil }
     /// `kunj 1.4.2`, `kunj 1.0.0 dev`, or empty before discovery.
@@ -120,10 +122,15 @@ final class SidebarView: NSView {
 
     private func timeText(_ id: String) -> String { lastActivity(id).map { relativeTime($0) } ?? "" }
 
+    private func usageOf(_ e: Environment) -> SessionUsage? {
+        e.path.flatMap { usage[($0 as NSString).standardizingPath] }
+    }
+
     private func reload() {
         let n = agentsRunning(repos)
         agents.stringValue = n == 1 ? "1 agent running" : "\(n) agents running"
         list.set(groups: groups(), selectedId: selectedId, time: timeText)
+        list.rows.forEach { $0.usage = usageOf($0.environment) }
         list.frame.size.width = scroll.contentSize.width
         list.needsLayout = true
     }

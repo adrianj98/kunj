@@ -12,6 +12,7 @@ each, its CPU and memory, and whether it is orphaned, so stray sessions can be f
 | `kunj sessions kill <names…> [--container c] [--orphans] [--if-detached] [--json]` (`SessionsKillJson`) | Shipped |
 | `@kunj_worktree` tag on host agent and shell sessions | Shipped |
 | Workspace app: Window > Sessions (⌘⇧S) | Shipped |
+| Workspace app: CPU and memory of a worktree's host sessions on its sidebar row | Shipped |
 | Opening a listed session as a tab | Not done (Copy Attach Command instead) |
 
 ## Why
@@ -72,6 +73,13 @@ the row menu's End Session confirm first (saying how many are attached or open i
 `kill` for the host sessions and one per container; End Orphans passes `--if-detached`, since the
 listing is up to 5 s old and the sheet may stay open longer. The row menu also copies the session name and an
 attach command (`tmux attach -t …`, or `docker exec -it <container> tmux attach -t …`).
+
+The sidebar rows show the CPU and memory of their worktree's host sessions, summed
+(`sessionUsageByWorktree()`, matched on the standardized worktree path), right of the status line as
+`65% 425M` (`formatUsageShort()`, amber at 50%+). The app runs `kunj sessions list --json` without
+`--containers` every 5 s while the main window is visible, so container rows show none (that would be
+an exec per container); three failures in a row (a kunj without `sessions`) stop the poll until kunj is
+discovered again.
 
 ## Code map
 

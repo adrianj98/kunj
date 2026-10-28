@@ -208,3 +208,27 @@ public func sessionsSummary(_ sessions: [TmuxSession]) -> String {
     let n = sessions.count
     return "\(n) session\(n == 1 ? "" : "s") · \(orphans) orphaned · \(formatCPU(SessionUsage(cpu: cpu, memoryBytes: mem))) CPU · \(formatMemory(SessionUsage(cpu: cpu, memoryBytes: mem)))"
 }
+
+// ---- the sidebar's usage
+
+/// The host sessions' usage summed per worktree path (standardized), for the sidebar rows.
+/// Container sessions are left out: the sidebar's poll does not exec into containers.
+public func sessionUsageByWorktree(_ sessions: [TmuxSession]) -> [String: SessionUsage] {
+    var out: [String: SessionUsage] = [:]
+    for s in sessions where s.container == nil {
+        guard let path = s.worktree?.path, let u = s.usage else { continue }
+        let key = (path as NSString).standardizingPath
+        let sum = out[key] ?? SessionUsage(cpu: 0, memoryBytes: 0)
+        out[key] = SessionUsage(cpu: sum.cpu + u.cpu, memoryBytes: sum.memoryBytes + u.memoryBytes)
+    }
+    return out
+}
+
+/// "65% 425M", "0.1% 19M", "3% 1.2G": a sidebar row's usage, short enough for its status line.
+public func formatUsageShort(_ u: SessionUsage) -> String {
+    let cpu = formatCPU(u)
+    let b = u.memoryBytes
+    let mem = b >= 1024 * 1024 * 1024 ? String(format: "%.1fG", b / (1024 * 1024 * 1024))
+        : String(format: "%.0fM", b / (1024 * 1024))
+    return "\(cpu) \(mem)"
+}

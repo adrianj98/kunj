@@ -39,4 +39,6 @@ before each kill; `--container` execs the kill in that branch container. `--json
 # Workspace app
 
 Window > Sessions (⌘⇧S) polls `kunj sessions list [--containers] --json` every 5 s while open; a
-session whose id matches an open tab is "Tab open" and is skipped by End Orphans.
+session whose id matches an open tab is "Tab open" and is skipped by End Orphans. The sidebar rows
+show each worktree's summed host-session usage (`sessionUsageByWorktree()`, `formatUsageShort()`) from
+its own `kunj sessions list --json` poll (5 s, no `--containers`, only while the window is visible).

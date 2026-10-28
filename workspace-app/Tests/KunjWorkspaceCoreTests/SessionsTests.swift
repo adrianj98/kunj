@@ -82,4 +82,21 @@ import Testing
         ])
         #expect(summary == "2 sessions · 1 orphaned · 12% CPU · 2 MB")
     }
+
+    @Test func sumsUsagePerWorktree() {
+        let wt = SessionWorktree(path: "/r/kunj/worktrees/main/", branch: "main")
+        let byPath = sessionUsageByWorktree([
+            TmuxSession(name: "a", kind: "agent", worktree: wt, usage: SessionUsage(cpu: 60, memoryBytes: 400 * 1_048_576)),
+            TmuxSession(name: "s", kind: "shell", worktree: wt, usage: SessionUsage(cpu: 5, memoryBytes: 25 * 1_048_576)),
+            TmuxSession(name: "c", kind: "agent", worktree: wt, container: "kunj-r-main-1",
+                        usage: SessionUsage(cpu: 99, memoryBytes: 1)),
+            TmuxSession(name: "gone", kind: "agent", usage: SessionUsage(cpu: 1, memoryBytes: 1)),
+            TmuxSession(name: "nousage", kind: "shell", worktree: SessionWorktree(path: "/r/other", branch: nil)),
+        ])
+        #expect(byPath.count == 1)
+        #expect(byPath["/r/kunj/worktrees/main"] == SessionUsage(cpu: 65, memoryBytes: 425 * 1_048_576))
+        #expect(formatUsageShort(byPath["/r/kunj/worktrees/main"]!) == "65% 425M")
+        #expect(formatUsageShort(SessionUsage(cpu: 0.1, memoryBytes: 19 * 1_048_576)) == "0.1% 19M")
+        #expect(formatUsageShort(SessionUsage(cpu: 3, memoryBytes: 1_288_490_189)) == "3.0% 1.2G")
+    }
 }

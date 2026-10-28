@@ -23,6 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runner = ActionRunner()
     private var settings: SettingsWindow?
     private var sessionsWindow: SessionsWindow?
+    /// The sidebar rows' CPU and memory: `kunj sessions list --json` (host sessions only, so no
+    /// container exec) every 5 s while the window is visible.
+    private var usageTimer: Timer?
+    private var usageLoading = false
+    private var usageFailures = 0
     private var newSessionSheet: NewSessionSheet?
     /// `--theme <name>`: this run's theme (not saved), for screenshots against light.png/graphite.png.
     private let themeArgument: ThemeChoice?
@@ -199,6 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.render(repos: store.repos)
         windowController.showListingError(store.lastError?.message)
         guard !terminating else { return }
+        startUsagePoll(cli: cli)
         let events = store.makeEventStream()
         self.events = events
         store.start(events: events)
@@ -456,6 +462,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings?.window?.makeKeyAndOrderFront(nil)
     }
 
+    private func startUsagePoll(cli: KunjCLI) {
+        usageTimer?.invalidate()
+        usageFailures = 0
+        pollUsage(cli: cli)
+        usageTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pollUsage(cli: cli) }
+        }
+    }
+
+    private func stopUsagePoll() {
+        usageTimer?.invalidate()
+        usageTimer = nil
+        windowController.sidebar.usage = [:]
+    }
+
+    /// One listing (skipped while the last one runs or the window is hidden); three failures in a
+    /// row (a kunj older than `kunj sessions`) stop the poll until kunj is discovered again.
+    private func pollUsage(cli: KunjCLI) {
+        guard !usageLoading, kunj === cli, windowController.window?.occlusionState.contains(.visible) == true,
+              let cwd = store?.repos.first?.repo.root else { return }
+        usageLoading = true
+        Task { [weak self] in
+            let json: SessionsJson? = try? await cli.run(sessionsListArguments(containers: false), cwd: cwd, timeout: 30)
+            guard let self else { return }
+            self.usageLoading = false
+            guard self.kunj === cli else { return }
+            if let json {
+                self.usageFailures = 0
+                self.windowController.sidebar.usage = sessionUsageByWorktree(json.sessions)
+            } else {
+                self.usageFailures += 1
+                if self.usageFailures >= 3 { self.stopUsagePoll() }
+            }
+        }
+    }
+
     /// Window > Sessions (⌘⇧S): kunj's tmux sessions, their terminals, CPU and memory, and orphans.
     @objc func showSessions(_ sender: Any?) {
         if sessionsWindow == nil {
@@ -490,6 +532,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         kunjStatus = nil
         settings?.cli = nil
         sessionsWindow?.cli = nil
+        stopUsagePoll()
         windowController.render(repos: [])
         windowController.setKunjVersion("")
         windowController.showListingError(nil)

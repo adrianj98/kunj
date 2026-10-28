@@ -75,7 +75,9 @@ is slow to start, the window shows a spinner with "Loading sessions…" and the 
   Session** and **Delete Worktree…** / **Delete Container…**. Closing a session (also ⌘⇧W) closes
   its tabs and ends all its tmux sessions, shells and agents. A row shows the branch, when you last did something in it, the kind
   (worktree or container) and its state: *Waiting for input*, *Running* (the agent), *Merged #398*,
-  *PR #412 open*, *3 changed files*, *↑2 unpushed*, *Clean*, or *Stopped* / *Missing*. The dot is
+  *PR #412 open*, *3 changed files*, *↑2 unpushed*, *Clean*, or *Stopped* / *Missing*. At the
+  right of that line a worktree shows the CPU and memory of its agents and shells (`65% 425M`,
+  amber from 50% CPU), updated every 5 seconds. The dot is
   green while an agent works, amber when it waits for you. A worktree and a container on the same
   branch are two rows. The box on top searches (⌘K), **+ New session** is at the bottom.
 - **Header.** The branch, then repository, kind, ahead/behind, the pull request (a link) and

@@ -2,6 +2,14 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-28 — CPU and memory on the workspace app's sidebar rows
+
+- Each worktree row in the sidebar shows the summed CPU and memory of its kunj agent and shell
+  sessions (`65% 425M`, amber at 50%+), from a `kunj sessions list --json` poll every 5 s while the
+  window is visible. Why: the user wanted session usage in the main window, not only in
+  Window > Sessions, and chose the sidebar rows. Container rows show none, because listing their
+  sessions needs an exec per container.
+
 ## 2026-10-27 — tmux sessions window (`kunj sessions`)
 
 - New `kunj sessions [list|kill]` (src/lib/sessions.ts, src/commands/sessions.ts, `SessionsJson`) and

@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-10-28 (sidebar session usage)
+* **Features**: `features/tmux-sessions.md`: workspace app sidebar rows show their worktree's session CPU and memory.
+
 ## 2026-10-27 (tmux sessions)
 * **New page**: `features/tmux-sessions.md` covers `kunj sessions`, the `@kunj_worktree` tag and the workspace app's Sessions window.
 
