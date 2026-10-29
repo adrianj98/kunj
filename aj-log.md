@@ -9,6 +9,9 @@ Changes made with Claude, and why.
   window is visible. Why: the user wanted session usage in the main window, not only in
   Window > Sessions, and chose the sidebar rows. Container rows show none, because listing their
   sessions needs an exec per container.
+- Review fixes: the usage is drawn only when the kind and status verb still fit whole (it could cut
+  off "Waiting for input"), and three failed polls now drop to one retry a minute instead of stopping
+  until a reconnect.
 
 ## 2026-10-27 — tmux sessions window (`kunj sessions`)
 

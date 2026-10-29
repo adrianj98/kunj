@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var usageTimer: Timer?
     private var usageLoading = false
     private var usageFailures = 0
+    private var usageTicks = 0
     private var newSessionSheet: NewSessionSheet?
     /// `--theme <name>`: this run's theme (not saved), for screenshots against light.png/graphite.png.
     private let themeArgument: ThemeChoice?
@@ -465,6 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startUsagePoll(cli: KunjCLI) {
         usageTimer?.invalidate()
         usageFailures = 0
+        usageTicks = 0
         pollUsage(cli: cli)
         usageTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pollUsage(cli: cli) }
@@ -477,9 +479,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.sidebar.usage = [:]
     }
 
-    /// One listing (skipped while the last one runs or the window is hidden); three failures in a
-    /// row (a kunj older than `kunj sessions`) stop the poll until kunj is discovered again.
+    /// One listing (skipped while the last one runs or the window is hidden). After three failures
+    /// in a row (a kunj older than `kunj sessions`, a hung tmux) the rows show none and it retries
+    /// once a minute.
     private func pollUsage(cli: KunjCLI) {
+        usageTicks += 1
+        guard usageFailures < 3 || usageTicks % 12 == 0 else { return }
         guard !usageLoading, kunj === cli, windowController.window?.occlusionState.contains(.visible) == true,
               let cwd = store?.repos.first?.repo.root else { return }
         usageLoading = true
@@ -493,7 +498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.windowController.sidebar.usage = sessionUsageByWorktree(json.sessions)
             } else {
                 self.usageFailures += 1
-                if self.usageFailures >= 3 { self.stopUsagePoll() }
+                if self.usageFailures >= 3 { self.windowController.sidebar.usage = [:] }
             }
         }
     }

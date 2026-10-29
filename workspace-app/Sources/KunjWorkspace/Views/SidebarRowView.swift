@@ -4,7 +4,7 @@ import KunjWorkspaceCore
 /// One environment in the sidebar (DESIGN.md "Sidebar row"): padding 9 × 10 inside a 1 px border,
 /// radius 6; dot · branch (sans 13/500) · relative time (mono 11, `muted`), then indented 15 px:
 /// kind (mono 11) · status verb (sans 11, `amber` when waiting), and at the right the CPU and memory
-/// of the worktree's kunj sessions (mono 11, `muted`, `amber` from 50 % CPU). Selected: `raised` fill and
+/// of the worktree's kunj sessions (mono 11, `muted`, `amber` from 50 % CPU) when the whole line fits. Selected: `raised` fill and
 /// `borderStrong` border; hover: `raised` at 50 %.
 final class SidebarRowView: NSView {
     static let height: CGFloat = 54
@@ -67,9 +67,15 @@ final class SidebarRowView: NSView {
         let lineColor = theme.color(selected ? \.text2 : \.muted)
         let caption = DesignTokens.TypeScale.caption
         var right = bounds.maxX - padH
+        // the usage only where kind · verb still fit whole: the verb is the waiting signal
         if let usage {
-            let color = usage.cpu >= 50 ? theme.color(\.amber) : theme.color(\.muted)
-            right -= draw(formatUsageShort(usage), font: Theme.mono(caption), color: color, rightEdge: right, midY: line2) + 8
+            let text = formatUsageShort(usage)
+            let status = width(environment.kind.rawValue, Theme.mono(caption)) + 6 + width("·", Theme.sans(caption)) + 6
+                + width(environment.statusVerb, Theme.sans(caption))
+            if textX + status + 8 + width(text, Theme.mono(caption)) <= right {
+                let color = usage.cpu >= 50 ? theme.color(\.amber) : theme.color(\.muted)
+                right -= draw(text, font: Theme.mono(caption), color: color, rightEdge: right, midY: line2) + 8
+            }
         }
         var x = textX
         x += draw(environment.kind.rawValue, font: Theme.mono(caption), color: lineColor,
@@ -79,6 +85,10 @@ final class SidebarRowView: NSView {
         let verbColor = environment.agent == .waiting ? theme.color(\.amber) : lineColor
         draw(environment.statusVerb, font: Theme.sans(caption), color: verbColor,
              in: x, width: right - x, midY: line2)
+    }
+
+    private func width(_ s: String, _ font: NSFont) -> CGFloat {
+        ceil((s as NSString).size(withAttributes: [.font: font]).width)
     }
 
     /// Draws one line truncated to `width`; returns the width used.
