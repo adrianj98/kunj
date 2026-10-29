@@ -28,7 +28,8 @@ export interface ErrorJson {
 export interface AgentState {
   /** true when the default session or any `--session <id>` one runs */
   running: boolean | null;
-  /** The default session's name (`kunj agent` without --session) */
+  /** The default session's name (`kunj agent` without --session); a running one started on an
+   *  earlier branch of the worktree keeps that branch's name (found by its @kunj_worktree tag) */
   session: string;
   /** Across the running sessions: 'waiting' when any waits, else 'running' when any works */
   state?: 'running' | 'waiting' | null;
@@ -203,7 +204,7 @@ export interface ContainerTokenCheckJson {
 export interface AgentStatusJson {
   branch: string;
   worktree: string;
-  /** The default session, or the --session one */
+  /** The default session, or the --session one; possibly named after an earlier branch of the worktree */
   session: string;
   /** Without --session: any of the worktree's agent sessions; with it: that one */
   running: boolean | null;
@@ -214,7 +215,7 @@ export interface AgentStatusJson {
 export interface AgentStopJson {
   success: true;
   branch: string;
-  /** The default session, or the --session one */
+  /** The default session, or the --session one; possibly named after an earlier branch of the worktree */
   session: string;
   /** With --session or --all: the sessions that were ended (may be empty) */
   stopped?: string[];
