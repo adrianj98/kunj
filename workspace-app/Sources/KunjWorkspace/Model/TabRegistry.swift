@@ -102,9 +102,31 @@ final class TabRegistry {
                               theme: theme)
         tab.onExit = { [weak self] t in self?.exited(t) }
         tab.onTitle = { [weak self] t in self?.onChange?(t.envId) }
-        tab.onOpenLink = { [weak self] t, link in self?.openLink(link, from: t, env: env) ?? false }
+        wireLinks(tab, env: env)
         add(tab)
         return tab
+    }
+
+    private func wireLinks(_ tab: TerminalTab, env: Environment) {
+        tab.onOpenLink = { [weak self] t, link in self?.openLink(link, from: t, env: env) ?? false }
+    }
+
+    /// A worktree checked out another branch (`worktreeMoves`): its tabs, which keep running, now
+    /// belong to the environment of the new branch (which has none of its own).
+    func move(from oldId: String, to env: Environment) {
+        guard let tabs = tabsByEnv.removeValue(forKey: oldId) else { return }
+        for tab in tabs {
+            if let terminal = tab as? TerminalTab {
+                terminal.envId = env.id
+                wireLinks(terminal, env: env)
+            } else if let editor = tab as? EditorTab {
+                editor.env = env
+            }
+        }
+        tabsByEnv[env.id, default: []].append(contentsOf: tabs)
+        if let active = activeByEnv.removeValue(forKey: oldId) { activeByEnv[env.id] = active }
+        onChange?(oldId)
+        onChange?(env.id)
     }
 
     private func nextId(env: Environment, kind: TabKind) -> String {

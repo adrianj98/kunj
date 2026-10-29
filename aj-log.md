@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-29 — workspace app tabs follow their worktree across a checkout
+
+- The app keys environments by branch, so a checkout inside a worktree orphaned its tabs under the
+  old id. `worktreeMoves()` + `EnvironmentStore.onWorktreesMoved` detect the same worktree path under a
+  new branch; the app moves the layout entry, the tabs (`TabRegistry.move`) and the selection to the
+  new id. Why: second half of the user's "whenever an agent switches branches we lose the session".
+
 ## 2026-10-29 — sessions follow their worktree across a checkout (CLI)
 
 - `worktree list`, `kunj agent start|status|stop` and `kunj worktree shell [--kill]` now find a

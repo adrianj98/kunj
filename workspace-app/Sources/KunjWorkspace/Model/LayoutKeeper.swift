@@ -74,6 +74,20 @@ final class LayoutKeeper {
         !(layouts.layout(repo: env.repo.dirName, fallback: env.repo.name).branches[key(env)]?.tabs.isEmpty ?? true)
     }
 
+    /// A worktree checked out another branch: what was kept for the old branch's environment (its
+    /// restored state, saved tabs and `lastActivity`) is now the new one's, unless that has its own.
+    func moved(_ move: WorktreeMove) {
+        if restored.remove(move.from.id) != nil { restored.insert(move.to.id) }
+        let repo = move.to.repo
+        let layout = layouts.layout(repo: repo.dirName, fallback: repo.name)
+        guard let entry = layout.branches[key(move.from)], layout.branches[key(move.to)] == nil else { return }
+        layouts.update(repo: repo.dirName, fallback: repo.name, key: key(move.to)) { $0 = entry }
+        layouts.update(repo: repo.dirName, fallback: repo.name, key: key(move.from)) {
+            $0.tabs = []
+            $0.active = nil
+        }
+    }
+
     /// The environment's session was closed: no tabs are saved for it any more.
     func closed(_ envId: String) {
         guard let env = environment(envId) else { return }

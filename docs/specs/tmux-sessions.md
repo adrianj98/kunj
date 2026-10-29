@@ -14,7 +14,7 @@ each, its CPU and memory, and whether it is orphaned, so stray sessions can be f
 | Workspace app: Window > Sessions (⌘⇧S) | Shipped |
 | Workspace app: CPU and memory of a worktree's host sessions on its sidebar row | Shipped |
 | Sessions follow their worktree across a checkout (CLI: listing, `agent`, `worktree shell`) | Shipped |
-| Workspace app: tabs follow their worktree across a checkout | In progress |
+| Workspace app: tabs follow their worktree across a checkout | Shipped |
 | Opening a listed session as a tab | Not done (Copy Attach Command instead) |
 
 ## Why
@@ -69,6 +69,15 @@ prefers the current branch's name, then any of the worktree's sessions with that
 `worktree list` (`agent.session`, `agent.sessions`), `kunj agent start|status|stop` and
 `kunj worktree shell [--kill]`; `--kill` still ends the current names as before and the tagged ones on
 top. Container sessions are unaffected: a container is named after its branch label, not its checkout.
+
+The workspace app keys an environment by `repo|worktree|branch`, so a checkout gives the worktree a new
+id. `worktreeMoves()` (KunjWorkspaceCore) finds a worktree listed at the same path under another
+branch, when the old id is gone and the new one was not listed before; `EnvironmentStore` reports
+them through `onWorktreesMoved` before `onChange`. The app then moves, in this order, the layout
+keeper's restored state and saved entry (tabs, `lastActivity`; not over an entry the new branch
+already has), the registry's tabs (`TabRegistry.move`: a terminal's `envId` and link handler, an
+editor's `env`; the processes keep running) and the selection. A tab's spec is never re-run, and
+closing a moved tab runs `kunj agent stop <new branch> --session <id>`, which the CLI resolves by tag.
 
 ## Ending sessions
 

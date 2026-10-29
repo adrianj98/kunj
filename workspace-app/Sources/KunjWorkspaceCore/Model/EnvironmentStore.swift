@@ -26,6 +26,9 @@ public final class EnvironmentStore {
     /// event or a container `status` event (head or dirty state changed): the Changes column
     /// reloads its diff when the root is its environment's (it debounces).
     public var onRepoChanged: ((String) -> Void)?
+    /// Called on the main actor before `onChange` with the worktrees that checked out another
+    /// branch since the last listing (`worktreeMoves`), so their tabs follow them.
+    public var onWorktreesMoved: (([WorktreeMove]) -> Void)?
 
     private let coalesceMs: Int
     private let lister: Lister
@@ -111,8 +114,10 @@ public final class EnvironmentStore {
 
     private func publish(_ repos: [RepoEnvironments], _ error: KunjCLIError?) {
         let changed = repos != self.repos || error != lastError
+        let moves = changed ? worktreeMoves(from: self.repos, to: repos) : []
         self.repos = repos
         lastError = error
+        if !moves.isEmpty { onWorktreesMoved?(moves) }
         if changed { onChange?() }
     }
 

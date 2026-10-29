@@ -185,6 +185,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // a selected environment that could not restore its tabs (stopped) may now
             keeper.selected(self.windowController.selectedEnvironment)
         }
+        // an agent checked out another branch in its worktree: the worktree's tabs (still running,
+        // their tmux sessions found by kunj through the worktree tag), saved layout and selection
+        // follow it to the new branch's environment. The keeper first, so the moved tabs are saved.
+        store.onWorktreesMoved = { [weak self] moves in
+            guard let self else { return }
+            for move in moves {
+                log("\(move.from.id) checked out \(move.to.branch): its tabs move to \(move.to.id)")
+                keeper.moved(move)
+                self.windowController.terminalColumn.registry.move(from: move.from.id, to: move.to)
+                if self.windowController.environmentMoved(from: move.from.id, to: move.to.id) {
+                    UserDefaults.standard.set(move.to.id, forKey: Self.selectedEnvironmentKey)
+                }
+            }
+        }
         // the Changes column follows git events and container status changes of its repository
         store.onRepoChanged = { [weak windowController] root in
             windowController?.changesColumn.repoChanged(root: root)

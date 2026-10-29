@@ -34,6 +34,7 @@ page only says where each thing stands.
 | Blueprint `"*"` tool values; snapshot seeds skip LFS smudge, containers `git lfs pull` | [blueprints.md](blueprints.md) | f3a4222 |
 | bun preset installs unzip (`kunj_need_pkg`) | [blueprints.md](blueprints.md) | 872fa13 |
 | Blueprint `aliases` (to `/etc/profile.d/kunj-aliases.sh` in the snapshot) | [blueprints.md](blueprints.md) | 12bdcc5 |
+| Agent and shell sessions follow their worktree across a checkout (CLI and workspace app tabs) | [tmux-sessions.md](tmux-sessions.md#following-a-checkout) | c5c543f, this commit |
 | `kunj sessions` and the workspace app's Sessions window (owner, attached, CPU/memory, orphans, kill); `@kunj_worktree` tag | [tmux-sessions.md](tmux-sessions.md) | f98e051 |
 | Workspace app sidebar rows show their worktree's session CPU and memory | [tmux-sessions.md](tmux-sessions.md#workspace-app) | 7ab0568 |
 | Sidecar services | [container-phase-2.md](container-phase-2.md) | ed136b3, 6273c61 |
@@ -82,7 +83,6 @@ page only says where each thing stands.
 | Work | Spec | Notes |
 | --- | --- | --- |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
-| Agent and shell sessions follow their worktree across a checkout | [tmux-sessions.md](tmux-sessions.md#following-a-checkout) | CLI c5c543f; left: the workspace app moves the tabs when a worktree's branch changes |
 
 ## To do
 

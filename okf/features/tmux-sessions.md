@@ -49,3 +49,5 @@ Lookups by worktree (`worktree list`, `kunj agent`, `kunj worktree shell`) read 
 `@kunj_worktree` tag (`readTaggedTmuxSessions()`) and take a tagged session by its tag
 (`worktreeAgentSessions()`, `worktreeShellSessions()`, `pickSession()`), so an agent that checked out
 another branch in its worktree keeps its session.
+The workspace app moves a worktree's tabs, saved layout and selection to the new branch's
+environment (`worktreeMoves()`, `EnvironmentStore.onWorktreesMoved`, `TabRegistry.move`).

@@ -9,7 +9,8 @@ import KunjWorkspaceCore
 final class EditorTab: WorkspaceTab {
     /// `"<envId>#editor#<n>"`
     let id: String
-    let env: Environment
+    /// Changes when the worktree checks out another branch (`TabRegistry.move`).
+    var env: Environment
     let path: String
     let kind = TabKind.editor
     var title: String

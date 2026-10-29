@@ -9,7 +9,8 @@ import SwiftTerm
 final class TerminalTab: LocalProcessTerminalView {
     /// `"<envId>#<kind>#<n>"`
     let id: String
-    let envId: String
+    /// Changes when the worktree checks out another branch (`TabRegistry.move`).
+    var envId: String
     let kind: TabKind
     let spec: TerminalSpec?
     var title: String

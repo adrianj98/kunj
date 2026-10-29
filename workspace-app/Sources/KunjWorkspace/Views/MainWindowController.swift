@@ -108,6 +108,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         renderSelection()
     }
 
+    /// A worktree checked out another branch: the selection follows it (the next render shows it).
+    /// True when it was selected.
+    @discardableResult
+    func environmentMoved(from oldId: String, to newId: String) -> Bool {
+        guard selectedId == oldId else { return false }
+        selectedId = newId
+        sidebar.selectedId = newId
+        return true
+    }
+
     /// The environment's session was closed: it leaves the sidebar (deselected when selected).
     func sessionClosed(_ id: String) {
         if selectedId == id {

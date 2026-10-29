@@ -1,7 +1,7 @@
 # Directory Update Log
 
 ## 2026-10-29 (sessions follow a checkout)
-* **Features**: `features/tmux-sessions.md`: sessions are matched to their worktree by tag, so a branch switch inside the worktree keeps them.
+* **Features**: `features/tmux-sessions.md`: sessions are matched to their worktree by tag, so a branch switch inside the worktree keeps them; the workspace app moves the worktree's tabs to the new branch.
 
 ## 2026-10-28 (sidebar session usage)
 * **Features**: `features/tmux-sessions.md`: workspace app sidebar rows show their worktree's session CPU and memory.
