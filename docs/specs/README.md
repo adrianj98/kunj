@@ -82,7 +82,7 @@ page only says where each thing stands.
 | Work | Spec | Notes |
 | --- | --- | --- |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
-| Agent and shell sessions follow their worktree across a checkout | [tmux-sessions.md](tmux-sessions.md#following-a-checkout) | CLI this commit; left: the workspace app moves the tabs when a worktree's branch changes |
+| Agent and shell sessions follow their worktree across a checkout | [tmux-sessions.md](tmux-sessions.md#following-a-checkout) | CLI c5c543f; left: the workspace app moves the tabs when a worktree's branch changes |
 
 ## To do
 
