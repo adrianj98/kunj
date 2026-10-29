@@ -114,6 +114,72 @@ export async function listTmuxSessions(): Promise<string[] | null> {
   return Array.isArray(sessions) ? sessions : null;
 }
 
+// A session name with the tmux user option @kunj_worktree (SESSION_WORKTREE_OPTION); '' when untagged
+export interface TaggedTmuxSession {
+  name: string;
+  worktree: string;
+}
+
+// readTmuxSessions with each session's worktree tag, in the same one call. The fields are separated by
+// a literal tab (tmux does not expand `\t` in a format).
+export async function readTaggedTmuxSessions(): Promise<TaggedTmuxSession[] | 'missing' | 'failed'> {
+  try {
+    const { stdout } = await execFileAsync('tmux', ['list-sessions', '-F', `#{session_name}\t#{${SESSION_WORKTREE_OPTION}}`]);
+    return stdout.split('\n').filter(l => l.trim()).map(l => {
+      const tab = l.indexOf('\t');
+      return tab === -1 ? { name: l.trim(), worktree: '' } : { name: l.slice(0, tab), worktree: l.slice(tab + 1).trim() };
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+    const stderr = String((error as { stderr?: unknown }).stderr ?? '');
+    return /no server running|error connecting to/.test(stderr) ? [] : 'failed';
+  }
+}
+
+// Any kunj agent or shell name, whatever branch it was named after: `<base>` / `<base>-a-<id>` and
+// `kunjsh-…-sh-<id>`, the base ending in the 6-hex name hash (names.ts). The id form is tried first,
+// so an id that is itself 6 hex digits is not read as a hash.
+const AGENT_WITH_ID = /^kunj-.*-[0-9a-f]{6}-a-([A-Za-z0-9_-]{1,32})$/;
+const AGENT_DEFAULT = /^kunj-.*-[0-9a-f]{6}$/;
+const SHELL_WITH_ID = /^kunjsh-.*-[0-9a-f]{6}-sh-([A-Za-z0-9_-]{1,32})$/;
+
+function sameWorktree(a: string, b: string): boolean {
+  return path.resolve(a) === path.resolve(b);
+}
+
+// A worktree's agent sessions: a tagged one by its tag, so one started before the worktree checked
+// out another branch is still found (and one tagged with another worktree never is, even when its
+// name is this branch's); an untagged one (started before the tag existed) by name.
+export function worktreeAgentSessions(sessions: TaggedTmuxSession[], base: string, worktree: string): Array<{ session: string; id: string | null }> {
+  return sessions.flatMap(({ name, worktree: tag }) => {
+    if (!tag) {
+      const id = agentSessionId(name, base);
+      return id === undefined ? [] : [{ session: name, id }];
+    }
+    if (!sameWorktree(tag, worktree)) return [];
+    const withId = AGENT_WITH_ID.exec(name);
+    if (withId) return [{ session: name, id: withId[1] }];
+    return AGENT_DEFAULT.test(name) ? [{ session: name, id: null }] : [];
+  });
+}
+
+// A worktree's shell sessions (`prefix` = shellSessionName(…, '')), matched like worktreeAgentSessions
+export function worktreeShellSessions(sessions: TaggedTmuxSession[], prefix: string, worktree: string): Array<{ session: string; id: string }> {
+  return sessions.flatMap(({ name, worktree: tag }) => {
+    if (!tag) return sessionsWithPrefix([name], prefix).map(session => ({ session, id: session.slice(prefix.length) }));
+    if (!sameWorktree(tag, worktree)) return [];
+    const m = SHELL_WITH_ID.exec(name);
+    return m ? [{ session: name, id: m[1] }] : [];
+  });
+}
+
+// The session to attach for `id` (null: the default one): the current branch's name when it runs,
+// else one of the worktree's sessions with that id (named after an earlier branch), else `current`
+export function pickSession(found: Array<{ session: string; id: string | null }>, id: string | null, current: string): string {
+  const same = found.filter(s => s.id === id);
+  return same.find(s => s.session === current)?.session ?? same[0]?.session ?? current;
+}
+
 // One session by exact name (`=`), for when the full listing failed; any failure reads as absent
 export async function hasTmuxSession(name: string): Promise<boolean> {
   try {

@@ -16,7 +16,7 @@ import { expandVariables, repoVariables } from './config-vars';
 import { DEFAULT_WORKTREE_BASE_DIR } from './worktree-defaults';
 import type { AgentSessionJson, AgentState } from './json-types';
 import type { UnlockSeam } from './secrets/host';
-import { agentRunning, agentSessionName, agentSessionsOf, agentStateFile, combineAgentStates, listTmuxSessions, readAgentState } from './agent-session';
+import { agentRunning, agentSessionName, agentStateFile, combineAgentStates, pickSession, readAgentState, readTaggedTmuxSessions, worktreeAgentSessions, type TaggedTmuxSession } from './agent-session';
 import { repoIdentity } from './repo-identity';
 
 const execAsync = promisify(exec);
@@ -313,7 +313,7 @@ export async function listWorktreesDetailed(options: ListWorktreesOptions = {}):
       ? fetchPullRequestsCached(cwd, options.pullRequestMaxAge)
       : Promise.resolve<PullRequestFetchResult>({ provider: null, pullRequests: null, fromCache: false }),
     // One tmux call for the whole listing, not one per worktree
-    includeStatus ? listTmuxSessions() : Promise.resolve<string[] | null>(null),
+    includeStatus ? readTaggedTmuxSessions().then(s => (Array.isArray(s) ? s : null)) : Promise.resolve<TaggedTmuxSession[] | null>(null),
   ]);
   const agentRepo = includeStatus ? agentRepoIdentity(paths) : null;
 
@@ -333,14 +333,17 @@ export async function listWorktreesDetailed(options: ListWorktreesOptions = {}):
         info.status = await getWorktreeStatus(wt.path);
       }
       if (includeStatus && agentRepo && exists && !wt.bare && wt.branch) {
-        const session = agentSessionName(agentRepo.name, agentRepo.id, wt.branch);
+        const base = agentSessionName(agentRepo.name, agentRepo.id, wt.branch);
         if (tmuxSessions === null) {
-          info.agent = { running: agentRunning(null, session), session, state: null };
+          info.agent = { running: agentRunning(null, base), session: base, state: null };
         } else {
-          // The default session and every --session one, from the same listing. The hooks' state
-          // file (agent-session.ts) only means something while its session runs.
+          // The default session and every --session one, from the same listing, also those named
+          // after a branch the worktree had checked out before (their @kunj_worktree tag). The
+          // hooks' state file (agent-session.ts) only means something while its session runs.
           const kunjDir = path.join(getGlobalKunjDir(), agentRepo.name);
-          const sessions = agentSessionsOf(tmuxSessions, session).map((s): AgentSessionJson => {
+          const found = worktreeAgentSessions(tmuxSessions, base, wt.path);
+          const session = pickSession(found, null, base);
+          const sessions = found.map((s): AgentSessionJson => {
             const state = readAgentState(agentStateFile(kunjDir, s.session));
             return state ? { ...s, state } : s;
           });

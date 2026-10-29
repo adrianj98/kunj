@@ -13,7 +13,15 @@ const tmuxMock = listTmuxSessions as unknown as jest.Mock<() => Promise<string[]
 const identityMock = repoIdentity as unknown as jest.Mock<() => unknown>;
 
 jest.mock('child_process', () => ({ ...jest.requireActual<object>('child_process'), exec: (...args: unknown[]) => (mockExec as unknown as (...a: unknown[]) => void)(...args) }));
-jest.mock('../agent-session', () => ({ ...jest.requireActual<object>('../agent-session'), listTmuxSessions: jest.fn() }));
+jest.mock('../agent-session', () => ({
+  ...jest.requireActual<object>('../agent-session'),
+  listTmuxSessions: jest.fn(),
+  // The tests list names; the commands read them with their (absent) worktree tags
+  readTaggedTmuxSessions: jest.fn(async () => {
+    const r = await jest.requireMock<any>('../agent-session').listTmuxSessions();
+    return Array.isArray(r) ? r.map((name: string) => ({ name, worktree: '' })) : r ?? 'missing';
+  }),
+}));
 jest.mock('../repo-identity', () => ({ repoIdentity: jest.fn() }));
 const mockKunjHome = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-home-'));
 jest.mock('../config', () => ({ ...jest.requireActual<object>('../config'), getGlobalKunjDir: () => mockKunjHome }));

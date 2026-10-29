@@ -9,7 +9,7 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentSessionsOf, agentStateDir, agentStateFile, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, readAgentState, readTmuxSessions, loginShell, runTmux, withAgentHooks } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentStateDir, agentStateFile, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks } from '../lib/agent-session';
 import type { AgentSessionJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
@@ -82,13 +82,16 @@ export class AgentCommand extends BaseCommand {
     if (opts.agent !== undefined) agentCommand(opts.agent, undefined);
     const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
     const base = agentSessionName(repo.name, repo.id, wt.branch);
-    const session = agentSessionName(repo.name, repo.id, wt.branch, id);
-    const tmux = await readTmuxSessions();
-    const sessions = Array.isArray(tmux) ? tmux : null;
+    const tmux = await readTaggedTmuxSessions();
+    const sessions = Array.isArray(tmux) ? tmux.map(s => s.name) : null;
+    // The worktree's agents, also those started before it checked out its current branch (tagged
+    // with its path): a reattach, status or stop finds them under their original name
+    const found = Array.isArray(tmux) ? worktreeAgentSessions(tmux, base, wt.path) : null;
+    const session = pickSession(found ?? [], id ?? null, agentSessionName(repo.name, repo.id, wt.branch, id));
 
     if (verb === 'status') {
       const kunjDir = getKunjDir();
-      const all = sessions && agentSessionsOf(sessions, base).map((s): AgentSessionJson => {
+      const all = found && found.map((s): AgentSessionJson => {
         const state = readAgentState(agentStateFile(kunjDir, s.session));
         return state ? { ...s, state } : s;
       });
@@ -106,7 +109,7 @@ export class AgentCommand extends BaseCommand {
 
     // One named session, or all of the worktree's: quiet when nothing runs (the app ends tabs and environments with it)
     if (verb === 'stop' && (id !== undefined || opts.all)) {
-      const targets = id !== undefined ? [session] : sessions ? agentSessionsOf(sessions, base).map(s => s.session).sort((a, b) => (a === base ? -1 : b === base ? 1 : 0)) : tmux === 'failed' ? [base] : [];
+      const targets = id !== undefined ? [session] : found ? found.map(s => s.session).sort((a, b) => (a === base ? -1 : b === base ? 1 : 0)) : tmux === 'failed' ? [base] : [];
       const stopped: string[] = [];
       for (const t of targets) if (await killTmuxSessionIfExists(t)) stopped.push(t);
       if (this.jsonMode) {

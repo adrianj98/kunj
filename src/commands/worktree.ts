@@ -60,7 +60,7 @@ import {
 } from '../lib/keep';
 import { resolveBaseRef } from '../lib/base-branch';
 import { recordRepo } from '../lib/repos';
-import { AgentError, agentArgv, checkShellSessionId, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, readTmuxSessions, runTmux, shellSessionName } from '../lib/agent-session';
+import { AgentError, agentArgv, checkShellSessionId, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, pickSession, readTaggedTmuxSessions, runTmux, shellSessionName, worktreeShellSessions } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
 import type { BranchContainerJson, ShellKillJson, WorktreeJson, WorktreeListContainersJson, WorktreeListJson } from '../lib/json-types';
 
@@ -194,11 +194,20 @@ export class WorktreeCommand extends BaseCommand {
     const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
     // The session of a worktree removed since can still be ended: the name needs only the branch
     const killBranch = wt ? wt.branch || wt.name : target;
+    // A shell started before the worktree checked out its current branch keeps that branch's name;
+    // its @kunj_worktree tag says it is still this worktree's. Read only when a session is asked for.
+    const prefix = killBranch ? shellSessionName(repo.name, repo.id, killBranch, '') : '';
+    const tmux = wt && wt.exists && !wt.bare && (id !== undefined || options.kill) ? await readTaggedTmuxSessions() : null;
+    const found = wt && Array.isArray(tmux) ? worktreeShellSessions(tmux, prefix, wt.path) : null;
     if (options.kill && killBranch) {
       // Without --session: every shell session of the branch (closing the whole environment)
-      const killed = id !== undefined
+      let killed = id !== undefined
         ? await killTmuxSessionIfExists(shellSessionName(repo.name, repo.id, killBranch, id))
-        : (await killTmuxSessionsWithPrefix(shellSessionName(repo.name, repo.id, killBranch, ''))).length > 0;
+        : (await killTmuxSessionsWithPrefix(prefix)).length > 0;
+      // and the worktree's shells named after an earlier branch
+      for (const s of found ?? []) {
+        if ((id === undefined || s.id === id) && !s.session.startsWith(prefix) && await killTmuxSessionIfExists(s.session)) killed = true;
+      }
       if (this.jsonMode) this.outputJSON({ killed } satisfies ShellKillJson);
       return;
     }
@@ -207,7 +216,7 @@ export class WorktreeCommand extends BaseCommand {
     }
     if (!wt.exists) throw new AgentError('no-worktree', `The worktree directory of ${wt.branch || wt.name} is missing: ${wt.path}`);
 
-    const name = id === undefined ? undefined : shellSessionName(repo.name, repo.id, wt.branch || wt.name, id);
+    const name = id === undefined ? undefined : pickSession(found ?? [], id, shellSessionName(repo.name, repo.id, wt.branch || wt.name, id));
 
     const shell = loginShell();
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
@@ -217,7 +226,7 @@ export class WorktreeCommand extends BaseCommand {
     const branch = wt.branch || undefined;
     if (name) {
       const config = await loadResolvedConfig(process.cwd());
-      if (config.agent?.tmux !== false && (await readTmuxSessions()) !== 'missing') {
+      if (config.agent?.tmux !== false && tmux !== 'missing' && (tmux !== null || (await readTaggedTmuxSessions()) !== 'missing')) {
         const argv = agentArgv(name, wt.path, hostRunArgv(branch, [shell, '-l']), {}, { status: config.agent?.tmuxStatus === true, worktree: wt.path });
         process.exitCode = await runTmux(argv, wt.path, env);
         return;

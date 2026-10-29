@@ -23,6 +23,11 @@ jest.mock('../../lib/repo-identity', () => ({
 jest.mock('../../lib/agent-session', () => ({
   ...jest.requireActual('../../lib/agent-session'),
   readTmuxSessions: jest.fn(),
+  // The tests list names; the commands read them with their (absent) worktree tags
+  readTaggedTmuxSessions: jest.fn(async () => {
+    const r = await jest.requireMock<any>('../../lib/agent-session').readTmuxSessions();
+    return Array.isArray(r) ? r.map((name: string) => ({ name, worktree: '' })) : r ?? 'missing';
+  }),
   runTmux: jest.fn(async () => 0),
   killTmuxSession: jest.fn(async () => undefined),
   hasTmuxSession: jest.fn(async () => false),

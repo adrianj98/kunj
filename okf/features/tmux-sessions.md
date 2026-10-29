@@ -42,3 +42,10 @@ Window > Sessions (⌘⇧S) polls `kunj sessions list [--containers] --json` eve
 session whose id matches an open tab is "Tab open" and is skipped by End Orphans. The sidebar rows
 show each worktree's summed host-session usage (`sessionUsageByWorktree()`, `formatUsageShort()`) from
 its own `kunj sessions list --json` poll (5 s, no `--containers`, only while the window is visible).
+
+# Following a checkout
+
+Lookups by worktree (`worktree list`, `kunj agent`, `kunj worktree shell`) read names with their
+`@kunj_worktree` tag (`readTaggedTmuxSessions()`) and take a tagged session by its tag
+(`worktreeAgentSessions()`, `worktreeShellSessions()`, `pickSession()`), so an agent that checked out
+another branch in its worktree keeps its session.

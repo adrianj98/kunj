@@ -13,6 +13,8 @@ each, its CPU and memory, and whether it is orphaned, so stray sessions can be f
 | `@kunj_worktree` tag on host agent and shell sessions | Shipped |
 | Workspace app: Window > Sessions (⌘⇧S) | Shipped |
 | Workspace app: CPU and memory of a worktree's host sessions on its sidebar row | Shipped |
+| Sessions follow their worktree across a checkout (CLI: listing, `agent`, `worktree shell`) | Shipped |
+| Workspace app: tabs follow their worktree across a checkout | In progress |
 | Opening a listed session as a tab | Not done (Copy Attach Command instead) |
 
 ## Why
@@ -49,6 +51,24 @@ expand `\t`). The same script runs on the host and, as the sandbox user, in each
   spelling git uses (realpath compared), and a repository whose `git worktree list` failed makes none of
   its sessions orphans. `idle`: no activity for `--idle-hours` (default 24). Container sessions are
   never `worktree-gone`.
+
+## Following a checkout
+
+An agent that runs `git checkout`/`git switch` in its worktree changes the worktree's branch, but its
+tmux session keeps the name it was started with (`kunj-<repo>-<old branch>-<h>[-a-<id>]`). Every
+lookup that computed the name from the current branch then missed it: the listing reported no agent,
+a reattach (`kunj agent <new branch> --session <id>`) started a second one, and closing the
+environment left it running.
+
+Host sessions carry `@kunj_worktree`, so lookups match on it: `readTaggedTmuxSessions()` lists names
+with their tag in the same one tmux call, and `worktreeAgentSessions()` / `worktreeShellSessions()`
+take a tagged session by its tag (whatever branch it was named after; one tagged with another
+worktree is never taken, even when its name matches) and an untagged one by name as before. The id is
+read from the name (`-a-<id>`, `-sh-<id>` after the 6-hex hash, the id form first). `pickSession()`
+prefers the current branch's name, then any of the worktree's sessions with that id. Used by
+`worktree list` (`agent.session`, `agent.sessions`), `kunj agent start|status|stop` and
+`kunj worktree shell [--kill]`; `--kill` still ends the current names as before and the tagged ones on
+top. Container sessions are unaffected: a container is named after its branch label, not its checkout.
 
 ## Ending sessions
 

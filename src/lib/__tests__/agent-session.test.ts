@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { AgentError, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName, kunjSelf, hostRunArgv } from '../agent-session';
+import { AgentError, readTaggedTmuxSessions, worktreeAgentSessions, worktreeShellSessions, pickSession, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName, kunjSelf, hostRunArgv } from '../agent-session';
 import { kunjEntry } from '../self';
 
 jest.mock('child_process', () => ({
@@ -293,5 +293,68 @@ describe('agentCommand', () => {
 
   test('an unknown name is refused', () => {
     expect(() => agentCommand('codex', undefined)).toThrow(AgentError);
+  });
+});
+
+describe('sessions follow their worktree across a checkout', () => {
+  const repo = ['app', 'github.com/acme/app'] as const;
+  const a = agentSessionName(...repo, 'feat-a');
+  const b = agentSessionName(...repo, 'feat-b');
+  const wt = '/r/.git/kunj/worktrees/feat-a';
+
+  test('readTaggedTmuxSessions reads each name with its @kunj_worktree tag', async () => {
+    execFileMock.mockReset();
+    tmuxResult(null, `${a}\t${wt}\nplain\t\n`);
+    await expect(readTaggedTmuxSessions()).resolves.toEqual([{ name: a, worktree: wt }, { name: 'plain', worktree: '' }]);
+    expect(execFileMock.mock.calls[0][1]).toEqual(['list-sessions', '-F', '#{session_name}\t#{@kunj_worktree}']);
+    tmuxResult(failure({ code: 'ENOENT' }));
+    await expect(readTaggedTmuxSessions()).resolves.toBe('missing');
+    tmuxResult(failure({ stderr: 'no server running on /tmp/x\n' }));
+    await expect(readTaggedTmuxSessions()).resolves.toEqual([]);
+  });
+
+  test('a tagged agent session belongs to its worktree after the worktree moved to another branch', () => {
+    const all = [
+      { name: a, worktree: wt },
+      { name: a + '-a-74e95f0d', worktree: wt },
+      { name: b + '-a-abcdef', worktree: wt },
+      { name: agentSessionName(...repo, 'other'), worktree: '/r/other' },
+      { name: b + '-a-x', worktree: '' },
+      { name: 'kunjsh-app-feat-a-123456-sh-1', worktree: wt },
+    ];
+    expect(worktreeAgentSessions(all, b, wt)).toEqual([
+      { session: a, id: null },
+      { session: a + '-a-74e95f0d', id: '74e95f0d' },
+      { session: b + '-a-abcdef', id: 'abcdef' },
+      { session: b + '-a-x', id: 'x' },
+    ]);
+  });
+
+  test('a session tagged with another worktree is not this one\'s even when its name matches', () => {
+    // feat-b was checked out elsewhere first; the worktree now on feat-b must not take its agent
+    expect(worktreeAgentSessions([{ name: b, worktree: '/r/elsewhere' }], b, wt)).toEqual([]);
+  });
+
+  test('worktreeShellSessions: tagged by tag, untagged by the branch prefix', () => {
+    const prefixB = shellSessionName(...repo, 'feat-b', '');
+    const oldShell = shellSessionName(...repo, 'feat-a', '1df4eb7a');
+    const all = [
+      { name: oldShell, worktree: wt },
+      { name: prefixB + 'u1', worktree: '' },
+      { name: prefixB + 'u2', worktree: '/r/elsewhere' },
+      { name: a, worktree: wt },
+    ];
+    expect(worktreeShellSessions(all, prefixB, wt)).toEqual([
+      { session: oldShell, id: '1df4eb7a' },
+      { session: prefixB + 'u1', id: 'u1' },
+    ]);
+  });
+
+  test('pickSession prefers the current name, then any session with the id, else the current name', () => {
+    const found = [{ session: a, id: null }, { session: b, id: null }, { session: a + '-a-x', id: 'x' }];
+    expect(pickSession(found, null, b)).toBe(b);
+    expect(pickSession(found, 'x', b + '-a-x')).toBe(a + '-a-x');
+    expect(pickSession([{ session: a, id: null }], null, b)).toBe(a);
+    expect(pickSession(found, 'y', b + '-a-y')).toBe(b + '-a-y');
   });
 });

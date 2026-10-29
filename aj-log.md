@@ -2,6 +2,18 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-29 — sessions follow their worktree across a checkout (CLI)
+
+- `worktree list`, `kunj agent start|status|stop` and `kunj worktree shell [--kill]` now find a
+  worktree's tmux sessions by their `@kunj_worktree` tag, not only by the name computed from the
+  current branch (`readTaggedTmuxSessions`, `worktreeAgentSessions`, `worktreeShellSessions`,
+  `pickSession` in src/lib/agent-session.ts). Why: the user reported that whenever an agent switches
+  branches the session is lost; reproduced: after `git checkout -b feat-b` in the worktree the
+  listing said no agent and a reattach would start a second one, while the feat-a-named session ran on.
+- Tests mock the tagged reader in agent, worktree-shell and worktree tests. Pre-existing, unrelated:
+  `deliver.test.ts` fails on a clean tree too, and agent/shell tests fail when run inside a kunj
+  session (`KUNJ_*` in the environment).
+
 ## 2026-10-28 — CPU and memory on the workspace app's sidebar rows
 
 - Each worktree row in the sidebar shows the summed CPU and memory of its kunj agent and shell
