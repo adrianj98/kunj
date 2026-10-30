@@ -21,7 +21,7 @@ snapshot. This phase is provisioning only: no lint, test or run commands and no 
 | `lint`, `test`, `run` commands and `kunj ct test`; telling the agent about the blueprint | Not started |
 | Snapshot rebuilt on a schedule or when a lockfile changes on origin | Not started |
 | Build-time secrets for private registries | Not started |
-| `lockfiles` optional, none hashed by default | Shipped (this commit) |
+| `lockfiles` optional, none hashed by default | Shipped (8a53c51) |
 
 ## Design
 
