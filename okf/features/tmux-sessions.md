@@ -42,8 +42,8 @@ Window > Sessions (⌘⇧S) polls `kunj sessions list [--containers] --json` eve
 session whose id matches an open tab is "Tab open" and is skipped by End Orphans. The sidebar rows
 show each worktree's summed host-session usage (`sessionUsageByWorktree()`, `formatUsageShort()`) from
 its own `kunj sessions list --json` poll (on entering the sidebar and every 5 s while the mouse is over it, no
-`--containers`); the usage is drawn only while hovering. A worktree row names its folder (`sidebarPlace()`), or `worktree` when the folder has the
-branch's letters and digits.
+`--containers`); the usage is drawn only while hovering. A row starts with a kind icon (branch or box, `Icon.worktree`/`.container`), then the worktree's
+folder (`sidebarFolder()`) unless it has the branch's letters and digits.
 
 # Following a checkout
 

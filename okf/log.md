@@ -79,3 +79,4 @@
   `kunj pr` is GitHub-only and does not use `resolveBaseRef()`; the macOS app's `kunj events`
   subscription was uncommitted at the time of writing and is not described.
 - Workspace app: resizable panes (`DividerHandle`, `PaneSizes`) and `sidebarPlace()` shows the kind when the folder matches the branch's letters and digits. Pages updated: apps/workspace-app.md, features/tmux-sessions.md.
+- Workspace app sidebar: the kind is an icon (branch/box) and `sidebarPlace()` became `sidebarFolder()` (nil when the folder matches the branch). Page updated: features/tmux-sessions.md.

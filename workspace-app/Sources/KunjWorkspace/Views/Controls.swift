@@ -79,6 +79,8 @@ extension Theme {
 /// The design's line icons, drawn from their 24-unit SVG paths.
 enum Icon {
     case shell, plus, dots, search, split, close
+    /// The sidebar's kind marks: a branch (worktree) and a box (container).
+    case worktree, container
 
     func draw(in rect: NSRect, color: NSColor) {
         let s = rect.width / 24
@@ -114,6 +116,21 @@ enum Icon {
         case .close:
             path.move(to: p(6, 6)); path.line(to: p(18, 18))
             path.move(to: p(18, 6)); path.line(to: p(6, 18))
+            path.stroke()
+        case .worktree:
+            path.lineWidth = 2 * s
+            path.move(to: p(6, 3)); path.line(to: p(6, 15))
+            path.appendOval(in: NSRect(x: p(15, 0).x, y: p(0, 3).y, width: 6 * s, height: 6 * s))
+            path.appendOval(in: NSRect(x: p(3, 0).x, y: p(0, 15).y, width: 6 * s, height: 6 * s))
+            path.move(to: p(18, 9)); path.curve(to: p(9, 18), controlPoint1: p(18, 14), controlPoint2: p(14, 18))
+            path.stroke()
+        case .container:
+            path.lineWidth = 2 * s
+            path.move(to: p(12, 2))
+            for (x, y) in [(21.0, 7.0), (21, 17), (12, 22), (3, 17), (3, 7)] { path.line(to: p(x, y)) }
+            path.close()
+            path.move(to: p(3, 7)); path.line(to: p(12, 12)); path.line(to: p(21, 7))
+            path.move(to: p(12, 12)); path.line(to: p(12, 22))
             path.stroke()
         }
     }

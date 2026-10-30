@@ -303,17 +303,17 @@ private func realPath(_ url: URL) -> String {
     return String(cString: p)
 }
 
-@Suite struct SidebarPlaceTests {
-    @Test func aWorktreeShowsItsFolderAContainerItsKind() {
-        #expect(sidebarPlace(testWorktree("feat-b", path: "/r/app/.git/kunj/worktrees/feat-a")) == "feat-a")
-        #expect(sidebarPlace(testWorktree("main", path: "/Users/me/projects/app/")) == "app")
-        #expect(sidebarPlace(testWorktree("x", path: nil)) == "worktree")
-        #expect(sidebarPlace(testContainer("feat-a")) == "container")
-     }
+@Suite struct SidebarFolderTests {
+    @Test func aWorktreeShowsItsFolderAContainerNone() {
+        #expect(sidebarFolder(testWorktree("feat-b", path: "/r/app/.git/kunj/worktrees/feat-a")) == "feat-a")
+        #expect(sidebarFolder(testWorktree("main", path: "/Users/me/projects/app/")) == "app")
+        #expect(sidebarFolder(testWorktree("x", path: nil)) == nil)
+        #expect(sidebarFolder(testContainer("feat-a")) == nil)
+    }
 
     @Test func aFolderNamedLikeItsBranchIsNotRepeated() {
-        #expect(sidebarPlace(testWorktree("feat-a", path: "/r/app/.git/kunj/worktrees/feat-a")) == "worktree")
-        #expect(sidebarPlace(testWorktree("feature/Login_Page", path: "/w/feature-login-page")) == "worktree")
-        #expect(sidebarPlace(testWorktree("feature/login", path: "/w/feature-login-2")) == "feature-login-2")
+        #expect(sidebarFolder(testWorktree("feat-a", path: "/r/app/.git/kunj/worktrees/feat-a")) == nil)
+        #expect(sidebarFolder(testWorktree("feature/Login_Page", path: "/w/feature-login-page")) == nil)
+        #expect(sidebarFolder(testWorktree("feature/login", path: "/w/feature-login-2")) == "feature-login-2")
     }
 }

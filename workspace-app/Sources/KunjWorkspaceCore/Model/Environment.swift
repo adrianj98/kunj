@@ -57,14 +57,14 @@ public func environmentId(repo: String, kind: EnvironmentKind, branch: String) -
     "\(repo)|\(kind.rawValue)|\(branch)"
 }
 
-/// The second line of a sidebar row starts with where the environment is: a worktree's folder (the
-/// last component of its path, which after a checkout no longer matches the branch), else its kind.
-/// A folder named like the branch (the same letters and digits, any case) says nothing new: the
-/// kind instead.
-public func sidebarPlace(_ env: Environment) -> String {
-    guard env.kind == .worktree, let path = env.path else { return env.kind.rawValue }
+/// The worktree folder a sidebar row names after its kind icon: the last component of its path,
+/// which after a checkout no longer matches the branch. Nil for a container, a worktree without a
+/// path, or a folder named like the branch (the same letters and digits, any case), which says
+/// nothing the branch does not.
+public func sidebarFolder(_ env: Environment) -> String? {
+    guard env.kind == .worktree, let path = env.path else { return nil }
     let name = URL(fileURLWithPath: path).lastPathComponent
-    guard !name.isEmpty, name != "/", alphanumerics(name) != alphanumerics(env.branch) else { return env.kind.rawValue }
+    guard !name.isEmpty, name != "/", alphanumerics(name) != alphanumerics(env.branch) else { return nil }
     return name
 }
 

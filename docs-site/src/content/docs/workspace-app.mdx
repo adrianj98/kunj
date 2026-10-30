@@ -76,9 +76,9 @@ is slow to start, the window shows a spinner with "Loading sessions…" and the 
   its tabs and ends all its tmux sessions, shells and agents. A row shows the branch, when you last did something in it, where it
   is and its state: *Waiting for input*, *Running* (the agent), *Merged #398*,
   *PR #412 open*, *3 changed files*, *↑2 unpushed*, *Clean*, or *Stopped* / *Missing*. That line
-  starts with the worktree's folder (hover for the full path), which no longer matches the branch
-  once an agent checks out another one; when the folder is named like the branch (the same letters
-  and digits, so `feature-x` for `feature/x`) it says *worktree* instead, and a container row says *container*. While the mouse is over
+  starts with an icon for the kind (a branch for a worktree, a box for a container), then the
+  worktree's folder (hover for the full path) when it is not named like the branch (the same letters
+  and digits, so `feature-x` for `feature/x`), as after an agent checks out another branch. While the mouse is over
   the sidebar, a worktree also shows the CPU and memory of its agents and shells at the right
   (`65% 425M`, amber from 50% CPU), updated every 5 seconds. When an agent checks out another branch in its
   worktree, the row moves to the new branch and keeps its tabs, which stay attached to the same agents
