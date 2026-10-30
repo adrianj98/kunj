@@ -282,13 +282,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    private func wireHandle(_ handle: DividerHandle, drag: @escaping (PaneSizes, Double) -> PaneSizes,
-                            reset: @escaping (inout PaneSizes) -> Void) {
+    /// A drag changes only `key`: its value shown at the start moved by `drag`, fitted to the window.
+    /// The other widths keep what was saved, so dragging in a narrow window does not save their
+    /// squeezed widths.
+    private func wireHandle(_ handle: DividerHandle, _ key: WritableKeyPath<PaneSizes, Double>,
+                            drag: @escaping (Double, Double) -> Double) {
         handle.onBegin = { [weak self] in self?.dragStart = self?.fittedSizes }
         handle.onDrag = { [weak self] dx in
             guard let self, let start = self.dragStart else { return }
-            self.paneSizes = drag(start, Double(dx)).fitted(windowWidth: self.windowWidth, filesOpen: self.filesVisible,
-                                                             changesOpen: self.changesVisible)
+            var moved = start
+            moved[keyPath: key] = drag(start[keyPath: key], Double(dx))
+            self.paneSizes[keyPath: key] = moved.fitted(windowWidth: self.windowWidth, filesOpen: self.filesVisible,
+                                                        changesOpen: self.changesVisible)[keyPath: key]
         }
         handle.onEnd = { [weak self] in
             guard let self else { return }
@@ -297,24 +302,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
         handle.onReset = { [weak self] in
             guard let self else { return }
-            reset(&self.paneSizes)
+            self.paneSizes[keyPath: key] = PaneSizes.standard[keyPath: key]
             self.onPaneSizesChanged(self.paneSizes)
         }
     }
 
     private func wireHandles() {
-        wireHandle(sidebarHandle, drag: { s, dx in var s = s; s.sidebar += dx; return s },
-                   reset: { $0.sidebar = PaneSizes.standard.sidebar })
-        wireHandle(splitHandle, drag: { [weak self] s, dx in
-            var s = s
-            let main = self?.mainWidth ?? 1
-            s.changesShare = (s.changesShare * main - dx) / main
-            return s
-        }, reset: { $0.changesShare = PaneSizes.standard.changesShare })
-        wireHandle(filesHandle, drag: { s, dx in var s = s; s.files -= dx; return s },
-                   reset: { $0.files = PaneSizes.standard.files })
-        wireHandle(changesColumn.listHandle, drag: { s, dx in var s = s; s.fileList += dx; return s },
-                   reset: { $0.fileList = PaneSizes.standard.fileList })
+        wireHandle(sidebarHandle, \.sidebar) { $0 + $1 }
+        wireHandle(splitHandle, \.changesShare) { [weak self] share, dx in
+            let main = max(1, self?.mainWidth ?? 1)
+            return (share * main - dx) / main
+        }
+        wireHandle(filesHandle, \.files) { $0 - $1 }
+        wireHandle(changesColumn.listHandle, \.fileList) { $0 + $1 }
     }
 
     // MARK: theme
