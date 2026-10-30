@@ -57,6 +57,14 @@ public func environmentId(repo: String, kind: EnvironmentKind, branch: String) -
     "\(repo)|\(kind.rawValue)|\(branch)"
 }
 
+/// The second line of a sidebar row starts with where the environment is: a worktree's folder (the
+/// last component of its path, which after a checkout no longer matches the branch), else its kind.
+public func sidebarPlace(_ env: Environment) -> String {
+    guard env.kind == .worktree, let path = env.path else { return env.kind.rawValue }
+    let name = URL(fileURLWithPath: path).lastPathComponent
+    return name.isEmpty || name == "/" ? env.kind.rawValue : name
+}
+
 /// An agent's `state` counts only while it runs: a crashed agent never fires SessionEnd and leaves
 /// its last state behind.
 public func agentActivity(running: Bool?, state: String?) -> AgentActivity {

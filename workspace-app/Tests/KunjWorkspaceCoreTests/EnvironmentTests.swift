@@ -302,3 +302,12 @@ private func realPath(_ url: URL) -> String {
     defer { free(p) }
     return String(cString: p)
 }
+
+@Suite struct SidebarPlaceTests {
+    @Test func aWorktreeShowsItsFolderAContainerItsKind() {
+        #expect(sidebarPlace(testWorktree("feat-b", path: "/r/app/.git/kunj/worktrees/feat-a")) == "feat-a")
+        #expect(sidebarPlace(testWorktree("main", path: "/Users/me/projects/app/")) == "app")
+        #expect(sidebarPlace(testWorktree("x", path: nil)) == "worktree")
+        #expect(sidebarPlace(testContainer("feat-a")) == "container")
+    }
+}

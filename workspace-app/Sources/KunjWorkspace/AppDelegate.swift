@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindow?
     private var sessionsWindow: SessionsWindow?
     /// The sidebar rows' CPU and memory: `kunj sessions list --json` (host sessions only, so no
-    /// container exec) every 5 s while the window is visible.
+    /// container exec) when the mouse enters the sidebar and every 5 s while it stays there.
     private var usageTimer: Timer?
     private var usageLoading = false
     private var usageFailures = 0
@@ -481,7 +481,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         usageTimer?.invalidate()
         usageFailures = 0
         usageTicks = 0
-        pollUsage(cli: cli)
+        windowController.sidebar.onHover = { [weak self] inside in
+            if inside { self?.pollUsage(cli: cli, now: true) }
+        }
         usageTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pollUsage(cli: cli) }
         }
@@ -490,15 +492,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopUsagePoll() {
         usageTimer?.invalidate()
         usageTimer = nil
+        windowController.sidebar.onHover = { _ in }
         windowController.sidebar.usage = [:]
     }
 
-    /// One listing (skipped while the last one runs or the window is hidden). After three failures
+    /// One listing while the mouse is over the sidebar (skipped while the last one runs or the window
+    /// is hidden); `now` is the one on entering, which a failure streak does not hold back. After three failures
     /// in a row (a kunj older than `kunj sessions`, a hung tmux) the rows show none and it retries
     /// once a minute.
-    private func pollUsage(cli: KunjCLI) {
-        usageTicks += 1
-        guard usageFailures < 3 || usageTicks % 12 == 0 else { return }
+    private func pollUsage(cli: KunjCLI, now: Bool = false) {
+        guard windowController.sidebar.hovering else { return }
+        if !now {
+            usageTicks += 1
+            guard usageFailures < 3 || usageTicks % 12 == 0 else { return }
+        }
         guard !usageLoading, kunj === cli, windowController.window?.occlusionState.contains(.visible) == true,
               let cwd = store?.repos.first?.repo.root else { return }
         usageLoading = true

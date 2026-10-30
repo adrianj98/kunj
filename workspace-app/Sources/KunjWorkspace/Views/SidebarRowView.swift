@@ -3,8 +3,9 @@ import KunjWorkspaceCore
 
 /// One environment in the sidebar (DESIGN.md "Sidebar row"): padding 9 × 10 inside a 1 px border,
 /// radius 6; dot · branch (sans 13/500) · relative time (mono 11, `muted`), then indented 15 px:
-/// kind (mono 11) · status verb (sans 11, `amber` when waiting), and at the right the CPU and memory
-/// of the worktree's kunj sessions (mono 11, `muted`, `amber` from 50 % CPU) when the whole line fits. Selected: `raised` fill and
+/// place (mono 11: a worktree's folder, else the kind; the full path in the tooltip) · status verb
+/// (sans 11, `amber` when waiting), and at the right, while the mouse is over the sidebar, the CPU and
+/// memory of the worktree's kunj sessions (mono 11, `muted`, `amber` from 50 % CPU) when the whole line fits. Selected: `raised` fill and
 /// `borderStrong` border; hover: `raised` at 50 %.
 final class SidebarRowView: NSView {
     static let height: CGFloat = 54
@@ -13,6 +14,8 @@ final class SidebarRowView: NSView {
     var time: String { didSet { needsDisplay = true } }
     /// The summed usage of the worktree's host tmux sessions; nil draws nothing.
     var usage: SessionUsage? { didSet { if usage != oldValue { needsDisplay = true } } }
+    /// The mouse is over the sidebar: the usage is drawn only then.
+    var showUsage = false { didSet { if showUsage != oldValue { needsDisplay = true } } }
     var selected: Bool { didSet { needsDisplay = true; setAccessibilitySelected(selected) } }
     var theme: Theme { didSet { needsDisplay = true } }
     var onSelect: ((String) -> Void)?
@@ -30,7 +33,8 @@ final class SidebarRowView: NSView {
                                        owner: self, userInfo: nil))
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel("\(environment.branch), \(environment.kind.rawValue), \(environment.statusVerb)")
+        setAccessibilityLabel("\(environment.branch), \(environment.kind.rawValue) \(sidebarPlace(environment)), \(environment.statusVerb)")
+        toolTip = environment.path
         setAccessibilitySelected(selected)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -68,9 +72,9 @@ final class SidebarRowView: NSView {
         let caption = DesignTokens.TypeScale.caption
         var right = bounds.maxX - padH
         // the usage only where kind · verb still fit whole: the verb is the waiting signal
-        if let usage {
+        if showUsage, let usage {
             let text = formatUsageShort(usage)
-            let status = width(environment.kind.rawValue, Theme.mono(caption)) + 6 + width("·", Theme.sans(caption)) + 6
+            let status = width(sidebarPlace(environment), Theme.mono(caption)) + 6 + width("·", Theme.sans(caption)) + 6
                 + width(environment.statusVerb, Theme.sans(caption))
             if textX + status + 8 + width(text, Theme.mono(caption)) <= right {
                 let color = usage.cpu >= 50 ? theme.color(\.amber) : theme.color(\.muted)
@@ -78,7 +82,7 @@ final class SidebarRowView: NSView {
             }
         }
         var x = textX
-        x += draw(environment.kind.rawValue, font: Theme.mono(caption), color: lineColor,
+        x += draw(sidebarPlace(environment), font: Theme.mono(caption), color: lineColor,
                   in: x, width: right - x, midY: line2) + 6
         x += draw("·", font: Theme.sans(caption), color: theme.color(\.faintest),
                   in: x, width: right - x, midY: line2) + 6

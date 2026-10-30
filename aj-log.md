@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-10-30 — sidebar rows: folder name, usage on hover
+
+- A worktree row's second line starts with its folder (last path component, full path in the
+  tooltip) instead of the word "worktree" (`sidebarPlace()`); containers still say "container". Why:
+  the user wants the branch and the path in the sidebar; after an agent's checkout they differ.
+- CPU and memory show only while the mouse is over the sidebar, and `kunj sessions list` is polled
+  only then (once on entering, every 5 s while there). Why: the user asked to see them on hover only;
+  polling for numbers nobody sees was wasted.
+
 ## 2026-10-29 — workspace app tabs follow their worktree across a checkout
 
 - The app keys environments by branch, so a checkout inside a worktree orphaned its tabs under the

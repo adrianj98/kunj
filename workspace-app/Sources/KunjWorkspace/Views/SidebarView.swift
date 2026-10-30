@@ -20,6 +20,15 @@ final class SidebarView: NSView {
     private var expanded: Set<String> = []
     /// The summed CPU and memory of each worktree's kunj sessions, by standardized path.
     var usage: [String: SessionUsage] = [:] { didSet { list.rows.forEach { $0.usage = usageOf($0.environment) } } }
+    /// The rows show the usage only while the mouse is over the sidebar.
+    private(set) var hovering = false {
+        didSet {
+            list.rows.forEach { $0.showUsage = hovering }
+            if hovering != oldValue { onHover(hovering) }
+        }
+    }
+    /// The mouse entered (true) or left the sidebar.
+    var onHover: (Bool) -> Void = { _ in }
     /// When the environment was last active (Task 8 persists it); nil shows no time.
     var lastActivity: (String) -> Date? = { _ in nil }
     /// `kunj 1.4.2`, `kunj 1.0.0 dev`, or empty before discovery.
@@ -83,6 +92,8 @@ final class SidebarView: NSView {
             version.firstBaselineAnchor.constraint(equalTo: agents.firstBaselineAnchor),
             version.leadingAnchor.constraint(greaterThanOrEqualTo: agents.trailingAnchor, constant: 8),
         ])
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
         list.onSelect = { [weak self] id in self?.onSelect(id) }
         list.rowMenu = { [weak self] env in self?.rowMenu(env) }
         list.onToggleMore = { [weak self] root in
@@ -94,6 +105,8 @@ final class SidebarView: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
 
     private func apply() {
         search.theme = theme
@@ -130,7 +143,7 @@ final class SidebarView: NSView {
         let n = agentsRunning(repos)
         agents.stringValue = n == 1 ? "1 agent running" : "\(n) agents running"
         list.set(groups: groups(), selectedId: selectedId, time: timeText)
-        list.rows.forEach { $0.usage = usageOf($0.environment) }
+        list.rows.forEach { $0.usage = usageOf($0.environment); $0.showUsage = hovering }
         list.frame.size.width = scroll.contentSize.width
         list.needsLayout = true
     }
