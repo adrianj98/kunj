@@ -45,7 +45,7 @@ The blueprint is `.kunj/blueprint.json` in the repository. Comments and trailing
 | `tools` | object | Preset name → version or option (a string, an array of strings, or `true`; `"*"` means the same as `true`, any version). Each one runs a [preset](../presets/) as root. Values may contain only plain words: no options (`-x`), paths or shell characters. |
 | `setup` | array of commands | Run in order, in `/workspace`, as the container's user, through a login shell. Runs once, when the snapshot is built. The first failure stops it. |
 | `maintain` | array of commands | Run the same way on every later start of a container, to absorb drift between the snapshot and the branch. A failure is a warning, not an error. Migrations against [services](../services/) go here, written so they can run again: `setup`'s only reach the snapshot build's temporary services. |
-| `lockfiles` | array of paths | Paths from the repository root that decide when the snapshot is stale. When omitted, kunj looks for the usual ones: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `requirements*.txt`, `go.sum`, `Cargo.lock`, `Gemfile.lock`. |
+| `lockfiles` | array of paths | Optional. Paths from the repository root whose changes on the default branch make the snapshot stale. When omitted, no lockfile is looked at: a dependency change is installed by `maintain` when a container starts, and the snapshot is rebuilt only when something else below changes. |
 | `notes` | string | Free text for people, shown by `status`. kunj does nothing else with it. |
 | `image` | string | The base image: `sandbox` for kunj's own sandbox image, or an image reference such as `ghcr.io/acme/dev:3`. It wins over `container.image` and the repository's devcontainer.json (whose compose services are then not started too); only `--image` wins over it. An image named here must not run as root. `blueprint init` writes `sandbox`, because the presets install onto it. |
 | `aliases` | object | Alias name → command, for the shells you open in the container (`kunj ct shell`, terminals, editor windows). Saved in the snapshot, so every container has them. A blueprint alias replaces one of the sandbox's own (`ll`, `gs`). Aliases work only in interactive shells: `kunj ct exec -- sso` does not see them, and an `alias` line in `setup` does nothing because each step runs in its own shell. |
@@ -133,7 +133,7 @@ the new container. If `setup` fails there, the start fails and what it created i
 The snapshot's hash covers:
 
 - the blueprint's text;
-- the lockfiles' contents **on origin's default branch** (not your current branch);
+- the contents of the lockfiles you list, **on origin's default branch** (not your current branch);
 - the base image the snapshot is built on (the blueprint's `image`, the sandbox image or your devcontainer image);
 - the presets the blueprint uses.
 

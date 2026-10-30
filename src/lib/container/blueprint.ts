@@ -184,17 +184,8 @@ export async function lockfileIds(
   ref: string,
   cwd: string
 ): Promise<Array<{ path: string; id: string }>> {
-  let paths = lockfiles;
-  if (paths.length === 0) {
-    const root = (await gitOut(cwd, ['ls-tree', '--name-only', ref])) ?? '';
-    const names = root.split('\n').filter(Boolean);
-    paths = [
-      ...KNOWN_LOCKFILES,
-      ...names.filter(n => /^requirements.*\.txt$/.test(n)),
-    ];
-  }
   const out: Array<{ path: string; id: string }> = [];
-  for (const p of paths) {
+  for (const p of lockfiles) {
     const id = await gitOut(cwd, ['rev-parse', '--verify', '-q', `${ref}:${p}`]);
     if (id && id.trim()) out.push({ path: p, id: id.trim() });
   }

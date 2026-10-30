@@ -32,7 +32,7 @@ as hostile; the host checkout and `~/.kunj` are trusted.
 | `tools` | object; keys `^[a-z0-9-]+$` (preset names); value a string, string array or `true` (`"*"` is stored as `true`); every word must match `TOOL_WORD` (no leading `-`, no `/`, no whitespace or shell metacharacters) |
 | `setup` | non-empty strings; run once as the sandbox user with `sh -lc` in `/workspace` (snapshot, or a new container without one) |
 | `maintain` | same; run on every start except one that just ran `setup`; a failure is a warning |
-| `lockfiles` | paths for the hash; default `KNOWN_LOCKFILES` plus root `requirements*.txt` |
+| `lockfiles` | optional paths for the hash; default none (`blueprint init` writes none; `KNOWN_LOCKFILES` only feeds `infer.ts`) |
 | `notes` | free text, shown by `blueprint status`, kept by `init` |
 | `image` | `"sandbox"` (`SANDBOX_IMAGE_KEYWORD`) or an `isImageRef()` reference. `baseSource()` in lifecycle.ts: `--image` > `image` > `container.image` > devcontainer > sandbox; any `image` skips `readDevcontainer()` (so no compose services; `declaredServices()` skips it too). A reference becomes a `setting` source with `fromBlueprint`, which `checkImage()` refuses when uid is 0. `init` writes `sandbox`, keeps an existing value |
 | `services` | [sidecar services](/containers/services.md), highest precedence |

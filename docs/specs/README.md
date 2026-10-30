@@ -31,6 +31,7 @@ page only says where each thing stands.
 | Branch containers (phase 1) | [branch-containers.md](branch-containers.md) | — |
 | Blueprints and snapshots | [blueprints.md](blueprints.md) | — |
 | Blueprint `image` key (sandbox or an image, over container.image and the devcontainer) | [blueprints.md](blueprints.md) | de46ded |
+| Blueprint `lockfiles` optional, none hashed by default | [blueprints.md](blueprints.md) | this commit |
 | Blueprint `"*"` tool values; snapshot seeds skip LFS smudge, containers `git lfs pull` | [blueprints.md](blueprints.md) | f3a4222 |
 | bun preset installs unzip (`kunj_need_pkg`) | [blueprints.md](blueprints.md) | 872fa13 |
 | Blueprint `aliases` (to `/etc/profile.d/kunj-aliases.sh` in the snapshot) | [blueprints.md](blueprints.md) | 12bdcc5 |

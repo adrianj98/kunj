@@ -1565,7 +1565,6 @@ export class ContainerCommand extends BaseCommand {
       ...(Object.keys(tools).length ? { tools } : {}),
       setup,
       maintain,
-      ...(inferred.lockfiles.length ? { lockfiles: inferred.lockfiles } : {}),
       ...(notes !== undefined ? { notes } : {}),
       ...(aliases ? { aliases } : {}),
     };

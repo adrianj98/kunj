@@ -50,7 +50,7 @@ const COPY = ['sh', '-c', SEED_COPY_SCRIPT];
 const READ = ['sh', '-c', SNAPSHOT_READ_SCRIPT];
 const SHA = 'a'.repeat(40);
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e' };
-const TEXT = '{ "tools": { "apt": ["jq"] }, "setup": ["npm ci"] }';
+const TEXT = '{ "tools": { "apt": ["jq"] }, "setup": ["npm ci"], "lockfiles": ["package-lock.json"] }';
 
 let warnings: string[] = [];
 let logs: string[] = [];
@@ -108,7 +108,7 @@ function startResult(over: Partial<StartResult> = {}): StartResult {
 
 async function expectedHash(ref: string): Promise<string> {
   const presets = await resolvePresets(['apt'], { repoRoot: tmp, globalKunjDir: path.join(tmp, 'global') });
-  return blueprintHash({ text: TEXT, lockfiles: await lockfileIds([], ref, tmp), baseImage: BASE, presetHashes: presets.map(p => p.hash) });
+  return blueprintHash({ text: TEXT, lockfiles: await lockfileIds(['package-lock.json'], ref, tmp), baseImage: BASE, presetHashes: presets.map(p => p.hash) });
 }
 
 function image(tag: string, hash: string, over: Partial<ImageInfo> = {}): ImageInfo {

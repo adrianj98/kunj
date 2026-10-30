@@ -396,7 +396,7 @@ environment with `kunj_env KEY=VALUE` (→ `/etc/kunj/env`, turned into image `E
 `/etc/profile.d/kunj-tools.sh`), and must end with `kunj_done <version>` (kunj reads the result file;
 prints `installed <name> <version>`). Tool values are validated twice (`TOOL_WORD` in blueprint.ts and
 `kunj_check_words` in the preset): never let a value become an option or a path. The hash is
-`computeBlueprintHash()` only: blueprint text, the lockfiles' blob ids at `blueprintRef()` (origin's
+`computeBlueprintHash()` only: blueprint text, the listed lockfiles' blob ids (none by default) at `blueprintRef()` (origin's
 default branch, never the current worktree), the base image tag and the presets' content hashes;
 start, snapshot, status and list must all call it. The snapshot is an ordinary `startContainer`
 (`namesFor: '<branch>:snapshot'`, no env, keep files, files, ports or agent, so no secrets in the

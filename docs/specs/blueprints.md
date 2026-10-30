@@ -21,6 +21,7 @@ snapshot. This phase is provisioning only: no lint, test or run commands and no 
 | `lint`, `test`, `run` commands and `kunj ct test`; telling the agent about the blueprint | Not started |
 | Snapshot rebuilt on a schedule or when a lockfile changes on origin | Not started |
 | Build-time secrets for private registries | Not started |
+| `lockfiles` optional, none hashed by default | Shipped (this commit) |
 
 ## Design
 
@@ -53,7 +54,7 @@ runs as root, like a devcontainer's.
 | `tools` | Preset name → `true` (or `"*"`, read as `true`: any version), a string, or a list (for `apt`). Installed as root before `setup`. Every word must match `TOOL_WORD`, `[A-Za-z0-9][A-Za-z0-9._+:=~@-]*`, so a value can never become an option or a path. |
 | `setup` | Shell commands run once with `sh -lc` in `/workspace` as the sandbox user, in order; the first failure stops. |
 | `maintain` | Run the same way on every start after the seed, to absorb lockfile drift; skipped right after `setup` in the same run. A failure is a warning. |
-| `lockfiles` | Paths whose blob ids are part of the hash. Default: whichever known names exist at the repo root (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `go.sum`, `Cargo.lock`, `Gemfile.lock`, `requirements*.txt`). |
+| `lockfiles` | Optional paths whose blob ids are part of the hash. Default: none, so a lockfile change on origin does not rebuild the snapshot (`maintain` absorbs it on start); list one to rebuild when it changes. `blueprint init` writes none (2026-10-30, user: lockfiles optional, none looked at by default; before, an omitted list meant the known names found at the root). |
 | `notes` | Free text, shown by `status`. |
 | `image` | The base image: `sandbox` (kunj's own, ignoring any devcontainer.json) or an image reference (refused at start when it runs as root). Precedence: `--image`, then `image`, then `container.image`, then the devcontainer, then the sandbox. Naming it skips the devcontainer entirely, its compose services too. `blueprint init` writes `sandbox`, since the presets install onto it, and keeps the image (and the `aliases`) of a file it overwrites. |
 | `services` | Sidecar services; see [container-phase-2.md](container-phase-2.md). |
@@ -66,7 +67,7 @@ kunj runs from (user-controlled, so a blueprint works before it is pushed);
 `origin/<default branch>:.kunj/blueprint.json`; `~/.kunj/<repo>/blueprint.json` (a private host copy).
 
 **Hash.** `computeBlueprintHash()`, the one helper `start`, `snapshot`, `status` and `list` all call:
-the first 12 hex chars of a sha1 over the blueprint text, each lockfile's blob id at `blueprintRef()`
+the first 12 hex chars of a sha1 over the blueprint text, each listed lockfile's blob id at `blueprintRef()`
 (the blueprint's own ref, else `origin/<default>`, never the current worktree), the base image tag and
 the content hash of every preset used (each includes `_lib.sh`). It is the snapshot's identity and its
 staleness test.
@@ -205,8 +206,8 @@ anything into the snapshot.
 
 ### Worked examples
 
-**kunj** (committed): `{ "setup": ["npm ci", "npm run build"], "maintain": ["npm install"],
-"lockfiles": ["package-lock.json"] }`. Node 22 comes from the sandbox image. Snapshot built in 62 s;
+**kunj** (committed): `{ "setup": ["npm ci", "npm run build"], "maintain": ["npm install"] }`
+(its `lockfiles` was removed 2026-10-30). Node 22 comes from the sandbox image. Snapshot built in 62 s;
 `maintain` was changed from `npm ci` to `npm install` because `npm ci` took ~16 s on every start.
 
 **driveday_planner** (in the working tree, not committed): `node 22`, `pnpm` through corepack,

@@ -1160,7 +1160,6 @@ describe('ContainerCommand', () => {
         tools: { node: '24', apt: ['jq', 'git-lfs'] },
         setup: ['npm ci', 'npm run build'],
         maintain: ['npm ci'],
-        lockfiles: ['package-lock.json'],
       });
       expect(JSON.parse(stdout.join(''))).toEqual({
         path: file,

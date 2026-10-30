@@ -175,8 +175,8 @@ describe('resolution', () => {
     const explicit = await lockfileIds(['yarn.lock', 'nope.lock'], 'HEAD', clone);
     expect(explicit.map(l => l.path)).toEqual(['yarn.lock']);
     expect(explicit[0].id).toMatch(/^[0-9a-f]{40}$/);
-    const defaults = await lockfileIds([], 'HEAD', clone);
-    expect(defaults.map(l => l.path).sort()).toEqual(['requirements-dev.txt', 'yarn.lock']);
+    // none listed, none read: the default hashes no lockfile
+    expect(await lockfileIds([], 'HEAD', clone)).toEqual([]);
   });
 });
 
