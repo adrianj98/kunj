@@ -106,7 +106,8 @@ attach command (`tmux attach -t …`, or `docker exec -it <container> tmux attac
 The sidebar rows show the CPU and memory of their worktree's host sessions, summed
 (`sessionUsageByWorktree()`, matched on the standardized worktree path), right of the status line as
 `65% 425M` (`formatUsageShort()`, amber at 50%+), only while the mouse is over the sidebar and only
-when the place and status verb still fit whole. The app runs `kunj sessions list --json` without
+when the place and status verb still fit whole. The place is the worktree's folder, or its kind when
+the folder has the branch's letters and digits (`feature-x` for `feature/x`, any case). The app runs `kunj sessions list --json` without
 `--containers` when the mouse enters the sidebar and every 5 s while it stays there, so container rows show none (that would be
 an exec per container); after three failures in a row (a kunj without `sessions`, a hung tmux) the rows
 show none and it retries once a minute.

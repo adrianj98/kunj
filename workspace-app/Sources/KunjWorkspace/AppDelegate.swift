@@ -43,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let showFilesKey = "showFiles"
     /// The environment selected when the app last ran, selected again after the first listing.
     static let selectedEnvironmentKey = "selectedEnvironment"
+    /// The widths the window's dividers were dragged to (`PaneSizes` as JSON).
+    static let paneSizesKey = "paneSizes"
 
     nonisolated init(arguments: [String]) {
         if let i = arguments.firstIndex(of: "--screenshot"), i + 1 < arguments.count {
@@ -78,6 +80,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.sidebar.rowMenu = { [weak self] env in self?.runner.rowMenu(env: env) }
         windowController.onToggleChanges = { [weak self] in self?.toggleChanges(nil) }
         windowController.sidebar.search.onEscape = { [weak self] in self?.windowController.terminalColumn.focusActive() }
+        // --demo renders the mockup at the design's widths and saves nothing
+        if !demo, let data = UserDefaults.standard.data(forKey: Self.paneSizesKey),
+           let sizes = try? JSONDecoder().decode(PaneSizes.self, from: data) {
+            windowController.paneSizes = sizes
+        }
+        windowController.onPaneSizesChanged = { [weak self] sizes in
+            guard self?.demo == false, let data = try? JSONEncoder().encode(sizes) else { return }
+            UserDefaults.standard.set(data, forKey: Self.paneSizesKey)
+        }
         // --demo renders the mockup, which shows the column; otherwise the saved setting (closed by default)
         let changesOpen = changesArgument ?? (demo || UserDefaults.standard.bool(forKey: Self.showChangesKey))
         windowController.setChangesVisible(changesOpen, animated: false)

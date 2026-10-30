@@ -3,7 +3,9 @@ import KunjWorkspaceCore
 
 /// The window: sidebar (272) | header (52) over the TerminalColumn (11fr) and the ChangesColumn
 /// (9fr), status bar (28) under both, 1 px `border` hairlines between them. Everything is driven by
-/// `render(repos:selected:)`, which takes the store's `[RepoEnvironments]` as they are.
+/// `render(repos:selected:)`, which takes the store's `[RepoEnvironments]` as they are. The hairlines
+/// beside the sidebar, between the columns, before the Files column and after the Changes file list
+/// are dragged by `DividerHandle`s (`paneSizes`).
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     private(set) var theme = ThemeManager.shared.current
     private(set) var repos: [RepoEnvironments] = []
@@ -26,7 +28,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     var onToggleChanges: () -> Void = {}
     /// The tab bar's Files pill was pressed.
     var onToggleFiles: () -> Void = {}
-    /// Whether the Files column (the right edge, `FilesColumn.width`) is open; closed by default.
+    /// Whether the Files column (the right edge, `paneSizes.files` wide) is open; closed by default.
     private(set) var filesVisible = false
     private var filesWidth: NSLayoutConstraint!
     private var filesLineWidth: NSLayoutConstraint!
@@ -36,6 +38,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private(set) var changesVisible = true
     private var splitWidth: NSLayoutConstraint!
     private var fullWidth: NSLayoutConstraint!
+    private var sidebarWidth: NSLayoutConstraint!
+    /// The widths the dividers were dragged to (the standard ones until then); what is shown is
+    /// these fitted to the window (`PaneSizes.fitted`).
+    var paneSizes = PaneSizes.standard { didSet { applyPaneSizes() } }
+    /// A divider was let go or reset: the app saves `paneSizes`.
+    var onPaneSizesChanged: (PaneSizes) -> Void = { _ in }
+    private var dragStart: PaneSizes?
+    private let sidebarHandle = DividerHandle(label: "Sidebar width")
+    private let splitHandle = DividerHandle(label: "Changes column width")
+    private let filesHandle = DividerHandle(label: "Files column width")
     /// The hairline between the columns: 0 wide while the Changes column is closed.
     private var columnLineWidth: NSLayoutConstraint!
 
@@ -142,8 +154,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         guard visible != filesVisible else { return }
         filesVisible = visible
         filesColumn.isActive = visible
-        filesWidth.constant = visible ? FilesColumn.width : 0
         filesLineWidth.constant = visible ? 1 : 0
+        applyPaneSizes()
         renderSelection()
         guard animated, let content = window?.contentView else { return }
         NSAnimationContext.runAnimationGroup { ctx in
@@ -167,6 +179,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             splitWidth.isActive = false
             fullWidth.isActive = true
         }
+        applyPaneSizes()
         renderSelection()
         guard animated, let content = window?.contentView else { return }
         NSAnimationContext.runAnimationGroup { ctx in
@@ -224,8 +237,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         terminalColumn.setFiles(open: filesVisible)
         let showColumns = env != nil
         for v in [terminalColumn, lines[2]] as [NSView] { v.isHidden = !showColumns }
-        for v in [changesColumn, lines[1]] as [NSView] { v.isHidden = !showColumns || !changesVisible }
-        for v in [filesColumn, filesLine] as [NSView] { v.isHidden = !showColumns || !filesVisible }
+        for v in [changesColumn, lines[1], splitHandle] as [NSView] { v.isHidden = !showColumns || !changesVisible }
+        for v in [filesColumn, filesLine, filesHandle] as [NSView] { v.isHidden = !showColumns || !filesVisible }
         emptyState.isHidden = showColumns
         let text = emptyStateText(discoveryError: discoveryError, discoveryDetail: discoveryDetail,
                                   loading: loading, hasRepos: !repos.isEmpty)
@@ -235,6 +248,73 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         emptyDetail.isHidden = text.detail == nil
         emptySpinner.isHidden = !text.spinner || showColumns
         if emptySpinner.isHidden { emptySpinner.stopAnimation(nil) } else { emptySpinner.startAnimation(nil) }
+    }
+
+    // MARK: pane sizes
+
+    private var windowWidth: Double { Double(window?.contentView?.bounds.width ?? 1440) }
+
+    /// `paneSizes` as they fit the window now.
+    private var fittedSizes: PaneSizes {
+        paneSizes.fitted(windowWidth: windowWidth, filesOpen: filesVisible, changesOpen: changesVisible)
+    }
+
+    private var mainWidth: Double {
+        let f = fittedSizes
+        return PaneSizes.mainWidth(windowWidth: windowWidth, sidebar: f.sidebar, files: filesVisible ? f.files : nil)
+    }
+
+    /// Sets the constraints from `paneSizes` fitted to the window (after a drag, a toggle or a resize).
+    private func applyPaneSizes() {
+        guard sidebarWidth != nil else { return }
+        let f = fittedSizes
+        sidebarWidth.constant = f.sidebar
+        filesWidth.constant = filesVisible ? f.files : 0
+        changesColumn.fileListWidth = f.fileList
+        let share = f.changesShare
+        let multiplier = (1 - share) / share
+        if abs(splitWidth.multiplier - multiplier) > 0.0001 {
+            // a multiplier is fixed once made: replace the constraint
+            let active = splitWidth.isActive
+            splitWidth.isActive = false
+            splitWidth = terminalColumn.widthAnchor.constraint(equalTo: changesColumn.widthAnchor, multiplier: multiplier)
+            splitWidth.isActive = active
+        }
+    }
+
+    private func wireHandle(_ handle: DividerHandle, drag: @escaping (PaneSizes, Double) -> PaneSizes,
+                            reset: @escaping (inout PaneSizes) -> Void) {
+        handle.onBegin = { [weak self] in self?.dragStart = self?.fittedSizes }
+        handle.onDrag = { [weak self] dx in
+            guard let self, let start = self.dragStart else { return }
+            self.paneSizes = drag(start, Double(dx)).fitted(windowWidth: self.windowWidth, filesOpen: self.filesVisible,
+                                                             changesOpen: self.changesVisible)
+        }
+        handle.onEnd = { [weak self] in
+            guard let self else { return }
+            self.dragStart = nil
+            self.onPaneSizesChanged(self.paneSizes)
+        }
+        handle.onReset = { [weak self] in
+            guard let self else { return }
+            reset(&self.paneSizes)
+            self.onPaneSizesChanged(self.paneSizes)
+        }
+    }
+
+    private func wireHandles() {
+        wireHandle(sidebarHandle, drag: { s, dx in var s = s; s.sidebar += dx; return s },
+                   reset: { $0.sidebar = PaneSizes.standard.sidebar })
+        wireHandle(splitHandle, drag: { [weak self] s, dx in
+            var s = s
+            let main = self?.mainWidth ?? 1
+            s.changesShare = (s.changesShare * main - dx) / main
+            return s
+        }, reset: { $0.changesShare = PaneSizes.standard.changesShare })
+        wireHandle(filesHandle, drag: { s, dx in var s = s; s.files -= dx; return s },
+                   reset: { $0.files = PaneSizes.standard.files })
+        wireHandle(changesColumn.listHandle, drag: { s, dx in var s = s; s.fileList += dx; return s },
+                   reset: { $0.fileList = PaneSizes.standard.fileList })
     }
 
     // MARK: theme
@@ -299,16 +379,24 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         emptyDetail.preferredMaxLayoutWidth = 520
 
         let sidebarLine = lines[0], columnLine = lines[1], headerLine = lines[2], statusLine = lines[3]
+        // the handles last, so they are hit before the terminal and the web views they overlap
         for v in [effect, sidebarLine, mainArea, header, headerLine, terminalColumn, columnLine, changesColumn,
-                  filesLine, filesColumn, statusLine, statusBar, emptyState] as [NSView] {
+                  filesLine, filesColumn, statusLine, statusBar, emptyState,
+                  sidebarHandle, splitHandle, filesHandle] as [NSView] {
             root.addSubview(v)
         }
-        let leftShare = L.paneSplit.0 / (L.paneSplit.0 + L.paneSplit.1)
+        for (handle, line) in [(sidebarHandle, sidebarLine), (splitHandle, columnLine), (filesHandle, filesLine)] {
+            NSLayoutConstraint.activate([
+                handle.centerXAnchor.constraint(equalTo: line.centerXAnchor),
+                handle.widthAnchor.constraint(equalToConstant: DividerHandle.width),
+                handle.topAnchor.constraint(equalTo: line === sidebarLine ? root.topAnchor : terminalColumn.topAnchor),
+                handle.bottomAnchor.constraint(equalTo: line === sidebarLine ? root.bottomAnchor : terminalColumn.bottomAnchor),
+            ])
+        }
         NSLayoutConstraint.activate([
             effect.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             effect.topAnchor.constraint(equalTo: root.topAnchor),
             effect.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            effect.widthAnchor.constraint(equalToConstant: L.sidebarWidth),
 
             sidebarLine.leadingAnchor.constraint(equalTo: effect.trailingAnchor),
             sidebarLine.topAnchor.constraint(equalTo: root.topAnchor),
@@ -366,9 +454,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             emptyState.centerYAnchor.constraint(equalTo: mainArea.centerYAnchor),
             emptyState.leadingAnchor.constraint(greaterThanOrEqualTo: mainArea.leadingAnchor, constant: 40),
         ])
-        // 11:9 of the width left of the Files column (the whole header width while it is closed)
-        splitWidth = terminalColumn.widthAnchor.constraint(equalTo: changesColumn.widthAnchor,
-                                                           multiplier: leftShare / (1 - leftShare), constant: -1)
+        sidebarWidth = effect.widthAnchor.constraint(equalToConstant: paneSizes.sidebar)
+        sidebarWidth.isActive = true
+        // 11:9 of the width left of the Files column by default (`paneSizes.changesShare`)
+        let share = paneSizes.changesShare
+        splitWidth = terminalColumn.widthAnchor.constraint(equalTo: changesColumn.widthAnchor, multiplier: (1 - share) / share)
         fullWidth = terminalColumn.trailingAnchor.constraint(equalTo: filesLine.leadingAnchor)
         filesWidth = filesColumn.widthAnchor.constraint(equalToConstant: 0)
         filesWidth.isActive = true
@@ -377,6 +467,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         splitWidth.isActive = true
         columnLineWidth = columnLine.widthAnchor.constraint(equalToConstant: 1)
         columnLineWidth.isActive = true
+        wireHandles()
+        applyPaneSizes()
     }
 
     private func pin(_ v: NSView, to parent: NSView) {
@@ -414,7 +506,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         placeTrafficLights()
     }
 
-    func windowDidResize(_ notification: Notification) { placeTrafficLights() }
+    func windowDidResize(_ notification: Notification) {
+        placeTrafficLights()
+        applyPaneSizes()
+    }
     func windowDidExitFullScreen(_ notification: Notification) { placeTrafficLights() }
 
     // MARK: snapshots

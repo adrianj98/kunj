@@ -37,6 +37,7 @@ page only says where each thing stands.
 | Agent and shell sessions follow their worktree across a checkout (CLI and workspace app tabs) | [tmux-sessions.md](tmux-sessions.md#following-a-checkout) | c5c543f, 2ea490e |
 | `kunj sessions` and the workspace app's Sessions window (owner, attached, CPU/memory, orphans, kill); `@kunj_worktree` tag | [tmux-sessions.md](tmux-sessions.md) | f98e051 |
 | Workspace app sidebar rows show their worktree's session CPU and memory | [tmux-sessions.md](tmux-sessions.md#workspace-app) | 7ab0568 |
+| Workspace app: resizable sidebar, Changes split, Files column and file list; a folder named like its branch is not repeated | [workspace-ide.md](workspace-ide.md) | this commit |
 | Sidecar services | [container-phase-2.md](container-phase-2.md) | ed136b3, 6273c61 |
 | `kunj ct open` (editor attach) | [container-phase-2.md](container-phase-2.md) | 93b7ed3, f635113 |
 | `kunj ct forward --auto` | [container-phase-2.md](container-phase-2.md) | 5710902, b88466c |

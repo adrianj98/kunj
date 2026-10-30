@@ -54,7 +54,6 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     var onClose: () -> Void = {}
     private let closeButton = BarIconButton(.close, label: "Close Files")
 
-    static let width: CGFloat = 260
     static let rowHeight: CGFloat = 24
     static let debounce: TimeInterval = 1
 

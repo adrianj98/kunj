@@ -59,10 +59,18 @@ public func environmentId(repo: String, kind: EnvironmentKind, branch: String) -
 
 /// The second line of a sidebar row starts with where the environment is: a worktree's folder (the
 /// last component of its path, which after a checkout no longer matches the branch), else its kind.
+/// A folder named like the branch (the same letters and digits, any case) says nothing new: the
+/// kind instead.
 public func sidebarPlace(_ env: Environment) -> String {
     guard env.kind == .worktree, let path = env.path else { return env.kind.rawValue }
     let name = URL(fileURLWithPath: path).lastPathComponent
-    return name.isEmpty || name == "/" ? env.kind.rawValue : name
+    guard !name.isEmpty, name != "/", alphanumerics(name) != alphanumerics(env.branch) else { return env.kind.rawValue }
+    return name
+}
+
+/// The letters and digits of `s`, lowercased: `feature/x` and `Feature-X` compare equal.
+private func alphanumerics(_ s: String) -> String {
+    String(s.lowercased().unicodeScalars.filter(CharacterSet.alphanumerics.contains).map(Character.init))
 }
 
 /// An agent's `state` counts only while it runs: a crashed agent never fires SessionEnd and leaves

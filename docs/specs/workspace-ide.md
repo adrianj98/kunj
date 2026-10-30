@@ -480,6 +480,13 @@ All 2026-10-23.
   file count, ⌘⇧C) brings the diff in when needed.
 - **A Files column at the right edge** (user, 2026-10-24), not in the design: hidden until opened
   (`Files` pill, ⌘⇧E), styled like the Changes file list.
+- **The panes are resizable** (user, 2026-10-30): an 8 px `DividerHandle` over the sidebar's
+  hairline, the one between the columns, the Files column's and the Changes file list's drags it
+  (double-click: the design's width). `PaneSizes` (KunjWorkspaceCore) holds the sidebar, Files and
+  file list widths and the Changes column's share, kept in range (sidebar 200–440, Files 180–560,
+  list 120–400 leaving the diff 200, each column at least 280) and fitted to the window on every
+  resize, the Files column and then the sidebar giving way; saved app-wide as `paneSizes` in user
+  defaults, ignored by `--demo`.
 - **Ports in v1 as links;** webview previews and split panes in v2 (2026-10-23: the user kept them out of
   this build; the agent waiting state and editor tabs are in).
 - **Session titles are branch names** (2026-10-23); the design's task titles need metadata the CLI does

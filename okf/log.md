@@ -78,3 +78,4 @@
   16 older top-level commands only; `ai.provider` is display-only (Bedrock is the only provider);
   `kunj pr` is GitHub-only and does not use `resolveBaseRef()`; the macOS app's `kunj events`
   subscription was uncommitted at the time of writing and is not described.
+- Workspace app: resizable panes (`DividerHandle`, `PaneSizes`) and `sidebarPlace()` shows the kind when the folder matches the branch's letters and digits. Pages updated: apps/workspace-app.md, features/tmux-sessions.md.

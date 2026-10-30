@@ -78,6 +78,9 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
   come from the theme, magenta and cyan are fixed real hues, and colours 16-255 are xterm's
   (`ansi256PaletteStrategy = .xterm`), because SwiftTerm's default re-tinted them with the theme.
 * Tab pills have an × (`PillView.onClose`), and the Changes and Files bars a close button.
+* The sidebar, the terminal/Changes split, the Files column and the Changes file list are resized by
+  dragging their hairlines (`DividerHandle`, `PaneSizes` in KunjWorkspaceCore fitted to the window,
+  saved as `paneSizes` in user defaults; double-click resets).
 * The Files column has a Search mode (Find in Files ⌘⇧F, `SearchPanel`): `kunj search` in the selected
   worktree or container by default, all worktrees (and containers) from its scope menu; a match opens
   an editor tab at its line with the match selected (`EditorTab.reveal`, `revealLine` on the editor page, which turns kunj's character columns into UTF-16). Model in

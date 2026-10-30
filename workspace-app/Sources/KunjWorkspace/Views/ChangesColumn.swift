@@ -55,6 +55,13 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var onClose: () -> Void = {}
     private let closeButton = BarIconButton(.close, label: "Close Changes")
     static let diffHeaderHeight: CGFloat = 29
+    /// Drags the hairline right of the file list (wired by the window, which keeps the width).
+    let listHandle = DividerHandle(label: "Changed files list width")
+    private var listWidth: NSLayoutConstraint!
+    var fileListWidth: Double {
+        get { Double(listWidth.constant) }
+        set { listWidth.constant = newValue }
+    }
 
     private var summary = DiffSummary(files: [])
     private var names: [String] = []
@@ -91,7 +98,7 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         for v in [title, counts, scopeButton, closeButton] as [NSView] { bar.addSubview(v) }
         closeButton.toolTip = "Close the Changes column (⌘⇧C)"
         closeButton.onPress = { [weak self] in self?.onClose() }
-        for v in [listScroll, listLine, diffHeader, diffHeaderLine, diffView, emptyLabel] as [NSView] { body.addSubview(v) }
+        for v in [listScroll, listLine, diffHeader, diffHeaderLine, diffView, emptyLabel, listHandle] as [NSView] { body.addSubview(v) }
         for v in [pathLabel, editButton] as [NSView] { diffHeader.addSubview(v) }
         pathLabel.lineBreakMode = .byTruncatingHead
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -108,7 +115,7 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
             // The page loaded, or reloaded after its process ended: give it the theme and the file again
             if m["type"] as? String == "ready" { self?.pageReady() }
         }
-        let fileListWidth = DesignTokens.Layout.changesFileListWidth
+        listWidth = listScroll.widthAnchor.constraint(equalToConstant: DesignTokens.Layout.changesFileListWidth)
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: topAnchor),
             bar.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -135,7 +142,11 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
             listScroll.leadingAnchor.constraint(equalTo: body.leadingAnchor),
             listScroll.topAnchor.constraint(equalTo: body.topAnchor),
             listScroll.bottomAnchor.constraint(equalTo: body.bottomAnchor),
-            listScroll.widthAnchor.constraint(equalToConstant: fileListWidth),
+            listWidth,
+            listHandle.centerXAnchor.constraint(equalTo: listLine.centerXAnchor),
+            listHandle.widthAnchor.constraint(equalToConstant: DividerHandle.width),
+            listHandle.topAnchor.constraint(equalTo: body.topAnchor),
+            listHandle.bottomAnchor.constraint(equalTo: body.bottomAnchor),
             listLine.leadingAnchor.constraint(equalTo: listScroll.trailingAnchor),
             listLine.topAnchor.constraint(equalTo: body.topAnchor),
             listLine.bottomAnchor.constraint(equalTo: body.bottomAnchor),

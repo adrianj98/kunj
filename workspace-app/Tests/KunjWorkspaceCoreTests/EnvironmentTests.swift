@@ -309,5 +309,11 @@ private func realPath(_ url: URL) -> String {
         #expect(sidebarPlace(testWorktree("main", path: "/Users/me/projects/app/")) == "app")
         #expect(sidebarPlace(testWorktree("x", path: nil)) == "worktree")
         #expect(sidebarPlace(testContainer("feat-a")) == "container")
+     }
+
+    @Test func aFolderNamedLikeItsBranchIsNotRepeated() {
+        #expect(sidebarPlace(testWorktree("feat-a", path: "/r/app/.git/kunj/worktrees/feat-a")) == "worktree")
+        #expect(sidebarPlace(testWorktree("feature/Login_Page", path: "/w/feature-login-page")) == "worktree")
+        #expect(sidebarPlace(testWorktree("feature/login", path: "/w/feature-login-2")) == "feature-login-2")
     }
 }
