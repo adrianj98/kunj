@@ -289,6 +289,31 @@ export function agentStateFile(kunjDir: string, session: string): string {
   return path.join(agentStateDir(kunjDir), session);
 }
 
+// Resuming: the SessionStart hook copies its input (JSON with Claude Code's `session_id`) to the
+// file named by KUNJ_AGENT_RESUME, ~/.kunj/<repo>/agent-resume/<session>.json on the host. It
+// outlives the tmux session (nothing removes it), so `kunj agent --resume` can run
+// `claude --resume <id>` when the session was ended. A new conversation (/clear) rewrites it.
+export function agentResumeFile(kunjDir: string, session: string): string {
+  return path.join(kunjDir, 'agent-resume', `${session}.json`);
+}
+
+// The saved conversation id, or null when there is none or it does not look like one
+export function readAgentResume(file: string): string | null {
+  try {
+    const id = JSON.parse(fs.readFileSync(file, 'utf8'))?.session_id;
+    return typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+// `command --resume <id>` when the command is claude; any other agent cannot resume
+export function withAgentResume(command: string, id: string | null): string {
+  if (!id) return command;
+  const first = command.trim().split(/\s+/)[0] ?? '';
+  return path.basename(first) === 'claude' ? `${command.trim()} --resume ${id}` : command;
+}
+
 // The hooks as `claude --settings` takes them. No single quotes anywhere, so the JSON can be
 // single-quoted for the shell tmux runs the command through.
 export function claudeHookSettings(): string {
@@ -301,6 +326,8 @@ export function claudeHookSettings(): string {
       Stop: hook(write('waiting')),
       Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),
       SessionEnd: hook('rm -f "$KUNJ_AGENT_STATE"'),
+      // Unset in containers (no resume there yet), where it does nothing
+      SessionStart: hook('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"'),
     },
   });
 }

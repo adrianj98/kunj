@@ -16,6 +16,9 @@ each, its CPU and memory, and whether it is orphaned, so stray sessions can be f
 | Sessions follow their worktree across a checkout (CLI: listing, `agent`, `worktree shell`) | Shipped |
 | Workspace app: tabs follow their worktree across a checkout | Shipped |
 | Opening a listed session as a tab | Not done (Copy Attach Command instead) |
+| Workspace app: quit asks Leave Running / Close All Sessions (Leave Running after 20 s); Session > Close All Sessions… | Shipped |
+| Host Claude agents save their session id; `kunj agent --resume`; restored agent tabs resume | Shipped |
+| Resuming container agents | Not done |
 
 ## Why
 
@@ -78,6 +81,28 @@ keeper's restored state and saved entry (tabs, `lastActivity`; not over an entry
 already has), the registry's tabs (`TabRegistry.move`: a terminal's `envId` and link handler, an
 editor's `env`; the processes keep running) and the selection. A tab's spec is never re-run, and
 closing a moved tab runs `kunj agent stop <new branch> --session <id>`, which the CLI resolves by tag.
+
+## Quitting and resuming
+
+Quitting the workspace app with shell or agent tabs open (`sessionTabs()`: terminal tabs with a tmux
+session id) asks **Leave Running** (the default), **Close All Sessions** or **Cancel**
+(`QuitSessionsChoice` in TerminalSpec.swift). The alert counts down and answers Leave Running after 20 s
+(a timer in the modal run loop mode calls `stopModal`). Close All runs each tab's
+`sessionKillArguments` (10 s each, in parallel) before `kunj events` is stopped. The layout is flushed
+either way, so the tabs come back on the next launch. `--demo` never asks.
+
+Resuming: the Claude hooks (`claudeHookSettings()`) include `SessionStart`, which copies its input
+(JSON with `session_id`) to `$KUNJ_AGENT_RESUME`. `kunj agent` sets that to
+`~/.kunj/<repo>/agent-resume/<tmux session>.json` (host only; unset in containers, where the hook does
+nothing). The file is never removed, and `/clear` rewrites it with the new conversation's id.
+`kunj agent start --resume` reads it (`readAgentResume()`, the id must be `[A-Za-z0-9_-]{1,64}`) only
+when the tmux session is not running, and then runs `claude --resume <id>` (`withAgentResume()`; any
+other agent command is left alone). The app passes `--resume` for every agent tab it restores from
+the layout (never for a new tab, whose session id is new), so a session that still runs is
+reattached as before.
+
+Session > Close All Sessions… runs Close Session (`finishClosingSession`) for every environment that
+has tabs, after one confirmation; an unsaved editor stops it.
 
 ## Ending sessions
 

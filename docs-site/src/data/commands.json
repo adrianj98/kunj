@@ -27,6 +27,11 @@
         "default": null
       },
       {
+        "flags": "--resume",
+        "description": "[start] When the session is not running, resume its agent's last Claude conversation (saved by a hook)",
+        "default": null
+      },
+      {
         "flags": "--all",
         "description": "[stop] Stop the default session and every --session one (exit 0 when none runs)",
         "default": null
@@ -37,7 +42,7 @@
         "default": null
       }
     ],
-    "helpText": "Actions:\n  start [branch]    run the agent in the worktree's tmux session, or reattach to it (default)\n  status [branch]   whether the session exists\n  stop [branch]     kill the session\n\n[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with\n--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.\n\n--session <id> runs one more agent in the worktree, in its own tmux session; status, stop and\nstart then act on that one. status without it reports every agent of the worktree; stop --all\nends them all. stop with --session or --all exits 0 even when nothing ran.\n\n--agent antigravity runs the Antigravity CLI (agy) instead of agent.command. Only Claude Code\nreports when it waits for input; another agent shows as running while its session lives."
+    "helpText": "Actions:\n  start [branch]    run the agent in the worktree's tmux session, or reattach to it (default)\n  status [branch]   whether the session exists\n  stop [branch]     kill the session\n\n[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with\n--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.\n\n--session <id> runs one more agent in the worktree, in its own tmux session; status, stop and\nstart then act on that one. status without it reports every agent of the worktree; stop --all\nends them all. stop with --session or --all exits 0 even when nothing ran.\n\n--resume: a Claude agent saves its conversation id as it starts; when its session was ended\n(the app quit with Close All, a reboot), start --resume runs claude --resume <id> in a new one.\n\n--agent antigravity runs the Antigravity CLI (agy) instead of agent.command. Only Claude Code\nreports when it waits for input; another agent shows as running while its session lives."
   },
   {
     "name": "branch-desc",

@@ -188,3 +188,21 @@ private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cw
         #expect(exitCode(waitStatus: SIGHUP | 0x80) == 128 + SIGHUP) // core dumped
     }
 }
+
+@Suite struct ResumeAndQuitTests {
+    @Test func aRestoredWorktreeAgentAsksToResume() throws {
+        let s = try terminalSpec(cli: cli, env: testWorktree(), kind: .agent, shell: "/bin/zsh", terminalEnv: baseEnv,
+                                 session: "ab12cd34", resume: true)
+        #expect(s.arguments == ["kunj", "agent", "feature/x", "--session", "ab12cd34", "--resume"])
+        let shell = try terminalSpec(cli: cli, env: testWorktree(), kind: .shell, shell: "/bin/zsh", terminalEnv: baseEnv,
+                                     session: "ab12cd34", resume: true)
+        #expect(!shell.arguments.contains("--resume"))
+    }
+
+    @Test func theQuitPromptCountsWhatRunsAndTheSecondsLeft() {
+        #expect(QuitSessionsChoice.message(shells: 2, agents: 1) == "Leave 1 agent and 2 shells running?")
+        #expect(QuitSessionsChoice.message(shells: 1, agents: 0) == "Leave 1 shell running?")
+        #expect(QuitSessionsChoice.detail(secondsLeft: 20).hasSuffix("Leaving them running in 20 s."))
+        #expect(QuitSessionsChoice.timeout == 20)
+    }
+}

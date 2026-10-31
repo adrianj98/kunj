@@ -80,7 +80,7 @@ public enum TerminalSpecError: Error, Equatable, Sendable {
 /// `kunj agent <branch> --agent <name>`, in worktrees only.
 public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: [String] = [], shell: String,
                          terminalEnv: [String: String], cwd: String? = nil, session: String? = nil,
-                         agent: AgentChoice? = nil) throws -> TerminalSpec {
+                         agent: AgentChoice? = nil, resume: Bool = false) throws -> TerminalSpec {
     let environment = ShellEnvironment.terminalEnvironment(path: cli.path, base: terminalEnv)
     func kunj(_ args: [String], title: String, closeOnExitZero: Bool = false) -> TerminalSpec {
         TerminalSpec(executable: "/usr/bin/env", arguments: cli.commandParts + args, cwd: cwd ?? env.repo.root,
@@ -102,7 +102,8 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
         guard env.exists, env.state != .missing else { throw TerminalSpecError.worktreeMissing }
         if kind == .agent {
             var s = kunj(["agent", env.branch] + (session.map { ["--session", $0] } ?? [])
-                         + (agent.map { ["--agent", $0.rawValue] } ?? []), title: agent?.title ?? "agent")
+                         + (agent.map { ["--agent", $0.rawValue] } ?? []) + (resume ? ["--resume"] : []),
+                         title: agent?.title ?? "agent")
             s.session = session
             s.agent = agent?.rawValue
             return s
@@ -166,5 +167,25 @@ public func tabDot(kind: TabKind, running: Bool, agent: AgentActivity) -> DotCol
     case .agent: return agent == .waiting ? .amber : .green
     case .action: return .green
     case .shell, .editor: return nil
+    }
+}
+
+/// What quitting does with the tabs' tmux sessions: leave them running (they reattach when the
+/// app opens again), or end them (agents then resume their saved Claude conversation).
+public enum QuitSessionsChoice: Equatable, Sendable {
+    case leaveRunning, closeAll, cancel
+
+    /// Unanswered for this long, the prompt leaves the sessions running.
+    public static let timeout = 20
+
+    public static func message(shells: Int, agents: Int) -> String {
+        func count(_ n: Int, _ word: String) -> String? { n == 0 ? nil : "\(n) \(word)\(n == 1 ? "" : "s")" }
+        let what = [count(agents, "agent"), count(shells, "shell")].compactMap { $0 }.joined(separator: " and ")
+        return "Leave \(what) running?"
+    }
+
+    public static func detail(secondsLeft: Int) -> String {
+        "Running sessions reattach when you open Kunj Workspace again. Closed agents resume their "
+            + "Claude conversation; closed shells start fresh.\n\nLeaving them running in \(secondsLeft) s."
     }
 }

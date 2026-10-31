@@ -76,6 +76,12 @@ When the command's first word is `claude` and `agent.hooks` is not false, `withA
 `~/.kunj/<repo>/agent-state/<session>` (`agentStateFile()`). `readAgentState()` reads it back;
 `combineAgentStates()` gives `waiting` if any session waits, else `running` if any runs.
 
+`SessionStart` copies its input (JSON with Claude Code's `session_id`) to `KUNJ_AGENT_RESUME` =
+`~/.kunj/<repo>/agent-resume/<session>.json` (`agentResumeFile()`, host only, never removed).
+`kunj agent start --resume` reads it with `readAgentResume()` when the tmux session is not running and
+runs `claude --resume <id>` (`withAgentResume()`). The workspace app passes `--resume` for restored agent
+tabs (docs/specs/tmux-sessions.md#quitting-and-resuming).
+
 # Status in the listing
 
 With status, `listWorktreesDetailed()` makes one `tmux list-sessions` call in the same `Promise.all` as

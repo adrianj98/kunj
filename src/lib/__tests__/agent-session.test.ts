@@ -110,11 +110,11 @@ describe('agent state hooks', () => {
     expect(withAgentHooks('claude', '/s', false)).toBe('claude');
   });
 
-  test('claudeHookSettings is valid JSON with the five hooks, quotable in single quotes', () => {
+  test('claudeHookSettings is valid JSON with the six hooks, quotable in single quotes', () => {
     const json = claudeHookSettings();
     expect(json).not.toContain("'");
     const parsed = JSON.parse(json);
-    expect(Object.keys(parsed.hooks).sort()).toEqual(['Notification', 'PreToolUse', 'SessionEnd', 'Stop', 'UserPromptSubmit']);
+    expect(Object.keys(parsed.hooks).sort()).toEqual(['Notification', 'PreToolUse', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit']);
     expect(parsed.hooks.Notification[0].matcher).toBe('permission_prompt|idle_prompt|elicitation_dialog');
     expect(parsed.hooks.Stop[0].hooks[0]).toEqual({ type: 'command', command: 'printf waiting > "$KUNJ_AGENT_STATE"' });
     expect(parsed.hooks.UserPromptSubmit[0].hooks[0].command).toBe('printf running > "$KUNJ_AGENT_STATE"');
@@ -356,5 +356,36 @@ describe('sessions follow their worktree across a checkout', () => {
     expect(pickSession(found, 'x', b + '-a-x')).toBe(a + '-a-x');
     expect(pickSession([{ session: a, id: null }], null, b)).toBe(a);
     expect(pickSession(found, 'y', b + '-a-y')).toBe(b + '-a-y');
+  });
+});
+
+describe('resuming a Claude conversation', () => {
+  const { agentResumeFile, readAgentResume, withAgentResume, claudeHookSettings } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+  const fs = jest.requireActual<typeof import('fs')>('fs');
+  const os = jest.requireActual<typeof import('os')>('os');
+  const path = jest.requireActual<typeof import('path')>('path');
+
+  test('the SessionStart hook saves its input only when KUNJ_AGENT_RESUME is set', () => {
+    expect(JSON.parse(claudeHookSettings()).hooks.SessionStart[0].hooks[0].command)
+      .toBe('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"');
+  });
+
+  test('reads the saved session id, refusing anything that is not one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-resume-'));
+    const file = agentResumeFile(dir, 'kunj-r-main-abc123-a-1');
+    expect(file).toBe(path.join(dir, 'agent-resume', 'kunj-r-main-abc123-a-1.json'));
+    expect(readAgentResume(file)).toBeNull();
+    fs.mkdirSync(path.dirname(file));
+    fs.writeFileSync(file, JSON.stringify({ session_id: '0b5e-41aa', source: 'startup' }));
+    expect(readAgentResume(file)).toBe('0b5e-41aa');
+    fs.writeFileSync(file, JSON.stringify({ session_id: 'x; rm -rf ~' }));
+    expect(readAgentResume(file)).toBeNull();
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('only claude gets --resume', () => {
+    expect(withAgentResume('claude --model opus', 'abc')).toBe('claude --model opus --resume abc');
+    expect(withAgentResume('agy', 'abc')).toBe('agy');
+    expect(withAgentResume('claude', null)).toBe('claude');
   });
 });

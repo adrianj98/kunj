@@ -267,8 +267,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let path = tab.path { self?.windowController.terminalColumn.registry.openEditor(env: env, path: path) }
             } else {
                 // a tab saved before sessions has none: the default agent session, a plain shell
+                // an agent whose session ended (Close All on quit, a reboot) resumes its conversation
                 _ = self?.startTab(env: env, kind: tab.kind, session: tab.session,
-                                   agent: tab.agent.flatMap(AgentChoice.init(rawValue:)))
+                                   agent: tab.agent.flatMap(AgentChoice.init(rawValue:)), resume: true)
             }
         }
         keeper.activate = { [weak registry] id, index in
@@ -329,20 +330,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// Ends every tab's process (tmux sessions stay) and the `kunj events` child before quitting,
-    /// so nothing the app started outlives it.
+    /// Ends every tab's process and the `kunj events` child before quitting, so nothing the app
+    /// started outlives it. With shell or agent tabs open it asks whether to leave their tmux
+    /// sessions running (the answer after 20 s) or end them; the tabs are saved either way.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateLater }
         guard confirmQuitWithUnsavedEditors() else { return .terminateCancel }
+        let sessions = demo ? [] : sessionTabs()
+        var kills: [(Environment, [String])] = []
+        if !sessions.isEmpty {
+            switch askAboutSessions(sessions) {
+            case .cancel: return .terminateCancel
+            case .closeAll: kills = sessions.map { ($0.env, sessionKillArguments(env: $0.env, kind: $0.kind, session: $0.session)) }
+            case .leaveRunning: break
+            }
+        }
         terminating = true
         windowController?.terminalColumn.registry.closeAll()
         layoutKeeper?.flush()
-        guard let events else { return .terminateNow }
+        let cli = kunj
+        guard events != nil || !kills.isEmpty else { return .terminateNow }
+        let events = self.events
         // terminate may be called from a main-actor job (the --screenshot path); the main queue
         // is then busy for as long as AppKit waits for the reply, so neither stop() nor the
         // reply may need the main actor: the reply goes through the run loop, not GCD.
         Task.detached {
-            await events.stop()
+            if let cli, !kills.isEmpty {
+                await withTaskGroup(of: Void.self) { group in
+                    for (env, args) in kills {
+                        group.addTask {
+                            let r = try? await cli.runRaw(args, cwd: env.repo.root, stdin: nil, timeout: 10)
+                            log("quit: kunj \(args.joined(separator: " ")) exited \(r.map { "\($0.exit)" } ?? "with an error")")
+                        }
+                    }
+                }
+            }
+            await events?.stop()
             log("kunj events stopped")
             let main = CFRunLoopGetMain()
             CFRunLoopPerformBlock(main, CFRunLoopMode.commonModes.rawValue) {
@@ -609,12 +632,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opens a `kind` tab in `env` (also one restored from the layout file); a refused spec shows
     /// inline in the column and opens nothing.
     @discardableResult
-    private func startTab(env: Environment, kind: TabKind, session: String?, agent: AgentChoice? = nil) -> Bool {
+    private func startTab(env: Environment, kind: TabKind, session: String?, agent: AgentChoice? = nil,
+                          resume: Bool = false) -> Bool {
         let column = windowController.terminalColumn
         guard let cli = kunj else { return false }
         do {
             let spec = try terminalSpec(cli: cli, env: env, kind: kind, shell: Self.loginShell,
-                                        terminalEnv: ProcessInfo.processInfo.environment, session: session, agent: agent)
+                                        terminalEnv: ProcessInfo.processInfo.environment, session: session, agent: agent,
+                                        resume: resume)
             column.registry.open(spec: spec, env: env, kind: kind)
             log("opened \(kind.rawValue) in \(env.id): \(spec.executable) \(spec.arguments.joined(separator: " ")) (cwd \(spec.cwd))")
             return true
@@ -685,6 +710,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default:
             break
         }
+    }
+
+    /// Session > Close All Sessions: Close Session for every environment with tabs, after one
+    /// confirmation; an unsaved editor stops it.
+    @objc func closeAllSessions(_ sender: Any?) {
+        guard kunj != nil, let registry = windowController?.terminalColumn.registry else { return }
+        var ids: [String] = []
+        for tab in registry.allTabs where !ids.contains(tab.envId) { ids.append(tab.envId) }
+        let envs = ids.compactMap { store?.environment(id: $0) }
+        guard !envs.isEmpty else { return }
+        let alert = NSAlert()
+        if let dirty = registry.allEditors.first(where: \.dirty) {
+            alert.messageText = "Save \(dirty.title) first"
+            alert.informativeText = "Closing all sessions closes their editor tabs."
+            alert.runModal()
+            return
+        }
+        alert.messageText = "Close all \(envs.count) session\(envs.count == 1 ? "" : "s")?"
+        alert.informativeText = "Their tabs close and every shell and agent of those worktrees and containers ends."
+        alert.addButton(withTitle: "Close All")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        for env in envs { finishClosingSession(env) }
     }
 
     /// Closes every tab of the environment without asking (unsaved editors were dealt with), ends
@@ -797,6 +845,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Quitting with unsaved editor tabs asks first; true to quit.
+    private struct SessionTab {
+        let env: Environment
+        let kind: TabKind
+        let session: String
+    }
+
+    /// The open shell and agent tabs that have a tmux session.
+    private func sessionTabs() -> [SessionTab] {
+        guard let registry = windowController?.terminalColumn.registry else { return [] }
+        return registry.allTerminals.compactMap { tab in
+            guard tab.kind == .shell || tab.kind == .agent, let session = tab.spec?.session,
+                  let env = store?.environment(id: tab.envId) else { return nil }
+            return SessionTab(env: env, kind: tab.kind, session: session)
+        }
+    }
+
+    /// Leave Running (default, and the answer after `QuitSessionsChoice.timeout` seconds), Close
+    /// All Sessions, or Cancel; the text counts down.
+    private func askAboutSessions(_ sessions: [SessionTab]) -> QuitSessionsChoice {
+        let alert = NSAlert()
+        alert.messageText = QuitSessionsChoice.message(shells: sessions.filter { $0.kind == .shell }.count,
+                                                       agents: sessions.filter { $0.kind == .agent }.count)
+        var left = QuitSessionsChoice.timeout
+        alert.informativeText = QuitSessionsChoice.detail(secondsLeft: left)
+        alert.addButton(withTitle: "Leave Running")
+        alert.addButton(withTitle: "Close All Sessions")
+        alert.addButton(withTitle: "Cancel")
+        let timer = Timer(timeInterval: 1, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                left -= 1
+                if left <= 0 {
+                    timer.invalidate()
+                    NSApp.stopModal(withCode: .alertFirstButtonReturn)
+                } else {
+                    alert.informativeText = QuitSessionsChoice.detail(secondsLeft: left)
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .modalPanel)
+        let response = alert.runModal()
+        timer.invalidate()
+        switch response {
+        case .alertFirstButtonReturn: return .leaveRunning
+        case .alertSecondButtonReturn: return .closeAll
+        default: return .cancel
+        }
+    }
+
     private func confirmQuitWithUnsavedEditors() -> Bool {
         let dirty = windowController?.terminalColumn.registry.allEditors.filter(\.dirty) ?? []
         guard !dirty.isEmpty else { return true }
@@ -862,6 +958,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clone.target = self
         menu.addItem(withTitle: "Search Sessions", action: #selector(focusSearch(_:)), keyEquivalent: "k").target = self
         menu.addItem(withTitle: "Close Session", action: #selector(closeSession(_:)), keyEquivalent: "W").target = self
+        menu.addItem(withTitle: "Close All Sessions…", action: #selector(closeAllSessions(_:)), keyEquivalent: "").target = self
         let switchItem = NSMenuItem(title: "Switch to Session", action: nil, keyEquivalent: "")
         let switches = NSMenu(title: "Switch to Session")
         for n in 1...9 {
@@ -931,6 +1028,8 @@ extension AppDelegate: NSMenuItemValidation {
             return kunj != nil
         case #selector(newSession(_:)):
             return kunj != nil && !(store?.repos.isEmpty ?? true) && newSessionSheet == nil
+        case #selector(closeAllSessions(_:)):
+            return kunj != nil && !(windowController?.terminalColumn.registry.allTabs.isEmpty ?? true)
         case #selector(cloneFromGitHub(_:)):
             return kunj != nil && cloneSheet == nil && newSessionSheet == nil
         case #selector(switchSession(_:)):

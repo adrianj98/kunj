@@ -87,6 +87,8 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
   `KunjWorkspaceCore/Search/Search.swift`.
 * Clone from GitHub… (⌥⌘N, `CloneRepoSheet`): `kunj repos github --json`, filtered by a search field,
   repositories already here last and disabled; Clone runs `kunj repos clone <owner/name> --json` and reloads.
+* Quit with shell/agent tabs asks Leave Running / Close All Sessions / Cancel (`QuitSessionsChoice`, Leave Running
+  after 20 s); restored agent tabs run `kunj agent … --resume`. Session > Close All Sessions… closes every environment with tabs.
 * Shortcuts include New Shell (⌘T), New Session (⌘N), Clone from GitHub (⌥⌘N), Search Sessions (⌘K), Show Changes, Show Files,
   Close Tab (⌘W) and Session 1-9.
 * Launch arguments: `--demo`, `--screenshot <png>`, `--theme warm|light|graphite`,

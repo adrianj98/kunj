@@ -187,6 +187,16 @@ reopens the environment you had selected, and its shells and agents reattach whe
 Closing a tab yourself (⌘W) ends its tmux session; without tmux a shell tab is a plain shell that
 ends with the app.
 
+When you quit with shell or agent tabs open, the app asks **Leave Running** or **Close All
+Sessions**. If you don't answer within 20 seconds it leaves them running. Either way the tabs come
+back the next time you open the app. A Claude agent whose session was closed (or lost to a reboot)
+resumes its conversation: kunj saves Claude Code's session id as the agent starts, and the restored
+tab runs `kunj agent --resume`, which starts `claude --resume <id>` when no session is running. A
+closed shell starts fresh. Agents in containers are not resumed yet.
+
+**Session > Close All Sessions…** closes every environment that has tabs, like Close Session on
+each, after one confirmation.
+
 The app remembers each environment's tabs in `~/.kunj/<repo>/workspace.json`. The first time you
 select an environment after launching, its shells and agents reattach, and its files reopen. A stopped container's tabs come back once it runs. Command tabs
 are not restored. The time on each sidebar row is your last activity there (typing in one of its

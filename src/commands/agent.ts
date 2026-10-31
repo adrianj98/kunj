@@ -5,11 +5,12 @@
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
 import * as fs from 'fs';
+import * as path from 'path';
 import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentStateDir, agentStateFile, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks } from '../lib/agent-session';
 import type { AgentSessionJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
@@ -19,6 +20,7 @@ interface AgentOptions {
   tmux?: boolean;
   session?: string;
   all?: boolean;
+  resume?: boolean;
 }
 
 const ACTIONS = ['start', 'status', 'stop'];
@@ -34,6 +36,7 @@ export class AgentCommand extends BaseCommand {
         { flags: '--agent <name>', description: 'Agent to run: claude or antigravity (agent.antigravityCommand, default agy); --command wins' },
         { flags: '--no-tmux', description: 'Run the agent directly in this terminal, without a tmux session' },
         { flags: '--session <id>', description: "One of several agents of the worktree: its own tmux session (<agent session>-a-<id>; letters, digits, _ and -, up to 32)" },
+        { flags: '--resume', description: "[start] When the session is not running, resume its agent's last Claude conversation (saved by a hook)" },
         { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs)' },
       ],
       helpText: [
@@ -48,6 +51,9 @@ export class AgentCommand extends BaseCommand {
         '--session <id> runs one more agent in the worktree, in its own tmux session; status, stop and',
         'start then act on that one. status without it reports every agent of the worktree; stop --all',
         'ends them all. stop with --session or --all exits 0 even when nothing ran.',
+        '',
+        '--resume: a Claude agent saves its conversation id as it starts; when its session was ended',
+        '(the app quit with Close All, a reboot), start --resume runs claude --resume <id> in a new one.',
         '',
         '--agent antigravity runs the Antigravity CLI (agy) instead of agent.command. Only Claude Code',
         'reports when it waits for input; another agent shows as running while its session lives.',
@@ -139,8 +145,13 @@ export class AgentCommand extends BaseCommand {
     const kunjDir = getKunjDir();
     const stateFile = agentStateFile(kunjDir, session);
     fs.mkdirSync(agentStateDir(kunjDir), { recursive: true });
-    const command = withAgentHooks(opts.command || agentCommand(opts.agent, config.agent), stateFile, config.agent?.hooks !== false);
-    const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile };
+    const resumeFile = agentResumeFile(kunjDir, session);
+    fs.mkdirSync(path.dirname(resumeFile), { recursive: true });
+    const agentCmd = opts.command || agentCommand(opts.agent, config.agent);
+    // A running session is reattached below; only a new one resumes the saved conversation
+    const resumeId = opts.resume && !(sessions?.includes(session) ?? false) ? readAgentResume(resumeFile) : null;
+    const command = withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false);
+    const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile };
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;
     // Like kunj ct agent in an image without tmux: the agent runs here and ends with the terminal

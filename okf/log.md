@@ -82,3 +82,4 @@
 - Workspace app sidebar: the kind is an icon (branch/box) and `sidebarPlace()` became `sidebarFolder()` (nil when the folder matches the branch). Page updated: features/tmux-sessions.md.
 - Blueprints: `lockfiles` is optional and defaults to none (no auto-detected lockfiles in the hash); `blueprint init` no longer writes it. Pages updated: containers/blueprints.md.
 - Clone from GitHub: `kunj repos github` (one `gh api --paginate user/repos`), `kunj repos clone` (`repos.cloneDir`, `repos.cloneBare`), the workspace app's Clone from GitHub sheet. Pages updated: architecture/repo-identity-and-registry.md, apps/workspace-app.md.
+- Quit prompt (Leave Running / Close All Sessions, 20 s timeout), Close All Sessions…, and resuming Claude agents (`SessionStart` hook saves the session id, `kunj agent --resume`). Pages updated: features/worktree-agents.md, apps/workspace-app.md.
