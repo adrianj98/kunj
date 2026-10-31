@@ -69,6 +69,16 @@ describe('cloning', () => {
     expect(result).toEqual({ path: path.join(tmp, 'src', 'b'), commonDir: path.join(tmp, 'src', 'b', '.git'), bare: false, worktree: null });
   });
 
+  it('removes a bare clone whose setup failed, so a retry is not refused', async () => {
+    const exec: Exec = async (file, args) => {
+      if (file === 'gh') { fs.mkdirSync(args[3]); return { stdout: '', stderr: '' }; }
+      throw Object.assign(new Error('fetch failed'), { stderr: 'fatal: unable to access' });
+    };
+    await expect(cloneRepo('a/b', { cloneDir: tmp, bare: true, worktreePathFor: () => '', exec }))
+      .rejects.toMatchObject({ code: 'clone-failed' });
+    expect(fs.existsSync(path.join(tmp, 'b.git'))).toBe(false);
+  });
+
   it('refuses a target that exists, before running gh', async () => {
     fs.mkdirSync(path.join(tmp, 'b'));
     const exec = jest.fn();

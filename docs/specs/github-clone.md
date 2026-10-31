@@ -49,7 +49,7 @@ Bare (`--bare`, or `repos.cloneBare` unless `--no-bare`): `gh repo clone … -- 
 the default one is deleted (a bare clone copies all of origin's branches to local ones), and a
 worktree for the default branch is added where `worktree.baseDir` puts it (by default
 `<name>.git/kunj/worktrees/<branch>`) with its upstream set to `origin/<branch>`. A failure after the
-clone is `clone-failed` naming the path, which is left in place.
+clone is `clone-failed`, and the half-made `<name>.git` is removed so a retry is not `clone-exists`.
 
 The new repository is added with `addRepo()` (un-hidden if it was hidden), so `kunj repos` and the
 apps list it at once.

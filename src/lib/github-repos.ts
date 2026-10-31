@@ -193,7 +193,10 @@ export async function cloneRepo(repoArg: string, opts: CloneOptions): Promise<Cl
     return { path: target, commonDir: target, bare: true, worktree };
   } catch (error) {
     const e = error as { stderr?: string; message?: string };
+    // The target did not exist before (checked above): remove the half-made clone so a retry
+    // is not refused as clone-exists
+    fs.rmSync(target, { recursive: true, force: true });
     throw new GitHubError('clone-failed',
-      `Cloned ${spec} to ${target}, but setting up its worktree failed: ${(e.stderr || e.message || '').trim()}`);
+      `Cloning ${spec} as a bare repository failed while setting up its worktree, and ${target} was removed: ${(e.stderr || e.message || '').trim()}`);
   }
 }
