@@ -35,6 +35,7 @@ page only says where each thing stands.
 | Blueprint `lockfiles` optional, none hashed by default | [blueprints.md](blueprints.md) | 8a53c51 |
 | Clone from GitHub: `kunj repos github`, `kunj repos clone`, workspace app sheet (⌥⌘N) | [github-clone.md](github-clone.md) | cc07138 |
 | Quit asks Leave Running / Close All Sessions (20 s timeout); Close All Sessions…; Claude agents resume (`kunj agent --resume`) | [tmux-sessions.md](tmux-sessions.md#quitting-and-resuming) | 68e1b3e |
+| Workspace app sidebar hides repositories with no open session (View > Show Repositories Without Sessions) | [workspace-ide.md](workspace-ide.md) | (this commit) |
 | Blueprint `"*"` tool values; snapshot seeds skip LFS smudge, containers `git lfs pull` | [blueprints.md](blueprints.md) | f3a4222 |
 | bun preset installs unzip (`kunj_need_pkg`) | [blueprints.md](blueprints.md) | 872fa13 |
 | Blueprint `aliases` (to `/etc/profile.d/kunj-aliases.sh` in the snapshot) | [blueprints.md](blueprints.md) | 12bdcc5 |

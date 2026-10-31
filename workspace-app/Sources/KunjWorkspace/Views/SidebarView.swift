@@ -18,6 +18,8 @@ final class SidebarView: NSView {
     var rowMenu: (Environment) -> NSMenu? = { _ in nil }
     /// Repository roots whose `N more…` row is expanded (for this run).
     private var expanded: Set<String> = []
+    /// Leave out repositories with no open session (View > Show Repositories Without Sessions off).
+    var hideEmptyRepos = false { didSet { reload() } }
     /// The summed CPU and memory of each worktree's kunj sessions, by standardized path.
     var usage: [String: SessionUsage] = [:] { didSet { list.rows.forEach { $0.usage = usageOf($0.environment) } } }
     /// The rows show the usage only while the mouse is over the sidebar.
@@ -127,7 +129,7 @@ final class SidebarView: NSView {
 
     private func groups() -> [SidebarGroup] {
         sidebarGroups(repos, query: query, isOpen: { [selectedId, isOpen] in $0.id == selectedId || isOpen($0) },
-                      expanded: expanded)
+                      expanded: expanded, hideEmpty: hideEmptyRepos)
     }
 
     /// Lists again (a tab opened or closed changes which sessions are open).

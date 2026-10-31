@@ -42,6 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let showChangesKey = "showChanges"
     /// The app-wide Files column setting (default closed).
     static let showFilesKey = "showFiles"
+    /// Off by default: the sidebar lists only repositories with an open session.
+    static let showEmptyReposKey = "showEmptyRepos"
     /// The environment selected when the app last ran, selected again after the first listing.
     static let selectedEnvironmentKey = "selectedEnvironment"
     /// The widths the window's dividers were dragged to (`PaneSizes` as JSON).
@@ -286,6 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // a tab opened or the last one closed changes which sessions the sidebar lists
             self?.windowController.sidebar.reloadRows()
         }
+        windowController.sidebar.hideEmptyRepos = !UserDefaults.standard.bool(forKey: Self.showEmptyReposKey)
         windowController.sidebar.isOpen = { [weak keeper, weak registry] env in
             !(registry?.tabs(for: env.id).isEmpty ?? true) || keeper?.hasSavedTabs(env) == true
         }
@@ -495,6 +498,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// View > Show/Hide Files (⌘⇧E) and the tab bar's pill; saved app-wide.
+    /// View > Show Repositories Without Sessions: the sidebar lists every repository, or (the
+    /// default) only those with an open session; saved app-wide.
+    @objc func toggleEmptyRepos(_ sender: Any?) {
+        let show = !UserDefaults.standard.bool(forKey: Self.showEmptyReposKey)
+        UserDefaults.standard.set(show, forKey: Self.showEmptyReposKey)
+        windowController.sidebar.hideEmptyRepos = !show
+    }
+
     @objc func toggleFiles(_ sender: Any?) {
         let visible = !windowController.filesVisible
         windowController.setFilesVisible(visible, animated: true)
@@ -935,6 +946,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Show Changes", action: #selector(toggleChanges(_:)), keyEquivalent: "C").target = self
         menu.addItem(withTitle: "Show Files", action: #selector(toggleFiles(_:)), keyEquivalent: "E").target = self
         menu.addItem(withTitle: "Find in Files", action: #selector(findInFiles(_:)), keyEquivalent: "F").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Show Repositories Without Sessions", action: #selector(toggleEmptyRepos(_:)),
+                     keyEquivalent: "").target = self
         return menu
     }
 
@@ -1034,6 +1048,9 @@ extension AppDelegate: NSMenuItemValidation {
             return kunj != nil && cloneSheet == nil && newSessionSheet == nil
         case #selector(switchSession(_:)):
             return item.tag <= (windowController?.visibleEnvironmentIds.count ?? 0)
+        case #selector(toggleEmptyRepos(_:)):
+            item.state = UserDefaults.standard.bool(forKey: Self.showEmptyReposKey) ? .on : .off
+            return true
         case #selector(toggleChanges(_:)):
             item.title = windowController?.changesVisible == true ? "Hide Changes" : "Show Changes"
             return true

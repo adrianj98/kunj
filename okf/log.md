@@ -83,3 +83,4 @@
 - Blueprints: `lockfiles` is optional and defaults to none (no auto-detected lockfiles in the hash); `blueprint init` no longer writes it. Pages updated: containers/blueprints.md.
 - Clone from GitHub: `kunj repos github` (one `gh api --paginate user/repos`), `kunj repos clone` (`repos.cloneDir`, `repos.cloneBare`), the workspace app's Clone from GitHub sheet. Pages updated: architecture/repo-identity-and-registry.md, apps/workspace-app.md.
 - Quit prompt (Leave Running / Close All Sessions, 20 s timeout), Close All Sessions…, and resuming Claude agents (`SessionStart` hook saves the session id, `kunj agent --resume`). Pages updated: features/worktree-agents.md, apps/workspace-app.md.
+- Workspace app sidebar hides repositories with no open session; View > Show Repositories Without Sessions brings them back. Page updated: apps/workspace-app.md.

@@ -44,6 +44,11 @@ import Testing
         let none = sidebarGroups(rs, query: "", isOpen: { _ in false }, expanded: [])
         #expect(none[1].environments.isEmpty && none[1].more == 2)
 
+        // hideEmpty leaves that repository out; one with a running agent stays, and search finds all
+        let hidden = sidebarGroups(rs, query: "", isOpen: { _ in false }, expanded: [], hideEmpty: true)
+        #expect(hidden.map(\.repo.root) == [rs[0].repo.root])
+        #expect(sidebarGroups(rs, query: "old", isOpen: { _ in false }, expanded: [], hideEmpty: true).count == 1)
+
         let searched = sidebarGroups(rs, query: "old", isOpen: { _ in false }, expanded: [])
         #expect(searched.map { $0.environments.map(\.branch) } == [["old-branch"]])
         #expect(searched[0].more == 0)

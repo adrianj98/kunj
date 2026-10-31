@@ -37,16 +37,18 @@ public struct SidebarGroup: Equatable, Sendable {
 /// The sidebar's rows: only open sessions (`isOpen`: tabs in the app or saved ones, the selection),
 /// and any environment whose agent is running or waiting. Each repository keeps its header and a
 /// `N more…` row for the rest; a repository in `expanded` lists them all. A search lists every
-/// environment that matches, open or not, so any one can be opened.
+/// environment that matches, open or not, so any one can be opened. With `hideEmpty` a repository
+/// with no open session is left out (search and New Session still reach it).
 public func sidebarGroups(_ repos: [RepoEnvironments], query: String, isOpen: (Environment) -> Bool,
-                          expanded: Set<String>) -> [SidebarGroup] {
+                          expanded: Set<String>, hideEmpty: Bool = false) -> [SidebarGroup] {
     if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         return filterEnvironments(repos, query: query).map {
             SidebarGroup(repo: $0.repo, environments: $0.environments, more: 0, expanded: false)
         }
     }
-    return repos.map { g in
+    return repos.compactMap { g in
         let open = g.environments.filter { isOpen($0) || $0.agent == .running || $0.agent == .waiting }
+        if hideEmpty && open.isEmpty { return nil }
         let more = g.environments.count - open.count
         let all = expanded.contains(g.repo.root)
         return SidebarGroup(repo: g.repo, environments: all ? g.environments : open, more: more, expanded: all)
