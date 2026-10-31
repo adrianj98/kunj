@@ -119,6 +119,21 @@ old-prototype /Users/me/src/old-prototype [missing]
 its main directory. `remove` takes the repository's directory. The list is stored in
 `~/.kunj/repos.json`.
 
+### Clone from GitHub
+
+```bash
+kunj repos github                   # repositories your gh login can clone; ✓ marks ones already here
+kunj repos github --owner my-org    # one user or organisation (--all adds archived ones)
+kunj repos clone my-org/shop-api    # clone into repos.cloneDir and add it to kunj repos
+kunj repos clone my-org/infra --bare --dir ~/src
+```
+
+Both go through the [GitHub CLI](https://cli.github.com) (`gh auth login` first), so its login and
+its https/ssh choice apply. A clone goes to `repos.cloneDir` (default `~/projects`) as `<name>`. With
+`--bare`, or `repos.cloneBare` set to `true`, it is a bare `<name>.git` that tracks origin like a normal
+clone, with a worktree for the default branch where `worktree.baseDir` puts it. An existing folder is
+never overwritten.
+
 <CommandReference name="repos" optionsOnly />
 
 ## Build from source

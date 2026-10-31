@@ -131,6 +131,10 @@ inside containers within about ten seconds.
 - **New session** (⌘N) asks for a repository, a branch name, a base and whether you want a worktree
   or a container, and can start an agent in it straight away. It runs `kunj worktree add -c` or
   `kunj ct start -c` in a tab and selects the new environment once it is ready.
+- **Clone from GitHub…** (⌥⌘N) lists the repositories your `gh` login can clone, newest push first,
+  with a filter box. The ones you already have are greyed at the bottom. **Clone** runs
+  `kunj repos clone` (see [Clone from GitHub](../worktrees/macos-app/#clone-from-github)) and the
+  new repository appears in the sidebar.
 - The **⋯ menu** has start, stop, rebuild and remove for a container, remove for a worktree, copy
   the path, reveal in Finder, and `kunj ct prune`. Items that don't apply are greyed out with the
   reason as a tooltip, and removing asks first, with a **Force** option.
@@ -216,6 +220,7 @@ kunj sessions kill --orphans   # end every orphaned one
 | ⌘K | Search the sidebar (Esc clears it, Esc again goes back to the terminal) |
 | ⌘1 – ⌘9 | Select the first to ninth session the search shows |
 | ⌘N | New session |
+| ⌥⌘N | Clone from GitHub |
 | ⌘T | New shell |
 | ⌘⇧A | Agent |
 | ⌘O | Open in VS Code |

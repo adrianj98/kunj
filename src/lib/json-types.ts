@@ -91,6 +91,41 @@ export interface ReposJson {
   repos: RepoJson[];
 }
 
+// ---- kunj repos github --json / kunj repos clone --json ---------------------------------------
+
+/** A repository the gh login can clone (`gh api user/repos`) */
+export interface GitHubRepoJson {
+  /** owner/name */
+  fullName: string;
+  owner: string;
+  name: string;
+  description: string | null;
+  private: boolean;
+  fork: boolean;
+  archived: boolean;
+  pushedAt: string | null;
+  /** The repository's page, https://github.com/owner/name */
+  url: string;
+  defaultBranch: string;
+  /** The root of a known repository (`kunj repos`) whose origin is this one, else null */
+  local: string | null;
+}
+
+export interface GitHubReposJson {
+  repos: GitHubRepoJson[];
+}
+
+export interface RepoCloneJson {
+  success: true;
+  /** The new entry in `kunj repos` */
+  repo: RepoJson;
+  /** The checkout, or the bare repository */
+  path: string;
+  bare: boolean;
+  /** The default branch's worktree of a bare clone, else null */
+  worktree: string | null;
+}
+
 // ---- kunj ct list --json ---------------------------------------------------------------------
 
 export interface ContainerPortJson {

@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var usageFailures = 0
     private var usageTicks = 0
     private var newSessionSheet: NewSessionSheet?
+    private var cloneSheet: CloneRepoSheet?
     /// `--theme <name>`: this run's theme (not saved), for screenshots against light.png/graphite.png.
     private let themeArgument: ThemeChoice?
     /// `--changes` / `--no-changes`: the Changes column open or closed for this run (not saved).
@@ -430,6 +431,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         newSessionSheet = sheet
         guard let panel = sheet.window else { return }
         window.beginSheet(panel) { [weak self] _ in self?.newSessionSheet = nil }
+    }
+
+    /// Clone from GitHub (⌥⌘N): the sheet lists what gh can clone; a clone registers the
+    /// repository, so the environments are reloaded to show it.
+    @objc func cloneFromGitHub(_ sender: Any?) {
+        guard cloneSheet == nil, let cli = kunj, let window = windowController.window else { return }
+        let sheet = CloneRepoSheet(cli: cli, theme: ThemeManager.shared.current)
+        sheet.onCloned = { [weak self] _ in
+            guard let store = self?.store else { return }
+            Task { await store.refreshAll() }
+        }
+        cloneSheet = sheet
+        guard let panel = sheet.window else { return }
+        window.beginSheet(panel) { [weak self] _ in self?.cloneSheet = nil }
     }
 
     /// ⌘K: the sidebar's search field.
@@ -842,6 +857,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Create PR", action: #selector(createPR(_:)), keyEquivalent: "P").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "New Session…", action: #selector(newSession(_:)), keyEquivalent: "n").target = self
+        let clone = menu.addItem(withTitle: "Clone from GitHub…", action: #selector(cloneFromGitHub(_:)), keyEquivalent: "n")
+        clone.keyEquivalentModifierMask = [.command, .option]
+        clone.target = self
         menu.addItem(withTitle: "Search Sessions", action: #selector(focusSearch(_:)), keyEquivalent: "k").target = self
         menu.addItem(withTitle: "Close Session", action: #selector(closeSession(_:)), keyEquivalent: "W").target = self
         let switchItem = NSMenuItem(title: "Switch to Session", action: nil, keyEquivalent: "")
@@ -913,6 +931,8 @@ extension AppDelegate: NSMenuItemValidation {
             return kunj != nil
         case #selector(newSession(_:)):
             return kunj != nil && !(store?.repos.isEmpty ?? true) && newSessionSheet == nil
+        case #selector(cloneFromGitHub(_:)):
+            return kunj != nil && cloneSheet == nil && newSessionSheet == nil
         case #selector(switchSession(_:)):
             return item.tag <= (windowController?.visibleEnvironmentIds.count ?? 0)
         case #selector(toggleChanges(_:)):

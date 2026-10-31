@@ -884,13 +884,33 @@
   {
     "name": "repos",
     "usage": "repos [action] [path]",
-    "description": "List the repositories kunj has been used in",
+    "description": "List the repositories kunj has been used in, and clone more from GitHub",
     "arguments": "[action] [path]",
     "aliases": [],
     "options": [
       {
         "flags": "-a, --all",
-        "description": "[list] Include hidden repositories",
+        "description": "[list] Include hidden repositories; [github] include archived ones",
+        "default": null
+      },
+      {
+        "flags": "--owner <login>",
+        "description": "[github] Only repositories of this user or organisation",
+        "default": null
+      },
+      {
+        "flags": "--dir <path>",
+        "description": "[clone] Clone into this directory instead of repos.cloneDir",
+        "default": null
+      },
+      {
+        "flags": "--bare",
+        "description": "[clone] Bare clone with a worktree for the default branch",
+        "default": null
+      },
+      {
+        "flags": "--no-bare",
+        "description": "[clone] Normal clone, whatever repos.cloneBare says",
         "default": null
       },
       {
@@ -899,7 +919,7 @@
         "default": null
       }
     ],
-    "helpText": "Actions:\n  list (default)   Known repositories, most recently used first\n  add [path]       Add the repository containing path (default: current directory)\n  remove <path>    Hide a repository; it stays hidden until added again\n  prune            Forget repositories whose directory no longer exists\n\nRepositories are recorded as kunj runs in them, in ~/.kunj/repos.json"
+    "helpText": "Actions:\n  list (default)   Known repositories, most recently used first\n  add [path]       Add the repository containing path (default: current directory)\n  remove <path>    Hide a repository; it stays hidden until added again\n  prune            Forget repositories whose directory no longer exists\n  github           GitHub repositories you can clone (via gh), marking those already here\n  clone <repo>     Clone owner/name (or a URL) into repos.cloneDir and add it\n\nRepositories are recorded as kunj runs in them, in ~/.kunj/repos.json"
   },
   {
     "name": "run",

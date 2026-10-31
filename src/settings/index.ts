@@ -8,6 +8,7 @@ import { registerFlowSettings } from './flow';
 import { registerJiraSettings } from './jira';
 import { registerSlackSettings } from './slack';
 import { registerWorktreeSettings } from './worktree';
+import { registerReposSettings } from './repos';
 import { registerHookSettings } from './hooks';
 import { registerContainerSettings } from './container';
 import { registerAgentSettings } from './agent';
@@ -31,6 +32,7 @@ export function initializeSettings(): void {
   registerJiraSettings();
   registerSlackSettings();
   registerWorktreeSettings();
+  registerReposSettings();
   registerHookSettings();
   registerContainerSettings();
   registerAgentSettings();

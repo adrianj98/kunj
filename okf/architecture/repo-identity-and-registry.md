@@ -84,6 +84,11 @@ elsewhere.
 | `add [path]` | Adds the repository containing path (default cwd), via `getGitCommonDir()` | `{ success, repo }` |
 | `remove <path>` | Hides it | `{ success, repo }` |
 | `prune` | Forgets missing repositories | `{ success, removed }` |
+| `github [--owner o] [--all]` | GitHub repositories the gh login can clone, `local` set when a known repository's origin is one (`src/lib/github-repos.ts`) | `GitHubReposJson` |
+| `clone <owner/name\|url> [--dir] [--bare\|--no-bare]` | `gh repo clone` into `repos.cloneDir` (bare: `<name>.git` plus a default-branch worktree), then `addRepo()` | `RepoCloneJson` |
+
+Spec: docs/specs/github-clone.md. Errors are `GitHubError` (`gh-missing`, `gh-auth`, `gh-failed`,
+`bad-repo`, `clone-exists`, `clone-failed`).
 
 `reposJson()` builds the JSON against `ReposJson` from the [JSON contract](/architecture/json-contract.md).
 

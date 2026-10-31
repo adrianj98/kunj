@@ -23,6 +23,7 @@ page only says where each thing stands.
 | [multi-remote-containers.md](multi-remote-containers.md) | A repository's containers across this Mac and several remotes: `ct list` and branch lookup ask every one; the workspace app's remote picker | Spec written |
 | [tmux-sessions.md](tmux-sessions.md) | `kunj sessions`: kunj's tmux sessions with owner, attached terminals, CPU, memory, orphans; `kill`; the workspace app's Sessions window | Shipped |
 | [search.md](search.md) | `kunj search`: worktrees (default), branches, containers, commits and work logs; `SearchJson`; the workspace app's Search panel | Shipped (CLI, workspace app); VS Code to do |
+| [github-clone.md](github-clone.md) | `kunj repos github` / `kunj repos clone`, `repos.cloneDir`/`repos.cloneBare`, the workspace app's Clone from GitHub sheet | Shipped (CLI, workspace app) |
 
 ## Done
 
@@ -32,6 +33,7 @@ page only says where each thing stands.
 | Blueprints and snapshots | [blueprints.md](blueprints.md) | — |
 | Blueprint `image` key (sandbox or an image, over container.image and the devcontainer) | [blueprints.md](blueprints.md) | de46ded |
 | Blueprint `lockfiles` optional, none hashed by default | [blueprints.md](blueprints.md) | 8a53c51 |
+| Clone from GitHub: `kunj repos github`, `kunj repos clone`, workspace app sheet (⌥⌘N) | [github-clone.md](github-clone.md) | (this commit) |
 | Blueprint `"*"` tool values; snapshot seeds skip LFS smudge, containers `git lfs pull` | [blueprints.md](blueprints.md) | f3a4222 |
 | bun preset installs unzip (`kunj_need_pkg`) | [blueprints.md](blueprints.md) | 872fa13 |
 | Blueprint `aliases` (to `/etc/profile.d/kunj-aliases.sh` in the snapshot) | [blueprints.md](blueprints.md) | 12bdcc5 |

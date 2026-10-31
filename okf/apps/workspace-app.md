@@ -85,7 +85,9 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
   worktree or container by default, all worktrees (and containers) from its scope menu; a match opens
   an editor tab at its line with the match selected (`EditorTab.reveal`, `revealLine` on the editor page, which turns kunj's character columns into UTF-16). Model in
   `KunjWorkspaceCore/Search/Search.swift`.
-* Shortcuts include New Shell (⌘T), New Session (⌘N), Search Sessions (⌘K), Show Changes, Show Files,
+* Clone from GitHub… (⌥⌘N, `CloneRepoSheet`): `kunj repos github --json`, filtered by a search field,
+  repositories already here last and disabled; Clone runs `kunj repos clone <owner/name> --json` and reloads.
+* Shortcuts include New Shell (⌘T), New Session (⌘N), Clone from GitHub (⌥⌘N), Search Sessions (⌘K), Show Changes, Show Files,
   Close Tab (⌘W) and Session 1-9.
 * Launch arguments: `--demo`, `--screenshot <png>`, `--theme warm|light|graphite`,
   `--changes`/`--no-changes`, `--files`/`--no-files`, `--loading`, `-kunjCommand`, `-openTabs`, `-searchQuery`, `-searchOpen`.
