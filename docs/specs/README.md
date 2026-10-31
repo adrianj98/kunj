@@ -33,7 +33,7 @@ page only says where each thing stands.
 | Blueprints and snapshots | [blueprints.md](blueprints.md) | — |
 | Blueprint `image` key (sandbox or an image, over container.image and the devcontainer) | [blueprints.md](blueprints.md) | de46ded |
 | Blueprint `lockfiles` optional, none hashed by default | [blueprints.md](blueprints.md) | 8a53c51 |
-| Clone from GitHub: `kunj repos github`, `kunj repos clone`, workspace app sheet (⌥⌘N) | [github-clone.md](github-clone.md) | (this commit) |
+| Clone from GitHub: `kunj repos github`, `kunj repos clone`, workspace app sheet (⌥⌘N) | [github-clone.md](github-clone.md) | cc07138 |
 | Blueprint `"*"` tool values; snapshot seeds skip LFS smudge, containers `git lfs pull` | [blueprints.md](blueprints.md) | f3a4222 |
 | bun preset installs unzip (`kunj_need_pkg`) | [blueprints.md](blueprints.md) | 872fa13 |
 | Blueprint `aliases` (to `/etc/profile.d/kunj-aliases.sh` in the snapshot) | [blueprints.md](blueprints.md) | 12bdcc5 |
