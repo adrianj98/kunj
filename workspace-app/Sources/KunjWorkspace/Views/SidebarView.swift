@@ -18,6 +18,11 @@ final class SidebarView: NSView {
     var rowMenu: (Environment) -> NSMenu? = { _ in nil }
     /// Repository roots whose `N more…` row is expanded (for this run).
     private var expanded: Set<String> = []
+    /// Repository roots collapsed to their header (a click on the header toggles); remembered.
+    private var collapsed = Set(UserDefaults.standard.stringArray(forKey: SidebarView.collapsedKey) ?? []) {
+        didSet { UserDefaults.standard.set(collapsed.sorted(), forKey: Self.collapsedKey) }
+    }
+    static let collapsedKey = "collapsedRepos"
     /// Leave out repositories with no open session (View > Show Repositories Without Sessions off).
     var hideEmptyRepos = false { didSet { reload() } }
     /// The summed CPU and memory of each worktree's kunj sessions, by standardized path.
@@ -103,6 +108,11 @@ final class SidebarView: NSView {
             if self.expanded.contains(root) { self.expanded.remove(root) } else { self.expanded.insert(root) }
             self.reload()
         }
+        list.onToggleCollapsed = { [weak self] root in
+            guard let self else { return }
+            if self.collapsed.contains(root) { self.collapsed.remove(root) } else { self.collapsed.insert(root) }
+            self.reload()
+        }
         apply()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -129,7 +139,7 @@ final class SidebarView: NSView {
 
     private func groups() -> [SidebarGroup] {
         sidebarGroups(repos, query: query, isOpen: { [selectedId, isOpen] in $0.id == selectedId || isOpen($0) },
-                      expanded: expanded, hideEmpty: hideEmptyRepos)
+                      expanded: expanded, hideEmpty: hideEmptyRepos, collapsed: collapsed)
     }
 
     /// Lists again (a tab opened or closed changes which sessions are open).
@@ -154,7 +164,7 @@ final class SidebarView: NSView {
 /// The scrolling list: group headers (repo name sans 11/500 `muted`, count mono 11 `faint`) drawn
 /// here, rows as subviews; 2 px between rows, 18 px between groups, 8 px side padding.
 private final class SidebarListView: NSView {
-    private struct Group { let name: String; let count: Int; let y: CGFloat }
+    private struct Group { let root: String; let name: String; let count: Int; let collapsed: Bool; let y: CGFloat }
 
     var theme: Theme {
         didSet { rows.forEach { $0.theme = theme }; moreRows.values.forEach { $0.theme = theme }; needsDisplay = true }
@@ -162,6 +172,7 @@ private final class SidebarListView: NSView {
     var onSelect: (String) -> Void = { _ in }
     var rowMenu: (Environment) -> NSMenu? = { _ in nil }
     var onToggleMore: (String) -> Void = { _ in }
+    var onToggleCollapsed: (String) -> Void = { _ in }
     private(set) var rows: [SidebarRowView] = []
     private var moreRows: [String: MoreRowView] = [:]
     private var groups: [Group] = []
@@ -214,7 +225,8 @@ private final class SidebarListView: NSView {
         let width = max(0, bounds.width - Self.side * 2)
         for (gi, g) in model.enumerated() {
             if gi > 0 { y += Self.groupGap }
-            groups.append(Group(name: g.repo.name, count: g.environments.count, y: y))
+            groups.append(Group(root: g.repo.root, name: g.repo.name,
+                                count: g.collapsed ? g.openCount : g.environments.count, collapsed: g.collapsed, y: y))
             y += Self.headerHeight
             for _ in g.environments {
                 y += Self.rowGap
@@ -239,8 +251,14 @@ private final class SidebarListView: NSView {
             .font: Theme.sans(caption, weight: .medium), .foregroundColor: theme.color(\.muted)]
         let countAttrs: [NSAttributedString.Key: Any] = [
             .font: Theme.mono(caption), .foregroundColor: theme.color(\.faint)]
+        let chevronAttrs: [NSAttributedString.Key: Any] = [
+            .font: Theme.sans(caption - 2), .foregroundColor: theme.color(\.faint)]
         for g in groups {
             let mid = g.y + 6.5
+            // ▾ open, ▸ collapsed; the whole header toggles (mouseDown)
+            let chevron = (g.collapsed ? "▸" : "▾") as NSString
+            let chevronSize = chevron.size(withAttributes: chevronAttrs)
+            chevron.draw(at: NSPoint(x: Self.side, y: (mid - chevronSize.height / 2).rounded()), withAttributes: chevronAttrs)
             let nameSize = (g.name as NSString).size(withAttributes: nameAttrs)
             (g.name as NSString).draw(at: NSPoint(x: Self.side * 2, y: (mid - nameSize.height / 2).rounded()),
                                       withAttributes: nameAttrs)
@@ -249,6 +267,18 @@ private final class SidebarListView: NSView {
             count.draw(at: NSPoint(x: bounds.width - Self.side * 2 - ceil(countSize.width),
                                    y: (mid - countSize.height / 2).rounded()), withAttributes: countAttrs)
         }
+    }
+}
+
+extension SidebarListView {
+    /// A click on a repository's header collapses it to the header, or opens it again.
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        guard let g = groups.first(where: { p.y >= $0.y && p.y < $0.y + Self.headerHeight }) else {
+            super.mouseDown(with: event)
+            return
+        }
+        onToggleCollapsed(g.root)
     }
 }
 

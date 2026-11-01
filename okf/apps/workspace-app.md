@@ -86,7 +86,8 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
   an editor tab at its line with the match selected (`EditorTab.reveal`, `revealLine` on the editor page, which turns kunj's character columns into UTF-16). Model in
   `KunjWorkspaceCore/Search/Search.swift`.
 * The sidebar hides repositories with no open session (`sidebarGroups(…, hideEmpty:)`); View > Show Repositories
-  Without Sessions (`showEmptyRepos` default, off) lists them all. Search ignores it.
+  Without Sessions (`showEmptyRepos` default, off) lists them all. Search ignores it. A click on a repository header
+  collapses or opens it (`sidebarGroups(…, collapsed:)`, saved in `collapsedRepos`).
 * Clone from GitHub… (⌥⌘N, `CloneRepoSheet`): `kunj repos github --json`, filtered by a search field,
   repositories already here last and disabled; Clone runs `kunj repos clone <owner/name> --json` and reloads.
 * Quit with shell/agent tabs asks Leave Running / Close All Sessions / Cancel (`QuitSessionsChoice`, Leave Running

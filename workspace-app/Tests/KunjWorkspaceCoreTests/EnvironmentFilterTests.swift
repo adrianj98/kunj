@@ -49,6 +49,12 @@ import Testing
         #expect(hidden.map(\.repo.root) == [rs[0].repo.root])
         #expect(sidebarGroups(rs, query: "old", isOpen: { _ in false }, expanded: [], hideEmpty: true).count == 1)
 
+        // a collapsed repository keeps only its header, with its open count; search ignores it
+        let folded = sidebarGroups(rs, query: "", isOpen: { open.contains($0.id) }, expanded: ["/r/k"], collapsed: ["/r/k"])
+        #expect(folded[1].collapsed && folded[1].environments.isEmpty && folded[1].more == 0 && folded[1].openCount == 1)
+        #expect(!folded[0].collapsed && folded[0].openCount == 2)
+        #expect(sidebarGroups(rs, query: "old", isOpen: { _ in false }, expanded: [], collapsed: ["/r/k"])[0].environments.count == 1)
+
         let searched = sidebarGroups(rs, query: "old", isOpen: { _ in false }, expanded: [])
         #expect(searched.map { $0.environments.map(\.branch) } == [["old-branch"]])
         #expect(searched[0].more == 0)

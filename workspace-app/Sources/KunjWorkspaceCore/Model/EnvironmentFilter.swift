@@ -32,25 +32,37 @@ public struct SidebarGroup: Equatable, Sendable {
     /// Environments that are not open: the `N more…` row (when expanded, they are listed too)
     public var more: Int
     public var expanded: Bool
+    /// Collapsed to its header: `environments` is empty and `more` 0; `openCount` still counts them.
+    public var collapsed: Bool = false
+    /// The open sessions it has (the header's count), collapsed or not.
+    public var openCount: Int = 0
 }
 
 /// The sidebar's rows: only open sessions (`isOpen`: tabs in the app or saved ones, the selection),
 /// and any environment whose agent is running or waiting. Each repository keeps its header and a
 /// `N more…` row for the rest; a repository in `expanded` lists them all. A search lists every
 /// environment that matches, open or not, so any one can be opened. With `hideEmpty` a repository
-/// with no open session is left out (search and New Session still reach it).
+/// with no open session is left out (search and New Session still reach it). A repository in
+/// `collapsed` shows only its header; a search ignores that.
 public func sidebarGroups(_ repos: [RepoEnvironments], query: String, isOpen: (Environment) -> Bool,
-                          expanded: Set<String>, hideEmpty: Bool = false) -> [SidebarGroup] {
+                          expanded: Set<String>, hideEmpty: Bool = false,
+                          collapsed: Set<String> = []) -> [SidebarGroup] {
     if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         return filterEnvironments(repos, query: query).map {
-            SidebarGroup(repo: $0.repo, environments: $0.environments, more: 0, expanded: false)
+            SidebarGroup(repo: $0.repo, environments: $0.environments, more: 0, expanded: false,
+                         openCount: $0.environments.count)
         }
     }
     return repos.compactMap { g in
         let open = g.environments.filter { isOpen($0) || $0.agent == .running || $0.agent == .waiting }
         if hideEmpty && open.isEmpty { return nil }
         let more = g.environments.count - open.count
+        if collapsed.contains(g.repo.root) {
+            return SidebarGroup(repo: g.repo, environments: [], more: 0, expanded: false, collapsed: true,
+                                openCount: open.count)
+        }
         let all = expanded.contains(g.repo.root)
-        return SidebarGroup(repo: g.repo, environments: all ? g.environments : open, more: more, expanded: all)
+        return SidebarGroup(repo: g.repo, environments: all ? g.environments : open, more: more, expanded: all,
+                            openCount: open.count)
     }
 }
