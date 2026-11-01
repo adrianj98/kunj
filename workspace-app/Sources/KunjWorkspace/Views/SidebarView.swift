@@ -109,7 +109,9 @@ final class SidebarView: NSView {
             self.reload()
         }
         list.onToggleCollapsed = { [weak self] root in
-            guard let self else { return }
+            // a search shows every match and ignores collapsing: a click there would only change
+            // what appears after the search is cleared
+            guard let self, self.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             if self.collapsed.contains(root) { self.collapsed.remove(root) } else { self.collapsed.insert(root) }
             self.reload()
         }
