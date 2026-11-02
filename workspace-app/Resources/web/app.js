@@ -378,6 +378,11 @@
           d.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false });
         }
       }
+      // The other mode's empty panes cover the whole page (inset: 0) and would take every click
+      // and wheel event (#editor is last, so on top of the diff): take them out of the page.
+      for (const id of mode === 'diff' ? ['editor'] : ['diff', 'single']) {
+        document.getElementById(id).style.display = 'none';
+      }
       if (mode === 'diff') createDiff();
       else createEditor();
       post({ type: 'ready', mode });

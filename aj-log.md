@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-02 — Changes column diff scrolls again
+
+- The Monaco page hides the panes of the mode it is not in (`#editor` in diff mode, `#diff` and
+  `#single` in editor mode). Why: the user could not scroll the diffs; the empty `#editor` div
+  (`position: absolute; inset: 0`, last in the page) sat on top of the diff and took every wheel
+  event and click.
+
 ## 2026-10-30 — sidebar rows: folder name, usage on hover
 
 - A worktree row's second line starts with its folder (last path component, full path in the
