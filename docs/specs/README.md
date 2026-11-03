@@ -43,6 +43,7 @@ page only says where each thing stands.
 | Agent and shell sessions follow their worktree across a checkout (CLI and workspace app tabs) | [tmux-sessions.md](tmux-sessions.md#following-a-checkout) | c5c543f, 2ea490e |
 | `kunj sessions` and the workspace app's Sessions window (owner, attached, CPU/memory, orphans, kill); `@kunj_worktree` tag | [tmux-sessions.md](tmux-sessions.md) | f98e051 |
 | Workspace app sidebar rows show their worktree's session CPU and memory | [tmux-sessions.md](tmux-sessions.md#workspace-app) | 7ab0568 |
+| Workspace app: go to declaration (⌘-click, F12) in editor tabs and the Changes diff, via `kunj search` | [workspace-ide.md](workspace-ide.md) | 4df35f2 |
 | Workspace app: the Changes diff scrolls (the editor pane no longer covers it) | [workspace-ide.md](workspace-ide.md) | 08c643d |
 | Workspace app: resizable sidebar, Changes split, Files column and file list; a folder named like its branch is not repeated | [workspace-ide.md](workspace-ide.md) | 015729a |
 | Sidecar services | [container-phase-2.md](container-phase-2.md) | ed136b3, 6273c61 |
