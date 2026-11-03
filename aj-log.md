@@ -12,6 +12,9 @@ Changes made with Claude, and why.
   function keywords first, same language, source before build output and tests). Why: v1 has no
   language servers and the page must never name a file; `kunj search` already works for worktrees and
   containers.
+- Review fixes: the name's column is counted in code points as the page counts them (a decomposed
+  accent before it shifted the selection), and a call that opens a closure (`useEffect(() => {`) is
+  no longer taken for a method declaration.
 
 ## 2026-11-02 — Changes column diff scrolls again
 

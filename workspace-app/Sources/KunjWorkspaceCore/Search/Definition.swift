@@ -33,7 +33,8 @@ public func definitionPattern(_ word: String) -> String {
         "(^|[^[:alnum:]_$.])(\(keywords))[[:space:]]+\\*?\(w)\(end)",
         "func[[:space:]]*\\([^)]*\\)[[:space:]]*\(w)[[:space:]]*\\(",
         "(^|[^[:alnum:]_$.])\(w)[[:space:]]*[:=][[:space:]]*(async[[:space:]]+)?(function|\\([^)]*\\)[^=;]*=>|[[:alnum:]_$]+[[:space:]]*=>)",
-        "^[[:space:]]*(\(modifiers)[[:space:]]+)*\(w)[[:space:]]*(<[^>]*>)?\\([^;]*\\)[^;]*\\{[[:space:]]*$",
+        // no parentheses inside the list and no `=` after it, so `useEffect(() => {` is not one
+        "^[[:space:]]*(\(modifiers)[[:space:]]+)*\(w)[[:space:]]*(<[^>]*>)?\\([^;()]*\\)[^;=()]*\\{[[:space:]]*$",
     ].joined(separator: "|")
 }
 
@@ -88,22 +89,26 @@ public func definitionIsUnambiguous(_ candidates: [DefinitionCandidate]) -> Bool
     return best.rank.prefix(4).lexicographicallyPrecedes(candidates[1].rank.prefix(4))
 }
 
-/// The word's first whole-word occurrence after the declaring keyword (else anywhere), as a
-/// 1-based column in characters; nil when the line does not hold it (cut short by kunj).
+/// The word's first whole-word occurrence, as a 1-based column in Unicode scalars (code points,
+/// as kunj and the page's `revealLine` count); nil when the line does not hold it (cut short by kunj).
 func wordColumn(_ word: String, in text: String) -> Int? {
-    let chars = Array(text)
-    let w = Array(word)
+    let chars = Array(text.unicodeScalars)
+    let w = Array(word.unicodeScalars)
     guard chars.count >= w.count else { return nil }
     var i = 0
     while i + w.count <= chars.count {
         if Array(chars[i..<i + w.count]) == w,
-           i == 0 || !isWordChar(chars[i - 1]),
-           i + w.count == chars.count || !isWordChar(chars[i + w.count]) {
+           i == 0 || !isWordScalar(chars[i - 1]),
+           i + w.count == chars.count || !isWordScalar(chars[i + w.count]) {
             return i + 1
         }
         i += 1
     }
     return nil
+}
+
+private func isWordScalar(_ c: Unicode.Scalar) -> Bool {
+    CharacterSet.alphanumerics.contains(c) || c == "_" || c == "$"
 }
 
 private func isWordChar(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "$" }

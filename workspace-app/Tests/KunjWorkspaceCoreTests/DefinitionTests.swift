@@ -37,6 +37,8 @@ import Testing
             "    case loadConfig",                               // 11 yes
             "def loadConfig(self):",                             // 12 yes
             "  if (loadConfig(x)) {",                            // 13 no
+            "  loadConfig(() => {",                              // 14 no (a call taking a closure)
+            "  loadConfig(a) => {",                              // 15 no
         ]
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kunj-def-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -120,6 +122,8 @@ import Testing
         #expect(wordColumn("Foo", in: "class FooBar extends Foo") == 22)
         #expect(wordColumn("Foo", in: "😀 class Foo") == 9)
         #expect(wordColumn("Foo", in: "class Fo…") == nil)
+        // code points, as the page counts: a decomposed é is two
+        #expect(wordColumn("Foo", in: "const cafe\u{301} = 1; export class Foo") == 31)
         #expect(declarationTier("Foo", in: "func (s *Store) Foo() {") == 0)
         #expect(declarationTier("Foo", in: "  Foo(a) {") == 2)
     }
