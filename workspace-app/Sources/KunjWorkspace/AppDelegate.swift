@@ -828,6 +828,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { column.focusActive() }
         }
         windowController.changesColumn.onEdit = open
+        // ⌘-click or F12 on a name in an editor tab or the diff
+        column.registry.onDefinition = { [weak self] env, word, path, line in
+            self?.goToDefinition(env: env, word: word, fromPath: path, fromLine: line)
+        }
+        windowController.changesColumn.onDefinition = column.registry.onDefinition
         // a double-click (or Return) on a file in the Files column
         windowController.filesColumn.onOpen = open
         // a match in the Search panel: in its environment (the selected one, or another worktree or
@@ -853,6 +858,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         column.registry.onSaved = { [weak windowController] tab in
             windowController?.changesColumn.repoChanged(root: tab.env.repo.root)
         }
+    }
+
+    /// Searches `env` for the declaration of `word` (`kunj search`, see Definition.swift) and opens
+    /// it in an editor tab at the name; when several lines could be it, a menu at the pointer lists
+    /// them. A word that is not a plain identifier is ignored.
+    private func goToDefinition(env: Environment, word: String, fromPath: String?, fromLine: Int?) {
+        guard isDefinitionWord(word), let cli = kunj else { return }
+        let column = windowController.terminalColumn
+        let at = NSEvent.mouseLocation
+        Task { @MainActor in
+            do {
+                let result: SearchJson = try await cli.run(searchArguments(definitionQuery(word), env: env),
+                                                           cwd: env.repo.root)
+                let found = definitionCandidates(result, word: word, fromPath: fromPath, fromLine: fromLine)
+                guard let best = found.first else {
+                    column.showMessage("No declaration of \(word) found in \(env.branch)")
+                    return
+                }
+                if definitionIsUnambiguous(found) {
+                    self.openDefinition(best, in: env)
+                } else {
+                    self.definitionMenu = DefinitionMenu(word: word, candidates: found) { [weak self] c in
+                        self?.openDefinition(c, in: env)
+                    }
+                    self.definitionMenu?.show(at: at)
+                }
+            } catch {
+                column.showMessage(searchFailureMessage(error))
+            }
+        }
+    }
+
+    private var definitionMenu: DefinitionMenu?
+
+    private func openDefinition(_ c: DefinitionCandidate, in env: Environment) {
+        let column = windowController.terminalColumn
+        column.showMessage(nil)
+        column.registry.openEditor(env: env, path: c.path, at: (c.line, c.column, c.length)) { [weak column] reason in
+            column?.showMessage(reason)
+        }
+        DispatchQueue.main.async { column.focusActive() }
     }
 
     /// Quitting with unsaved editor tabs asks first; true to quit.

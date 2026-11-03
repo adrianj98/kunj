@@ -157,6 +157,13 @@ servers) meant for small fixes. ⌘S saves, in the worktree or, for a container,
 overwriting it. Closing a tab or quitting with unsaved changes asks too. Binary files, files that are
 not UTF-8 and files over 5 MB are not opened.
 
+⌘-click a name in an editor tab or in a diff (or put the cursor on it and press F12, or choose
+**Go to Declaration** from the editor's menu) to jump to where it is declared. With no language
+servers, the app searches the environment with `kunj search` for a line that declares the name
+(`class`, `struct`, `func`, `function`, `def`, `const`, `let`, a method, an arrow function…) and opens
+it at the name. When several files declare it equally well, a menu lists them; declarations in the
+same language come first, and build output, dependencies and tests come last.
+
 ## Agents
 
 You can run as many agents in an environment as you like: **Agent** (⌘⇧A) opens a new one each

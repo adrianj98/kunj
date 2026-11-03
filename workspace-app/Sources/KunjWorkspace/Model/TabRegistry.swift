@@ -32,6 +32,8 @@ final class TabRegistry {
     /// Called after tabs were opened, closed, activated or changed state; the argument is the
     /// environment id whose tabs changed.
     var onChange: ((String) -> Void)?
+    /// Go to declaration from an editor tab: the environment, the word, the tab's path and the line.
+    var onDefinition: ((Environment, String, String?, Int?) -> Void)?
     /// A key press went to a tab of this environment (its `lastActivity`).
     var onInput: ((String) -> Void)?
     /// Reads and writes editor tabs' files (set once kunj is discovered; no editor tabs before).
@@ -222,6 +224,10 @@ final class TabRegistry {
         case "save":
             guard let tab = editor(id: m["id"]) else { return }
             Task { await self.save(tab) }
+        case "definition":
+            // ⌘-click or F12 on a name: only the word and its line come from the page
+            guard let tab = editor(id: m["id"]), let word = m["word"] as? String else { return }
+            onDefinition?(tab.env, word, tab.path, m["line"] as? Int)
         case "ready":
             // A page reloaded after its process ended has lost every model: read the files again
             // (unsaved text is gone with the process).

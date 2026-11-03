@@ -51,6 +51,8 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private let editButton = HeaderTextButton("Edit")
     /// Edit (or a double-click on a file): open the file of the environment in an editor tab.
     var onEdit: ((Environment, String) -> Void)?
+    /// ⌘-click or F12 on a name in the diff: the environment, the word, the file shown and the line.
+    var onDefinition: ((Environment, String, String?, Int?) -> Void)?
     /// The × at the bar's right: close the column.
     var onClose: () -> Void = {}
     private let closeButton = BarIconButton(.close, label: "Close Changes")
@@ -112,8 +114,20 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         emptyLabel.maximumNumberOfLines = 4
         scopeButton.onChoose = { [weak self] s in self?.choose(s) }
         diffView.onMessage = { [weak self] m in
-            // The page loaded, or reloaded after its process ended: give it the theme and the file again
-            if m["type"] as? String == "ready" { self?.pageReady() }
+            guard let self else { return }
+            switch m["type"] as? String {
+            case "ready":
+                // The page loaded, or reloaded after its process ended: give it the theme and the file again
+                self.pageReady()
+            case "definition":
+                // ⌘-click or F12 on a name in the diff: only the word and its line come from the page
+                guard let env = self.environment, let word = m["word"] as? String else { return }
+                // a line of the original side is not a line of the working-tree file
+                let line = m["side"] as? String == "original" ? nil : m["line"] as? Int
+                self.onDefinition?(env, word, self.selectedPath, line)
+            default:
+                break
+            }
         }
         listWidth = listScroll.widthAnchor.constraint(equalToConstant: DesignTokens.Layout.changesFileListWidth)
         NSLayoutConstraint.activate([

@@ -295,6 +295,7 @@
     code.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       if (current) post({ type: 'save', id: current });
     });
+    wireDefinition(code, () => (current ? { id: current } : null));
   }
 
   function showSingle(text, added, lang) {
@@ -347,6 +348,40 @@
     selectionHighlight: false,
   };
 
+  // ---- go to declaration (both modes) ----
+  // ⌘-click or F12 on a name posts { type: 'definition', word, line } (plus the tab id in editor
+  // mode); Swift searches the environment for its declaration and opens it. No path is ever sent.
+  function definitionAt(ed, position) {
+    const model = ed.getModel();
+    if (!model || !position) return null;
+    const w = model.getWordAtPosition(position);
+    return w ? { word: w.word, line: position.lineNumber } : null;
+  }
+
+  function wireDefinition(ed, extra) {
+    const send = (position) => {
+      const d = definitionAt(ed, position);
+      const more = extra();
+      if (d && more) post(Object.assign({ type: 'definition' }, d, more));
+    };
+    ed.onMouseDown((e) => {
+      const ev = e.event;
+      if (!ev.metaKey || ev.altKey || ev.shiftKey || !ev.leftButton) return;
+      if (e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      send(e.target.position);
+    });
+    ed.addAction({
+      id: 'kunj.goToDeclaration',
+      label: 'Go to Declaration',
+      keybindings: [monaco.KeyCode.F12],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0,
+      run: (e) => send(e.getPosition()),
+    });
+  }
+
   function createDiff() {
     editor = monaco.editor.createDiffEditor(document.getElementById('diff'), Object.assign({}, COMMON, {
       originalEditable: false,
@@ -359,6 +394,9 @@
     models = [monaco.editor.createModel('', 'plaintext'), monaco.editor.createModel('', 'plaintext')];
     editor.setModel({ original: models[0], modified: models[1] });
     showPane('diff');
+    wireDefinition(editor.getModifiedEditor(), () => ({ side: 'modified' }));
+    wireDefinition(editor.getOriginalEditor(), () => ({ side: 'original' }));
+    wireDefinition(single, () => ({ side: 'single' }));
   }
 
   const loader = document.createElement('script');

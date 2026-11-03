@@ -386,7 +386,15 @@ one that changed since it was opened asks before overwriting, one that was delet
 recreating it, one that already holds the text is not written. Closing a dirty tab asks Save / Don't
 Save / Cancel, and quitting with dirty tabs asks Cancel / Quit Without Saving. Key presses in the
 editor count as the environment's activity. A crashed editor page is reloaded with every file read
-again (unsaved text is lost). No language servers. The web views never name a file to Swift: a save message carries only the
+again (unsaved text is lost). No language servers. **Go to declaration:** ⌘-click (or F12, or the
+editor's *Go to Declaration*) on a name in an editor tab or either side of the diff posts
+`{ type: "definition", word, line }` (plus the tab id, or the diff side); Swift ignores a word that is
+not an ASCII identifier (`isDefinitionWord`), runs `kunj search` in the environment with
+`definitionPattern()` (an ERE for `<keyword> word`, a Go method, `word = function`/arrow, a method
+`word(…) {`) and ranks the lines (`definitionCandidates`: declaring tier, same language, not
+generated/vendored, not a test, same file; the clicked line left out). The best opens in an editor
+tab at the name when it outranks the next (`definitionIsUnambiguous`), else a menu at the pointer
+lists up to 20 (`DefinitionMenu`); none says so in the column's message line. The web views never name a file to Swift: a save message carries only the
 tab id, and Swift holds the path, so content from a container cannot steer a write.
 
 **Layout file** `~/.kunj/<reponame>/workspace.json` (`<reponame>` is `kunjName` from `kunj repos --json`,

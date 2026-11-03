@@ -2,6 +2,17 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-03 — workspace app: go to declaration
+
+- ⌘-click (or F12, or *Go to Declaration*) on a name in an editor tab or the Changes diff opens the
+  file that declares it, at the name; several equally good candidates give a menu. Why: the user
+  asked to click a value and go to its declaration in another file.
+- No language server: the page sends only the word and line, Swift checks it is an identifier,
+  searches the environment with `kunj search` and a declaration regex, and ranks the hits (type and
+  function keywords first, same language, source before build output and tests). Why: v1 has no
+  language servers and the page must never name a file; `kunj search` already works for worktrees and
+  containers.
+
 ## 2026-11-02 — Changes column diff scrolls again
 
 - The Monaco page hides the panes of the mode it is not in (`#editor` in diff mode, `#diff` and
