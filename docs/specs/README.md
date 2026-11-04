@@ -23,13 +23,14 @@ page only says where each thing stands.
 | [multi-remote-containers.md](multi-remote-containers.md) | A repository's containers across this Mac and several remotes: `ct list` and branch lookup ask every one; the workspace app's remote picker | Spec written |
 | [tmux-sessions.md](tmux-sessions.md) | `kunj sessions`: kunj's tmux sessions with owner, attached terminals, CPU, memory, orphans; `kill`; the workspace app's Sessions window | Shipped |
 | [search.md](search.md) | `kunj search`: worktrees (default), branches, containers, commits and work logs; `SearchJson`; the workspace app's Search panel | Shipped (CLI, workspace app); VS Code to do |
-| [language-servers.md](language-servers.md) | Language servers for the workspace app's editor: `kunj lsp`, the Swift bridge and URI guard, start/stop/cap lifecycle using servers' disk caches | Spec written |
+| [language-servers.md](language-servers.md) | Language servers for the workspace app's editor: `kunj lsp`, the Swift bridge and URI guard, start/stop/cap lifecycle using servers' disk caches | Shipped (the diff still searches) |
 | [agent-handoff.md](agent-handoff.md) | `/handoff` skill: a brief from the conversation, a new worktree, a detached agent with the brief as its prompt, opened in the workspace app; `kunj agent start --detach --prompt-file --open-in-app`, `kunj install skill` | Shipped |
 | [github-clone.md](github-clone.md) | `kunj repos github` / `kunj repos clone`, `repos.cloneDir`/`repos.cloneBare`, the workspace app's Clone from GitHub sheet | Shipped (CLI, workspace app) |
 
 ## Done
 
 | Work | Spec | Commits |
+| Language servers parts 2–4: `kunj lsp`, `LspConnection`/`LspPolicy`/`LspCoordinator`, definition, references, hover, diagnostics, status bar memory, Language Servers menu | [language-servers.md](language-servers.md#as-built-2026-11-04) | 41026cb, this commit |
 | Language servers part 1: the workspace app's Monaco page on monaco-vscode-api 38 (Vite, TextMate, VS Code colour themes, language by file name) | [language-servers.md](language-servers.md#1-editor-on-monaco-vscode-api) | this commit |
 | `/handoff` skill: detached agent with a brief in a new worktree, opened in the workspace app; `kunj install skill` | [agent-handoff.md](agent-handoff.md) | CLI fb3e7cc; app and docs in the commit after |
 | --- | --- | --- |
@@ -110,7 +111,7 @@ page only says where each thing stands.
 | Phase 2 follow-ups left | [container-phase-2.md](container-phase-2.md) | `container.services` registered as a string setting (the registry has no object type); a snapshot copy reuses its own local branch on `ct start -c <same name>` (optional `switch -C`) |
 | MCP bridge follow-ups | [container-phase-2.md](container-phase-2.md#open-questions-and-roadmap) | Verify the download block in a visible browser |
 | Agent state follow-ups | [workspace-ide.md](workspace-ide.md#open-questions) | A killed session's leftover state shows until the next hook; `--settings` lands after a pipe in a compound `agent.command` |
-| Language servers, parts 2–4: `kunj lsp`, the bridge and lifecycle, the diff and memory view | [language-servers.md](language-servers.md) | In progress |
+| Language servers: the Changes diff through a running server | [language-servers.md](language-servers.md#as-built-2026-11-04) | The diff still searches |
 | Minor follow-ups from the CLI contract review | — | Ctrl-C in a tmux-less `kunj agent` can lose the exit code; the top-level git watcher in `kunj events` is not restarted on error |
 
 ## Waiting on you

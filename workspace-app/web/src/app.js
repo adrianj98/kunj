@@ -209,7 +209,7 @@ export async function start() {
     /** Opens (or replaces) the tab `id`'s file and shows it. */
     openFile({ id, content, language, path }) {
       const old = files.get(id);
-      if (old) old.model.dispose();
+      if (old) { old.model.dispose(); tracked.delete(id); }
       const model = newModel(content || '', path, language);
       const f = { model, saved: model.getAlternativeVersionId(), dirty: false, view: null };
       files.set(id, f);
@@ -251,6 +251,8 @@ export async function start() {
       const f = files.get(id);
       if (!f) return false;
       files.delete(id);
+      tracked.delete(id);
+      clearTimeout(changeTimers.get(id));
       if (current === id) { code.setModel(null); current = null; }
       f.model.dispose();
       return true;
@@ -296,7 +298,88 @@ export async function start() {
       if (current) post({ type: 'save', id: current });
     });
     wireDefinition(code, () => (current ? { id: current } : null));
+    code.addAction({
+      id: 'kunj.findReferences',
+      label: 'Find References',
+      keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1,
+      run: (e) => {
+        const d = definitionAt(e, e.getPosition());
+        if (d && current) post(Object.assign({ type: 'references', id: current }, d));
+      },
+    });
+    wireLanguageServer();
   }
+
+  // ---- language servers (editor mode) ----
+  // Swift runs the server and speaks LSP to it (with the real file URI it holds); the page sends the
+  // tab id, positions and its text, never a path. A tab is tracked once Swift says a server serves it.
+  const tracked = new Set();
+  const changeTimers = new Map();
+  const pendingHovers = new Map();
+  let hoverCount = 0;
+  const SEVERITY = { 1: monaco.MarkerSeverity.Error, 2: monaco.MarkerSeverity.Warning, 3: monaco.MarkerSeverity.Info, 4: monaco.MarkerSeverity.Hint };
+
+  function idOf(model) {
+    for (const [id, f] of files) if (f.model === model) return id;
+    return null;
+  }
+
+  function wireLanguageServer() {
+    monaco.languages.registerHoverProvider('*', {
+      provideHover(model, position) {
+        const id = idOf(model);
+        if (!id || !tracked.has(id)) return null;
+        const req = ++hoverCount;
+        post({ type: 'hover', id, req, line: position.lineNumber, column: position.column });
+        return new Promise((resolve) => {
+          pendingHovers.set(req, resolve);
+          setTimeout(() => { if (pendingHovers.delete(req)) resolve(null); }, 4000);
+        }).then((markdown) => (markdown ? { contents: [{ value: markdown, isTrusted: false }] } : null));
+      },
+    });
+  }
+
+  Object.assign(api, {
+    /** A server serves tab `id` (on) or no longer does: its edits are sent, its markers cleared. */
+    lspTrack({ id, on }) {
+      const f = files.get(id);
+      if (!f) return false;
+      if (on) {
+        if (!tracked.has(id)) {
+          tracked.add(id);
+          f.model.onDidChangeContent(() => {
+            if (!tracked.has(id)) return;
+            clearTimeout(changeTimers.get(id));
+            changeTimers.set(id, setTimeout(() => post({ type: 'lspChange', id, text: f.model.getValue() }), 300));
+          });
+        }
+      } else {
+        tracked.delete(id);
+        monaco.editor.setModelMarkers(f.model, 'kunj-lsp', []);
+      }
+      return true;
+    },
+    lspText({ id }) {
+      const f = files.get(id);
+      return f ? f.model.getValue() : null;
+    },
+    lspHover({ req, markdown }) {
+      const resolve = pendingHovers.get(req);
+      if (resolve) { pendingHovers.delete(req); resolve(markdown || null); }
+      return true;
+    },
+    lspDiagnostics({ id, markers }) {
+      const f = files.get(id);
+      if (!f) return false;
+      monaco.editor.setModelMarkers(f.model, 'kunj-lsp', (markers || []).map((m) => ({
+        startLineNumber: m.line, startColumn: m.column, endLineNumber: m.endLine, endColumn: m.endColumn,
+        severity: SEVERITY[m.severity] || monaco.MarkerSeverity.Error, message: m.message, source: m.source || undefined,
+      })));
+      return true;
+    },
+  });
 
   function showSingle(text, added, path, language) {
     const model = newModel(text, path, language);
@@ -355,7 +438,7 @@ export async function start() {
     const model = ed.getModel();
     if (!model || !position) return null;
     const w = model.getWordAtPosition(position);
-    return w ? { word: w.word, line: position.lineNumber } : null;
+    return w ? { word: w.word, line: position.lineNumber, column: position.column } : null;
   }
 
   function wireDefinition(ed, extra) {

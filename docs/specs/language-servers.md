@@ -12,8 +12,8 @@ stays as the fallback.
 | --- | --- |
 | 1. Editor on monaco-vscode-api (option B, no visible change) | Shipped |
 | 2. CLI: `kunj lsp list` / `kunj lsp run`, `lsp.servers.*`, `LspListJson` | Shipped |
-| 3. App: `LspSession` bridge, URI guard, `LspManager` lifecycle; definition, references, hover, diagnostics | To do |
-| 4. App: the Changes diff, status bar memory, Language Servers menu | To do |
+| 3. App: `LspConnection`, `LspPolicy` lifecycle, `LspCoordinator`; definition, references, hover, diagnostics | Shipped |
+| 4. App: status bar memory, Language Servers menu (shipped); the Changes diff through a running server (to do: it still searches) | Partly shipped |
 
 Each part ships and is reviewed on its own, in this order.
 
@@ -168,3 +168,25 @@ TypeScript server has no disk cache and re-reads the whole project, so it is kep
 - The TypeScript native server (tsgo) as the TypeScript default once it is stable: it starts faster and
   uses far less memory than tsserver.
 - Container environments through `kunj ct exec` in `kunj lsp run`.
+
+## As built (2026-11-04)
+
+What shipped differs from the design above in these places:
+
+- **Swift is the LSP client, not monaco-languageclient.** `LspConnection` (KunjWorkspaceCore/LSP) runs
+  `kunj lsp run`, frames JSON-RPC (`LspFrameReader`), sends `initialize` with the worktree as root, and
+  answers the server's requests itself (configuration empty, `applyEdit` and `showDocument` refused).
+  `LspCoordinator` (KunjWorkspace/Editor) owns the connections, the open documents (real `file://`
+  URIs, full-text `didChange`) and `LspPolicy` (the lifecycle table, a pure state machine). The page
+  never sees a URI or a path: it sends `definition`/`references` (word, line, UTF-16 column),
+  `hover` (with a request number answered by `lspHover`) and `lspChange` (its text, debounced 300 ms),
+  all keyed by the tab id; Swift sends `lspTrack`, `lspDiagnostics` (markers) and `lspHover`.
+- **References open a menu** (`path:line` and the line's text, like the declarations menu) rather than
+  Monaco's peek widget, so the page never loads another file.
+- **Only locations inside the worktree open.** A definition in an SDK header or the Go standard library
+  is dropped; when nothing is left, the search fallback runs.
+- **Restart after a crash:** a server that exits by itself restarts on the next request; a third exit
+  within 5 minutes disables it (search instead) until the last tab of that language closes.
+- **The diff** still uses the search-based jump.
+- **Memory:** the status bar sums the RSS of each `kunj lsp run` process tree (`processTreeRSS`, from
+  one `ps` every 10 s while a server runs).

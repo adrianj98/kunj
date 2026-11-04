@@ -8,19 +8,19 @@ final class DefinitionMenu: NSObject {
     static let limit = 20
     private let candidates: [DefinitionCandidate]
     private let onChoose: (DefinitionCandidate) -> Void
-    private let word: String
+    private let title: String
 
-    init(word: String, candidates: [DefinitionCandidate], onChoose: @escaping (DefinitionCandidate) -> Void) {
-        self.word = word
+    init(word: String, title: String? = nil, candidates: [DefinitionCandidate], onChoose: @escaping (DefinitionCandidate) -> Void) {
+        self.title = title ?? "Declarations of \(word)"
         self.candidates = Array(candidates.prefix(Self.limit))
         self.onChoose = onChoose
     }
 
     /// `point` in screen coordinates.
     func show(at point: NSPoint) {
-        let menu = NSMenu(title: "Declarations of \(word)")
+        let menu = NSMenu(title: title)
         menu.autoenablesItems = false
-        let header = NSMenuItem(title: "Declarations of \(word)", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
         for (i, c) in candidates.enumerated() {

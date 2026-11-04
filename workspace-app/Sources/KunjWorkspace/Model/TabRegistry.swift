@@ -34,6 +34,8 @@ final class TabRegistry {
     var onChange: ((String) -> Void)?
     /// Go to declaration from an editor tab: the environment, the word, the tab's path and the line.
     var onDefinition: ((Environment, String, String?, Int?) -> Void)?
+    /// Language servers for editor tabs (nil until kunj is discovered).
+    weak var lsp: LspCoordinator?
     /// A key press went to a tab of this environment (its `lastActivity`).
     var onInput: ((String) -> Void)?
     /// Reads and writes editor tabs' files (set once kunj is discovered; no editor tabs before).
@@ -176,6 +178,7 @@ final class TabRegistry {
         Task { @MainActor in
             do {
                 try await tab.load()
+                self.lsp?.editorLoaded(tab)
                 self.onChange?(env.id) // the column shows it now that the page has it
             } catch {
                 log("editor: cannot open \(path) in \(env.id): \(error)")
@@ -225,15 +228,47 @@ final class TabRegistry {
             guard let tab = editor(id: m["id"]) else { return }
             Task { await self.save(tab) }
         case "definition":
-            // ⌘-click or F12 on a name: only the word and its line come from the page
+            // ⌘-click or F12 on a name: the word and its position come from the page. The language
+            // server answers when there is one; else, or when it finds nothing, the search does.
             guard let tab = editor(id: m["id"]), let word = m["word"] as? String else { return }
-            onDefinition?(tab.env, word, tab.path, m["line"] as? Int)
+            let line = m["line"] as? Int
+            guard let lsp, let line, let column = m["column"] as? Int else {
+                onDefinition?(tab.env, word, tab.path, line)
+                return
+            }
+            Task { @MainActor in
+                if !(await lsp.definition(tab, word: word, line: line, column: column)) {
+                    self.onDefinition?(tab.env, word, tab.path, line)
+                }
+            }
+        case "references":
+            guard let tab = editor(id: m["id"]), let word = m["word"] as? String,
+                  let line = m["line"] as? Int, let column = m["column"] as? Int else { return }
+            guard let lsp else { return }
+            Task { @MainActor in
+                if !(await lsp.references(tab, word: word, line: line, column: column)) {
+                    lsp.onMessage?("No references to \(word) found (needs a language server for this file; see kunj lsp list)")
+                }
+            }
+        case "hover":
+            guard let tab = editor(id: m["id"]), let req = m["req"] as? Int,
+                  let line = m["line"] as? Int, let column = m["column"] as? Int else { return }
+            lsp?.hover(tab, req: req, line: line, column: column)
+        case "lspChange":
+            guard let tab = editor(id: m["id"]), let text = m["text"] as? String else { return }
+            lsp?.textChanged(tab, text: text)
         case "ready":
             // A page reloaded after its process ended has lost every model: read the files again
             // (unsaved text is gone with the process).
             for tab in allEditors where tab.loaded {
                 Task { @MainActor in
-                    if (try? await tab.load()) == nil { self.remove(tab) }
+                    if (try? await tab.load()) == nil {
+                        self.remove(tab)
+                    } else {
+                        // the server's copy is reopened from the reloaded text
+                        self.lsp?.editorClosed(tab)
+                        self.lsp?.editorLoaded(tab)
+                    }
                     self.onChange?(tab.envId)
                 }
             }
@@ -310,6 +345,7 @@ final class TabRegistry {
             terminal.close()
             terminal.removeFromSuperview()
         } else if let editor = tab as? EditorTab {
+            lsp?.editorClosed(editor)
             editor.discard()
         }
         // the neighbour on the left in the bar (else on the right) becomes active

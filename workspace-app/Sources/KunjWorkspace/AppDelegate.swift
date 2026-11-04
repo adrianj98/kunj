@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController!
     /// The kunj CLI once discovery succeeded (Tasks 4+ build the environment store on it).
     private(set) var kunj: KunjCLI?
+    /// Language servers for the editor tabs (docs/specs/language-servers.md).
+    private var lsp: LspCoordinator?
     private(set) var kunjStatus: KunjStatus?
     private var discovery: Task<Void, Never>?
     /// The environments (live) and the `kunj events` child that keeps them current.
@@ -167,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.windowController.filesColumn.source = FileListerSource(cli: cli)
                 self.windowController.filesColumn.searchPanel.source = KunjSearchSource(cli: cli)
                 self.windowController.terminalColumn.registry.fileAccess = FileAccess(cli: cli)
+                self.startLanguageServers(cli: cli)
                 self.settings?.cli = cli
                 self.sessionsWindow?.cli = cli
                 self.windowController.header.show(self.windowController.selectedEnvironment)
@@ -351,6 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         terminating = true
+        lsp?.stopAll()
         windowController?.terminalColumn.registry.closeAll()
         layoutKeeper?.flush()
         let cli = kunj
@@ -618,6 +622,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store = nil
         kunj = nil
         kunjStatus = nil
+        lsp?.stopAll()
+        lsp = nil
+        windowController.statusBar.showLanguageServers(nil)
         settings?.cli = nil
         sessionsWindow?.cli = nil
         stopUsagePoll()
@@ -910,6 +917,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var definitionMenu: DefinitionMenu?
 
+    private lazy var languageServersMenu = LanguageServersMenu { [weak self] in self?.lsp }
+
+    private func startLanguageServers(cli: KunjCLI) {
+        lsp?.stopAll()
+        let column = windowController.terminalColumn
+        let coordinator = LspCoordinator(cli: cli, registry: column.registry)
+        coordinator.onStatus = { [weak self] text in self?.windowController.statusBar.showLanguageServers(text) }
+        coordinator.onMessage = { [weak column] text in column?.showMessage(text) }
+        column.registry.lsp = coordinator
+        lsp = coordinator
+    }
+
     private func openDefinition(_ c: DefinitionCandidate, in env: Environment) {
         let column = windowController.terminalColumn
         column.showMessage(nil)
@@ -1037,6 +1056,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Search Sessions", action: #selector(focusSearch(_:)), keyEquivalent: "k").target = self
         menu.addItem(withTitle: "Close Session", action: #selector(closeSession(_:)), keyEquivalent: "W").target = self
         menu.addItem(withTitle: "Close All Sessions…", action: #selector(closeAllSessions(_:)), keyEquivalent: "").target = self
+        // the running language servers, each with Stop (filled when the menu opens)
+        let servers = NSMenuItem(title: "Language Servers", action: nil, keyEquivalent: "")
+        let serversMenu = NSMenu(title: "Language Servers")
+        serversMenu.delegate = languageServersMenu
+        servers.submenu = serversMenu
+        menu.addItem(servers)
         let switchItem = NSMenuItem(title: "Switch to Session", action: nil, keyEquivalent: "")
         let switches = NSMenu(title: "Switch to Session")
         for n in 1...9 {

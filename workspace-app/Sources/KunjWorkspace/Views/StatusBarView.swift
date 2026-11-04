@@ -10,6 +10,8 @@ final class StatusBarView: NSView {
     private var environment: Environment?
     private var environmentCount = 0
     private var error: String?
+    /// The running language servers and their memory (`typescript 1.2 GB · swift 310 MB`), nil for none.
+    private var languageServers: String?
     private let left = NSStackView()
     private let right = NSStackView()
 
@@ -38,6 +40,12 @@ final class StatusBarView: NSView {
     func show(_ env: Environment?, environmentCount: Int) {
         environment = env
         self.environmentCount = environmentCount
+        render()
+    }
+
+    func showLanguageServers(_ text: String?) {
+        guard text != languageServers else { return }
+        languageServers = text
         render()
     }
 
@@ -103,6 +111,7 @@ final class StatusBarView: NSView {
             case .none, .unknown: break
             }
         }
+        if let languageServers { rightItems.append(dotted(languageServers, theme.color(\.green))) }
         if environmentCount > 0 {
             let n = min(9, environmentCount)
             rightItems.append(label(n == 1 ? "⌘1 switch session" : "⌘1–\(n) switch session"))

@@ -56,6 +56,16 @@ public struct DefinitionCandidate: Equatable, Sendable {
     /// then 0 for a source file (not generated or vendored), then 0 for not a test, then 0 for the
     /// file the click came from.
     public var rank: [Int]
+
+    public init(path: String, line: Int, column: Int, length: Int, text: String, tier: Int, rank: [Int]) {
+        self.path = path
+        self.line = line
+        self.column = column
+        self.length = length
+        self.text = text
+        self.tier = tier
+        self.rank = rank
+    }
 }
 
 /// The candidates for `word` in a search result, best first (by `rank`, then path and line). The

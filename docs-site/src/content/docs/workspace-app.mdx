@@ -164,6 +164,24 @@ servers, the app searches the environment with `kunj search` for a line that dec
 it at the name. When several files declare it equally well, a menu lists them; declarations in the
 same language come first, and build output, dependencies and tests come last.
 
+### Language servers
+
+When a language server is installed for a file's language, editor tabs get real go to definition
+(⌘-click, F12), **Find References** (⇧F12, a menu of every use), hovers and errors underlined. kunj
+knows TypeScript/JavaScript (`typescript-language-server`), Swift (`sourcekit-lsp`), Go (`gopls`) and
+C/C++ (`clangd`); see which are installed with:
+
+```bash
+kunj lsp list
+```
+
+Add or change one with `lsp.servers.<language>` in the config (`command`, `extensions`, `restart`,
+`cachePaths`). A server starts when you open a tab of its language in a worktree and stops 2 minutes
+after its last tab closes, after 5 idle minutes (servers with a disk cache: gopls, sourcekit-lsp,
+clangd) or 15 (TypeScript), and at most 3 run at once (`lsp.*` settings). The status bar shows the
+running ones and their memory; **Environment > Language Servers** stops one. Without a server, in a
+container or in the Changes diff, ⌘-click searches the branch as before.
+
 ## Agents
 
 You can run as many agents in an environment as you like: **Agent** (⌘⇧A) opens a new one each
