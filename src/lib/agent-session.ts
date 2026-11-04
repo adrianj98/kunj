@@ -376,9 +376,12 @@ export function agentCommand(name: string | undefined, agent: { command?: string
 
 // The first prompt for a claude command: the brief's copy read by the shell tmux runs the command
 // through, single-quoted (a path in $HOME may hold any character but NUL)
-export function withAgentPrompt(command: string, promptFile: string | null): string {
+// fish has no `$(...)` before 3.4 and splits `(...)` on newlines: `string collect` keeps it one argument.
+export function withAgentPrompt(command: string, promptFile: string | null, shell = loginShell()): string {
   if (!promptFile) return command;
-  return `${command.trim()} "$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;
+  const quoted = `'${promptFile.replace(/'/g, "'\\''")}'`;
+  const read = path.basename(shell) === 'fish' ? `(cat ${quoted} | string collect)` : `"$(cat ${quoted})"`;
+  return `${command.trim()} ${read}`;
 }
 
 export function isClaudeCommand(command: string): boolean {

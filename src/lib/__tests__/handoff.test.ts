@@ -16,7 +16,8 @@ describe('kunj agent start --detach / --open-in-app / --prompt-file', () => {
   });
 
   it('the prompt is the quoted copy read by the shell, only for claude', () => {
-    expect(withAgentPrompt('claude --x', "/h/it's/p.md")).toBe(`claude --x "$(cat '/h/it'\\''s/p.md')"`);
+    expect(withAgentPrompt('claude --x', "/h/it's/p.md", '/bin/zsh')).toBe(`claude --x "$(cat '/h/it'\\''s/p.md')"`);
+    expect(withAgentPrompt('claude', '/h/p.md', '/opt/homebrew/bin/fish')).toBe(`claude (cat '/h/p.md' | string collect)`);
     expect(withAgentPrompt('claude', null)).toBe('claude');
     expect(isClaudeCommand('/usr/local/bin/claude --flag')).toBe(true);
     expect(isClaudeCommand('agy')).toBe(false);
