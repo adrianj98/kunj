@@ -1547,3 +1547,7 @@ macOS app zip (`kunj install macos` needs a release that has one).
 ## 2026-11-04 — language servers spec (docs/specs/language-servers.md)
 - New spec: real language servers for the workspace app's editor (definition, references, hover, diagnostics), run through a new `kunj lsp run <language>` child per worktree and language, bridged by Swift with a URI guard, started with an editor tab and stopped when idle (2 min after the last tab, 5 min idle for servers with a disk cache, 15 for tsserver, at most 3, cached ones evicted first). Option B (monaco-vscode-api) is adopted as part 1. Tracker and workspace-ide.md updated.
   Why: the user asked for click-through to declarations and references (option C) without language servers always running and eating memory, and pointed out that many servers restart from a cached state.
+
+## 2026-11-04 — handoff skill spec (docs/specs/agent-handoff.md)
+- New spec for `/handoff`: a kunj-shipped Claude Code skill that writes a brief from the conversation, runs `kunj worktree add -c` and a detached `kunj agent start --prompt-file --open-in-app`, and the workspace app opens, selects and focuses the new agent tab (via new `open`/`id`/`worktree` fields on the `kunj events` agent event). Installed with `kunj install skill`.
+  Why: the user asked for a skill to use while in the app that starts the research being discussed in a new worktree with a new agent, passing the context along; they chose the app switching to it, kunj shipping the skill, and the name "hand off".
