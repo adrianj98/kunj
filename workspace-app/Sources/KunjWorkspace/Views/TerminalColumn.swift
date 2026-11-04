@@ -156,12 +156,12 @@ final class TerminalColumn: NSView {
 
     private func syncBar() {
         guard let env = environment else { tabBar.show([], tmux: nil); return }
-        let tabs = registry.tabs(for: env.id)
+        let tabs = registry.barOrder(for: env.id)
         let active = registry.active(for: env.id)
         let items = tabs.map { tab -> TabBarItem in
             if let e = tab as? EditorTab {
                 return TabBarItem(id: e.id, title: e.title, dot: nil, active: e === active,
-                                  toolTip: e.dirty ? "\(e.path) (unsaved)" : e.path, dirty: e.dirty)
+                                  toolTip: e.dirty ? "\(e.path) (unsaved)" : e.path, dirty: e.dirty, terminal: false)
             }
             let t = tab as! TerminalTab
             return TabBarItem(id: t.id, title: t.title,

@@ -256,8 +256,15 @@ final class TabRegistry {
     }
 
     /// The next (`by` 1) or previous (-1) tab of the environment, wrapping.
-    func cycle(envId: String, by step: Int) {
+    /// The order the tab bar shows: shell and agent tabs first, then editor tabs, each in opening order.
+    func barOrder(for envId: String) -> [any WorkspaceTab] {
         let tabs = tabs(for: envId)
+        return tabs.filter { !($0 is EditorTab) } + tabs.filter { $0 is EditorTab }
+    }
+
+    /// Next/previous tab, in the bar's order.
+    func cycle(envId: String, by step: Int) {
+        let tabs = barOrder(for: envId)
         guard tabs.count > 1, let current = active(for: envId),
               let i = tabs.firstIndex(where: { $0 === current }) else { return }
         activate(tabs[(i + step + tabs.count) % tabs.count])
@@ -305,10 +312,14 @@ final class TabRegistry {
         } else if let editor = tab as? EditorTab {
             editor.discard()
         }
+        // the neighbour on the left in the bar (else on the right) becomes active
+        let shown = barOrder(for: tab.envId)
+        let j = shown.firstIndex(where: { $0 === tab }) ?? 0
+        let next = j > 0 ? shown[j - 1] : shown.count > 1 ? shown[1] : nil
         tabs.remove(at: i)
         tabsByEnv[tab.envId] = tabs.isEmpty ? nil : tabs
         if activeByEnv[tab.envId] == tab.id {
-            activeByEnv[tab.envId] = tabs.isEmpty ? nil : tabs[max(0, i - 1)].id
+            activeByEnv[tab.envId] = next?.id
         }
         onChange?(tab.envId)
     }

@@ -10,6 +10,8 @@ struct TabBarItem: Equatable {
     var toolTip: String?
     /// An editor tab with unsaved changes: a `text2` dot (status colours stay for agent states).
     var dirty = false
+    /// A shell or agent tab: they come first, and a divider separates them from the editor tabs.
+    var terminal = true
 }
 
 /// The left column's tab bar (40 px, padding 0 × 12): segmented 26 px pills, 2 px apart, then on
@@ -86,7 +88,17 @@ final class TabBarView: NSView {
         guard items != self.items else { return }
         self.items = items
         pills.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for item in items {
+        for (i, item) in items.enumerated() {
+            // between the last shell/agent tab and the first editor tab
+            if i > 0, items[i - 1].terminal, !item.terminal {
+                let line = FillView(theme.color(\.border))
+                line.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([line.widthAnchor.constraint(equalToConstant: 1),
+                                             line.heightAnchor.constraint(equalToConstant: 16)])
+                pills.addArrangedSubview(line)
+                pills.setCustomSpacing(8, after: pills.arrangedSubviews[pills.arrangedSubviews.count - 2])
+                pills.setCustomSpacing(8, after: line)
+            }
             let dot = item.dot.map { theme.dotColor($0) } ?? (item.dirty ? theme.color(\.text2) : nil)
             let pill = PillView(item.title, dot: dot, active: item.active, theme: theme)
             pill.toolTip = item.toolTip
