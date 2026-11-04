@@ -9,10 +9,10 @@ agent there with the brief as its first prompt, and the workspace app switches t
 
 | Part | State |
 | --- | --- |
-| CLI: `kunj agent start --detach --prompt-file --open-in-app` | To do |
-| CLI: `kunj events` agent event `open`, `id`, `worktree` | To do |
-| Workspace app: open, select and focus the handed-off agent | To do |
-| Skill: `skills/handoff/SKILL.md`, `kunj install skill`, offered by `kunj setup` | To do |
+| CLI: `kunj agent start --detach --prompt-file --open-in-app` | Shipped |
+| CLI: `kunj events` agent event `open`, `id`, `worktree` | Shipped |
+| Workspace app: open, select and focus the handed-off agent | Shipped |
+| Skill: `skills/handoff/SKILL.md`, `kunj install skill`, offered by `kunj setup` | Shipped |
 
 ## The skill
 
@@ -49,8 +49,8 @@ The skill needs no app: outside it the agent runs in tmux and the user attaches 
 | `--open-in-app` | Sets the tmux user option `@kunj_open` to `app` on the new session. |
 | `--json` | With `--detach`: `AgentStartJson` `{ branch, worktree, session, id, started }`. |
 
-**`kunj events`.** The agent poll reads `@kunj_open` and `@kunj_worktree` in the same `tmux
-list-sessions` call. A new session's event gains `id` (its `--session` id or null), `worktree` (the
+**`kunj events`.** When the agent poll sees a new session, one more `tmux list-sessions` reads
+`@kunj_worktree` and `@kunj_open` for it (only then, so a quiet poll stays one call). A new session's event gains `id` (its `--session` id or null), `worktree` (the
 tagged path) and `open: 'app'` when the option is set. Fields are only added (`EventJson`).
 
 ## Workspace app

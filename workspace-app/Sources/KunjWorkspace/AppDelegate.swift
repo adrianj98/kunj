@@ -213,6 +213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        // an agent handed off with /handoff (kunj agent start --open-in-app): its tab, selected and focused
+        store.onOpenAgent = { [weak self] env, id in self?.openHandedOffAgent(env: env, id: id) }
         // the Changes column follows git events and container status changes of its repository
         store.onRepoChanged = { [weak windowController] root in
             windowController?.changesColumn.repoChanged(root: root)
@@ -660,6 +662,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             column.showMessage("\(error)")
         }
         return false
+    }
+
+    /// Opens (or finds) the agent tab of session `id` in `env`, selects `env` and brings the window
+    /// forward with that tab focused.
+    private func openHandedOffAgent(env: Environment, id: String?) {
+        let column = windowController.terminalColumn
+        log("handed-off agent \(id ?? "default") in \(env.id)")
+        if let tab = column.registry.allTerminals.first(where: { $0.envId == env.id && $0.kind == .agent && $0.spec?.session == id }) {
+            column.registry.activate(tab)
+        } else if !startTab(env: env, kind: .agent, session: id) {
+            return
+        }
+        windowController.select(env.id)
+        windowController.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async { column.focusActive() }
     }
 
     @objc func nextTab(_ sender: Any?) { cycleTab(1) }

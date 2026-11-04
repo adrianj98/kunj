@@ -1551,3 +1551,10 @@ macOS app zip (`kunj install macos` needs a release that has one).
 ## 2026-11-04 — handoff skill spec (docs/specs/agent-handoff.md)
 - New spec for `/handoff`: a kunj-shipped Claude Code skill that writes a brief from the conversation, runs `kunj worktree add -c` and a detached `kunj agent start --prompt-file --open-in-app`, and the workspace app opens, selects and focuses the new agent tab (via new `open`/`id`/`worktree` fields on the `kunj events` agent event). Installed with `kunj install skill`.
   Why: the user asked for a skill to use while in the app that starts the research being discussed in a new worktree with a new agent, passing the context along; they chose the app switching to it, kunj shipping the skill, and the name "hand off".
+
+## 2026-11-04 — /handoff built
+- CLI: `kunj agent start --detach` (tmux `new-session -d`, no terminal needed, `AgentStartJson`), `--prompt-file` (claude only, copied 0600 to `~/.kunj/<repo>/agent-prompts/`, passed as `"$(cat '<copy>')"`), `--open-in-app` (tmux option `@kunj_open=app`). `kunj events` adds `id`, `worktree`, `open` to a new session's agent event. `kunj install skill` copies `skills/handoff` to `~/.claude/skills/` (marker `.kunj-version`, never overwrites a user's skill without `--force`); `kunj setup` offers it.
+  Why: the user asked for a skill that starts the discussed work in a new worktree with a new agent and the context passed in.
+- Workspace app: `KunjEvent.openAgent`, pending opens in `EnvironmentStore` (30 s for the worktree to be listed), `openHandedOffAgent` opens/selects/focuses the tab.
+  Why: the user chose that the app switches to the handed-off agent.
+- Docs: workspace-app.mdx "Handing work off", okf worktree-agents, CLAUDE.md, spec status, tracker.

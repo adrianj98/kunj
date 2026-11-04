@@ -37,12 +37,27 @@
         "default": null
       },
       {
+        "flags": "--detach",
+        "description": "[start] Start the tmux session without attaching to it (no terminal needed); a running one is left as it is",
+        "default": null
+      },
+      {
+        "flags": "--prompt-file <file>",
+        "description": "[start] The agent's first prompt, read from a file (claude only; a new session only)",
+        "default": null
+      },
+      {
+        "flags": "--open-in-app",
+        "description": "[start] Ask the workspace app to open, select and focus a tab for the new session",
+        "default": null
+      },
+      {
         "flags": "--json",
         "description": "Output result as JSON",
         "default": null
       }
     ],
-    "helpText": "Actions:\n  start [branch]    run the agent in the worktree's tmux session, or reattach to it (default)\n  status [branch]   whether the session exists\n  stop [branch]     kill the session\n\n[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with\n--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.\n\n--session <id> runs one more agent in the worktree, in its own tmux session; status, stop and\nstart then act on that one. status without it reports every agent of the worktree; stop --all\nends them all. stop with --session or --all exits 0 even when nothing ran.\n\n--resume: a Claude agent saves its conversation id as it starts; when its session was ended\n(the app quit with Close All, a reboot), start --resume runs claude --resume <id> in a new one.\n\n--agent antigravity runs the Antigravity CLI (agy) instead of agent.command. Only Claude Code\nreports when it waits for input; another agent shows as running while its session lives."
+    "helpText": "Actions:\n  start [branch]    run the agent in the worktree's tmux session, or reattach to it (default)\n  status [branch]   whether the session exists\n  stop [branch]     kill the session\n\n[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with\n--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.\n\n--session <id> runs one more agent in the worktree, in its own tmux session; status, stop and\nstart then act on that one. status without it reports every agent of the worktree; stop --all\nends them all. stop with --session or --all exits 0 even when nothing ran.\n\n--resume: a Claude agent saves its conversation id as it starts; when its session was ended\n(the app quit with Close All, a reboot), start --resume runs claude --resume <id> in a new one.\n\n--detach starts the session in the background and returns (with --json: branch, worktree,\nsession, id, started). --prompt-file gives a new claude agent its first prompt; --open-in-app\nhas the workspace app switch to it. The /handoff skill (kunj install skill) uses all three.\n\n--agent antigravity runs the Antigravity CLI (agy) instead of agent.command. Only Claude Code\nreports when it waits for input; another agent shows as running while its session lives."
   },
   {
     "name": "branch-desc",
@@ -604,12 +619,17 @@
         "default": null
       },
       {
+        "flags": "--force",
+        "description": "[skill] Replace a skill of the same name kunj did not install",
+        "default": null
+      },
+      {
         "flags": "--json",
         "description": "Output result as JSON",
         "default": null
       }
     ],
-    "helpText": "Apps:\n  vscode     Kunj Worktrees extension for VS Code (and VS Code-like editors via --editor)\n  macos      Kunj menu bar app, installed to /Applications (or ~/Applications)\n  workspace  Kunj Workspace app: worktrees, containers, terminals and agents in one window (macOS)\n  all        All of them, where available\n\nThey are downloaded from https://github.com/adrianj98/kunj/releases. The macOS apps are not\nnotarized; the download quarantine is cleared so they open without a warning."
+    "helpText": "Apps:\n  vscode     Kunj Worktrees extension for VS Code (and VS Code-like editors via --editor)\n  macos      Kunj menu bar app, installed to /Applications (or ~/Applications)\n  workspace  Kunj Workspace app: worktrees, containers, terminals and agents in one window (macOS)\n  all        All of them, where available\n  skill      The /handoff Claude Code skill, copied to ~/.claude/skills/ (not part of all)\n\nThey are downloaded from https://github.com/adrianj98/kunj/releases. The macOS apps are not\nnotarized; the download quarantine is cleared so they open without a warning."
   },
   {
     "name": "issue",

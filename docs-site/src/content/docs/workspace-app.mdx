@@ -184,6 +184,25 @@ Without tmux, or with **Run agents in tmux** turned off in Settings, the agent r
 tab: it keeps running while the app is open, even when you look at another branch, but stops when
 the app quits. Containers always use tmux inside the container.
 
+### Handing work off to a new agent
+
+`/handoff` is a Claude Code skill that kunj ships. Install it once:
+
+```bash
+kunj install skill
+```
+
+Then, in any Claude session (an agent tab or a terminal), after some research or planning, type
+`/handoff start that in a new worktree`. The skill writes a brief from the conversation (goal,
+findings with file and line, decisions, constraints, first steps), creates a worktree for it with
+`kunj worktree add -c`, and starts a Claude agent there with the brief as its first prompt
+(`kunj agent start <branch> --session handoff --detach --open-in-app --prompt-file <brief>`). Within a
+few seconds the app selects the new worktree and focuses the new agent's tab. Without the app, attach
+from a terminal with `kunj agent <branch> --session handoff`.
+
+The new branch starts from your default base branch; ask for "from this branch" to build on the
+current one. Uncommitted changes are not carried over, only the brief.
+
 To copy from a terminal where a program has the mouse (tmux with `mouse on`, or a full-screen agent),
 hold ⌥ (or ⇧) while you drag, then press ⌘C. The selection stays until you copy, click again or scroll.
 In a Shell tab a plain drag does this too, because tmux's own copy never reaches the Mac clipboard;

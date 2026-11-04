@@ -26,6 +26,12 @@ public final class EnvironmentStore {
     /// event or a container `status` event (head or dirty state changed): the Changes column
     /// reloads its diff when the root is its environment's (it debounces).
     public var onRepoChanged: ((String) -> Void)?
+    /// A handed-off agent (`KunjEvent.openAgent`) whose worktree is now listed: open its tab
+    /// (`--session` id, nil for the default agent), select the environment and focus it.
+    public var onOpenAgent: ((Environment, String?) -> Void)?
+    private var pendingOpens: [PendingAgentOpen] = []
+    /// The clock pending opens expire by (tests replace it).
+    public var now: () -> Date = Date.init
     /// Called on the main actor before `onChange` with the worktrees that checked out another
     /// branch since the last listing (`worktreeMoves`), so their tabs follow them.
     public var onWorktreesMoved: (([WorktreeMove]) -> Void)?
@@ -119,6 +125,11 @@ public final class EnvironmentStore {
         lastError = error
         if !moves.isEmpty { onWorktreesMoved?(moves) }
         if changed { onChange?() }
+        if !pendingOpens.isEmpty {
+            let (ready, waiting) = resolvePendingOpens(pendingOpens, in: repos, now: now())
+            pendingOpens = waiting
+            for (env, open) in ready { onOpenAgent?(env, open.id) }
+        }
     }
 
     private func runAll() async {
@@ -194,6 +205,12 @@ public final class EnvironmentStore {
             if let root { onRepoChanged?(root) }
         case .agent(_, _, _, let root):
             scoped(root) { .worktrees($0) }
+        case .openAgent(let session, let id, let worktree):
+            pendingOpens.removeAll { $0.session == session }
+            pendingOpens.append(PendingAgentOpen(session: session, id: id, worktree: worktree,
+                                                 until: now().addingTimeInterval(PendingAgentOpen.wait)))
+            // the event names no repository: the new worktree may be in any of them
+            schedule(.all)
         case .container(let root, _, _, let action):
             scoped(root) { .containers($0) }
             if action == "status", let root { onRepoChanged?(root) }
@@ -243,4 +260,44 @@ public final class EnvironmentStore {
             }
         }
     }
+}
+
+/// An agent the app was asked to open whose worktree may not be listed yet.
+public struct PendingAgentOpen: Equatable, Sendable {
+    /// How long a refresh may take to list the new worktree (seconds).
+    public static let wait: TimeInterval = 30
+    public var session: String
+    public var id: String?
+    public var worktree: String
+    public var until: Date
+
+    public init(session: String, id: String?, worktree: String, until: Date) {
+        self.session = session
+        self.id = id
+        self.worktree = worktree
+        self.until = until
+    }
+}
+
+/// The pending opens whose worktree is listed now (with its environment), and the ones still
+/// waiting; an expired one is dropped. Paths are compared with symlinks resolved (/tmp, /private/tmp).
+public func resolvePendingOpens(_ pending: [PendingAgentOpen], in repos: [RepoEnvironments],
+                                now: Date) -> (ready: [(Environment, PendingAgentOpen)], waiting: [PendingAgentOpen]) {
+    func norm(_ p: String) -> String { URL(fileURLWithPath: p).standardizedFileURL.resolvingSymlinksInPath().path }
+    var byPath: [String: Environment] = [:]
+    for repo in repos {
+        for env in repo.environments where env.kind == .worktree && env.exists {
+            if let path = env.path { byPath[norm(path)] = env }
+        }
+    }
+    var ready: [(Environment, PendingAgentOpen)] = []
+    var waiting: [PendingAgentOpen] = []
+    for open in pending {
+        if let env = byPath[norm(open.worktree)] {
+            ready.append((env, open))
+        } else if open.until > now {
+            waiting.append(open)
+        }
+    }
+    return (ready, waiting)
 }

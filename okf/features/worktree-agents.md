@@ -82,6 +82,21 @@ When the command's first word is `claude` and `agent.hooks` is not false, `withA
 runs `claude --resume <id>` (`withAgentResume()`). The workspace app passes `--resume` for restored agent
 tabs (docs/specs/tmux-sessions.md#quitting-and-resuming).
 
+# Detached starts and handoff
+
+`kunj agent start --detach` starts the session with `new-session -d` instead of `-A` and returns
+(`AgentStartJson` `{ branch, worktree, session, id, started }` with `--json`; `started: false` when it
+already ran, and then nothing is sent). `--prompt-file <f>` (claude commands only, 256 KB at most)
+copies the file to `~/.kunj/<repo>/agent-prompts/<session>.md` (0600) and appends
+`"$(cat '<copy>')"` to the command (`withAgentPrompt()`), so the shell tmux runs reads it as one
+argument. `--open-in-app` sets the tmux user option `@kunj_open` to `app` (`SESSION_OPEN_OPTION`);
+`readTaggedTmuxSessions()` reads it with `@kunj_worktree`, and the events poll adds `id`, `worktree`
+and `open` to a new session's `agent` event. The workspace app turns that into
+`KunjEvent.openAgent`, waits up to 30 s for the worktree to be listed (`resolvePendingOpens()`), then
+opens, selects and focuses the tab. The `/handoff` skill (`skills/handoff/SKILL.md`, installed by
+`kunj install skill` into `~/.claude/skills/` with a `.kunj-version` marker, src/lib/skills.ts) drives
+it. Spec: docs/specs/agent-handoff.md.
+
 # Status in the listing
 
 With status, `listWorktreesDetailed()` makes one `tmux list-sessions` call in the same `Promise.all` as

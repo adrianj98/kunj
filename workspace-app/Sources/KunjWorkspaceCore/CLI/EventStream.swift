@@ -9,6 +9,9 @@ public enum KunjEvent: Equatable, Sendable {
     case registry(kind: String, repoRoot: String?)
     case container(repoRoot: String?, branch: String?, container: String, action: String)
     case agent(session: String, running: Bool, state: String?, repoRoot: String?)
+    /// A new agent session `kunj agent start --open-in-app` made (the /handoff skill): the app opens,
+    /// selects and focuses its tab once `worktree` is listed.
+    case openAgent(session: String, id: String?, worktree: String)
     case backend(available: Bool, message: String?)
     case error(code: String?, message: String)
 }
@@ -38,6 +41,9 @@ public func parseEventLine(_ line: String) -> KunjEvent? {
         return .container(repoRoot: root, branch: object["branch"] as? String, container: container, action: action)
     case "agent":
         guard let session = object["session"] as? String, let running = object["running"] as? Bool else { return nil }
+        if running, object["open"] as? String == "app", let worktree = object["worktree"] as? String, !worktree.isEmpty {
+            return .openAgent(session: session, id: object["id"] as? String, worktree: worktree)
+        }
         return .agent(session: session, running: running, state: object["state"] as? String, repoRoot: root)
     case "backend":
         guard let status = object["status"] as? String else { return nil }
