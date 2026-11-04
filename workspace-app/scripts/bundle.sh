@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build "Kunj Workspace.app" from the Swift package: SwiftTerm (vendored, patched), Monaco
-# (Resources/web/vs), the bundled fonts, a release build for arm64 and x86_64, the app bundle
+# Build "Kunj Workspace.app" from the Swift package: SwiftTerm (vendored, patched), the Monaco page
+# (web/, built by Vite into Resources/web), the bundled fonts, a release build for arm64 and x86_64, the app bundle
 # with Info.plist (__VERSION__ filled in) and SwiftTerm's resource bundle, ad-hoc signature.
 #
 #   scripts/bundle.sh                    -> build/Kunj Workspace.app

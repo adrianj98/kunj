@@ -10,7 +10,7 @@ stays as the fallback.
 
 | Part | State |
 | --- | --- |
-| 1. Editor on monaco-vscode-api (option B, no visible change) | To do |
+| 1. Editor on monaco-vscode-api (option B, no visible change) | Shipped |
 | 2. CLI: `kunj lsp list` / `kunj lsp run`, `lsp.servers.*`, `LspListJson` | To do |
 | 3. App: `LspSession` bridge, URI guard, `LspManager` lifecycle; definition, references, hover, diagnostics | To do |
 | 4. App: the Changes diff, status bar memory, Language Servers menu | To do |

@@ -1564,3 +1564,7 @@ macOS app zip (`kunj install macos` needs a release that has one).
 ## 2026-11-04 — tab bar: shells and agents apart from editors
 - The tab bar shows shell and agent tabs first, then a 1 px divider, then editor tabs (`TabRegistry.barOrder`); next/previous tab and the tab chosen after a close follow that order. The saved layout keeps opening order.
   Why: the user asked for shell and agent tabs to be separate from the other tabs, with a divider.
+
+## 2026-11-04 — workspace app editor on monaco-vscode-api (language servers part 1)
+- `workspace-app/web` is now a Vite build of `@codingame/monaco-vscode-api` 38.0.4 (configuration, languages, TextMate, theme services and 26 default language extensions) instead of `monaco-editor` 0.57's AMD `min/vs`. `index.html` and `app.js` moved from `Resources/web` to `web/` and `web/src/`; `Resources/web` is now build output (ignored). `src/main.ts` starts the services and the editor/TextMate workers; `app.js` is an ES module: themes are registered as VS Code colour-theme extensions (no `defineTheme`), token colours use TextMate scopes, a model's language comes from its file name (`newModel`).
+  Why: the user asked for real language servers (option C), which need monaco-vscode-api; the spike had only proved it works, the app had never been moved.

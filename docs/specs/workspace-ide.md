@@ -268,8 +268,8 @@ Kunj Workspace.app
 SwiftTerm is vendored at an exact tag by `scripts/prepare-swiftterm.sh` (the spike's one-line
 `Shaders.metal` patch, so it builds with the Command Line Tools, and a second patch in `Pty.swift`:
 the forked child closes every descriptor above 2 before `execve`, because `forkpty` does not and a
-shell's background job would otherwise hold `kunj events`' stdin open after the app is gone). Monaco's `min/vs` build is copied
-into `Resources/web/vs` by `web/copy-monaco.js`; Inter and JetBrains Mono (OFL) are fetched at pinned
+shell's background job would otherwise hold `kunj events`' stdin open after the app is gone). The Monaco page (monaco-vscode-api, [language-servers.md](language-servers.md#1-editor-on-monaco-vscode-api)) is built
+by Vite from `web/` into `Resources/web`; Inter and JetBrains Mono (OFL) are fetched at pinned
 versions into `Resources/fonts` by `scripts/fetch-fonts.sh` and registered through
 `ATSApplicationFontsPath`. `scripts/gen-tokens.js` turns `docs/workspace-app/design/tokens.json` into
 `Sources/KunjWorkspaceCore/Design/DesignTokens.swift` (committed; a test fails when they drift).

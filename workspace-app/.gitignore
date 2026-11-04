@@ -2,6 +2,6 @@
 build/
 vendor/
 web/node_modules/
-Resources/web/vs/
+Resources/web/
 Resources/fonts/
 build.log

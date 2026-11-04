@@ -1,9 +1,13 @@
-// The Monaco page. Swift (MonacoWebView) calls `window.kunj[name](args)` with one argument object
-// and receives messages posted to `window.webkit.messageHandlers.kunj`: `ready` once Monaco is up,
-// `error` for page errors. Modes: `?mode=diff` (the Changes column) and `?mode=editor` (the editor
-// tabs: one model per open file, keyed by the tab id; posts `dirty` and `save` with the id only, so
-// the page never names a file to Swift).
-(function () {
+// The Monaco page (monaco-vscode-api, started by main.ts). Swift (MonacoWebView) calls
+// `window.kunj[name](args)` with one argument object and receives messages posted to
+// `window.webkit.messageHandlers.kunj`: `ready` once the editor is up, `error` for page errors. Modes:
+// `?mode=diff` (the Changes column) and `?mode=editor` (the editor tabs: one model per open file, keyed
+// by the tab id; posts `dirty` and `save` with the id only, so the page never names a file to Swift).
+import * as monaco from 'monaco-editor';
+import { registerExtension, ExtensionHostKind } from '@codingame/monaco-vscode-api/extensions';
+import { updateUserConfiguration } from '@codingame/monaco-vscode-configuration-service-override';
+
+export async function start() {
   'use strict';
   const mode = new URLSearchParams(location.search).get('mode') || 'diff';
   const post = (m) => {
@@ -17,25 +21,21 @@
   const LINE_HEIGHT = Math.round(11.5 * 1.65);
   const EDITOR_FONT_SIZE = 12.5; // the terminal's size: an editor tab sits where terminals do
 
-  // Language ids by file extension (Monaco's basic languages), or by file name.
-  const BY_EXT = {
-    ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
-    js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
-    json: 'json', jsonc: 'json', md: 'markdown', markdown: 'markdown', mdx: 'mdx',
-    swift: 'swift', py: 'python', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin', kts: 'kotlin',
-    rb: 'ruby', php: 'php', cs: 'csharp', c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp',
-    m: 'objective-c', sh: 'shell', bash: 'shell', zsh: 'shell', yml: 'yaml', yaml: 'yaml',
-    css: 'css', scss: 'scss', less: 'less', html: 'html', htm: 'html', xml: 'xml', plist: 'xml', svg: 'xml',
-    sql: 'sql', graphql: 'graphql', gql: 'graphql', lua: 'lua', r: 'r', dart: 'dart', scala: 'scala',
-    ini: 'ini', toml: 'ini', proto: 'proto', tf: 'hcl', hcl: 'hcl', ps1: 'powershell', vue: 'html',
-  };
-  const BY_NAME = { dockerfile: 'dockerfile', makefile: 'shell', '.gitignore': 'shell', '.env': 'shell' };
+  // A model's language comes from its URI (the language extensions' file names and extensions); each
+  // model gets a unique one under /kunj/<n>/ so two sides or two tabs of one file never collide.
+  let modelCount = 0;
+  function newModel(text, path, language) {
+    const name = String(path || '').replace(/^\/+/, '');
+    if (language) return monaco.editor.createModel(text, language);
+    if (!name) return monaco.editor.createModel(text, 'plaintext');
+    const uri = monaco.Uri.from({ scheme: 'file', path: `/kunj/${++modelCount}/${name}` });
+    return monaco.editor.createModel(text, undefined, uri);
+  }
   function languageFor(path) {
-    const name = String(path || '').split('/').pop().toLowerCase();
-    if (BY_NAME[name]) return BY_NAME[name];
-    if (name.startsWith('dockerfile')) return 'dockerfile';
-    const dot = name.lastIndexOf('.');
-    return dot > 0 ? (BY_EXT[name.slice(dot + 1)] || 'plaintext') : 'plaintext';
+    const m = newModel('', path);
+    const id = m.getLanguageId();
+    m.dispose();
+    return id;
   }
 
   // `#rrggbb` + alpha (0–1) as `#rrggbbaa`.
@@ -52,26 +52,32 @@
   };
   function syntaxRules(dark) {
     const c = dark ? SYNTAX.dark : SYNTAX.light;
+    const rule = (scope, color) => ({ scope, settings: { foreground: '#' + color } });
     return [
-      { token: 'keyword', foreground: c.keyword },
-      { token: 'storage', foreground: c.keyword },
-      { token: 'string', foreground: c.string },
-      { token: 'string.escape', foreground: c.regexp },
-      { token: 'regexp', foreground: c.regexp },
-      { token: 'number', foreground: c.number },
-      { token: 'constant', foreground: c.number },
-      { token: 'type', foreground: c.type },
-      { token: 'type.identifier', foreground: c.type },
-      { token: 'annotation', foreground: c.type },
-      { token: 'string.key.json', foreground: c.type },
-      { token: 'key', foreground: c.type },
-      { token: 'attribute.name', foreground: c.number },
-      { token: 'attribute.value', foreground: c.string },
-      { token: 'tag', foreground: c.tag },
-      { token: 'metatag', foreground: c.tag },
-      { token: 'variable', foreground: c.tag },
-      { token: 'variable.predefined', foreground: c.tag },
+      rule(['keyword', 'storage', 'storage.type', 'storage.modifier', 'keyword.control'], c.keyword),
+      rule(['string', 'string.quoted', 'string.template'], c.string),
+      rule(['constant.character.escape', 'string.regexp'], c.regexp),
+      rule(['constant.numeric', 'constant.language', 'constant.other', 'support.constant'], c.number),
+      rule(['entity.name.type', 'entity.name.class', 'entity.name.interface', 'entity.name.enum', 'support.type',
+        'support.class', 'meta.decorator', 'support.type.property-name', 'entity.name.namespace'], c.type),
+      rule(['entity.other.attribute-name'], c.number),
+      rule(['entity.name.tag', 'variable.language', 'support.variable'], c.tag),
     ];
+  }
+
+  // setTheme registers each theme as a VS Code colour-theme extension under a new id (a theme
+  // extension cannot be changed once registered) and selects it.
+  let themeCount = 0;
+  async function applyTheme(dark, colors, tokenColors) {
+    const id = `kunj-${++themeCount}`;
+    const ext = registerExtension({
+      name: id, publisher: 'kunj', version: '0.0.0', engines: { vscode: '*' },
+      contributes: { themes: [{ id, label: id, uiTheme: dark ? 'vs-dark' : 'vs', path: `./${id}.json` }] },
+    }, ExtensionHostKind.LocalProcess);
+    const json = JSON.stringify({ name: id, type: dark ? 'dark' : 'light', colors, tokenColors, semanticHighlighting: false });
+    ext.registerFileUrl(`./${id}.json`, URL.createObjectURL(new Blob([json], { type: 'application/json' })));
+    await ext.whenReady();
+    await updateUserConfiguration(JSON.stringify({ 'workbench.colorTheme': id, 'editor.semanticHighlighting.enabled': false }));
   }
 
   let editor = null; // the diff editor (diff mode)
@@ -105,17 +111,13 @@
       root.setProperty('--red', t.red);
       const brackets = {};
       for (let i = 1; i <= 6; i++) brackets['editorBracketHighlight.foreground' + i] = t.text2;
-      monaco.editor.defineTheme('kunj', {
-        // The diff is in the ramp's text colours only, as the mockup's is (status colours are the
-        // design's only chroma, DESIGN.md principle 4); editor tabs get muted syntax colours.
-        base: t.dark ? 'vs-dark' : 'vs',
-        inherit: false,
-        rules: [
-          { token: '', foreground: t.text2.slice(1) },
-          { token: 'keyword', foreground: t.text2.slice(1) },
-          { token: 'comment', foreground: t.muted.slice(1) },
-        ].concat(mode === 'editor' ? syntaxRules(t.dark) : []),
-        colors: Object.assign(brackets, {
+      // The diff is in the ramp's text colours only, as the mockup's is (status colours are the
+      // design's only chroma, DESIGN.md principle 4); editor tabs get muted syntax colours.
+      const tokenColors = [
+        { settings: { foreground: t.text2 } },
+        { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: t.muted } },
+      ].concat(mode === 'editor' ? syntaxRules(t.dark) : []);
+      const colors = Object.assign(brackets, {
           'editor.background': t.bg,
           'editor.foreground': t.text2,
           'editorGutter.background': t.bg,
@@ -145,21 +147,19 @@
           'scrollbarSlider.background': alpha(t.muted, 0.2),
           'scrollbarSlider.hoverBackground': alpha(t.muted, 0.35),
           'scrollbarSlider.activeBackground': alpha(t.muted, 0.45),
-        }),
-      });
-      monaco.editor.setTheme('kunj');
-      return true;
+        });
+      return applyTheme(t.dark, colors, tokenColors).then(() => true);
     },
 
     /** Shows one file's two sides; resolves once the diff is shown ({ changes, language }). */
     showDiff({ original, modified, language, path }) {
-      const lang = language || languageFor(path);
       original = original || '';
       modified = modified || '';
       if ((original === '') !== (modified === '')) {
-        return showSingle(original === '' ? modified : original, original === '', lang);
+        return showSingle(original === '' ? modified : original, original === '', path, language);
       }
-      const dispose = replaceModels([monaco.editor.createModel(original, lang), monaco.editor.createModel(modified, lang)]);
+      const dispose = replaceModels([newModel(original, path, language), newModel(modified, path, language)]);
+      const lang = models[1].getLanguageId();
       showPane('diff');
       return new Promise((resolve) => {
         let done = false;
@@ -210,7 +210,7 @@
     openFile({ id, content, language, path }) {
       const old = files.get(id);
       if (old) old.model.dispose();
-      const model = monaco.editor.createModel(content || '', language || languageFor(path));
+      const model = newModel(content || '', path, language);
       const f = { model, saved: model.getAlternativeVersionId(), dirty: false, view: null };
       files.set(id, f);
       model.onDidChangeContent(() => postDirty(id, f));
@@ -298,8 +298,9 @@
     wireDefinition(code, () => (current ? { id: current } : null));
   }
 
-  function showSingle(text, added, lang) {
-    const model = monaco.editor.createModel(text, lang);
+  function showSingle(text, added, path, language) {
+    const model = newModel(text, path, language);
+    const lang = model.getLanguageId();
     const dispose = replaceModels([model]);
     single.setModel(model);
     editor.setModel(null);
@@ -324,7 +325,6 @@
   const COMMON = {
     readOnly: true,
     automaticLayout: true,
-    theme: 'kunj',
     fontFamily: FONT,
     fontSize: FONT_SIZE,
     lineHeight: LINE_HEIGHT,
@@ -399,32 +399,14 @@
     wireDefinition(single, () => ({ side: 'single' }));
   }
 
-  const loader = document.createElement('script');
-  loader.src = 'vs/loader.js';
-  loader.onerror = () => post({ type: 'error', message: 'vs/loader.js did not load' });
-  loader.onload = () => {
-    require.config({ paths: { vs: 'vs' } });
-    require(['vs/editor/editor.main'], async function () {
-      // Monaco measures the font when an editor is created: load it first.
-      try { await document.fonts.load(`${FONT_SIZE}px 'JetBrains Mono'`); } catch (e) { /* fallback font */ }
-      monaco.editor.defineTheme('kunj', { base: 'vs-dark', inherit: true, rules: [], colors: {} });
-      // The page sees one file and no node_modules, so every import would be an error: keep
-      // only syntax errors.
-      const ts = monaco.typescript;
-      if (ts) {
-        for (const d of [ts.typescriptDefaults, ts.javascriptDefaults]) {
-          d.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false });
-        }
-      }
-      // The other mode's empty panes cover the whole page (inset: 0) and would take every click
-      // and wheel event (#editor is last, so on top of the diff): take them out of the page.
-      for (const id of mode === 'diff' ? ['editor'] : ['diff', 'single']) {
-        document.getElementById(id).style.display = 'none';
-      }
-      if (mode === 'diff') createDiff();
-      else createEditor();
-      post({ type: 'ready', mode });
-    }, (err) => post({ type: 'error', message: 'require failed: ' + err }));
-  };
-  document.head.appendChild(loader);
-})();
+  // Monaco measures the font when an editor is created: load it first.
+  try { await document.fonts.load(`${FONT_SIZE}px 'JetBrains Mono'`); } catch (e) { /* fallback font */ }
+  // The other mode's empty panes cover the whole page (inset: 0) and would take every click
+  // and wheel event (#editor is last, so on top of the diff): take them out of the page.
+  for (const id of mode === 'diff' ? ['editor'] : ['diff', 'single']) {
+    document.getElementById(id).style.display = 'none';
+  }
+  if (mode === 'diff') createDiff();
+  else createEditor();
+  post({ type: 'ready', mode });
+}

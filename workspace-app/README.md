@@ -31,7 +31,7 @@ and npm (Monaco), `curl`, `git` and network access on the first build.
 | `Resources/web/` | The Monaco page (`index.html`); `vs/` is copied in by the build (ignored) |
 | `Resources/fonts/` | Inter and JetBrains Mono, fetched by the build (ignored) |
 | `vendor/SwiftTerm/` | SwiftTerm 1.20.0, fetched and patched by the build (ignored) |
-| `web/` | npm package pinning `monaco-editor` 0.57.0; `npm run build` copies `min/vs` to `Resources/web/vs` |
+| `web/` | The Monaco page: `@codingame/monaco-vscode-api` 38.0.4 (every `@codingame` package one version) with TextMate grammars and VS Code colour themes; `src/main.ts` starts the services, `src/app.js` is the page API. `npm run build` (Vite) writes `Resources/web` (ignored by git) |
 | `Tests/Fixtures/fake-kunj` | `sh` script standing in for kunj in the tests (below) |
 | `Tests/Fixtures/responses/` | Its canned outputs |
 

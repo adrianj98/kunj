@@ -30,6 +30,7 @@ page only says where each thing stands.
 ## Done
 
 | Work | Spec | Commits |
+| Language servers part 1: the workspace app's Monaco page on monaco-vscode-api 38 (Vite, TextMate, VS Code colour themes, language by file name) | [language-servers.md](language-servers.md#1-editor-on-monaco-vscode-api) | this commit |
 | `/handoff` skill: detached agent with a brief in a new worktree, opened in the workspace app; `kunj install skill` | [agent-handoff.md](agent-handoff.md) | CLI fb3e7cc; app and docs in the commit after |
 | --- | --- | --- |
 | Better error messages across the CLI: one format (`✗ message` + hint, no stack trace unless `KUNJ_DEBUG=1`), raw git/Node/AWS errors explained, every message reviewed | — | 3689dd7, dde4ddb, e7c2444 |
@@ -109,8 +110,7 @@ page only says where each thing stands.
 | Phase 2 follow-ups left | [container-phase-2.md](container-phase-2.md) | `container.services` registered as a string setting (the registry has no object type); a snapshot copy reuses its own local branch on `ct start -c <same name>` (optional `switch -C`) |
 | MCP bridge follow-ups | [container-phase-2.md](container-phase-2.md#open-questions-and-roadmap) | Verify the download block in a visible browser |
 | Agent state follow-ups | [workspace-ide.md](workspace-ide.md#open-questions) | A killed session's leftover state shows until the next hook; `--settings` lands after a pipe in a compound `agent.command` |
-| Language servers, part 1: move Monaco to monaco-vscode-api 38 (option B): Vite build, VS Code colour themes from `tokens.json`, language by file name, explicit worker labels | [language-servers.md](language-servers.md#1-editor-on-monaco-vscode-api) | Adopted 2026-11-04 as the first part of language servers ([spike REPORT](../../spikes/monaco-vscode-api/REPORT.md)) |
-| Language servers, parts 2–4: `kunj lsp`, the bridge and lifecycle, the diff and memory view | [language-servers.md](language-servers.md) | After part 1 |
+| Language servers, parts 2–4: `kunj lsp`, the bridge and lifecycle, the diff and memory view | [language-servers.md](language-servers.md) | In progress |
 | Minor follow-ups from the CLI contract review | — | Ctrl-C in a tmux-less `kunj agent` can lose the exit code; the top-level git watcher in `kunj events` is not restarted on error |
 
 ## Waiting on you
