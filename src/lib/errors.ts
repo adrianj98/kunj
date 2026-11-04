@@ -94,12 +94,17 @@ export function describeError(error: unknown): DescribedError {
 
   // A program kunj runs is not installed
   if (e.code === 'ENOENT' && (typeof (e as { syscall?: unknown }).syscall === 'string' && String((e as { syscall?: unknown }).syscall).startsWith('spawn'))) {
+    // Node gives the same error when the directory a program was asked to run in is gone
     const tool = commandOf(e) ?? 'a required program';
-    return { message: `${tool} is not installed or not on your PATH.`, hint: TOOL_INSTALL[tool], unexpected: false };
+    return {
+      message: `Could not run ${tool}: it is not installed or not on your PATH, or the directory it was run in no longer exists.`,
+      hint: TOOL_INSTALL[tool],
+      unexpected: false,
+    };
   }
   // A shell command whose program is missing (exec through /bin/sh)
   const stderr = typeof e.stderr === 'string' ? e.stderr : '';
-  const notFound = /(?:^|\s)(\S+): (?:command )?not found/.exec(stderr);
+  const notFound = /^(?:\/bin\/)?(?:ba|z)?sh: (?:line \d+: |\d+: )?(\S+): (?:command )?not found$/m.exec(stderr);
   if (notFound && typeof e.cmd === 'string') {
     const tool = notFound[1].split('/').pop()!;
     return { message: `${tool} is not installed or not on your PATH.`, hint: TOOL_INSTALL[tool], unexpected: false };

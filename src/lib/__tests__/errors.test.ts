@@ -25,7 +25,7 @@ describe('describeError', () => {
   it('names a missing program', () => {
     const e = Object.assign(new Error('spawn tmux ENOENT'), { code: 'ENOENT', syscall: 'spawn tmux', path: 'tmux' });
     const d = describeError(e);
-    expect(d.message).toBe('tmux is not installed or not on your PATH.');
+    expect(d.message).toMatch(/^Could not run tmux: it is not installed or not on your PATH, or the directory/);
     expect(d.hint).toMatch(/brew install tmux/);
   });
 
@@ -38,6 +38,11 @@ describe('describeError', () => {
     const d = describeError(execError('git frobnicate', 'git: frobnicate is not a git command'));
     expect(d.message).toBe('git: frobnicate is not a git command');
     expect(d.hint).toBe('(while running: git frobnicate)');
+  });
+
+  it('names a program the shell could not find, but not any "x: not found" line', () => {
+    expect(describeError(execError('gh pr list', '/bin/sh: gh: command not found')).message).toBe('gh is not installed or not on your PATH.');
+    expect(describeError(execError('git show x', 'fatal: ref: not found')).message).toBe('ref: not found');
   });
 
   it('explains missing AWS credentials', () => {

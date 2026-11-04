@@ -1533,3 +1533,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - Stack traces only with `KUNJ_DEBUG=1`; an unexpected error says to use it.
 - `--json` errors use the same translated message (shape unchanged).
 - worktree.ts's own git-error cleaner now reuses `describeError()` and throws a `UserError` with the hint.
+- Adversarial review fixes: a spawn ENOENT can also mean the working directory is gone, so the message names both; the shell "not found" detection only matches `sh: x: not found` lines, not any `x: not found` in stderr.
