@@ -337,6 +337,27 @@ export interface SecretApplyJson {
  * or failed (never the ones searched without a match); `searched` counts all of them. `commits`,
  * `logs` and `containers` are present only when their scope was asked for.
  */
+/** `kunj lsp list --json`: the language servers the workspace app may start, and its lifecycle numbers. */
+export interface LspListJson {
+  servers: Array<{
+    language: string;
+    command: string[];
+    extensions: string[];
+    /** cached: keeps an index on disk, cheap to restart; cold: re-reads the project */
+    restart: 'cached' | 'cold';
+    cachePaths: string[];
+    installed: boolean;
+    /** Where the program was found */
+    path?: string;
+    /** How to install it when it is missing */
+    install?: string;
+  }>;
+  idleStopMinutes: { cached: number; cold: number };
+  closedStopMinutes: number;
+  maxServers: number;
+  readyTimeoutMs: number;
+}
+
 export interface SearchJson {
   query: {
     pattern: string;

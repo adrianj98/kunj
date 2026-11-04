@@ -1643,5 +1643,65 @@
     ],
     "relatedSettings": null,
     "sensitive": false
+  },
+  {
+    "key": "lsp.idleStopMinutes.cached",
+    "type": "number",
+    "category": "lsp",
+    "default": 5,
+    "description": "Stop a language server that keeps a cache on disk (gopls, sourcekit-lsp, clangd) after this many idle minutes, even with tabs open",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "lsp.idleStopMinutes.cold",
+    "type": "number",
+    "category": "lsp",
+    "default": 15,
+    "description": "Stop a language server without a disk cache (typescript-language-server) after this many idle minutes, even with tabs open",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "lsp.closedStopMinutes",
+    "type": "number",
+    "category": "lsp",
+    "default": 2,
+    "description": "Stop a language server this many minutes after the last editor tab of its language in that worktree closes",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "lsp.maxServers",
+    "type": "number",
+    "category": "lsp",
+    "default": 3,
+    "description": "At most this many language servers run at once; starting another stops one (a cached one first, else the least recently used)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "lsp.readyTimeoutMs",
+    "type": "number",
+    "category": "lsp",
+    "default": 1500,
+    "description": "A go to definition waits this long for a starting server before it searches instead",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
   }
 ]

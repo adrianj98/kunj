@@ -13,6 +13,7 @@ import { registerHookSettings } from './hooks';
 import { registerContainerSettings } from './container';
 import { registerAgentSettings } from './agent';
 import { registerSecretsSettings } from './secrets';
+import { registerLspSettings } from './lsp';
 import { settingsRegistry } from '../lib/settings-registry';
 
 let initialized = false;
@@ -37,6 +38,7 @@ export function initializeSettings(): void {
   registerContainerSettings();
   registerAgentSettings();
   registerSecretsSettings();
+  registerLspSettings();
 
   initialized = true;
 }

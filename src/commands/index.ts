@@ -73,6 +73,8 @@ import { InstallCommand } from './install';
 import { UICommand } from '../ui';
 
 // Export a function that returns all command instances
+import { LspCommand } from './lsp';
+
 export function getAllCommands(): BaseCommand[] {
   return [
     new CreateCommand(),
@@ -104,6 +106,7 @@ export function getAllCommands(): BaseCommand[] {
     new SessionsCommand(),
     new EventsCommand(),
     new SearchCommand(),
+    new LspCommand(),
     new SecretCommand(),
     new RunCommand(),
     new ServeCommand(),

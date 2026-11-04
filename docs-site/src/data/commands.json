@@ -772,6 +772,26 @@
     "helpText": null
   },
   {
+    "name": "lsp",
+    "usage": "lsp [action] [language]",
+    "description": "Language servers for the workspace app's editor (list, run)",
+    "arguments": "[action] [language]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "-b, --branch <branch>",
+        "description": "[run] The worktree to run the server in (default: the current one)",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Actions:\n  list               the configured servers, whether each is installed, and the lifecycle settings\n  run <language>     run the server in the worktree, stdio passed through (the workspace app does this)\n\nServers are lsp.servers.<language> in the config: { \"command\": [...], \"extensions\": [...],\n\"restart\": \"cached\" | \"cold\", \"cachePaths\": [...] }, merged over kunj's defaults (typescript,\nswift, go, cpp). The app starts one when an editor tab opens and stops it when idle\n(lsp.idleStopMinutes.*, lsp.closedStopMinutes, lsp.maxServers)."
+  },
+  {
     "name": "pr",
     "usage": "pr [prNumber]",
     "description": "Create or view pull requests on GitHub",
