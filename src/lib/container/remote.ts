@@ -21,6 +21,7 @@ import {
   LabelledObject,
   LogOptions,
 } from './backend';
+import { ContainerError } from './errors';
 import { CHANNEL, ErrorBody, ExecControl, ExecRequest, HIGH_WATER, InfoJson, PROTOCOL_VERSION, decodeFrame, encodeFrame, labelQuery, parseControl } from '../serve/protocol';
 
 export type RemoteErrorCode = 'remote-unreachable' | 'remote-unauthorized' | 'remote-protocol' | 'remote-refused';
@@ -87,7 +88,8 @@ export class RemoteKunjBackend implements ContainerBackend {
       const info = (await this.json('GET', '/v1/info')) as InfoJson;
       if (info.protocol !== PROTOCOL_VERSION) {
         throw new RemoteError(
-          `remote ${this.name} speaks protocol ${info.protocol}, this kunj speaks ${PROTOCOL_VERSION}: update ${info.protocol < PROTOCOL_VERSION ? 'kunj serve on the remote' : 'kunj here'}`,
+          `Remote ${this.name} speaks protocol ${info.protocol} and this kunj speaks ${PROTOCOL_VERSION}. ` +
+            `Update ${info.protocol < PROTOCOL_VERSION ? `kunj on the remote (it runs kunj serve)` : 'kunj here (npm install -g kunj)'}.`,
           'remote-protocol',
         );
       }
@@ -137,7 +139,7 @@ export class RemoteKunjBackend implements ContainerBackend {
             try {
               parsed = JSON.parse(text);
             } catch {
-              return reject(new RemoteError(`remote ${this.name} answered ${res.statusCode} with something that is not kunj serve`, 'remote-protocol'));
+              return reject(new RemoteError(`Remote ${this.name} answered HTTP ${res.statusCode}, but not as kunj serve. Check its URL with kunj remote list.`, 'remote-protocol'));
             }
           }
           resolve({ status: res.statusCode ?? 0, body: parsed });
@@ -145,7 +147,7 @@ export class RemoteKunjBackend implements ContainerBackend {
         res.on('error', reject);
       });
       req.on('error', (err: NodeJS.ErrnoException) =>
-        reject(new RemoteError(`Docker is not available: remote ${this.name} is unreachable (${err.code ?? err.message})`, 'remote-unreachable')));
+        reject(new RemoteError(this.unreachableMessage(err), 'remote-unreachable')));
       req.end(body);
     });
   }
@@ -157,13 +159,23 @@ export class RemoteKunjBackend implements ContainerBackend {
     throw this.errorOf(reply);
   }
 
+  // "Docker is not available" first: the same words as a local daemon that is down
+  private unreachableMessage(err: Error & { code?: string }): string {
+    return `Docker is not available: remote ${this.name} is unreachable (${err.code ?? err.message}). ` +
+      `Check that kunj serve runs there, then try kunj remote ping ${this.name}.`;
+  }
+
+  private refusedToken(): RemoteError {
+    return new RemoteError(`Remote ${this.name} refused the token. Replace it with kunj remote token ${this.name}.`, 'remote-unauthorized');
+  }
+
   private errorOf(reply: Reply): Error {
     const error = (reply.body as ErrorBody | undefined)?.error;
     const message = error?.message ?? `HTTP ${reply.status}`;
-    if (reply.status === 401) return new RemoteError(`remote ${this.name} refused the token (kunj remote token ${this.name} to replace it)`, 'remote-unauthorized');
-    if (error?.code === 'remote-refused') return new RemoteError(`remote ${this.name} refused: ${message}`, 'remote-refused');
-    if (error?.code === 'backend') return new Error(message);
-    return new RemoteError(`remote ${this.name}: ${message}`, 'remote-protocol');
+    if (reply.status === 401) return this.refusedToken();
+    if (error?.code === 'remote-refused') return new RemoteError(`Remote ${this.name} refused: ${message}`, 'remote-refused');
+    if (error?.code === 'backend') return new ContainerError(message);
+    return new RemoteError(`Remote ${this.name}: ${message}`, 'remote-protocol');
   }
 
   // ---- ContainerBackend --------------------------------------------------------------------
@@ -282,14 +294,14 @@ export class RemoteKunjBackend implements ContainerBackend {
         const text = rawToString(data);
         const control = tryControl(text);
         if (control && 'error' in control) {
-          failed = new Error(control.error);
+          failed = new ContainerError(control.error);
           return;
         }
         try {
           const line = JSON.parse(text) as { stream: 'stdout' | 'stderr'; line: string };
           onLine(line.stream, line.line);
         } catch {
-          failed = new RemoteError(`remote ${this.name}: malformed log frame`, 'remote-protocol');
+          failed = new RemoteError(`Remote ${this.name} sent a malformed log frame.`, 'remote-protocol');
           ws.close();
         }
       });
@@ -318,13 +330,13 @@ export class RemoteKunjBackend implements ContainerBackend {
         const text = rawToString(data);
         const control = tryControl(text);
         if (control && 'error' in control) {
-          failed = new Error(`docker events failed: ${control.error}`);
+          failed = new ContainerError(`docker events failed: ${control.error}`);
           return;
         }
         try {
           onEvent(JSON.parse(text) as BackendEvent);
         } catch {
-          failed = new RemoteError(`remote ${this.name}: malformed event frame`, 'remote-protocol');
+          failed = new RemoteError(`Remote ${this.name} sent a malformed event frame.`, 'remote-protocol');
           ws.close();
         }
       });
@@ -336,7 +348,7 @@ export class RemoteKunjBackend implements ContainerBackend {
       ws.on('close', () => {
         signal.removeEventListener('abort', onAbort);
         if (signal.aborted) return resolve();
-        reject(failed ?? new Error('docker events failed: the remote closed the event stream'));
+        reject(failed ?? new ContainerError(`docker events failed: remote ${this.name} closed the event stream`));
       });
     });
   }
@@ -422,7 +434,7 @@ export class RemoteKunjBackend implements ContainerBackend {
           }
           const control = parseControl(rawToString(data));
           if ('exit' in control) exitCode = control.exit;
-          else if ('error' in control) failure = new Error(control.error);
+          else if ('error' in control) failure = new ContainerError(control.error);
         } catch (err) {
           failure = err instanceof Error ? err : new Error(String(err));
           ws.close();
@@ -432,7 +444,7 @@ export class RemoteKunjBackend implements ContainerBackend {
       ws.on('close', () =>
         finish(() => {
           if (failure) return reject(failure);
-          if (exitCode === undefined) return reject(new Error('exec ended: connection closed'));
+          if (exitCode === undefined) return reject(new ContainerError(`exec ended: connection closed before the command on remote ${this.name} reported its exit code`));
           resolve({ exitCode, stdout: '' });
         }));
     });
@@ -449,9 +461,9 @@ export class RemoteKunjBackend implements ContainerBackend {
   private wsError(err: Error & { code?: string }): Error {
     // ws reports a refused upgrade as "Unexpected server response: 401"
     const m = /Unexpected server response: (\d+)/.exec(err.message);
-    if (m?.[1] === '401') return new RemoteError(`remote ${this.name} refused the token (kunj remote token ${this.name} to replace it)`, 'remote-unauthorized');
-    if (m) return new RemoteError(`remote ${this.name}: HTTP ${m[1]} on a stream`, 'remote-protocol');
-    return new RemoteError(`Docker is not available: remote ${this.name} is unreachable (${err.code ?? err.message})`, 'remote-unreachable');
+    if (m?.[1] === '401') return this.refusedToken();
+    if (m) return new RemoteError(`Remote ${this.name} answered HTTP ${m[1]} on a stream. Check that kunj on the remote is up to date.`, 'remote-protocol');
+    return new RemoteError(this.unreachableMessage(err), 'remote-unreachable');
   }
 
   /** A request whose body is a stream (a tar); the reply is JSON like a unary call. */
@@ -469,14 +481,14 @@ export class RemoteKunjBackend implements ContainerBackend {
           try {
             parsed = text ? JSON.parse(text) : {};
           } catch {
-            return reject(new RemoteError(`remote ${this.name} answered ${res.statusCode} with something that is not kunj serve`, 'remote-protocol'));
+            return reject(new RemoteError(`Remote ${this.name} answered HTTP ${res.statusCode}, but not as kunj serve. Check its URL with kunj remote list.`, 'remote-protocol'));
           }
           if (res.statusCode === 200) resolve(parsed);
           else reject(this.errorOf({ status: res.statusCode ?? 0, body: parsed }));
         });
       });
       req.on('error', (err: NodeJS.ErrnoException) =>
-        reject(new RemoteError(`Docker is not available: remote ${this.name} is unreachable (${err.code ?? err.message})`, 'remote-unreachable')));
+        reject(new RemoteError(this.unreachableMessage(err), 'remote-unreachable')));
       body.on('error', err => req.destroy(err as Error));
       body.pipe(req);
     });
@@ -577,7 +589,7 @@ export class RemoteKunjBackend implements ContainerBackend {
           else if ('error' in control) {
             failure = control.error === 'timeout'
               ? new ExecTimeoutError(`docker exec timed out after ${io.timeoutMs} ms`)
-              : new Error(control.error);
+              : new ContainerError(control.error);
           }
         } catch (err) {
           failure = err instanceof Error ? err : new Error(String(err));
@@ -588,7 +600,7 @@ export class RemoteKunjBackend implements ContainerBackend {
       ws.on('close', () =>
         finish(() => {
           if (failure) return reject(failure);
-          if (exitCode === undefined) return reject(new Error('exec ended: connection closed'));
+          if (exitCode === undefined) return reject(new ContainerError(`exec ended: connection closed before the command on remote ${this.name} reported its exit code`));
           resolve({ exitCode, stdout: Buffer.concat(collected).toString() });
         }));
     });

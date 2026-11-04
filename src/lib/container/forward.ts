@@ -5,6 +5,7 @@
 import * as net from 'net';
 import { PassThrough } from 'stream';
 import { ContainerBackend } from './backend';
+import { ContainerError } from './errors';
 
 export interface ForwardSpec {
   container: number;
@@ -29,7 +30,7 @@ export function parseForwardSpec(text: string): ForwardSpec {
   if (parts.length <= 2 && ports.every(p => p !== undefined)) {
     return ports.length === 1 ? { container: ports[0]! } : { host: ports[0]!, container: ports[1]! };
   }
-  throw new Error(`Invalid port "${text}": expected <port> or <hostPort>:<port>`);
+  throw new ContainerError(`Invalid port "${text}": expected <port> or <hostPort>:<port>, each from 1 to 65535 (e.g. 3000 or 8080:3000).`);
 }
 
 const NEXT_FREE_TRIES = 100;
@@ -51,6 +52,7 @@ function listenLocal(server: net.Server, preferred: number, nextFree = false): P
   const next = (port: number) => (nextFree && port < Math.min(preferred + NEXT_FREE_TRIES, 65535) ? port + 1 : 0);
   const tryFrom = (port: number): Promise<number> =>
     attempt(port).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'EACCES') throw new ContainerError(`Not allowed to listen on 127.0.0.1:${port}. Use a host port above 1023 with <hostPort>:<port>.`);
       if (err.code !== 'EADDRINUSE' || port === 0) throw err;
       return tryFrom(next(port));
     });

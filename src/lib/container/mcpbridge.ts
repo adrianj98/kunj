@@ -18,6 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { PassThrough } from 'stream';
 import { ContainerBackend } from './backend';
+import { ContainerError } from './errors';
 import { pidRegistry } from './pidregistry';
 
 export interface McpServerConfig {
@@ -452,10 +453,10 @@ export function mergeClaudeConfig(text: string | null, names: string[]): string 
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw new Error('~/.claude.json in the container is not valid JSON; not changed');
+      throw new ContainerError('~/.claude.json in the container is not valid JSON, so it was not changed. Fix or delete it (kunj ct shell), then run kunj ct agent again.');
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new Error('~/.claude.json in the container is not a JSON object; not changed');
+      throw new ContainerError('~/.claude.json in the container is not a JSON object, so it was not changed. Fix or delete it (kunj ct shell), then run kunj ct agent again.');
     }
     config = parsed as Record<string, unknown>;
   }
@@ -484,13 +485,13 @@ const WRITE_CLAUDE_CONFIG = 'umask 077; f="$HOME/.claude.json"; t="$f.kunj.$$"; 
 export async function installMcpConfig(backend: ContainerBackend, id: string, user: string, names: string[]): Promise<void> {
   const as = user || undefined;
   const read = await backend.exec(id, ['sh', '-c', READ_CLAUDE_CONFIG], { user: as });
-  if (read.exitCode !== 0 && read.exitCode !== 3) throw new Error(`Could not read ~/.claude.json in the container (exit ${read.exitCode})`);
+  if (read.exitCode !== 0 && read.exitCode !== 3) throw new ContainerError(`Could not read ~/.claude.json in the container (exit ${read.exitCode})`);
   const merged = mergeClaudeConfig(read.exitCode === 3 ? null : read.stdout, names);
   if (merged === null) return;
   const stdin = new PassThrough();
   stdin.end(merged);
   const write = await backend.exec(id, ['sh', '-c', WRITE_CLAUDE_CONFIG], { user: as, stdin });
-  if (write.exitCode !== 0) throw new Error(`Could not write ~/.claude.json in the container (exit ${write.exitCode})`);
+  if (write.exitCode !== 0) throw new ContainerError(`Could not write ~/.claude.json in the container (exit ${write.exitCode})`);
 }
 
 // ---------------------------------------------------------------------
@@ -644,19 +645,19 @@ export async function runBridge(
   cfg: McpServerConfig,
   opts: BridgeOptions,
 ): Promise<void> {
-  if (!SERVER_NAME.test(name)) throw new Error(`Invalid MCP server name "${name}"`);
-  if (opts.user && !USER_NAME.test(opts.user)) throw new Error(`Invalid container user "${opts.user}"`);
+  if (!SERVER_NAME.test(name)) throw new ContainerError(`Invalid MCP server name "${name}" in container.mcp: use letters, digits, _ and -.`);
+  if (opts.user && !USER_NAME.test(opts.user)) throw new ContainerError(`Invalid container user "${opts.user}".`);
   const { signal } = opts;
   const log = opts.log ?? (() => {});
 
   const run = await backend.containerRun(containerId);
-  if (!run || run.state !== 'running') throw new Error('The container is not running');
+  if (!run || run.state !== 'running') throw new ContainerError('The container is not running, so there is nothing to bridge to. Start it with kunj ct start.');
 
   let user = opts.user;
   if (!user) {
     const r = await backend.exec(containerId, ['id', '-un']);
     user = r.stdout.trim();
-    if (r.exitCode !== 0 || !USER_NAME.test(user)) throw new Error('Cannot tell which user the container runs as');
+    if (r.exitCode !== 0 || !USER_NAME.test(user)) throw new ContainerError('Cannot tell which user the container runs as, so the MCP bridge was not started.');
   }
 
   const policy = originPolicy(cfg, opts.forwardedPorts ?? (() => []));
@@ -686,8 +687,8 @@ export async function runBridge(
       if (now.state !== 'running' || now.startedAt !== run.startedAt) return;
 
       const prepared = await backend.exec(containerId, ['sh', '-c', PREPARE, 'sh', user], { user: 'root' });
-      if (prepared.exitCode === 3) throw new Error('socat is not installed in the container; the MCP bridge needs it');
-      if (prepared.exitCode !== 0) throw new Error(`Could not create ${MCP_SOCKET_DIR} in the container (exit ${prepared.exitCode})`);
+      if (prepared.exitCode === 3) throw new ContainerError('socat is not installed in the container, and the MCP bridge needs it. Add it to the image (kunj\'s sandbox image has it), or remove container.mcp.');
+      if (prepared.exitCode !== 0) throw new ContainerError(`Could not create ${MCP_SOCKET_DIR} in the container (exit ${prepared.exitCode})`);
       // A listener left by a bridge that died
       await backend.exec(containerId, stopCommand(name), { user });
       if (signal.aborted) break;

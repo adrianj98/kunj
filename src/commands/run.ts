@@ -4,6 +4,7 @@
 // On the fast path (src/commands/fast.ts): keep top-level imports light.
 
 import { BaseCommand } from '../lib/command';
+import { formatError, UserError } from '../lib/errors';
 import { getCurrentBranch } from '../lib/git';
 import { getCurrentWorktreePath } from '../lib/worktree';
 import { hostSecrets, runAttached, UnlockSeam } from '../lib/secrets/host';
@@ -61,7 +62,7 @@ export class RunCommand extends BaseCommand {
   async execute(command?: any, options?: any): Promise<void> {
     const argv: string[] = Array.isArray(command) ? command : [];
     const opts: RunOptions = (options && typeof options === 'object' ? options : {}) as RunOptions;
-    if (argv.length === 0) throw new Error('No command given: kunj run -- <command…>');
+    if (argv.length === 0) throw new UserError('Give the command to run.', 'Usage: kunj run [--branch <b>] -- <command…>');
 
     const branch = opts.branch || (await (this.deps.currentBranch ?? getCurrentBranch)()) || undefined;
     const root = await (this.deps.worktreeRoot ?? (() => getCurrentWorktreePath()))();
@@ -77,7 +78,7 @@ export class RunCommand extends BaseCommand {
       // `kunj agent` and `kunj worktree shell` run this as a tmux pane's process: without the wait the
       // pane, and the message with it, would close at once and leave only "[exited]".
       if (opts.hold) {
-        process.stderr.write(`✗ ${error instanceof Error ? error.message : String(error)}\nPress Enter to close.\n`);
+        process.stderr.write(`${formatError(error)}\nPress Enter to close.\n`);
         await (this.deps.waitForEnter ?? waitForEnter)();
       }
       throw error;

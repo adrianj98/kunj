@@ -1534,3 +1534,12 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - `--json` errors use the same translated message (shape unchanged).
 - worktree.ts's own git-error cleaner now reuses `describeError()` and throws a `UserError` with the hint.
 - Adversarial review fixes: a spawn ENOENT can also mean the working directory is gone, so the message names both; the shell "not found" detection only matches `sh: x: not found` lines, not any `x: not found` in stderr.
+
+## 2026-11-04 — every error message reviewed (~425 rewritten, 89 files)
+- General git/AI commands (~120): "not a git repository" checks share `requireGitRepo()`/`notGitRepoError()`; git.ts helpers return "Could not X: reason"; `requireGhCli()` tells gh missing from gh logged out; `console.error` + `exit(1)` in execute() became `UserError`s (so `--json` prints `{error}`); `kunj flow`/`kunj jira` now exit 1 on failure (they exited 0). Wrong hints fixed: `kunj config set k v` → `kunj config --set k=v`; stash-pop conflicts are detected on stdout.
+- Worktrees, agents, repos, hooks, install (~80): every "not found" names the command that lists what exists; hook failures say how to skip/fix; consumer-matched text ("Unknown repos action", Docker timeout text) kept.
+- Containers (~165): Docker down/missing, blueprint/devcontainer/services validation now names file and field (a JSON syntax error used to be a bare SyntaxError), next steps for push, tokens, remove guard, remotes; `kunj ct` prints through `formatError()`.
+- Secrets, serve, remotes (~60): each locked/corrupt vault message says how to recover; invalid secret names are no longer echoed (a value pasted as the name would be printed).
+- `ExecTimeoutError` counts as expected (no "bug" footer).
+- Review fixes: stash warnings go to stderr (they could land in `--json` stdout); a successful `kunj stash` whose follow-up listing fails now warns instead of reporting the stash failed.
+- Docs: docs-site installation page "When a command fails"; okf command-system page; tracker line moved to Done.

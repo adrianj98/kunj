@@ -4,7 +4,8 @@ import chalk from 'chalk';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { BaseCommand } from '../lib/command';
-import { executeGitCommand, getGitRoot } from '../lib/git';
+import { executeGitCommand, getGitRoot, gitFailureLine, wrapError } from '../lib/git';
+import { UserError } from '../lib/errors';
 import { loadConfig } from '../lib/config';
 
 const execAsync = promisify(exec);
@@ -122,9 +123,7 @@ export class GraphCommand extends BaseCommand {
       const { stdout, stderr } = await execAsync(gitCommand, { cwd: gitRoot });
 
       if (stderr && !stdout) {
-        console.error(chalk.red('\n❌ Error generating commit graph'));
-        console.error(chalk.gray(stderr));
-        process.exit(1);
+        throw new UserError(`Could not read the commit history: ${gitFailureLine(stderr)}`);
       }
 
       if (!stdout.trim()) {
@@ -170,9 +169,7 @@ export class GraphCommand extends BaseCommand {
       // Show helpful tips
       this.showTips(options, useUnicode);
     } catch (error: any) {
-      console.error(chalk.red('\n❌ Error generating commit graph'));
-      console.error(chalk.gray(error.message));
-      process.exit(1);
+      throw wrapError('Could not read the commit history', error);
     }
   }
 

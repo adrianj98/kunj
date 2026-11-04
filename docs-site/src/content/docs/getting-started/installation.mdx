@@ -74,6 +74,24 @@ The VS Code extension and the macOS menu bar app are installed separately with `
 See [Companion apps](../../integrations/apps/).
 </Aside>
 
+## When a command fails
+
+kunj prints what went wrong on one line and, when there is something you can do about it, the next
+step on the line below:
+
+```text
+✗ The path ~/projects/shop-api.git/kunj/worktrees/feature-login already exists.
+  Remove it, or pick another path (see `kunj worktree list` for what is there).
+```
+
+Errors from git, gh, Docker or AWS are explained in the same way rather than echoed. If kunj
+says an error looks like a bug, run the command again with `KUNJ_DEBUG=1` to see the stack trace,
+and include it when you report the problem:
+
+```bash
+KUNJ_DEBUG=1 kunj worktree add feature/login
+```
+
 ## Next steps
 
 - Run [`kunj setup`](../setup/) to add shell aliases and, optionally, connect Jira and install the

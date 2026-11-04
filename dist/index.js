@@ -43,6 +43,7 @@ const chalk_1 = __importDefault(require("chalk"));
 const command_1 = require("./lib/command");
 const fast_1 = require("./commands/fast");
 const version_1 = require("./lib/version");
+const errors_1 = require("./lib/errors");
 // Loaded lazily: pulling in every command costs close to a second of startup
 async function getAllCommands() {
     return (await Promise.resolve().then(() => __importStar(require('./commands')))).getAllCommands();
@@ -98,7 +99,7 @@ async function main() {
 }
 // Run the main function
 main().catch(error => {
-    console.error('Fatal error:', error);
+    console.error((0, errors_1.formatError)(error));
     process.exit(1);
 });
 //# sourceMappingURL=index.js.map

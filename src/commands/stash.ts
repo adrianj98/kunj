@@ -5,7 +5,8 @@ import inquirer from 'inquirer';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { BaseCommand } from '../lib/command';
-import { checkGitRepo, getCurrentBranch, getFileStatuses } from '../lib/git';
+import { requireGitRepo, wrapError, getCurrentBranch, getFileStatuses } from '../lib/git';
+import { describeError, UserError } from '../lib/errors';
 import { generateStashMessage } from '../lib/ai-commit';
 import { loadConfig } from '../lib/config';
 import { runActionHook } from '../lib/hooks';
@@ -76,11 +77,7 @@ export class StashCommand extends BaseCommand {
 
   async execute(action?: string, options: StashOptions = {}): Promise<void> {
     // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red('Error: Not a git repository'));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
     // Handle list flag or "list" action
     if (options.list || action === 'list') {
@@ -193,12 +190,15 @@ export class StashCommand extends BaseCommand {
 
       await runActionHook('post-stash', hookValues, hookOptions);
 
-      // Show stash list
+      // Show stash list; the stash is made, so a failing listing is only a warning
       console.log(chalk.cyan('\n📋 Current stashes:'));
-      await this.listStashes();
+      try {
+        await this.listStashes();
+      } catch (error) {
+        console.error(chalk.yellow(`⚠ The changes are stashed, but listing the stashes failed: ${describeError(error).message}`));
+      }
     } catch (error: any) {
-      console.error(chalk.red('Failed to create stash:'), error.message);
-      process.exit(1);
+      throw wrapError('Could not stash the changes', error);
     }
   }
 
@@ -324,7 +324,7 @@ export class StashCommand extends BaseCommand {
       if (error.message.includes('No stash entries')) {
         console.log(chalk.gray('No stashes found'));
       } else {
-        console.error(chalk.red('Failed to list stashes:'), error.message);
+        throw wrapError('Could not list the stashes', error);
       }
     }
   }
@@ -346,13 +346,7 @@ export class StashCommand extends BaseCommand {
         console.log(chalk.gray(stdout.trim()));
       }
     } catch (error: any) {
-      if (error.message.includes('CONFLICT')) {
-        console.error(chalk.red('⚠ Merge conflicts occurred while popping stash'));
-        console.log(chalk.yellow('Please resolve conflicts manually'));
-      } else {
-        console.error(chalk.red('Failed to pop stash:'), error.message);
-      }
-      process.exit(1);
+      throw stashFailure('Could not pop the stash', error);
     }
   }
 
@@ -364,8 +358,7 @@ export class StashCommand extends BaseCommand {
       try {
         await execAsync(`git stash show ${stashRef}`);
       } catch {
-        console.error(chalk.red(`Error: Stash ${stashRef} does not exist`));
-        process.exit(1);
+        throw noStash(stashRef);
       }
 
       console.log(chalk.blue(`Popping stash ${stashRef}...`));
@@ -376,13 +369,7 @@ export class StashCommand extends BaseCommand {
         console.log(chalk.gray(stdout.trim()));
       }
     } catch (error: any) {
-      if (error.message.includes('CONFLICT')) {
-        console.error(chalk.red('⚠ Merge conflicts occurred while popping stash'));
-        console.log(chalk.yellow('Please resolve conflicts manually'));
-      } else {
-        console.error(chalk.red('Failed to pop stash:'), error.message);
-      }
-      process.exit(1);
+      throw stashFailure('Could not pop the stash', error);
     }
   }
 
@@ -394,8 +381,7 @@ export class StashCommand extends BaseCommand {
       try {
         await execAsync(`git stash show ${stashRef}`);
       } catch {
-        console.error(chalk.red(`Error: Stash ${stashRef} does not exist`));
-        process.exit(1);
+        throw noStash(stashRef);
       }
 
       console.log(chalk.cyan(`\n📋 Stash ${stashRef} diff:\n`));
@@ -422,8 +408,7 @@ export class StashCommand extends BaseCommand {
 
       console.log(); // Add newline after less exits
     } catch (error: any) {
-      console.error(chalk.red('Failed to show stash diff:'), error.message);
-      process.exit(1);
+      throw wrapError('Could not show the stash', error);
     }
   }
 
@@ -435,9 +420,7 @@ export class StashCommand extends BaseCommand {
       try {
         await execAsync(`git stash show ${stashRef}`);
       } catch {
-        console.error(chalk.red(`Error: Stash ${stashRef} does not exist`));
-        console.log(chalk.gray('Use "kunj stash --list" to see available stashes'));
-        process.exit(1);
+        throw noStash(stashRef);
       }
 
       console.log(chalk.blue(`Applying stash ${stashRef}...`));
@@ -450,13 +433,7 @@ export class StashCommand extends BaseCommand {
       console.log(chalk.gray(`\nNote: Stash ${stashRef} is still in the stash list`));
       console.log(chalk.gray(`Use "kunj stash --drop ${index}" to remove it`));
     } catch (error: any) {
-      if (error.message.includes('CONFLICT')) {
-        console.error(chalk.red('⚠ Merge conflicts occurred while applying stash'));
-        console.log(chalk.yellow('Please resolve conflicts manually'));
-      } else {
-        console.error(chalk.red('Failed to apply stash:'), error.message);
-      }
-      process.exit(1);
+      throw stashFailure('Could not apply the stash', error);
     }
   }
 
@@ -468,9 +445,7 @@ export class StashCommand extends BaseCommand {
       try {
         await execAsync(`git stash show ${stashRef}`);
       } catch {
-        console.error(chalk.red(`Error: Stash ${stashRef} does not exist`));
-        console.log(chalk.gray('Use "kunj stash --list" to see available stashes'));
-        process.exit(1);
+        throw noStash(stashRef);
       }
 
       // Get stash description
@@ -495,8 +470,23 @@ export class StashCommand extends BaseCommand {
 
       console.log(chalk.green(`✓ Stash ${stashRef} dropped`));
     } catch (error: any) {
-      console.error(chalk.red('Failed to drop stash:'), error.message);
-      process.exit(1);
+      throw wrapError('Could not drop the stash', error);
     }
   }
+}
+
+function noStash(stashRef: string): UserError {
+  return new UserError(`There is no stash ${stashRef}.`, 'Run `kunj stash --list` to see the stashes.');
+}
+
+// A pop or apply that stopped on conflicts has still changed the working tree: say so
+function stashFailure(what: string, error: any): Error {
+  const output = `${error?.stdout ?? ''}${error?.message ?? ''}`;
+  if (output.includes('CONFLICT')) {
+    return new UserError(
+      'The stash was applied with merge conflicts; it is still in the stash list.',
+      'Resolve the conflicts and `git add` the files, then drop the stash with `kunj stash --drop <index>`.',
+    );
+  }
+  return wrapError(what, error);
 }

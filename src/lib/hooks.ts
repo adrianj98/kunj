@@ -27,6 +27,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getGlobalKunjDir, getKunjDir } from './config';
 import chalk from 'chalk';
+import { UserError } from './errors';
 import { ConfigVariables, RepoVariables, expandVariablesQuoted, resolveConfigVariables } from './config-vars';
 import {
   HOOKS_DIR,
@@ -240,7 +241,7 @@ export interface HookRunResult {
 export class HookError extends Error {
   readonly result!: HookRunResult;
   constructor(result: HookRunResult) {
-    super(describeHookFailure(result));
+    super(`${describeHookFailure(result)}. Fix the hook (\`kunj hooks list\` shows where it is), or pass --no-hooks to skip hooks.`);
     this.name = 'HookError';
     // Non-enumerable so console.error(error) shows the message, not the whole result
     Object.defineProperty(this, 'result', { value: result, enumerable: false });
@@ -305,7 +306,7 @@ function spawnHook(spec: SpawnSpec, context: HookContext, jsonMode: boolean): Pr
 export async function runHook(name: HookName, context: HookContext, options: RunHookOptions = {}): Promise<HookRunResult> {
   const definition = getHookDefinition(name);
   if (!definition) {
-    throw new Error(`Unknown hook '${name}'. Known hooks: ${HOOK_NAMES.join(', ')}`);
+    throw new UserError(`Unknown hook '${name}'.`, `Known hooks: ${HOOK_NAMES.join(', ')}.`);
   }
   const result: HookRunResult = { hook: name, enabled: !options.skip, executions: [], ok: true };
   if (options.skip) return result;
@@ -418,12 +419,12 @@ export function hookTemplate(definition: HookDefinition): string {
 export function createHookScript(name: HookName, scope: HookScope, force = false): string {
   const definition = getHookDefinition(name);
   if (!definition) {
-    throw new Error(`Unknown hook '${name}'. Known hooks: ${HOOK_NAMES.join(', ')}`);
+    throw new UserError(`Unknown hook '${name}'.`, `Known hooks: ${HOOK_NAMES.join(', ')}.`);
   }
   const dir = getHooksDir(scope);
   const file = path.join(dir, name);
   if (fs.existsSync(file) && !force) {
-    throw new Error(`Hook already exists: ${file} (use --force to overwrite)`);
+    throw new UserError(`The hook ${file} already exists.`, 'Edit it, or pass --force to replace it with the template.');
   }
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(file, hookTemplate(definition), { mode: 0o755 });

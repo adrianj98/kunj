@@ -2,6 +2,7 @@ import { FakeBackend } from '../../lib/container/__tests__/fake-backend';
 import { HARNESS_TOKEN, Harness, startHarness } from '../../lib/container/__tests__/remote-harness';
 import { ContainerInfo } from '../../lib/container/backend';
 import { containerNames, repoIdFromUrl } from '../../lib/container/names';
+import { ContainerError } from '../../lib/container/errors';
 
 const backend = new FakeBackend();
 
@@ -344,15 +345,15 @@ describe('ContainerCommand', () => {
   });
 
   it('prints a failing docker call as one line, without a stack', async () => {
-    jest.spyOn(backend, 'list').mockRejectedValueOnce(new Error('docker ps failed: Cannot connect to the Docker daemon'));
+    jest.spyOn(backend, 'list').mockRejectedValueOnce(new ContainerError('docker ps failed: Cannot connect to the Docker daemon'));
     await new ContainerCommand().execute('list', {});
     expect(errors).toEqual(['✗ docker ps failed: Cannot connect to the Docker daemon']);
     expect(process.exitCode).toBe(1);
   });
 
   it("prefers docker info's message when the daemon is down", async () => {
-    jest.spyOn(backend, 'list').mockRejectedValueOnce(new Error('docker ps failed: Cannot connect to the Docker daemon'));
-    jest.spyOn(backend, 'info').mockRejectedValueOnce(new Error('Docker is not available: Cannot connect to the Docker daemon'));
+    jest.spyOn(backend, 'list').mockRejectedValueOnce(new ContainerError('docker ps failed: Cannot connect to the Docker daemon'));
+    jest.spyOn(backend, 'info').mockRejectedValueOnce(new ContainerError('Docker is not available: Cannot connect to the Docker daemon'));
     await new ContainerCommand().execute('list', {});
     expect(errors).toEqual(['✗ Docker is not available: Cannot connect to the Docker daemon']);
   });
@@ -629,7 +630,7 @@ describe('ContainerCommand', () => {
       backend.execResults.set('sh -c command -v socat', { exitCode: 1, stdout: '' });
       await new ContainerCommand().execute('agent', 'feat', [], {});
       expect(spawnDetached).not.toHaveBeenCalled();
-      expect(logSpy.mock.calls.map(c => String(c[0])).join('\n')).toMatch(/Not forwarding ports: The network helper of this container predates/);
+      expect(logSpy.mock.calls.map(c => String(c[0])).join('\n')).toMatch(/Not forwarding ports: The network helper of this container is too old/);
     });
 
     it('agent still runs when the forwarder cannot be started', async () => {
@@ -662,8 +663,8 @@ describe('ContainerCommand', () => {
       await new ContainerCommand().execute('forward', 'feat', [], { auto: true });
       await new ContainerCommand().execute('forward', 'feat', ['3000'], {});
       expect(errors).toEqual([
-        '✗ The network helper of feat is not running, so no port can be forwarded; run kunj ct start feat',
-        '✗ The network helper of feat is not running, so no port can be forwarded; run kunj ct start feat',
+        '✗ The network helper of feat is not running, so no port can be forwarded. Start it with kunj ct start feat.',
+        '✗ The network helper of feat is not running, so no port can be forwarded. Start it with kunj ct start feat.',
       ]);
       expect(runAutoForward).not.toHaveBeenCalled();
       expect(spawnDetached).not.toHaveBeenCalled();
@@ -695,13 +696,13 @@ describe('ContainerCommand', () => {
       backend.existing = [mainContainer('feat'), helperContainer('feat')];
       backend.execResults.set('sh -c command -v socat', { exitCode: 1, stdout: '' });
       await new ContainerCommand().execute('forward', 'feat', ['3000'], {});
-      expect(errors[0]).toMatch(/^✗ The network helper of this container predates/);
+      expect(errors[0]).toMatch(/^✗ The network helper of this container is too old/);
     });
 
     it('forward --auto refuses port arguments', async () => {
       backend.existing = [mainContainer('feat')];
       await new ContainerCommand().execute('forward', 'feat', ['3000'], { auto: true });
-      expect(errors).toEqual(['✗ forward --auto takes no ports; it forwards whatever listens in the container']);
+      expect(errors).toEqual(['✗ forward --auto takes no ports; it forwards whatever listens in the container. Drop the ports, or leave out --auto.']);
       expect(runAutoForward).not.toHaveBeenCalled();
     });
 
@@ -956,7 +957,7 @@ describe('ContainerCommand', () => {
       await new ContainerCommand().execute('logs', 'feat-x', [], {});
       expect(backend.callsOf('logs')).toEqual([['postgres-id', { follow: true }], ['cid-1', { follow: false }]]);
       await new ContainerCommand().execute('logs', 'feat-x', ['nope'], {});
-      expect(errors).toEqual(['✗ feat-x has no service nope; services: postgres']);
+      expect(errors).toEqual(['✗ feat-x has no service nope; services: postgres.']);
     });
 
     it('logs --json prints one NDJSON object per line, tagged with the service and stream', async () => {
@@ -998,7 +999,7 @@ describe('ContainerCommand', () => {
       await new ContainerCommand().execute('forward', 'feat-x', ['postgres:5432'], {});
       await new ContainerCommand().execute('forward', 'feat-x', ['redis:6379'], {});
       expect(errors[0]).toMatch(/^✗ The postgres image has none of socat, bash or nc/);
-      expect(errors[1]).toBe('✗ Service redis is not running; run kunj ct start feat-x');
+      expect(errors[1]).toBe('✗ Service redis is not running. Start it with kunj ct start feat-x.');
       expect(forward.forwardPort).not.toHaveBeenCalled();
     });
   });
@@ -1049,7 +1050,7 @@ describe('ContainerCommand', () => {
   it('refuses to exec in a stopped container', async () => {
     backend.existing = [mainContainer('feat', { state: 'exited' })];
     await new ContainerCommand().execute('exec', 'feat', ['ls'], {});
-    expect(errors).toEqual(['✗ Container for feat is not running; run kunj ct start feat']);
+    expect(errors).toEqual(['✗ The container for feat is not running. Start it with kunj ct start feat.']);
     expect(backend.callsOf('exec')).toEqual([]);
   });
 
@@ -1176,7 +1177,7 @@ describe('ContainerCommand', () => {
       } finally {
         (process.stdin as any).isTTY = isTTY;
       }
-      expect(errors).toEqual([`✗ ${file} already exists; pass --yes to overwrite it`]);
+      expect(errors).toEqual([`✗ ${file} already exists. Pass --yes to overwrite it.`]);
       expect(process.exitCode).toBe(1);
       expect(fs.readFileSync(file, 'utf8')).toBe('{"setup":["make"]}\n');
     });
@@ -1204,7 +1205,7 @@ describe('ContainerCommand', () => {
       }
       expect((resolveBlueprint as jest.Mock).mock.calls).toHaveLength(2);
       expect(logSpy.mock.calls.map(c => c.join(' ')).filter(l => /push/.test(l))).toEqual([]);
-      expect(errors).toEqual(['✗ No blueprint; run kunj ct blueprint init', '✗ No blueprint; run kunj ct blueprint init']);
+      expect(errors).toEqual(['✗ No blueprint for this repository. Write one with kunj ct blueprint init.', '✗ No blueprint for this repository. Write one with kunj ct blueprint init.']);
       expect(snapshot.snapshotBlueprint).not.toHaveBeenCalled();
     });
 
@@ -1254,7 +1255,7 @@ describe('ContainerCommand', () => {
 
       (detectDefaultBranch as jest.Mock).mockResolvedValueOnce(null);
       await new ContainerCommand().execute('blueprint', 'snapshot', [], {});
-      expect(errors).toEqual(['✗ cannot detect the default branch; pass --base']);
+      expect(errors).toEqual(['✗ Cannot detect the default branch of origin. Pass --base <branch>.']);
     });
 
     it('blueprint snapshot takes an ssh origin through a host bundle, and --no-bundle opts out', async () => {
@@ -1315,7 +1316,7 @@ describe('ContainerCommand', () => {
     it('blueprint status without a blueprint exits 1 in text', async () => {
       (resolveBlueprint as jest.Mock).mockResolvedValue(null);
       await new ContainerCommand().execute('blueprint', 'status', [], {});
-      expect(errors).toEqual(['✗ No blueprint; run kunj ct blueprint init']);
+      expect(errors).toEqual(['✗ No blueprint for this repository. Write one with kunj ct blueprint init.']);
       expect(process.exitCode).toBe(1);
     });
 
@@ -1735,7 +1736,7 @@ describe('ContainerCommand', () => {
 
     it('refuses a branch without a container', async () => {
       await new ContainerCommand().execute('open', 'feat', {});
-      expect(errors).toEqual(['✗ No container for feat; run kunj ct start feat']);
+      expect(errors).toEqual(['✗ No container for feat. Start one with kunj ct start feat.']);
       expect(mockSpawned).toEqual([]);
     });
   });
@@ -1932,14 +1933,14 @@ describe('ct file', () => {
   it('read on a stopped container fails', async () => {
     backend.existing = [mainContainer('feat', { state: 'exited' })];
     await new ContainerCommand().execute('file', 'read', ['feat', 'src/a.ts'], {});
-    expect(errors).toEqual(['✗ Container for feat is not running; run kunj ct start feat']);
+    expect(errors).toEqual(['✗ The container for feat is not running. Start it with kunj ct start feat.']);
   });
 
   it('a coded error prints { code, message } in --json mode', async () => {
     backend.existing = [mainContainer('feat')];
     await new ContainerCommand().execute('file', 'read', ['feat', '../x'], { json: true });
     expect(exit).toHaveBeenCalledWith(1);
-    expect(JSON.parse(stdout.join(''))).toEqual({ error: { code: 'bad-path', message: 'Path must stay inside /workspace: ../x' } });
+    expect(JSON.parse(stdout.join(''))).toEqual({ error: { code: 'bad-path', message: 'Path must stay inside /workspace: ../x.' } });
   });
 
   it('a missing file is not-found', async () => {
@@ -1952,7 +1953,7 @@ describe('ct file', () => {
   it('an uncoded ContainerError prints code "error" in --json mode', async () => {
     backend.existing = [mainContainer('feat', { state: 'exited' })];
     await new ContainerCommand().execute('file', 'read', ['feat', 'src/a.ts'], { json: true });
-    expect(JSON.parse(stdout.join(''))).toEqual({ error: { code: 'error', message: 'Container for feat is not running; run kunj ct start feat' } });
+    expect(JSON.parse(stdout.join(''))).toEqual({ error: { code: 'error', message: 'The container for feat is not running. Start it with kunj ct start feat.' } });
   });
 
   it('rejects an unknown file action and a missing path', async () => {

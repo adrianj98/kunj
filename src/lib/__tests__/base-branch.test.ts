@@ -69,7 +69,7 @@ describe('base-branch', () => {
   });
 
   it('throws for a base that does not exist', async () => {
-    await expect(resolveBaseRef({ cwd: clone, base: 'nope' })).rejects.toThrow(/Base branch 'nope' not found/);
+    await expect(resolveBaseRef({ cwd: clone, base: 'nope' })).rejects.toThrow(/There is no branch nope to start from/);
   });
 
   it('returns null with no base and no main/master in a repo without origin', async () => {

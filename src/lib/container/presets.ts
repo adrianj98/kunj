@@ -6,6 +6,7 @@ import * as path from 'path';
 import { ContainerBackend, ExecIO } from './backend';
 import { Blueprint, ToolValue } from './blueprint';
 import { tarEntries } from './image';
+import { ContainerError } from './errors';
 import { shellQuote } from '../config-vars';
 
 export interface Preset {
@@ -50,7 +51,7 @@ export async function resolvePresets(
   const presets: Preset[] = [];
   for (const name of names) {
     // Validate before any path join: the name comes from blueprint.json
-    if (!NAME.test(name)) throw new Error(`"${name}" is not a valid preset name (use a-z, 0-9 and -)`);
+    if (!NAME.test(name)) throw new ContainerError(`"${name}" is not a valid preset name (use a-z, 0-9 and -). Rename it under tools in the blueprint.`);
     let found: Preset | undefined;
     for (const [source, dir] of dirs) {
       const file = path.join(dir, `${name}.sh`);
@@ -63,7 +64,7 @@ export async function resolvePresets(
       found = { name, path: file, source, text, hash: presetHash(lib, text) };
       break;
     }
-    if (!found) throw new Error(`Unknown preset "${name}" (looked in ${dirs.map(d => d[1]).join(', ')})`);
+    if (!found) throw new ContainerError(`Unknown preset "${name}" (looked in ${dirs.map(d => d[1]).join(', ')}). Remove tools.${name} from the blueprint, or add ${name}.sh to .kunj/presets/.`);
     presets.push(found);
   }
   return presets;
@@ -115,7 +116,7 @@ export async function runPresets(
       ['sh', '-c', 'rm -rf "$1" && mkdir -m 700 -p "$1" && tar -xf - -C "$1"', 'sh', PRESET_DIR],
       { user: 'root', stdin: tarEntries(entries) }
     );
-    if (x.exitCode !== 0) throw new Error(`Copying presets into the container failed (exit ${x.exitCode})`);
+    if (x.exitCode !== 0) throw new ContainerError(`Copying presets into the container failed (exit ${x.exitCode})`);
 
     for (const p of presets) {
       const r = await backend.exec(id, ['sh', '-c', WRAPPER, 'sh', p.name], {
@@ -124,7 +125,7 @@ export async function runPresets(
         stdout: io.stdout ?? 'inherit',
         stderr: io.stderr ?? 'inherit',
       });
-      if (r.exitCode !== 0) throw new Error(`preset ${p.name} failed (exit ${r.exitCode})`);
+      if (r.exitCode !== 0) throw new ContainerError(`Preset ${p.name} (tools.${p.name} in the blueprint) failed (exit ${r.exitCode})`);
       // Written by kunj_done as "<name> <version>". A preset that skipped kunj_done still installed
       // something, so it is a warning with an empty version rather than a failure.
       const result = await backend.exec(id, ['cat', `${PRESET_DIR}/${p.name}.result`], { user: 'root' });

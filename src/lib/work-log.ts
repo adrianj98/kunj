@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getKunjDir } from "./config";
 import chalk from "chalk";
+import { describeError } from "./errors";
 
 const WORK_LOG_DIR = "work-logs";
 
@@ -77,11 +78,11 @@ export function appendToWorkLog(entry: string): void {
 
     // Debug: verify file was written
     if (!fs.existsSync(logPath)) {
-      throw new Error(`Failed to create work log file at ${logPath}`);
+      throw new Error(`Could not create the work log file ${logPath}.`);
     }
   } catch (error: any) {
-    console.error(chalk.red("Failed to write to work log:"), error.message);
-    throw error; // Re-throw so caller knows it failed
+    // The callers (commit, pr) warn: their own work is already done
+    throw error;
   }
 }
 
@@ -94,7 +95,7 @@ export function readTodayWorkLog(): string | null {
     }
     return null;
   } catch (error) {
-    console.error(chalk.red("Failed to read work log:"), error);
+    console.error(chalk.yellow(`Warning: could not read the work log ${getTodayLogPath()}: ${describeError(error).message}`));
     return null;
   }
 }
@@ -126,7 +127,7 @@ export function readWorkLog(date: string): string | null {
     }
     return null;
   } catch (error) {
-    console.error(chalk.red("Failed to read work log:"), error);
+    console.error(chalk.yellow(`Warning: could not read the work log for ${date}: ${describeError(error).message}`));
     return null;
   }
 }

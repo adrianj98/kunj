@@ -393,6 +393,9 @@ function outputIO(jsonMode: boolean): Pick<ExecIO, 'stdout' | 'stderr'> {
   return { stdout: jsonMode ? process.stderr : 'inherit', stderr: 'inherit' };
 }
 
+// The next step of a helper failure; left out where the caller says it itself
+const RETRY_START = ' Run kunj ct start again.';
+
 async function waitForHelper(backend: ContainerBackend, helperId: string): Promise<void> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
@@ -401,11 +404,11 @@ async function waitForHelper(backend: ContainerBackend, helperId: string): Promi
       if (r.exitCode === 0) return;
     } catch (err) {
       if (!(err instanceof ExecTimeoutError)) {
-        throw new StartError(`Network helper failed before the firewall was ready: ${message(err)}`, 'firewall');
+        throw new StartError(`The network helper failed before the firewall was ready: ${message(err).replace(/\.$/, '')}.${RETRY_START}`, 'firewall');
       }
     }
     if (Date.now() >= deadline) {
-      throw new StartError(`Network helper did not report ready within ${READY_TIMEOUT_MS / 1000}s`, 'firewall');
+      throw new StartError(`The network helper did not report ready within ${READY_TIMEOUT_MS / 1000}s, so the firewall is not known to be up.${RETRY_START}`, 'firewall');
     }
     await new Promise(r => setTimeout(r, READY_POLL_MS));
   }
@@ -495,12 +498,16 @@ async function checkImage(backend: ContainerBackend, id: string, source: ImageSo
       if (r.exitCode !== 0) throw new Error(`exit ${r.exitCode}`);
       uid = r.stdout.trim();
     } catch (err) {
-      throw new StartError(`remoteUser "${source.user}" does not exist in the image (${message(err)})`, 'image');
+      throw new StartError(
+        `User "${source.user}" does not exist in the image ${source.tag} (${message(err)}). ` +
+          (source.fromBlueprint ? 'Give the image that USER.' : 'Set remoteUser in devcontainer.json to a user the image has.'),
+        'image'
+      );
     }
     if (uid === '0') {
       throw new StartError(source.fromBlueprint
-        ? `The blueprint's image ${source.tag} runs as root; give it a non-root USER`
-        : 'The devcontainer image runs as root; set remoteUser to a non-root user', 'image');
+        ? `The blueprint's image ${source.tag} runs as root, which kunj refuses. Give it a non-root USER, or set the blueprint's image to "sandbox".`
+        : `The devcontainer image ${source.tag} runs as root, which kunj refuses. Set remoteUser in devcontainer.json to a non-root user.`, 'image');
     }
   }
   const r = await backend.exec(id, ['sh', '-c', 'for t in git tmux socat; do command -v $t >/dev/null 2>&1 || echo $t; done'], {
@@ -561,7 +568,7 @@ async function seedIfNeeded(
           ? ' If the repository has private submodules, they cannot be fetched during a snapshot yet.'
           : hasToken
             ? ''
-            : ' If origin needs authentication, forward a token with container.env (GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN) or log in with `gh auth login`.'),
+            : ' If origin needs authentication, log in with `gh auth login`, or forward a token with container.env (GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN).'),
       'seed'
     );
   }
@@ -579,7 +586,7 @@ async function extractInto(backend: ContainerBackend, id: string, user: string, 
     user: user || undefined,
     stdin: tar,
   });
-  if (r.exitCode !== 0) throw new Error(`Copying files into ${dir} failed (exit ${r.exitCode})`);
+  if (r.exitCode !== 0) throw new ContainerError(`Copying files into ${dir} in the container failed (exit ${r.exitCode})`);
 }
 
 // Any image, not just kunj-sandbox, needs the helper the seed points credential.helper at. It goes
@@ -674,7 +681,7 @@ function checkedSecrets(options: StartOptions): StartSecrets | undefined {
 export function checkSecrets(secrets: StartSecrets): void {
   for (const [name, value] of Object.entries(secrets.env)) {
     if (/[\r\n]/.test(value)) {
-      throw new StartError(`Secret ${name} has more than one line, which a container's environment cannot hold; deliver it as a file instead`, 'docker');
+      throw new StartError(`Secret ${name} has more than one line, which a container's environment cannot hold. Deliver it as a file instead: kunj secret set ${name} --file <path> --no-env.`, 'docker');
     }
   }
   for (const rel of secrets.files.keys()) secretFilePath(rel);
@@ -685,13 +692,13 @@ export function secretFilePath(rel: string): string {
   const norm = path.posix.normalize(rel);
   // A control character would split the .git/info/exclude line and leave the file committable
   if (/[\x00-\x1f\x7f]/.test(rel)) {
-    throw new ContainerError(`Secret file path must not contain control characters: ${JSON.stringify(rel)}`, 'bad-path');
+    throw new ContainerError(`Secret file path must not contain control characters: ${JSON.stringify(rel)}. Store it again with kunj secret set <name> --file <path relative to the worktree>.`, 'bad-path');
   }
   if (!rel || path.posix.isAbsolute(rel) || norm === '.' || norm === '..' || norm.startsWith('../')) {
-    throw new ContainerError(`Secret file path must be inside /workspace: ${JSON.stringify(rel)}`, 'bad-path');
+    throw new ContainerError(`Secret file path must be inside /workspace: ${JSON.stringify(rel)}. Store it again with kunj secret set <name> --file <path relative to the worktree>.`, 'bad-path');
   }
   if (norm.split('/').some(part => part.toLowerCase() === '.git')) {
-    throw new ContainerError(`Secret file path must not be inside a .git directory: ${JSON.stringify(rel)}`, 'bad-path');
+    throw new ContainerError(`Secret file path must not be inside a .git directory: ${JSON.stringify(rel)}. Store it again with kunj secret set <name> --file <path relative to the worktree>.`, 'bad-path');
   }
   return norm;
 }
@@ -717,8 +724,8 @@ async function renderSecretFiles(backend: ContainerBackend, id: string, user: st
     user: user || undefined,
     stdin: tar,
   });
-  if (r.exitCode === 3) throw new Error('Secret files not rendered: /workspace has no git checkout yet');
-  if (r.exitCode !== 0) throw new Error(`Rendering secret files into /workspace failed (exit ${r.exitCode})`);
+  if (r.exitCode === 3) throw new ContainerError('Secret files not rendered: /workspace has no git checkout yet. Run kunj ct start again once the clone has finished.');
+  if (r.exitCode !== 0) throw new ContainerError(`Rendering secret files into /workspace failed (exit ${r.exitCode})`);
   return rels;
 }
 
@@ -810,13 +817,19 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   // An existing container is resumed whatever origin now has: its clone is the source of truth
   const labels = await step('docker', () => backend.inspectLabels(names.container));
   if (labels && !labelsMatch(labels, repo.id, labelBranch)) {
-    throw new StartError(`A container named ${names.container} exists but does not belong to ${repo.name} ${labelBranch}`, 'collision');
+    throw new StartError(
+      `A container named ${names.container} exists but does not belong to ${repo.name} ${labelBranch}. If it is left over, remove it with docker rm -f ${names.container}.`,
+      'collision'
+    );
   }
 
   // Origin (only its host matters for an existing container; the fetch may fail)
   const origin = await step('origin', () => inspectOrigin(branch, options.cwd));
   if (!origin.originHost) {
-    throw new StartError('Origin has no host; a container can only clone from a remote origin', 'origin');
+    throw new StartError(
+      `Origin ${origin.originUrl} has no host; a container can only clone from a remote origin. Point origin at a hosted repository (git remote set-url origin <url>).`,
+      'origin'
+    );
   }
   const secrets = checkedSecrets(options);
   // A stored secret wins over container.env, and a stored token means gh is never asked
@@ -845,15 +858,17 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     // A bundle is cloned instead of origin, and the host that made it has just fetched the branch
     if (origin.isSsh && !hasToken && !options.bundle) {
       throw new StartError(
-        `Origin ${origin.originUrl} uses SSH, which the container cannot use without a token; forward GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN with container.env, or log in with \`gh auth login\` (used when container.useGhToken is not false)`,
+        `Origin ${origin.originUrl} uses SSH, which the container cannot use without a token. ` +
+          'Log in with `gh auth login` (used unless container.useGhToken is false), store one with `kunj secret set GH_TOKEN --targets container`, ' +
+          'or forward GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN with container.env.',
         'no-token'
       );
     }
     if (options.create) {
-      if (!options.base) throw new StartError('No base branch to create the branch from', 'base-missing');
+      if (!options.base) throw new StartError('No base branch to create the new branch from. Pass --base <ref>, or set preferences.defaultBaseBranch.', 'base-missing');
       const base = options.base;
       if (!(await step('origin', () => refExistsOnOrigin(base, options.cwd)))) {
-        throw new StartError(`Base ${base} is not on origin`, 'base-missing');
+        throw new StartError(`Base ${base} is not on origin, and the container clones from origin. Push it first, or pass another --base.`, 'base-missing');
       }
     }
 
@@ -863,7 +878,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
         ? `${branch} has ${origin.unpushed} commit${origin.unpushed === 1 ? '' : 's'} origin does not have`
         : `${branch} is not on origin`;
       if (options.jsonMode || !(await options.confirmPush())) {
-        throw new StartError(`${what}; push it first (the container clones from origin)`, 'unpushed');
+        throw new StartError(`${what}. Push it first (git push -u origin ${branch}): the container clones from origin.`, 'unpushed');
       }
       await step('unpushed', () => pushBranch(branch, options.cwd));
     }
@@ -1155,7 +1170,7 @@ async function resume(
   const labelBranch = options.namesFor ?? options.branch;
   const found = await step('docker', () => backend.list(labelsFor(repo.id, labelBranch)));
   const main = found.find(c => c.name === names.container);
-  if (!main) throw new StartError(`Container ${names.container} disappeared while starting`, 'docker');
+  if (!main) throw new StartError(`Container ${names.container} disappeared while starting. Run kunj ct start again.`, 'docker');
   const helper: ContainerInfo | undefined = found.find(c => c.name === names.helper);
   const services = servicesOf(found, names.container, { repoId: repo.id, branch: labelBranch });
   const firewall = firewallMode(options.config.container);
@@ -1294,7 +1309,7 @@ async function resume(
     if (unfirewalled && mainWasRunning) {
       // It was running before this call, so say why it no longer is
       throw new StartError(
-        `Stopped ${names.container}: its firewall could not be re-applied (${message(err)}); kunj ct start ${options.branch} retries`,
+        `Stopped ${names.container}: its firewall could not be re-applied (${message(err).replace(RETRY_START, '')}). Run kunj ct start ${options.branch} to try again.`,
         'firewall'
       );
     }
@@ -1383,10 +1398,10 @@ const ORIGIN_TIMEOUT_MS = 15000;
 
 async function mainInfo(backend: ContainerBackend, names: ContainerNames): Promise<ContainerInfo> {
   const labels = await backend.inspectLabels(names.container);
-  if (!labels) throw new Error(`No container ${names.container}`);
+  if (!labels) throw new ContainerError(`No container ${names.container}.`);
   const found = await backend.list({ [LABEL.repo]: labels[LABEL.repo], [LABEL.branch]: labels[LABEL.branch] });
   const main = found.find(c => c.name === names.container);
-  if (!main) throw new Error(`No container ${names.container}`);
+  if (!main) throw new ContainerError(`No container ${names.container}.`);
   return main;
 }
 
@@ -1408,13 +1423,13 @@ export async function inspectForRemove(backend: ContainerBackend, names: Contain
   if (main.state !== 'running') {
     const recorded = parseOptionsLabel(main.labels);
     const fwEnv = recorded.helperEnv;
-    if (!fwEnv) throw new Error(`${names.container} has no recorded firewall settings, so it cannot be checked safely; use --force`);
+    if (!fwEnv) throw new ContainerError(`${names.container} has no recorded firewall settings, so it cannot be started to check for unpushed work. Use kunj ct remove --force to remove it unchecked.`);
     // Fail closed: a revoked allowPrivileged is never overridden to look inside (a sysbox container
     // whose runtime is gone just fails to start, which fails the guard too)
     if (recorded.dind === 'privileged' && ctx.allowPrivileged !== true) {
-      throw new Error(
+      throw new ContainerError(
         `${names.container} runs privileged and container.allowPrivileged is no longer true, so it is not started to check it ` +
-          'for unpushed work; set container.allowPrivileged back to true, or use --force to remove it unchecked'
+          'for unpushed work. Set container.allowPrivileged back to true, or use kunj ct remove --force to remove it unchecked.'
       );
     }
     try {
@@ -1427,7 +1442,7 @@ export async function inspectForRemove(backend: ContainerBackend, names: Contain
   try {
     const io: ExecIO = { user: ctx.user || undefined, workdir: WORKSPACE };
     const r = await backend.exec(main.id, ['sh', '-c', GUARD_SCRIPT], io);
-    if (r.exitCode !== 0) throw new Error(`Could not inspect ${names.container} for unpushed work (exit ${r.exitCode}); use --force`);
+    if (r.exitCode !== 0) throw new ContainerError(`Could not check ${names.container} for unpushed work (exit ${r.exitCode}). Use kunj ct remove --force to remove it unchecked.`);
     if (r.stdout.split('\n')[0].trim() === '@@none') {
       // Never cloned: nothing to lose
       return { unpushedRefs: [], stashes: 0, dirty: false, originReachable: true };
@@ -1459,7 +1474,7 @@ export async function removeContainer(
   if (!opts.force) {
     guard = await inspectForRemove(backend, names, opts);
     const problems = describeGuard(guard);
-    if (problems.length) throw new Error(`Container has unpushed work: ${problems.join('; ')}; use --force`);
+    if (problems.length) throw new ContainerError(`Container has unpushed work: ${problems.join('; ')}. Push it from the container (kunj ct shell), or use --force to remove it anyway.`);
   }
   // Services and their data go with the branch; the guard above is about the branch's work only
   const owner = opts.owner ?? (await serviceOwner(backend, names));

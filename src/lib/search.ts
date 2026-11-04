@@ -371,7 +371,7 @@ export interface LogMatch {
 /** Lines of the work logs (`<dir>/*.md`), newest log first */
 export function searchWorkLogs(dir: string, q: SearchQuery): LogMatch[] {
   const re = searchRegExp(q);
-  if (!re) throw new Error(`The pattern cannot be used to search the work logs: ${q.pattern}`);
+  if (!re) throw new Error(`The pattern ${q.pattern} is not a regular expression the work log search can read; pass -F to search for it as plain text.`);
   let files: string[];
   try {
     files = fs.readdirSync(dir).filter(f => f.endsWith('.md')).sort().reverse();

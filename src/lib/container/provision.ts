@@ -4,6 +4,7 @@ import { ContainerBackend, ExecIO } from './backend';
 import { shellQuote } from '../config-vars';
 import { Blueprint, SNAPSHOT_REPO } from './blueprint';
 import { LABEL } from './names';
+import { ContainerError } from './errors';
 import { Preset, runPresets } from './presets';
 
 export interface FoundSnapshot {
@@ -59,7 +60,7 @@ export async function writeAliases(backend: ContainerBackend, id: string, aliase
     ['sh', '-c', 'mkdir -p "$(dirname "$1")" && printf %s "$2" > "$1" && chmod 644 "$1"', 'sh', ALIASES_FILE, aliasesScript(aliases)],
     { user: 'root' }
   );
-  if (r.exitCode !== 0) throw new Error(`writing the blueprint's aliases failed (exit ${r.exitCode})`);
+  if (r.exitCode !== 0) throw new ContainerError(`Writing the blueprint's aliases failed (exit ${r.exitCode})`);
 }
 
 /**
@@ -79,7 +80,7 @@ export async function provisionNew(
   const installed = presets.length ? await runPresets(backend, id, presets, blueprint.tools, toolUser, output, warn) : [];
   if (blueprint.aliases) await writeAliases(backend, id, blueprint.aliases);
   const failed = await runCommands(backend, id, blueprint.setup, io);
-  if (failed) throw new Error(`setup command failed (exit ${failed.exitCode}): ${failed.command}`);
+  if (failed) throw new ContainerError(`The blueprint's setup command failed (exit ${failed.exitCode}): ${failed.command}`);
   return { toolsRun: installed.map(t => t.name), tools: installed, setupRan: blueprint.setup.length > 0 };
 }
 

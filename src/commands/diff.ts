@@ -2,7 +2,7 @@
 
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
-import { getFileDiff, getFileStatuses, checkGitRepo } from '../lib/git';
+import { getFileDiff, getFileStatuses, requireGitRepo, wrapError } from '../lib/git';
 import { formatDiff, formatSideBySideDiff, formatDiffSummary } from '../lib/diff-formatter';
 import inquirer from 'inquirer';
 
@@ -58,11 +58,7 @@ export class DiffCommand extends BaseCommand {
   async execute(options: DiffOptions = {}): Promise<void> {
     try {
       // Check if we're in a git repository
-      const isGitRepo = await checkGitRepo();
-      if (!isGitRepo) {
-        console.error(chalk.red('❌ Not in a git repository'));
-        process.exit(1);
-      }
+      await requireGitRepo();
 
       // Get changed files
       const files = await getFileStatuses();
@@ -117,9 +113,7 @@ export class DiffCommand extends BaseCommand {
       // Interactive file selection with navigation loop
       await this.interactiveMode(filesToShow, options.sideBySide || false);
     } catch (error: any) {
-      console.error(chalk.red('\n❌ Error showing diff'));
-      console.error(chalk.gray(error.message));
-      process.exit(1);
+      throw wrapError('Could not show the diff', error);
     }
   }
 

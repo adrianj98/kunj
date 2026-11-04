@@ -31,7 +31,7 @@ main()  (src/index.ts)
   |- registry.applyTo(program); program.parse(argv)
 ```
 
-An uncaught rejection from `main()` prints `Fatal error:` and exits 1.
+An uncaught rejection from `main()` is printed by `formatError()` (see Error Printing) and exits 1.
 
 # CommandConfig
 
@@ -69,8 +69,20 @@ The action wrapper catches anything `execute()` throws:
 |-----------|--------|------|
 | JSON mode, error has a string `jsonCode` | `{"error":{"code","message"}}` on stdout | 1 |
 | JSON mode, otherwise | `{"error":"<message>"}` on stdout | 1 |
-| Error `name` is one of `HookError`, `BaseBranchError`, `StartError`, `ContainerError`, `AgentError`, `EventsError`, `SecretError` | `✗ <message>` on stderr, no stack | 1 |
-| Anything else | `Command failed:` plus the error | 1 |
+| Any other error | `formatError()` on stderr: `✗ <message>`, then an indented hint when there is one | 1 |
+
+`src/lib/errors.ts` (no imports, so the fast path can use it) decides the text. `describeError()` keeps
+the message of kunj's own errors (`UserError`, `HookError`, `BaseBranchError`, `StartError`,
+`ContainerError`, `AgentError`, `EventsError`, `SecretError`, `RemoteError`, `GitHubError`,
+`ServeError`, `ExecTimeoutError`) and translates raw ones: a spawn `ENOENT` names the missing program
+with how to install it (or a vanished working directory), a failed exec shows git's `fatal:` line
+(`gitErrorLine()`) with a hint for common git failures, AWS credential and Bedrock access errors say
+how to log in, and Ctrl-C at a prompt is `Cancelled.`. `UserError(message, hint?, jsonCode?)` is the
+error to throw for an expected failure the user can act on. A stack trace is printed only with
+`KUNJ_DEBUG=1`; an error describeError does not recognise gets a line saying it looks like a bug and
+to rerun with `KUNJ_DEBUG=1`. The `--json` message is `describeError(error).message` too (shape
+unchanged; hints are not in JSON). `kunj ct`, `kunj flow` and `kunj jira` have their own handlers that
+also print `formatError()`.
 
 Errors with a `jsonCode` today: `AgentError` (`src/lib/agent-session.ts`), `SecretError`
 (`src/lib/secrets/errors.ts`), `ContainerError` (`src/lib/container/errors.ts`) and `EventsError`

@@ -4,7 +4,8 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import { BaseCommand } from "../lib/command";
 import {
-  checkGitRepo,
+  requireGitRepo,
+  gitCommandError,
   getFileStatuses,
   stageFiles,
   createCommit,
@@ -19,6 +20,7 @@ import {
 } from "../lib/git";
 import { generateAICommitMessage, checkAWSCredentials, getAWSConfigInfo, generateWorkLogEntry } from "../lib/ai-commit";
 import { updateBranchMetadata } from "../lib/metadata";
+import { UserError, describeError } from "../lib/errors";
 import { appendToWorkLog } from "../lib/work-log";
 import { formatDiff, formatSideBySideDiff } from "../lib/diff-formatter";
 import { loadConfig } from "../lib/config";
@@ -74,11 +76,7 @@ export class CommitCommand extends BaseCommand {
 
     try {
       // Check if we're in a git repository
-      const isGitRepo = await checkGitRepo();
-      if (!isGitRepo) {
-        console.error(chalk.red("Error: Not a git repository"));
-        process.exit(1);
-      }
+      await requireGitRepo();
 
       const currentBranch = await getCurrentBranch();
       console.log(chalk.blue(`On branch: ${currentBranch}`));
@@ -106,10 +104,7 @@ export class CommitCommand extends BaseCommand {
         );
         const stageResult = await stageFiles(filesToCommit);
         if (!stageResult.success) {
-          console.error(
-            chalk.red(`Failed to stage files: ${stageResult.message}`)
-          );
-          process.exit(1);
+          throw new UserError(stageResult.message, "Check the paths with `git status`, then try again.");
         }
         } else if (unstagedFiles.length > 0) {
         // Interactive file selection
@@ -126,12 +121,10 @@ export class CommitCommand extends BaseCommand {
           );
           const stageResult = await stageFiles(filesToCommit);
           if (!stageResult.success) {
-            console.error(
-              chalk.red(`Failed to stage files: ${stageResult.message}`)
-            );
-            process.exit(1);
+            throw new UserError(stageResult.message, "Check the paths with `git status`, then try again.");
           }
         } catch (err) {
+          if (err instanceof UserError) throw err;
           // Handle Ctrl-C gracefully
           console.log(chalk.yellow("\nCommit cancelled"));
           return;
@@ -213,11 +206,10 @@ export class CommitCommand extends BaseCommand {
               console.log(chalk.yellow("⚠ Work log entry was not generated"));
             }
           } catch (error: any) {
-            // Show the actual error for debugging
-            console.error(chalk.red("✗ Work log generation failed:"), error.message);
-            if (error.stack) {
-              console.error(chalk.gray(error.stack));
-            }
+            // The commit is made; the work log is a side effect, so warn and carry on
+            const d = describeError(error);
+            console.error(chalk.yellow(`⚠ The commit was made, but its work log entry could not be written: ${d.message}`));
+            if (d.hint) console.error(chalk.gray(`  ${d.hint}`));
           }
         }
 
@@ -298,13 +290,13 @@ export class CommitCommand extends BaseCommand {
               await prCommand.execute(undefined, {});
             }
           } catch (error: any) {
-            console.error(chalk.red(`✗ Push failed: ${error.message}`));
-            console.log(chalk.gray("You can manually push with: git push"));
+            const d = describeError(error);
+            console.error(chalk.red(`✗ The commit was made, but pushing failed: ${d.message}`));
+            console.log(chalk.gray(d.hint ?? "Push it yourself with `git push`."));
           }
         }
         } else {
-        console.error(chalk.red(`✗ Commit failed: ${commitResult.message}`));
-        process.exit(1);
+        throw gitCommandError("Could not create the commit", commitResult.message);
       }
     } finally {
       // Remove SIGINT handler
@@ -325,7 +317,7 @@ export class CommitCommand extends BaseCommand {
       await runActionHook("commit-msg", { "message-file": file, branch }, hookOptions);
       const edited = fs.readFileSync(file, "utf8").trim();
       if (!edited) {
-        throw new Error("commit-msg hook left an empty commit message");
+        throw new UserError("The commit-msg hook left the commit message empty, so nothing was committed.", "Fix the hook (see `kunj hooks list`), or skip it with --no-hooks.");
       }
       if (edited !== message.trim()) {
         console.log(chalk.cyan("✎ Commit message updated by the commit-msg hook"));
@@ -495,7 +487,7 @@ export class CommitCommand extends BaseCommand {
         diffCache.set(cacheKey, lines);
         diffLines = lines;
       } catch {
-        diffLines = [chalk.red('Error loading diff')];
+        diffLines = [chalk.red(`Could not load the diff of ${filePath}.`)];
       }
       diffLoading   = false;
       diffScrollTop = 0;

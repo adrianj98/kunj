@@ -12,6 +12,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { loadConfig } from '../lib/config';
+import { UserError } from '../lib/errors';
 import { repoVariables, resolveConfigVariables } from '../lib/config-vars';
 import { getCurrentBranch } from '../lib/git';
 import {
@@ -155,7 +156,7 @@ export class HooksCommand extends BaseCommand {
 
     const verb = (action || 'list').toLowerCase();
     if (!ACTIONS.includes(verb)) {
-      throw new Error(`Unknown hooks action '${action}'. Expected one of: ${ACTIONS.join(', ')}`);
+      throw new UserError(`Unknown hooks action '${action}'.`, `Use one of: ${ACTIONS.join(', ')} (see \`kunj hooks --help\`).`);
     }
     const scope: HookScope = options.global ? 'global' : 'repo';
 
@@ -173,10 +174,10 @@ export class HooksCommand extends BaseCommand {
 
   private requireHook(name: string | undefined, usage: string): HookName {
     if (!name) {
-      throw new Error(`Usage: ${usage}\nHooks: ${HOOKS.map(h => h.name).join(', ')}`);
+      throw new UserError('Name the hook.', `Usage: ${usage}. Hooks: ${HOOKS.map(h => h.name).join(', ')}.`);
     }
     if (!isHookName(name)) {
-      throw new Error(`Unknown hook '${name}'. Known hooks: ${HOOKS.map(h => h.name).join(', ')}`);
+      throw new UserError(`Unknown hook '${name}'.`, `Known hooks: ${HOOKS.map(h => h.name).join(', ')}.`);
     }
     return name;
   }
@@ -291,7 +292,7 @@ export class HooksCommand extends BaseCommand {
       ? findWorktreeIn(listing.worktrees, target)
       : listing.worktrees.find(w => w.isCurrent) || listing.worktrees.find(w => w.isMain) || null;
     if (!wt) {
-      throw new Error(`No worktree found for '${target}'`);
+      throw new UserError(`No worktree for ${target}.`, 'See `kunj worktree list` for the branches and paths you can name.');
     }
     return {
       context: worktreeHookContext(repoVariables(listing.gitCommonDir), wt.path, wt.branch),

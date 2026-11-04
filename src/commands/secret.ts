@@ -14,6 +14,7 @@ import { getCurrentWorktreePath, listWorktrees } from '../lib/worktree';
 import { deleteKeptFile, getKeepDir, hasKeptFile } from '../lib/keep';
 import { parseDotenv, isSecretName } from '../lib/secrets/dotenv';
 import { SecretError } from '../lib/secrets/errors';
+import { UserError } from '../lib/errors';
 import { getUnlock, GetUnlockOptions, hiddenPrompt } from '../lib/secrets/keyprovider';
 import { configuredMode, envOf, openVaults, resolveSecrets, SecretTarget } from '../lib/secrets/resolve';
 import { CLAUDE_TOKEN_NAME, claudeTokenProblem } from '../lib/secrets/claude-token';
@@ -123,12 +124,12 @@ export class SecretCommand extends BaseCommand {
       case 'apply':
         return this.apply(opts);
       default:
-        throw new Error(`Unknown action ${JSON.stringify(verb)}; one of ${ACTIONS.join(', ')}`);
+        throw new UserError(`Unknown secret action ${JSON.stringify(verb)}.`, `Use one of: ${ACTIONS.join(', ')} (see kunj secret --help).`);
     }
   }
 
   private async set(name: string | undefined, opts: SecretOptions): Promise<void> {
-    checkName(name);
+    checkName(name, 'set');
     const scope = await this.writeScope(opts);
     const shape = deliveryShape(scope, opts, undefined);
     let value = await this.readValue(name);
@@ -136,7 +137,7 @@ export class SecretCommand extends BaseCommand {
     if (name === CLAUDE_TOKEN_NAME) {
       value = value.trim();
       const problem = claudeTokenProblem(value);
-      if (problem) throw new Error(`${problem}: nothing was stored`);
+      if (problem) throw new UserError(`${problem}. Nothing was stored.`, 'Run `kunj ct token setup` to get a token from `claude setup-token` and store it.');
     }
     const entry: SecretEntry = { name, value, ...scopeField(scope), ...shape, updatedAt: new Date().toISOString() };
     await this.modify(scope, (entries) => [...entries.filter((e) => !sameSlot(e, name, scope)), entry]);
@@ -145,17 +146,17 @@ export class SecretCommand extends BaseCommand {
   }
 
   private async import(file: string | undefined, opts: SecretOptions): Promise<void> {
-    if (!file) throw new Error('Usage: kunj secret import <file>');
+    if (!file) throw new UserError('Name the .env file to import.', 'Usage: kunj secret import <file> [--branch [name] | --global]');
     const scope = await this.writeScope(opts);
     const shape = deliveryShape(scope, opts, '.env');
     const source = path.resolve(this.cwd(), file);
-    if (!fs.existsSync(source)) throw new Error(`File not found: ${file}`);
+    if (!fs.existsSync(source)) throw new UserError(`File not found: ${source}.`, 'Check the path; it is relative to the current directory.');
     let parsed: Array<{ name: string; value: string }>;
     try {
       parsed = parseDotenv(fs.readFileSync(source, 'utf8'));
     } catch (err) {
       // parseDotenv's messages name the line, never the text (which may be a value).
-      throw new SecretError(`${file}: ${(err as Error).message}`, 'bad-dotenv');
+      throw new SecretError(`${file}: ${(err as Error).message}. Nothing was imported; fix that line and run the import again.`, 'bad-dotenv');
     }
     if (parsed.length === 0) {
       if (this.jsonMode) this.outputJSON({ imported: [] } satisfies SecretImportJson);
@@ -190,7 +191,7 @@ export class SecretCommand extends BaseCommand {
   }
 
   private async list(opts: SecretOptions): Promise<void> {
-    if (opts.global && opts.branch !== undefined) throw new Error('--global and --branch cannot be combined');
+    checkScopeFlags(opts);
     const branch = opts.branch === undefined ? undefined : await this.branchArg(opts.branch);
     const { global, repo } = await this.open();
     const rows: SecretListJson['secrets'] = [];
@@ -228,9 +229,9 @@ export class SecretCommand extends BaseCommand {
 
   private async get(name: string | undefined, opts: SecretOptions): Promise<void> {
     // A value in JSON output ends up in app logs; get is for scripts.
-    if (opts.json) throw new Error('kunj secret get prints a value and does not take --json');
-    checkName(name);
-    if (opts.global && opts.branch !== undefined) throw new Error('--global and --branch cannot be combined');
+    if (opts.json) throw new UserError('kunj secret get does not take --json: it prints a secret value, and JSON output ends up in logs.', 'Run it without --json, or use kunj secret list --json for the names.');
+    checkName(name, 'get');
+    checkScopeFlags(opts);
     const branch = opts.global ? undefined : await this.readBranch(opts.branch);
     const { global, repo } = await this.open();
     const found = opts.global
@@ -238,12 +239,12 @@ export class SecretCommand extends BaseCommand {
       : (branch !== undefined ? repo.find((e) => e.name === name && e.scope?.branch === branch) : undefined) ??
         repo.find((e) => e.name === name && !e.scope?.branch) ??
         global.find((e) => e.name === name);
-    if (!found) throw notFound(name, opts.global ? { global: true } : { global: false, branch });
+    if (!found) throw opts.global ? notFound(name, { global: true }) : notFoundAnywhere(name, branch);
     process.stdout.write(found.value + '\n');
   }
 
   private async rm(name: string | undefined, opts: SecretOptions): Promise<void> {
-    checkName(name);
+    checkName(name, 'rm');
     const scope = await this.writeScope(opts);
     const file = this.fileOf(scope);
     if (!vaultKdf(file)) throw notFound(name, scope);
@@ -256,9 +257,9 @@ export class SecretCommand extends BaseCommand {
   }
 
   private async env(opts: SecretOptions): Promise<void> {
-    if (opts.json) throw new Error('kunj secret env prints values and does not take --json');
+    if (opts.json) throw new UserError('kunj secret env does not take --json: it prints secret values, and JSON output ends up in logs.', 'Run it without --json (eval "$(kunj secret env)"), or use kunj secret list --json for the names.');
     const target = (opts.target ?? 'host') as SecretTarget;
-    if (!TARGETS.includes(target)) throw new Error(`--target must be host or container`);
+    if (!TARGETS.includes(target)) throw new UserError(`Unknown --target ${JSON.stringify(target)}.`, 'Use --target host or --target container.');
     const branch = await this.readBranch(opts.branch);
     const { global, repo } = await this.open();
     const env = envOf(resolveSecrets(global, repo, branch, target));
@@ -274,7 +275,7 @@ export class SecretCommand extends BaseCommand {
     const summary: SecretApplyJson['applied'] = {};
     for (const t of targets) {
       if (!fs.existsSync(t.path)) {
-        if (!this.jsonMode) console.error(chalk.yellow(`Skipping missing worktree ${t.path}`));
+        if (!this.jsonMode) console.error(chalk.yellow(`Skipping ${t.path}: the worktree directory is gone (kunj worktree prune forgets it).`));
         continue;
       }
       const files = renderFiles(resolveSecrets(global, repo, t.branch ?? undefined, 'host'));
@@ -289,11 +290,11 @@ export class SecretCommand extends BaseCommand {
   // --- helpers ---
 
   private async writeScope(opts: SecretOptions): Promise<Scope> {
-    if (opts.global && opts.branch !== undefined) throw new Error('--global and --branch cannot be combined');
+    checkScopeFlags(opts);
     if (opts.global) return { global: true };
     // Outside one getKunjDir() is ./.kunj (in the home directory, the global vault's directory)
     if (!getRepoName()) {
-      throw new Error('Not in a git repository: repo and branch secrets belong to one; use --global for a global secret');
+      throw new UserError('Not in a git repository, and repo and branch secrets belong to one.', 'Run this inside the repository, or pass --global for a global secret.');
     }
     if (opts.branch === undefined) return { global: false };
     return { global: false, branch: await this.branchArg(opts.branch) };
@@ -303,7 +304,7 @@ export class SecretCommand extends BaseCommand {
   private async branchArg(branch: string | boolean): Promise<string> {
     if (typeof branch === 'string' && branch) return branch;
     const current = await this.currentBranch();
-    if (!current) throw new Error('No current branch (detached HEAD?); pass --branch <name>');
+    if (!current) throw new UserError('There is no current branch (HEAD is detached).', 'Name the branch: --branch <name>.');
     return current;
   }
 
@@ -378,7 +379,7 @@ export class SecretCommand extends BaseCommand {
       try {
         return await ask(`Value for ${name}: `);
       } catch {
-        throw new Error('No value given');
+        throw new UserError(`No value entered for ${name}, so nothing was stored.`, `To pipe it in instead: printf %s "$VALUE" | kunj secret set ${name}`);
       }
     }
     const raw = await (this.deps.stdin ?? readStdin)();
@@ -434,19 +435,28 @@ export class SecretCommand extends BaseCommand {
   }
 }
 
-function checkName(name: string | undefined): asserts name is string {
-  if (!name) throw new Error('A secret name is required');
-  if (!isSecretName(name)) throw new SecretError(`Invalid secret name ${JSON.stringify(name)}: names must match [A-Za-z_][A-Za-z0-9_]*`, 'bad-name');
+function checkName(name: string | undefined, verb: string): asserts name is string {
+  if (!name) throw new UserError('Name the secret.', `Usage: kunj secret ${verb} NAME${verb === 'set' ? ' (the value is asked for, or read from stdin)' : ''}`);
+  if (!isSecretName(name)) {
+    // Not echoed: a value pasted where the name goes would land in the terminal and in logs
+    throw new SecretError(`That is not a valid secret name. Use letters, digits and underscores, not starting with a digit (like API_KEY); the value is asked for after the name.`, 'bad-name');
+  }
+}
+
+function checkScopeFlags(opts: SecretOptions): void {
+  if (opts.global && opts.branch !== undefined) {
+    throw new UserError('--global and --branch cannot be combined.', 'Pass --global for the global store, --branch for one branch, or neither for this repository.');
+  }
 }
 
 // targets and delivery of a new entry, from --targets, --file and --no-env.
 function deliveryShape(scope: Scope, opts: SecretOptions, defaultFile: string | undefined): Pick<SecretEntry, 'targets' | 'delivery'> {
   const targets = parseTargets(opts.targets);
-  if (scope.global && opts.file) throw new Error('Global secrets are env only: --file needs repo or branch scope');
+  if (scope.global && opts.file) throw new UserError('Global secrets are env only, so --file cannot be used with --global.', 'Drop --global to store it for this repository (add --branch for one branch).');
   const file = scope.global ? undefined : opts.file ?? defaultFile;
   if (file !== undefined) checkFilePath(file);
   const env = opts.env !== false;
-  if (!env && !file) throw new Error('--no-env without --file leaves nothing to deliver');
+  if (!env && !file) throw new UserError('--no-env without --file leaves nothing to deliver.', 'Add --file <path> to render it into a file, or drop --no-env.');
   return { targets, delivery: { env, ...(file ? { file } : {}) } };
 }
 
@@ -454,7 +464,7 @@ function parseTargets(value: string | undefined): SecretEntry['targets'] {
   if (value === undefined) return ['host', 'container'];
   const list = value.split(',').map((t) => t.trim()).filter(Boolean);
   if (list.length === 0 || list.some((t) => !TARGETS.includes(t as SecretTarget))) {
-    throw new Error('--targets must be host, container or host,container');
+    throw new UserError(`Unknown --targets ${JSON.stringify(value)}.`, 'Use host, container or host,container.');
   }
   return TARGETS.filter((t) => list.includes(t));
 }
@@ -463,7 +473,7 @@ function parseTargets(value: string | undefined): SecretEntry['targets'] {
 function checkFilePath(file: string): void {
   const parts = file.split(/[\\/]/);
   if (!file || path.isAbsolute(file) || parts.some((p) => p === '..') || parts.every((p) => p === '' || p === '.') || parts.some((p) => p.toLowerCase() === '.git')) {
-    throw new Error(`--file must be a path inside the worktree (not inside .git): ${file}`);
+    throw new UserError(`--file ${file || '(empty)'} must be a relative path inside the worktree, not inside .git.`, 'For example: --file .env or --file config/app.env');
   }
 }
 
@@ -487,7 +497,14 @@ function writeJson(name: string, scope: Scope): SecretWriteJson {
 }
 
 function notFound(name: string, scope: Scope): SecretError {
-  return new SecretError(`No secret ${name} (${scopeLabel(scope)})`, 'secret-not-found');
+  const where = scope.global ? 'in the global store' : scope.branch ? `for branch ${scope.branch}` : 'for this repository';
+  return new SecretError(`No secret named ${name} ${where}. Run kunj secret list to see what is stored.`, 'secret-not-found');
+}
+
+// get looks through every layer: the branch, the repository, then the global store
+function notFoundAnywhere(name: string, branch: string | undefined): SecretError {
+  const where = branch ? `for branch ${branch}, this repository or globally` : 'for this repository or globally';
+  return new SecretError(`No secret named ${name} ${where}. Run kunj secret list to see what is stored.`, 'secret-not-found');
 }
 
 // By name, the repo entry before branch ones, branches in order: a stable file and listing.

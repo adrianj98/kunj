@@ -8,6 +8,7 @@
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { BaseCommand } from '../lib/command';
+import { describeError, UserError } from '../lib/errors';
 import {
   COMPANION_APPS,
   CompanionApp,
@@ -80,7 +81,7 @@ export class InstallCommand extends BaseCommand {
     } else if (app === 'vscode' || app === 'macos' || app === 'workspace') {
       apps = [app];
     } else {
-      throw new Error(`Unknown app '${app}'. Expected vscode, macos, workspace or all`);
+      throw new UserError(`Unknown app '${app}'.`, 'Use one of: vscode, macos, workspace, all.');
     }
 
     if (apps.length === 0) {
@@ -94,9 +95,9 @@ export class InstallCommand extends BaseCommand {
         const { release, path } = await this.installOne(name, options);
         results.push({ app: name, success: true, release, path });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const { message, hint } = describeError(error);
         results.push({ app: name, success: false, error: message });
-        this.log(chalk.red(`✗ ${COMPANION_APPS[name].label}: ${message}`));
+        this.log(chalk.red(`✗ ${COMPANION_APPS[name].label}: ${message}`) + (hint ? `\n  ${hint}` : ''));
       }
     }
 
@@ -134,12 +135,17 @@ export class InstallCommand extends BaseCommand {
     this.log(chalk.blue(`Looking for the ${label} in the GitHub releases...`));
     const asset = await findReleaseAsset(app, version);
     if (!asset) {
-      throw new Error(
+      throw new UserError(
         app === 'macos'
-          ? 'no release has the macOS app yet. Build it from source: cd macos-app && scripts/bundle.sh --install'
+          ? 'No release has the macOS app yet.'
           : app === 'workspace'
-            ? 'no release has the Workspace app yet. Build it from source: cd workspace-app && scripts/bundle.sh --install'
-            : 'no release has the VS Code extension. Build it from source: cd vscode-extension && npm run install-local'
+            ? 'No release has the Workspace app yet.'
+            : 'No release has the VS Code extension.',
+        app === 'macos'
+          ? 'Build it from source: cd macos-app && scripts/bundle.sh --install'
+          : app === 'workspace'
+            ? 'Build it from source: cd workspace-app && scripts/bundle.sh --install'
+            : 'Build it from source: cd vscode-extension && npm run install-local'
       );
     }
     if (version && asset.tag.replace(/^v/, '') !== version.replace(/^v/, '')) {

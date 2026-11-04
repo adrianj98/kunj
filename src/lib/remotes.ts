@@ -43,9 +43,9 @@ export function readRemotes(file: string = getRemotesPath()): Remotes {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new ContainerError(`${file} is not valid JSON; fix or delete it`, 'bad-remote');
+    throw new ContainerError(`${file} is not valid JSON. Fix it, or delete it and add the remotes again with \`kunj remote add\`.`, 'bad-remote');
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new ContainerError(`${file} must hold an object of remotes`, 'bad-remote');
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new ContainerError(`${file} must hold an object of remotes (name → entry). Fix it, or delete it and add the remotes again with \`kunj remote add\`.`, 'bad-remote');
   return parsed as Remotes;
 }
 
@@ -58,8 +58,8 @@ export function writeRemotes(remotes: Remotes, file: string = getRemotesPath()):
 }
 
 export function checkRemoteName(name: string): void {
-  if (!REMOTE_NAME.test(name)) throw new ContainerError(`Remote name "${name}": letters, digits, _ . and -, up to 32, starting with a letter or digit`, 'bad-remote');
-  if (name === 'local') throw new ContainerError('"local" means the laptop\'s own Docker and cannot be a remote name', 'bad-remote');
+  if (!REMOTE_NAME.test(name)) throw new ContainerError(`"${name}" cannot be a remote name. Use up to 32 letters, digits, _ . and -, starting with a letter or digit.`, 'bad-remote');
+  if (name === 'local') throw new ContainerError('"local" means the laptop\'s own Docker and cannot be a remote name. Pick another name.', 'bad-remote');
 }
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost|\[::1\]|::1)$/;
@@ -79,33 +79,33 @@ export function checkRemoteUrl(url: string, opts: { allowInsecureHttp?: boolean 
   try {
     parsed = new URL(url);
   } catch {
-    throw new ContainerError(`"${url}" is not a URL`, 'bad-remote');
+    throw new ContainerError(`"${url}" is not a URL. Give the full address, e.g. https://box.example.com:7433.`, 'bad-remote');
   }
   if (parsed.protocol === 'https:') return parsed;
   if (parsed.protocol === 'http:') {
     if (LOOPBACK.test(parsed.hostname) || opts.allowInsecureHttp) return parsed;
-    throw new ContainerError(`http:// is only accepted to a loopback address (${parsed.hostname} is not): use https://, add the remote with --ssh and let kunj tunnel to it, or pass --allow-insecure-http on a network that already encrypts (Tailscale, WireGuard)`, 'bad-remote');
+    throw new ContainerError(`http:// is only accepted to a loopback address, and ${parsed.hostname} is not one. Use https://, add the remote with --ssh and let kunj tunnel to it, or pass --allow-insecure-http on a network that already encrypts (Tailscale, WireGuard).`, 'bad-remote');
   }
-  throw new ContainerError(`"${url}": expected http:// or https://`, 'bad-remote');
+  throw new ContainerError(`"${url}" is not an http:// or https:// URL.`, 'bad-remote');
 }
 
 /** `user@host` or `host`: one word ssh will take as a destination, never an option. */
 export function checkSshDestination(ssh: string): void {
-  if (!ssh || /\s/.test(ssh) || ssh.startsWith('-')) throw new ContainerError(`"${ssh}" is not an SSH destination (user@host)`, 'bad-remote');
+  if (!ssh || /\s/.test(ssh) || ssh.startsWith('-')) throw new ContainerError(`"${ssh}" is not an SSH destination. Give it as user@host or host.`, 'bad-remote');
 }
 
 export function checkToken(token: string): void {
-  if (!token || /\s/.test(token)) throw new ContainerError('The token must be one word', 'bad-remote');
+  if (!token || /\s/.test(token)) throw new ContainerError('The token must be one word, with no spaces. Print it again with `kunj serve token` on the box.', 'bad-remote');
 }
 
 export function checkPort(port: number): void {
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ContainerError(`Port ${port} is not between 1 and 65535`, 'bad-remote');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ContainerError(`Port ${port} is not between 1 and 65535.`, 'bad-remote');
 }
 
 /** The entry for `name`, else `remote-unknown` naming the file. */
 export function requireRemote(name: string, file: string = getRemotesPath()): RemoteEntry {
   const entry = readRemotes(file)[name];
-  if (!entry) throw new ContainerError(`No remote named "${name}" (kunj remote add ${name} --ssh user@host | --url https://…; the known ones are in ${file})`, 'remote-unknown');
+  if (!entry) throw new ContainerError(`No remote named "${name}". Add it with \`kunj remote add ${name} --ssh user@host\` (or --url https://…), or see \`kunj remote list\` (stored in ${file}).`, 'remote-unknown');
   return entry;
 }
 

@@ -258,7 +258,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
       return;
     }
     req.resume();
-    sendError(res, new ServeError(404, 'not-found', `no route ${req.method} ${url.pathname}`));
+    sendError(res, new ServeError(404, 'not-found', `no route ${req.method} ${url.pathname} on kunj serve ${opts.version} (run the same kunj version on both machines)`));
   });
 
   const sockets = attachWebSockets(server, streamOpts);

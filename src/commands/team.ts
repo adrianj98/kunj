@@ -6,7 +6,8 @@ import * as path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { BaseCommand } from "../lib/command";
-import { checkGitRepo } from "../lib/git";
+import { requireGitRepo, wrapError } from "../lib/git";
+import { requireGhCli } from "../lib/pr-providers";
 import { getKunjDir, loadConfig } from "../lib/config";
 import {
   checkAWSCredentials,
@@ -138,19 +139,9 @@ export class TeamCommand extends BaseCommand {
   }
 
   async execute(options: TeamOptions = {}): Promise<void> {
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
-    const ghAvailable = await this.checkGhCli();
-    if (!ghAvailable) {
-      console.error(chalk.red("Error: GitHub CLI (gh) is not installed"));
-      console.log(chalk.yellow("\nTo install: brew install gh"));
-      console.log(chalk.yellow("Then authenticate: gh auth login"));
-      process.exit(1);
-    }
+    await requireGhCli();
 
     const limit = parseInt(options.limit || "50", 10);
 
@@ -580,15 +571,6 @@ export class TeamCommand extends BaseCommand {
     return { prs: {} };
   }
 
-  private async checkGhCli(): Promise<boolean> {
-    try {
-      await execAsync("gh auth status");
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   private async fetchOpenPRs(limit: number): Promise<PRData[]> {
     try {
       const { stdout } = await execAsync(
@@ -596,8 +578,7 @@ export class TeamCommand extends BaseCommand {
       );
       return JSON.parse(stdout || "[]");
     } catch (error: any) {
-      console.error(chalk.red("Failed to fetch PRs:"), error.message);
-      process.exit(1);
+      throw wrapError("Could not list the open pull requests", error);
     }
   }
 
@@ -718,7 +699,7 @@ export class TeamCommand extends BaseCommand {
       return stdout || "";
     } catch (error: any) {
       console.error(
-        chalk.yellow(`Warning: Could not fetch diff for PR #${prNumber}`)
+        chalk.yellow(`Warning: could not fetch the diff of PR #${prNumber}; continuing without it.`)
       );
       return "";
     }

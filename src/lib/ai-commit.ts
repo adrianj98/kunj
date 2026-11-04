@@ -16,6 +16,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import chalk from "chalk";
 import { loadConfig } from "./config";
+import { UserError, describeError } from "./errors";
 import { getCommitStylePrompt } from "./commit-styles";
 import * as fs from "fs";
 import * as path from "path";
@@ -92,7 +93,7 @@ function logInferenceProfileHelp(modelId: string): void {
   console.error(chalk.yellow(`\n⚠ Model '${modelId}' requires a cross-region inference profile.`));
   console.error(chalk.yellow("  Newer Claude models cannot be called with their bare model ID."));
   console.error(chalk.gray("  Fix: prefix the model ID with your region (e.g. 'us.', 'eu.', 'ap.'):"));
-  console.error(chalk.cyan(`    kunj config set ai.model us.${modelId}`));
+  console.error(chalk.cyan(`    kunj config --set ai.model=us.${modelId}`));
   console.error(chalk.gray("  Or set the BEDROCK_MODEL environment variable.\n"));
 }
 
@@ -183,7 +184,7 @@ export async function getCommitDiff(files: string[]): Promise<string> {
     );
     return fileDiff || "";
   } catch (error) {
-    console.error(chalk.yellow("Warning: Could not get file diff"));
+    console.error(chalk.yellow("Warning: could not read the diff of the staged files; the AI sees only their names."));
     return "";
   }
 }
@@ -200,7 +201,7 @@ export async function generateAICommitMessage(
 
     // Check if AI is enabled
     if (!config.ai?.enabled) {
-      throw new Error("AI features are disabled in config");
+      throw new UserError("AI features are turned off.", "Turn them on with `kunj config --set ai.enabled=true`.");
     }
 
     // Get the diff if not provided
@@ -278,7 +279,7 @@ ${includeBody ? 'BODY: <optional detailed description>\n' : ''}BRANCH_DESC: <ver
     const branchDescMatch = content.match(/BRANCH_DESC:\s*(.+?)(?:\n|$)/i);
 
     if (!typeMatch || !messageMatch) {
-      throw new Error("Could not parse AI response");
+      throw new UserError("The AI reply had no TYPE and MESSAGE lines, so kunj could not read a commit message from it.");
     }
 
     const type = typeMatch[1].trim();
@@ -327,7 +328,7 @@ ${includeBody ? 'BODY: <optional detailed description>\n' : ''}BRANCH_DESC: <ver
     if (isInferenceProfileError(error)) {
       logInferenceProfileHelp(getDefaultModelId());
     }
-    console.error(chalk.red("AI generation failed:"), error.message);
+    console.error(chalk.yellow(`⚠ Could not write the commit message with AI: ${describeError(error).message} Suggesting one from the file names.`));
 
     // Provide a fallback suggestion based on file patterns
     const fallbackType = suggestCommitType(files);
@@ -497,8 +498,7 @@ Respond with just the tagged entry with bullets, no additional formatting.`;
     if (isInferenceProfileError(error)) {
       logInferenceProfileHelp(getDefaultModelId());
     }
-    console.error(chalk.red("Work log generation error:"), error.message);
-    throw error; // Re-throw to be caught by caller
+    throw error; // the caller warns: the commit is already made
   }
 }
 
@@ -577,7 +577,7 @@ Respond with ONLY the stash message, nothing else.`;
     console.log(chalk.gray("AI returned empty stash message"));
     return null;
   } catch (error: any) {
-    console.error(chalk.red("Stash message generation error:"), error.message);
+    console.error(chalk.yellow(`⚠ Could not write the stash message with AI: ${describeError(error).message}`));
     return null;
   }
 }
@@ -725,8 +725,7 @@ Respond with just the tagged entry with bullets, no additional formatting.`;
     if (isInferenceProfileError(error)) {
       logInferenceProfileHelp(getDefaultModelId());
     }
-    console.error(chalk.red("PR log generation error:"), error.message);
-    throw error; // Re-throw to be caught by caller
+    throw error; // the caller warns: the PR is already open
   }
 }
 
@@ -822,7 +821,7 @@ Example format (CASUAL tone):
 
     return bullets;
   } catch (error: any) {
-    console.error(chalk.gray("Standup bullet generation failed:"), error.message);
+    console.error(chalk.gray(`Could not write the standup bullets with AI: ${describeError(error).message}`));
     return null;
   }
 }
@@ -946,14 +945,8 @@ export async function checkAWSCredentials(): Promise<boolean> {
         err.message?.includes("ValidationException")
       ) {
         // Model doesn't exist but credentials are OK
-        console.error(
-          chalk.yellow("Warning: Model not available:", getDefaultModelId())
-        );
-        console.error(
-          chalk.yellow(
-            "Try setting BEDROCK_MODEL environment variable to a valid model ID"
-          )
-        );
+        console.error(chalk.yellow(`Warning: Bedrock does not know the model ${getDefaultModelId()}.`));
+        console.error(chalk.gray("  Pick another with `kunj config -i` (AI settings), or set ai.model or BEDROCK_MODEL."));
         return true;
       }
 
@@ -964,9 +957,7 @@ export async function checkAWSCredentials(): Promise<boolean> {
     }
   } catch (error: any) {
     // If we can't even create the client, credentials are not configured
-    console.error(
-      chalk.yellow("Warning: Could not check AWS credentials:", error.message)
-    );
+    console.error(chalk.yellow(`Warning: could not check the AWS credentials: ${describeError(error).message}`));
     return false;
   }
 }

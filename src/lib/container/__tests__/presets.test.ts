@@ -146,7 +146,7 @@ describe('presets', () => {
     const failing = testBackend();
     failing.execResults.set(runs[1][1].join(' '), { exitCode: 3, stdout: '' });
     const noResult: string[] = [];
-    await expect(runPresets(failing, 'c1', presets, tools, 'dev', {}, m => noResult.push(m))).rejects.toThrow('preset node failed (exit 3)');
+    await expect(runPresets(failing, 'c1', presets, tools, 'dev', {}, m => noResult.push(m))).rejects.toThrow('Preset node (tools.node in the blueprint) failed (exit 3)');
     // apt ran but wrote no result file
     expect(noResult).toEqual(['preset apt did not report its version (it should end with kunj_done <version>)']);
     expect(failing.callsOf('exec').pop()).toEqual(['c1', ['rm', '-rf', PRESET_DIR], { user: 'root' }]);

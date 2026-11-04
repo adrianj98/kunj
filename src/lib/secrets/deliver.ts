@@ -4,6 +4,7 @@
 import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { UserError } from '../errors';
 import { SecretError } from './errors';
 import type { SecretEntry } from './vault';
 
@@ -42,7 +43,7 @@ export async function writeHostFiles(worktreeRoot: string, files: Map<string, st
   if (!opts.force) {
     for (const t of targets) {
       if (!(await gitIgnores(root, t.abs))) {
-        throw new SecretError(`${t.rel} is not ignored by git in ${root}; add it to .gitignore, or pass --force`, 'not-ignored');
+        throw new SecretError(`${t.rel} is not ignored by git in ${root}, so no secret files were written there. Add it to .gitignore, or run kunj secret apply --force to write it anyway.`, 'not-ignored');
       }
     }
   }
@@ -69,11 +70,11 @@ function insideRoot(root: string, rel: string): string {
   const abs = path.resolve(root, rel);
   const back = path.relative(root, abs);
   if (!rel || path.isAbsolute(rel) || !back || back === '..' || back.startsWith('..' + path.sep) || path.isAbsolute(back)) {
-    throw new Error(`Secret file path must be inside the worktree: ${JSON.stringify(rel)}`);
+    throw new UserError(`The secret file path ${JSON.stringify(rel)} leads outside the worktree, so no secret files were written. Store the secret again with a --file inside the worktree (kunj secret set NAME --file <path>).`);
   }
   // git's own files are not the worktree, whatever .gitignore says (`check-ignore` matches `*` there too).
   if (back.split(path.sep).some((part) => part.toLowerCase() === '.git')) {
-    throw new Error(`Secret file path must not be inside a .git directory: ${JSON.stringify(rel)}`);
+    throw new UserError(`The secret file path ${JSON.stringify(rel)} is inside a .git directory, so no secret files were written. Store the secret again with a --file outside .git (kunj secret set NAME --file <path>).`);
   }
   return abs;
 }

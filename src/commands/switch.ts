@@ -3,7 +3,7 @@
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { BaseCommand } from '../lib/command';
-import { checkGitRepo, executeGitCommand, getCurrentBranch, getBranchesWithActivity } from '../lib/git';
+import { requireGitRepo, gitCommandError, executeGitCommand, getCurrentBranch, getBranchesWithActivity } from '../lib/git';
 import { createStash, popStashForBranch, getAllStashesWithBranch } from '../lib/stash';
 import { loadBranchMetadata, updateBranchMetadata } from '../lib/metadata';
 import { loadConfig } from '../lib/config';
@@ -11,6 +11,7 @@ import { isBranchWIP } from '../lib/utils';
 import { BranchInfo } from '../types';
 import { runActionHook } from '../lib/hooks';
 import { resolveBaseRef, describeBase } from '../lib/base-branch';
+import { UserError } from '../lib/errors';
 
 interface SwitchOptions {
   stash?: boolean;
@@ -48,11 +49,7 @@ export class SwitchCommand extends BaseCommand {
 
   async execute(targetBranch?: string, options: SwitchOptions = {}): Promise<void> {
     // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
     const currentBranch = await getCurrentBranch();
 
@@ -100,9 +97,10 @@ export class SwitchCommand extends BaseCommand {
       return;
     } else if (!branchExists) {
       // Branch doesn't exist and no -c flag
-      console.error(chalk.red(`✗ Branch '${targetBranch}' does not exist`));
-      console.log(chalk.gray(`Tip: Use -c flag to create and switch: kunj switch -c ${targetBranch}`));
-      process.exit(1);
+      throw new UserError(
+        `There is no local branch named ${targetBranch}.`,
+        `Create it with \`kunj switch -c ${targetBranch}\`, or run \`kunj list\` to see the branches.`,
+      );
     }
 
     const config = loadConfig();
@@ -146,8 +144,7 @@ export class SwitchCommand extends BaseCommand {
 
       await runActionHook('post-branch-switch', hookValues, hookOptions);
     } else {
-      console.error(chalk.red(`✗ Failed to switch: ${result.message}`));
-      process.exit(1);
+      throw gitCommandError(`Could not switch to ${targetBranch}`, result.message);
     }
   }
 
@@ -372,8 +369,7 @@ export class SwitchCommand extends BaseCommand {
 
       console.log(chalk.gray("\nTip: Add notes with 'kunj branch-note'"));
     } else {
-      console.error(chalk.red(`✗ Failed to create branch: ${result.message}`));
-      process.exit(1);
+      throw gitCommandError(`Could not create branch ${branchName}`, result.message);
     }
   }
 }

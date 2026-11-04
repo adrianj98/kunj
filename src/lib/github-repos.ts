@@ -13,6 +13,7 @@ import * as path from 'path';
 import type { KnownRepo } from './repos';
 import { readOriginUrl } from './repo-identity';
 import { DEFAULT_CLONE_DIR } from './clone-defaults';
+import { gitErrorLine } from './errors';
 
 export type GitHubErrorCode = 'gh-missing' | 'gh-auth' | 'gh-failed' | 'bad-repo' | 'clone-exists' | 'clone-failed';
 
@@ -56,13 +57,13 @@ export const execFileAsync: Exec = (file, args, opts = {}) =>
 function ghError(error: unknown, what: string): GitHubError {
   const e = error as { code?: unknown; stderr?: string; message?: string };
   if (e.code === 'ENOENT') {
-    return new GitHubError('gh-missing', 'The GitHub CLI (gh) is not installed: https://cli.github.com');
+    return new GitHubError('gh-missing', 'The GitHub CLI (gh) is not installed. Install it from https://cli.github.com and run `gh auth login`.');
   }
   const stderr = (e.stderr || '').trim();
   if (/gh auth login|not logged in|authentication required|HTTP 401/i.test(stderr)) {
-    return new GitHubError('gh-auth', "gh is not logged in to GitHub: run 'gh auth login'");
+    return new GitHubError('gh-auth', 'gh is not logged in to GitHub. Run `gh auth login`, then try again.');
   }
-  return new GitHubError('gh-failed', `${what} failed: ${stderr.split('\n').pop() || e.message || 'gh exited with an error'}`);
+  return new GitHubError('gh-failed', `${what} failed: ${gitErrorLine(stderr) || e.message || 'gh exited with an error'}`);
 }
 
 const LIST_JQ =
@@ -124,12 +125,12 @@ export function parseRepoArg(arg: string): { spec: string; name: string } {
   if (short) return check(value, short[2]);
   const key = remoteKey(value);
   if (key && /^(https?|ssh|git):\/\/|^[^@/:-][^@/:]*@/i.test(value)) return check(value, key.split('/')[2]);
-  throw new GitHubError('bad-repo', `Not a repository: '${arg}'. Expected owner/name or a GitHub URL`);
+  throw new GitHubError('bad-repo', `'${arg}' is not a repository. Name it as owner/name or a GitHub URL.`);
 }
 
 function check(spec: string, name: string): { spec: string; name: string } {
   if (!name || name === '.' || name === '..' || name.startsWith('-')) {
-    throw new GitHubError('bad-repo', `Not a repository name: '${name}'`);
+    throw new GitHubError('bad-repo', `'${name}' cannot be used as a repository directory name.`);
   }
   return { spec, name };
 }
@@ -163,7 +164,7 @@ export async function cloneRepo(repoArg: string, opts: CloneOptions): Promise<Cl
   const { spec, name } = parseRepoArg(repoArg);
   const target = path.join(opts.cloneDir, opts.bare ? `${name}.git` : name);
   if (fs.existsSync(target)) {
-    throw new GitHubError('clone-exists', `${target} already exists`);
+    throw new GitHubError('clone-exists', `${target} already exists. Add it with \`kunj repos add ${target}\`, or pass --dir to clone somewhere else.`);
   }
   fs.mkdirSync(opts.cloneDir, { recursive: true });
   try {
@@ -197,6 +198,6 @@ export async function cloneRepo(repoArg: string, opts: CloneOptions): Promise<Cl
     // is not refused as clone-exists
     fs.rmSync(target, { recursive: true, force: true });
     throw new GitHubError('clone-failed',
-      `Cloning ${spec} as a bare repository failed while setting up its worktree, and ${target} was removed: ${(e.stderr || e.message || '').trim()}`);
+      `Cloning ${spec} as a bare repository failed while setting up its worktree, and ${target} was removed: ${gitErrorLine(e.stderr || e.message || '') ?? 'git failed'}. Try again, or pass --no-bare for a normal clone.`);
   }
 }

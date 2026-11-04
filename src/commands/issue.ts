@@ -6,7 +6,9 @@ import * as fs from "fs";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { BaseCommand } from "../lib/command";
-import { checkGitRepo, getCurrentBranch, createTag } from "../lib/git";
+import { requireGitRepo, wrapError, getCurrentBranch, createTag } from "../lib/git";
+import { UserError } from "../lib/errors";
+import { requireGhCli } from "../lib/pr-providers";
 import { updateBranchMetadata } from "../lib/metadata";
 
 const execAsync = promisify(exec);
@@ -38,19 +40,8 @@ export class IssueCommand extends BaseCommand {
   }
 
   async execute(options: IssueOptions = {}): Promise<void> {
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
-
-    const ghAvailable = await this.checkGhCli();
-    if (!ghAvailable) {
-      console.error(chalk.red("Error: GitHub CLI (gh) is not installed or not authenticated"));
-      console.log(chalk.yellow("  macOS: brew install gh"));
-      console.log(chalk.yellow("  Then:  gh auth login"));
-      process.exit(1);
-    }
+    await requireGitRepo();
+    await requireGhCli();
 
     // --- Title ---
     let title = options.title;
@@ -70,8 +61,7 @@ export class IssueCommand extends BaseCommand {
     let body = "";
     if (options.bodyFile) {
       if (!fs.existsSync(options.bodyFile)) {
-        console.error(chalk.red(`Error: File not found: ${options.bodyFile}`));
-        process.exit(1);
+        throw new UserError(`The description file ${options.bodyFile} does not exist.`, "Check the path given to --body-file.");
       }
       body = fs.readFileSync(options.bodyFile, "utf-8");
       console.log(chalk.gray(`Using description from ${options.bodyFile}`));
@@ -132,8 +122,7 @@ export class IssueCommand extends BaseCommand {
         console.log(chalk.gray(`Issue #${issueNumber}`));
       }
     } catch (error: any) {
-      console.error(chalk.red("Failed to create issue:"), error.message);
-      process.exit(1);
+      throw wrapError("Could not create the issue", error);
     }
 
     // --- Save to branch metadata ---
@@ -174,7 +163,7 @@ export class IssueCommand extends BaseCommand {
         if (result.success) {
           console.log(chalk.green(`✓ ${result.message}`));
         } else {
-          console.log(chalk.yellow(`⚠ Could not create tag: ${result.message}`));
+          console.log(chalk.yellow(`⚠ ${result.message}`));
         }
       }
     } else if (typeof options.tag === "string" && options.tag) {
@@ -183,7 +172,7 @@ export class IssueCommand extends BaseCommand {
       if (result.success) {
         console.log(chalk.green(`✓ ${result.message}`));
       } else {
-        console.log(chalk.yellow(`⚠ Could not create tag: ${result.message}`));
+        console.log(chalk.yellow(`⚠ ${result.message}`));
       }
     }
 
@@ -204,16 +193,6 @@ export class IssueCommand extends BaseCommand {
       if (openInBrowser) {
         await execAsync(`gh issue view ${issueNumber || ""} --web`);
       }
-    }
-  }
-
-  private async checkGhCli(): Promise<boolean> {
-    try {
-      await execAsync("gh --version");
-      await execAsync("gh auth status");
-      return true;
-    } catch {
-      return false;
     }
   }
 

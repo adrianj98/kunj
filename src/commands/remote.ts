@@ -101,7 +101,7 @@ export class RemoteCommand extends BaseCommand {
   private async tokenFrom(opts: RemoteOptions): Promise<string> {
     let token: string;
     if (opts.token !== undefined) {
-      if (!this.jsonMode) console.error(chalk.yellow('⚠ --token puts the token in your shell history; --token-stdin or the prompt avoid that'));
+      if (!this.jsonMode) console.error(chalk.yellow('⚠ --token puts the token in your shell history; --token-stdin or the prompt avoid that.'));
       token = opts.token;
     } else if (opts.tokenStdin) {
       token = (await (this.deps.stdin ?? readStdin)()).trim();
@@ -124,7 +124,7 @@ export class RemoteCommand extends BaseCommand {
     if (opts.json) this.jsonMode = true;
     const verb = (positionals[0] || 'list').toLowerCase();
     const target = positionals[1];
-    if (!ACTIONS.includes(verb)) throw new ContainerError(`Unknown remote action '${verb}'. Expected one of: ${ACTIONS.join(', ')}`);
+    if (!ACTIONS.includes(verb)) throw new ContainerError(`Unknown remote action '${verb}'. Use one of: ${ACTIONS.join(', ')} (see kunj remote --help).`);
 
     switch (verb) {
       case 'list':
@@ -158,16 +158,16 @@ export class RemoteCommand extends BaseCommand {
   }
 
   private async add(name: string | undefined, opts: RemoteOptions): Promise<void> {
-    if (!name) throw new ContainerError('Usage: kunj remote add <name> --ssh user@host | --url https://…');
+    if (!name) throw new ContainerError('Name the remote to add. Usage: kunj remote add <name> --ssh user@host | --url https://…');
     checkRemoteName(name);
-    if (!!opts.ssh === !!opts.url) throw new ContainerError('Give exactly one of --ssh user@host or --url https://…');
+    if (!!opts.ssh === !!opts.url) throw new ContainerError('Give exactly one of --ssh user@host (kunj opens an SSH tunnel) or --url https://… (your own TLS).');
     const entry: RemoteEntry = { token: '', addedAt: new Date().toISOString() };
-    if (opts.allowInsecureHttp && !opts.url) throw new ContainerError('--allow-insecure-http goes with --url http://…');
+    if (opts.allowInsecureHttp && !opts.url) throw new ContainerError('--allow-insecure-http goes with --url http://…; an --ssh remote is already encrypted by ssh.');
     if (opts.url) {
       const url = checkRemoteUrl(opts.url, { allowInsecureHttp: opts.allowInsecureHttp });
       entry.url = opts.url.replace(/\/+$/, '');
       if (isInsecureUrl(url)) entry.insecure = true;
-      if (opts.port) throw new ContainerError('--port goes with --ssh; put the port in the URL');
+      if (opts.port) throw new ContainerError('--port goes with --ssh; with --url, put the port in the URL (https://box:7433).');
     } else {
       checkSshDestination(opts.ssh!);
       entry.ssh = opts.ssh;
@@ -196,9 +196,9 @@ export class RemoteCommand extends BaseCommand {
   }
 
   private remove(name: string | undefined): void {
-    if (!name) throw new ContainerError('Usage: kunj remote remove <name>');
+    if (!name) throw new ContainerError('Name the remote to remove. Usage: kunj remote remove <name> (kunj remote list shows them).');
     const remotes = readRemotes(this.file());
-    if (!remotes[name]) throw new ContainerError(`No remote named "${name}"`, 'remote-unknown');
+    if (!remotes[name]) throw new ContainerError(`No remote named "${name}". Run kunj remote list to see them, or kunj remote add ${name} to add it.`, 'remote-unknown');
     delete remotes[name];
     writeRemotes(remotes, this.file());
     if (this.jsonMode) this.outputJSON({ success: true, name });
@@ -206,9 +206,9 @@ export class RemoteCommand extends BaseCommand {
   }
 
   private async token(name: string | undefined, opts: RemoteOptions): Promise<void> {
-    if (!name) throw new ContainerError('Usage: kunj remote token <name> [--token-stdin]');
+    if (!name) throw new ContainerError('Name the remote whose token to replace. Usage: kunj remote token <name> [--token-stdin]');
     const remotes = readRemotes(this.file());
-    if (!remotes[name]) throw new ContainerError(`No remote named "${name}"`, 'remote-unknown');
+    if (!remotes[name]) throw new ContainerError(`No remote named "${name}". Run kunj remote list to see them, or kunj remote add ${name} to add it.`, 'remote-unknown');
     remotes[name].token = await this.tokenFrom(opts);
     writeRemotes(remotes, this.file());
     if (this.jsonMode) this.outputJSON({ success: true, name });
@@ -216,7 +216,7 @@ export class RemoteCommand extends BaseCommand {
   }
 
   private async ping(name: string | undefined): Promise<void> {
-    if (!name) throw new ContainerError('Usage: kunj remote ping <name>');
+    if (!name) throw new ContainerError('Name the remote to ping. Usage: kunj remote ping <name> (kunj remote list shows them).');
     const entry = requireRemote(name, this.file());
     const select = this.deps.select ?? (await import('../lib/container/select-backend')).selectBackend;
     const config = await loadResolvedConfig(process.cwd()).catch(() => ({}) as Awaited<ReturnType<typeof loadResolvedConfig>>);

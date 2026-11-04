@@ -58,7 +58,7 @@ export function parseListen(text: string | undefined): { host: string; port: num
   }
   // Port 0 lets the OS pick one (printed once listening)
   const port = portText === '' ? DEFAULT_SERVE_PORT : Number(portText);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new ContainerError(`--listen ${text}: the port must be 0-65535`);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new ContainerError(`--listen ${text}: the port must be 0-65535 (0 picks a free one).`);
   return { host, port };
 }
 
@@ -126,7 +126,7 @@ export class ServeCommand extends BaseCommand {
       else console.log(token);
       return;
     }
-    if (verb !== 'run') throw new ContainerError(`Unknown serve action '${verb}'. Expected: token`);
+    if (verb !== 'run') throw new ContainerError(`Unknown serve action '${verb}'. Run kunj serve to start the server, or kunj serve token to print the token.`);
 
     const listen = parseListen(opts.listen);
     // Commander keeps only the last of a repeated option, so every occurrence is read from argv
@@ -136,7 +136,7 @@ export class ServeCommand extends BaseCommand {
       throw new ContainerError(
         `--listen ${opts.listen} is not a loopback address: the connection would be plain HTTP on your network. ` +
           'Keep the default and reach it through an SSH tunnel (kunj remote add <name> --ssh user@host) or a TLS proxy, ' +
-          'or pass --allow-remote-listen if you know what you are doing',
+          'or pass --allow-remote-listen if you know what you are doing.',
       );
     }
 
@@ -161,8 +161,8 @@ export class ServeCommand extends BaseCommand {
     });
     const address = await server.listen(listen.host, listen.port).catch((err: NodeJS.ErrnoException) => {
       // a plain message, not a stack trace: the common mistakes are an address this machine does not have and a busy port
-      if (err.code === 'EADDRNOTAVAIL') throw new ContainerError(`--listen ${listen.host}:${listen.port}: ${listen.host} is not an address of this machine (see ifconfig)`);
-      if (err.code === 'EADDRINUSE') throw new ContainerError(`--listen ${listen.host}:${listen.port}: the port is already in use (another kunj serve?)`);
+      if (err.code === 'EADDRNOTAVAIL') throw new ContainerError(`--listen ${listen.host}:${listen.port}: ${listen.host} is not an address of this machine. Use one that ifconfig lists, or keep the default 127.0.0.1.`);
+      if (err.code === 'EADDRINUSE') throw new ContainerError(`--listen ${listen.host}:${listen.port}: the port is already in use (another kunj serve?). Stop that one, or pick another port with --listen.`);
       throw err;
     });
 

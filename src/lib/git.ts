@@ -4,6 +4,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import chalk from 'chalk';
 import { GitCommandResult, BranchInfo } from '../types';
+import { UserError, gitErrorLine, describeError } from './errors';
 
 const execAsync = promisify(exec);
 
@@ -32,8 +33,38 @@ export async function getGitRoot(): Promise<string> {
     } catch {
       // fall through
     }
-    throw new Error('Not in a git repository');
+    throw notGitRepoError();
   }
+}
+
+// The error for a command run outside a repository
+export function notGitRepoError(): UserError {
+  return new UserError('Not inside a git repository.', 'Run this from a repository, or `cd` into one first.');
+}
+
+// Throw notGitRepoError() unless the current directory is inside a repository
+export async function requireGitRepo(): Promise<void> {
+  if (!(await checkGitRepo())) throw notGitRepoError();
+}
+
+// The line worth showing from a failed executeGitCommand() result ("Command failed: git ..." dropped)
+export function gitFailureLine(message: string): string {
+  return gitErrorLine(message) ?? message;
+}
+
+// `<what>: <reason>` for an error caught around git/gh calls. kunj's own errors (a failing hook, a
+// UserError) and Ctrl-C at a prompt pass through unchanged.
+export function wrapError(what: string, error: unknown): Error {
+  if (error instanceof Error && PASS_THROUGH.has(error.name)) return error;
+  const d = describeError(error);
+  return new UserError(`${what}: ${d.message}`, d.hint);
+}
+const PASS_THROUGH = new Set(['UserError', 'HookError', 'BaseBranchError', 'ExitPromptError']);
+
+// A UserError for a failed executeGitCommand() result: `<what>: <git's reason>`, with a hint when kunj knows one
+export function gitCommandError(what: string, message: string): UserError {
+  const d = describeError(new Error(message));
+  return new UserError(`${what}: ${d.message}`, d.hint);
 }
 
 // Execute command from git root directory
@@ -356,11 +387,11 @@ export async function stageFiles(filePaths: string[]): Promise<GitCommandResult>
 
   if (failedFiles.length > 0) {
     const errorMsg = failedFiles
-      .map(f => `  ${f.path}: ${f.error}`)
+      .map(f => `  ${f.path}: ${gitFailureLine(f.error ?? '')}`)
       .join('\n');
     return {
       success: false,
-      message: `Failed to stage ${failedFiles.length} file(s):\n${errorMsg}`
+      message: `Could not stage ${failedFiles.length} file(s):\n${errorMsg}`
     };
   }
 
@@ -484,7 +515,8 @@ export async function getFileDiff(filePath: string, colored: boolean = true): Pr
 
     return colored ? chalk.gray('No changes to display') : 'No changes to display';
   } catch (error: any) {
-    return colored ? chalk.red(`Error getting diff: ${error.message}`) : `Error getting diff: ${error.message}`;
+    const text = `Could not show the diff of ${filePath}: ${describeError(error).message}`;
+    return colored ? chalk.red(text) : text;
   }
 }
 
@@ -514,7 +546,7 @@ export async function getFileDiffWithMain(filePath: string): Promise<string> {
 
     return chalk.gray(`No differences with ${mainBranch}`);
   } catch (error: any) {
-    return chalk.red(`Error getting diff with main: ${error.message}`);
+    return chalk.red(`Could not diff ${filePath} against the main branch: ${describeError(error).message}`);
   }
 }
 
@@ -534,7 +566,7 @@ export async function revertFile(filePath: string): Promise<GitCommandResult> {
     if (status.trim().startsWith('??')) {
       return {
         success: false,
-        message: 'Cannot revert untracked file. Use delete instead.'
+        message: `${filePath} is untracked, so there is nothing to revert it to. Delete it instead.`
       };
     }
 
@@ -548,7 +580,7 @@ export async function revertFile(filePath: string): Promise<GitCommandResult> {
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to revert file'
+      message: `Could not revert ${filePath}: ${describeError(error).message}`
     };
   }
 }
@@ -576,7 +608,7 @@ export async function deleteFile(filePath: string): Promise<GitCommandResult> {
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to delete file'
+      message: `Could not delete ${filePath}: ${describeError(error).message}`
     };
   }
 }
@@ -650,7 +682,7 @@ export async function mergeBranch(sourceBranch: string, noFf: boolean = true): P
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || `Failed to merge ${sourceBranch}`
+      message: `Could not merge ${sourceBranch}: ${describeError(error).message}`
     };
   }
 }
@@ -666,7 +698,7 @@ export async function createBranchFrom(branchName: string, baseBranch: string): 
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || `Failed to create branch ${branchName}`
+      message: `Could not create branch ${branchName} from ${baseBranch}: ${describeError(error).message}`
     };
   }
 }
@@ -682,7 +714,7 @@ export async function switchBranch(branchName: string): Promise<GitCommandResult
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || `Failed to switch to ${branchName}`
+      message: `Could not switch to ${branchName}: ${describeError(error).message}`
     };
   }
 }
@@ -699,7 +731,7 @@ export async function createTag(tagName: string, message?: string): Promise<GitC
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || `Failed to create tag ${tagName}`
+      message: `Could not create tag ${tagName}: ${describeError(error).message}`
     };
   }
 }
@@ -726,7 +758,7 @@ export async function ensureBranchExists(branchName: string, createFrom?: string
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || `Failed to ensure branch ${branchName} exists`
+      message: `Could not create branch ${branchName}: ${describeError(error).message}`
     };
   }
 }
@@ -743,7 +775,7 @@ export async function pullBranch(branchName?: string): Promise<GitCommandResult>
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to pull from remote'
+      message: `Could not pull ${branchName ?? 'the current branch'} from origin: ${describeError(error).message}`
     };
   }
 }
@@ -760,7 +792,7 @@ export async function pushBranch(branchName: string, setUpstream: boolean = fals
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to push to remote'
+      message: `Could not push ${branchName} to origin: ${describeError(error).message}`
     };
   }
 }

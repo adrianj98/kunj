@@ -3,6 +3,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getKunjDir } from './config';
+import { UserError } from './errors';
 
 export const KEEP_DIR = 'keep';
 
@@ -16,7 +17,7 @@ export function toRelativeKeepPath(filePath: string, worktreeRoot: string, cwd: 
   const absolute = path.isAbsolute(filePath) ? filePath : path.resolve(cwd, filePath);
   const relative = path.relative(worktreeRoot, absolute);
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`File must be inside the worktree: ${filePath}`);
+    throw new UserError(`${filePath} is not inside the worktree ${worktreeRoot}.`, 'Keep files are stored by their path in the worktree: name a file inside it.');
   }
   return relative.split(path.sep).join('/');
 }
@@ -29,7 +30,7 @@ function toKeepPath(relative: string): string {
 export function keepFile(relative: string, worktreeRoot: string): string {
   const source = path.join(worktreeRoot, ...relative.split('/'));
   if (!fs.existsSync(source)) {
-    throw new Error(`File not found: ${source}`);
+    throw new UserError(`File not found: ${source}.`, 'Keep files are copied from the worktree you are in: check the path, relative to its root.');
   }
   const dest = toKeepPath(relative);
   fs.mkdirSync(path.dirname(dest), { recursive: true });

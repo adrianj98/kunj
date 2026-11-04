@@ -4,6 +4,7 @@ import { PassThrough, Readable } from 'stream';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { ContainerError } from './errors';
 import {
   BackendEvent,
   BuildOptions,
@@ -43,7 +44,9 @@ function labelArgs(labels: Labels): string[] {
 /** `docker run` arguments for a spec; env goes through `envFile` so no value lands in argv. */
 export function runArgs(spec: ContainerSpec, envFile: string): string[] {
   // The image is the first positional: anything starting with '-' would be taken as a flag
-  if (!isImageRef(spec.image)) throw new Error(`Refusing to run "${spec.image}": not a valid image reference`);
+  if (!isImageRef(spec.image)) {
+    throw new ContainerError(`Refusing to run "${spec.image}": it is not a valid image reference. Check --image, container.image or the blueprint's image.`);
+  }
   const args = ['run', '-d', '--name', spec.name];
   if (spec.init !== false) args.push('--init');
   args.push(...labelArgs(spec.labels));
@@ -156,8 +159,20 @@ export function parseDockerEvent(line: string): BackendEvent | null {
 }
 
 function firstLine(out: Output): string {
-  return out.stderr.trim().split('\n')[0] || `exit code ${out.code}`;
+  return daemonText(out.stderr.trim().split('\n')[0]) || `exit code ${out.code}`;
 }
+
+// "Error response from daemon: No such container: x" → "No such container: x"
+function daemonText(line: string): string {
+  return line.replace(/^Error response from daemon:\s*/, '');
+}
+
+// Docker's text as the end of a sentence
+function sentence(text: string): string {
+  return /[.?!]$/.test(text) ? text : `${text}.`;
+}
+
+const START_DOCKER = 'Start Docker (Docker Desktop, Colima or the docker daemon) and try again.';
 
 // BuildKit writes its progress to stderr, so the first line is "#0 building with ..." and the
 // cause is the last "ERROR..." line
@@ -210,7 +225,10 @@ export function parseEngineEndpoint(hostUrl: string): EngineEndpoint {
     const url = new URL(text);
     return { host: url.hostname, port: Number(url.port || 2375) };
   }
-  throw new Error(`A TTY exec needs a unix:// or tcp:// Docker endpoint; this context uses ${text || '(none)'}`);
+  throw new ContainerError(
+    `An interactive session (shell, attach, agent) needs a unix:// or tcp:// Docker endpoint, but this Docker context uses ${text || 'none'}. ` +
+      'Switch to a local context with `docker context use`, or set container.dockerContext.'
+  );
 }
 
 export class LocalDockerBackend implements ContainerBackend {
@@ -280,7 +298,7 @@ export class LocalDockerBackend implements ContainerBackend {
     const out = await this.spawnDocker(args, opts);
     if (out.code !== 0) {
       const line = args[0] === 'build' ? buildErrorLine(out) : firstLine(out);
-      throw new Error(`docker ${subcommand(args)} failed: ${line}`);
+      throw new ContainerError(`docker ${subcommand(args)} failed: ${line}`);
     }
     return out;
   }
@@ -290,23 +308,35 @@ export class LocalDockerBackend implements ContainerBackend {
     try {
       out = await this.spawnDocker(['info', '--format', '{{json .}}']);
     } catch (err) {
-      throw new Error(`Docker is not available: ${(err as Error).message}`);
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new ContainerError(`Docker is not available: ${this.dockerPath} is not installed or not on your PATH. Install Docker (https://docs.docker.com/get-docker/) and start it.`);
+      }
+      throw new ContainerError(`Docker is not available: ${sentence((err as Error).message)} ${START_DOCKER}`);
     }
-    if (out.code !== 0) throw new Error(`Docker is not available: ${firstLine(out)}`);
+    if (out.code !== 0) throw new ContainerError(`Docker is not available: ${sentence(firstLine(out))} ${this.startHint()}`);
     let info: any;
     try {
       info = JSON.parse(out.stdout);
     } catch {
-      throw new Error(`Docker is not available: docker info printed no JSON`);
+      throw new ContainerError(`Docker is not available: docker info printed no JSON, so this docker CLI may be too old. Update Docker and try again.`);
     }
     // An unreachable daemon can still exit 0 with only the client's half filled in
     const serverError = (info.ServerErrors ?? [])[0];
-    if (serverError || !info.ServerVersion) throw new Error(`Docker is not available: ${serverError ?? 'no server version'}`);
+    if (serverError || !info.ServerVersion) {
+      throw new ContainerError(`Docker is not available: ${sentence(daemonText(String(serverError ?? 'the daemon did not answer')))} ${this.startHint()}`);
+    }
     return {
       serverVersion: String(info.ServerVersion),
       runtimes: Object.keys(info.Runtimes ?? {}),
       operatingSystem: String(info.OperatingSystem ?? ''),
     };
+  }
+
+  // What to do when the daemon does not answer: the context matters when one is configured
+  private startHint(): string {
+    return this.context
+      ? `Start the Docker daemon of context ${this.context} (container.dockerContext), or change the setting, and try again.`
+      : START_DOCKER;
   }
 
   async contextName(): Promise<string> {
@@ -347,7 +377,7 @@ export class LocalDockerBackend implements ContainerBackend {
   async removeImage(tag: string): Promise<void> {
     const out = await this.spawnDocker(['image', 'rm', tag]);
     if (out.code === 0 || /No such image/i.test(out.stderr)) return;
-    throw new Error(`docker image rm failed: ${firstLine(out)}`);
+    throw new ContainerError(`docker image rm failed: ${firstLine(out)}`);
   }
 
   async createNetwork(name: string, labels: Labels): Promise<void> {
@@ -385,7 +415,9 @@ export class LocalDockerBackend implements ContainerBackend {
   async run(spec: ContainerSpec): Promise<string> {
     for (const [k, v] of Object.entries(spec.env)) {
       // --env-file is line based, so a newline would split the value into another variable
-      if (/[\r\n]/.test(k) || /[\r\n]/.test(v)) throw new Error(`Environment variable ${k} contains a newline`);
+      if (/[\r\n]/.test(k) || /[\r\n]/.test(v)) {
+        throw new ContainerError(`The environment variable ${k.replace(/[\r\n]/g, ' ')} contains a newline, which a container's env file cannot hold. Deliver it as a file instead (kunj secret set <name> --file <path> --no-env).`);
+      }
     }
     // A file rather than -e so secrets never appear in `ps` output
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-env-'));
@@ -490,7 +522,7 @@ export class LocalDockerBackend implements ContainerBackend {
       child.on('error', err =>
         finish(() => {
           const detail = Buffer.concat(stderr).toString().trim().split('\n')[0];
-          reject(new Error(`docker exec failed to start: ${err.message}${detail ? ` (${detail})` : ''}`));
+          reject(new ContainerError(`docker exec failed to start: ${err.message}${detail ? ` (${daemonText(detail)})` : ''}`));
         }));
       // The command's own exit code is the result, not an error; 126/127 (not executable / not
       // found) are the command's too
@@ -499,7 +531,7 @@ export class LocalDockerBackend implements ContainerBackend {
           const exitCode = code ?? 1;
           const first = Buffer.concat(stderr).toString().trim().split('\n')[0];
           if (!io.stderr && exitCode !== 0 && exitCode !== 126 && exitCode !== 127 && DOCKER_EXEC_ERROR.test(first)) {
-            reject(new Error(`docker exec failed: ${first}`));
+            reject(new ContainerError(`docker exec failed: ${daemonText(first)}`));
             return;
           }
           resolve({ exitCode, stdout: Buffer.concat(stdout).toString() });
@@ -538,11 +570,11 @@ export class LocalDockerBackend implements ContainerBackend {
           } catch {
             parsed = { message: text };
           }
-          if ((res.statusCode ?? 500) >= 300) return reject(new Error(`docker exec failed: ${parsed.message ?? `HTTP ${res.statusCode}`}`));
+          if ((res.statusCode ?? 500) >= 300) return reject(new ContainerError(`docker exec failed: ${parsed.message ?? `HTTP ${res.statusCode}`}`));
           resolve(parsed);
         });
       });
-      req.on('error', err => reject(new Error(`docker exec failed: ${err.message}`)));
+      req.on('error', err => reject(new ContainerError(`docker exec failed: ${err.message}`)));
       req.end(data);
     });
   }
@@ -578,9 +610,9 @@ export class LocalDockerBackend implements ContainerBackend {
       req.on('response', res => {
         const chunks: Buffer[] = [];
         res.on('data', (d: Buffer) => chunks.push(d));
-        res.on('end', () => reject(new Error(`docker exec failed: the daemon did not hijack the exec (HTTP ${res.statusCode}): ${Buffer.concat(chunks).toString().trim()}`)));
+        res.on('end', () => reject(new ContainerError(`docker exec failed: the daemon did not hijack the exec (HTTP ${res.statusCode}): ${Buffer.concat(chunks).toString().trim()}`)));
       });
-      req.on('error', err => reject(new Error(`docker exec failed: ${err.message}`)));
+      req.on('error', err => reject(new ContainerError(`docker exec failed: ${err.message}`)));
       req.end(data);
     });
 
@@ -600,7 +632,7 @@ export class LocalDockerBackend implements ContainerBackend {
             if (!state.Running) return resolve(typeof state.ExitCode === 'number' ? state.ExitCode : 1);
             await new Promise(r => setTimeout(r, 100));
           }
-          reject(new Error('docker exec failed: the process did not report its exit code'));
+          reject(new ContainerError('docker exec failed: the process did not report its exit code'));
         } catch (err) {
           if (closed) resolve(129);
           else reject(err);
@@ -610,7 +642,7 @@ export class LocalDockerBackend implements ContainerBackend {
       socket.on('close', () => {
         if (!socket.readableEnded) finish();
       });
-      socket.on('error', err => (closed ? undefined : reject(new Error(`docker exec failed: ${err.message}`))));
+      socket.on('error', err => (closed ? undefined : reject(new ContainerError(`docker exec failed: ${err.message}`))));
     });
     exit.catch(() => undefined);
     await this.engineCall('POST', `/exec/${execId}/resize?h=${opts.rows}&w=${opts.cols}`).catch(() => undefined);
@@ -689,7 +721,7 @@ export class LocalDockerBackend implements ContainerBackend {
         }
       }
       child.on('error', reject);
-      child.on('close', (code: number | null) => (code === 0 || code === null || signal?.aborted ? resolve() : reject(new Error(`docker logs failed: exit code ${code}`))));
+      child.on('close', (code: number | null) => (code === 0 || code === null || signal?.aborted ? resolve() : reject(new ContainerError(`docker logs failed: exit code ${code}`))));
     });
   }
 
@@ -719,7 +751,7 @@ export class LocalDockerBackend implements ContainerBackend {
       child.on('close', (code: number | null) => {
         signal.removeEventListener('abort', onAbort);
         if (signal.aborted) return resolve();
-        reject(new Error(`docker events failed: ${firstLine({ code: code ?? 1, stdout: '', stderr: Buffer.concat(stderr).toString() })}`));
+        reject(new ContainerError(`docker events failed: ${firstLine({ code: code ?? 1, stdout: '', stderr: Buffer.concat(stderr).toString() })}`));
       });
     });
   }
@@ -739,7 +771,7 @@ export class LocalDockerBackend implements ContainerBackend {
       // Docker 29's CLI adds an `exit status 1` line after the daemon's errors
       const lines = out.stderr.trim().split('\n').filter(l => l && !/^exit status \d+$/.test(l.trim()));
       const allGone = lines.length > 0 && lines.every(l => /no such|not found/i.test(l));
-      if (!allGone) throw new Error(`docker ${subcommand(args)} failed: ${firstLine(out)}`);
+      if (!allGone) throw new ContainerError(`docker ${subcommand(args)} failed: ${firstLine(out)}`);
     }
   }
 }

@@ -63,7 +63,7 @@ import { recordRepo } from '../lib/repos';
 import { AgentError, agentArgv, checkShellSessionId, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, pickSession, readTaggedTmuxSessions, runTmux, shellSessionName, worktreeShellSessions } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
 import type { BranchContainerJson, ShellKillJson, WorktreeJson, WorktreeListContainersJson, WorktreeListJson } from '../lib/json-types';
-import { describeError, UserError } from '../lib/errors';
+import { describeError, formatError, UserError } from '../lib/errors';
 
 interface WorktreeOptions {
   all?: boolean;
@@ -155,7 +155,7 @@ export class WorktreeCommand extends BaseCommand {
 
     const verb = (action || 'list').toLowerCase();
     if (!ACTIONS.includes(verb)) {
-      throw new Error(`Unknown worktree action '${action}'. Expected one of: ${ACTIONS.join(', ')}`);
+      throw new UserError(`Unknown worktree action '${action}'.`, `Use one of: ${ACTIONS.join(', ')} (see \`kunj worktree --help\`).`);
     }
 
     switch (verb) {
@@ -213,9 +213,9 @@ export class WorktreeCommand extends BaseCommand {
       return;
     }
     if (!wt || wt.bare) {
-      throw new AgentError('no-worktree', `No worktree for ${target || 'the current directory'}; see kunj worktree list`);
+      throw new AgentError('no-worktree', `No worktree for ${target || 'the current directory'}. See \`kunj worktree list\`, or create one with \`kunj worktree add <branch>\`.`);
     }
-    if (!wt.exists) throw new AgentError('no-worktree', `The worktree directory of ${wt.branch || wt.name} is missing: ${wt.path}`);
+    if (!wt.exists) throw new AgentError('no-worktree', `The worktree directory of ${wt.branch || wt.name} is missing: ${wt.path}. Run \`kunj worktree prune\` to clear the stale record.`);
 
     const name = id === undefined ? undefined : pickSession(found ?? [], id, shellSessionName(repo.name, repo.id, wt.branch || wt.name, id));
 
@@ -381,7 +381,7 @@ export class WorktreeCommand extends BaseCommand {
   private async pr(target?: string, options: WorktreeOptions = {}): Promise<void> {
     const wt = await this.resolveTarget(target);
     if (!wt.branch) {
-      throw new Error(`Worktree ${wt.path} is detached, so it has no pull request`);
+      throw new UserError(`The worktree at ${wt.path} is on a detached HEAD, so it has no pull request.`, 'Check out a branch there first.');
     }
     const pr = await getPullRequestForBranch(wt.branch, wt.exists ? wt.path : undefined, options.fresh ? 0 : DEFAULT_PR_MAX_AGE_SECONDS);
 
@@ -411,7 +411,7 @@ export class WorktreeCommand extends BaseCommand {
 
   private async add(branch?: string, explicitPath?: string, options: WorktreeOptions = {}): Promise<void> {
     if (!branch) {
-      throw new Error('Usage: kunj worktree add <branch> [path] [-b|-c] [--base <ref>]');
+      throw new UserError('Name the branch for the new worktree.', 'Usage: kunj worktree add <branch> [path] [-b|-c] [--base <ref>]');
     }
 
     // Raw config: ${...} in baseDir is expanded from the listing's git call
@@ -428,7 +428,7 @@ export class WorktreeCommand extends BaseCommand {
     // Refuse to create a second worktree for a branch that already has one
     const existing = findWorktreeIn(listing.worktrees, branch);
     if (existing && !options.newBranch) {
-      throw new Error(`Branch '${branch}' is already checked out in worktree ${existing.path}`);
+      throw new UserError(`Branch ${branch} is already checked out at ${existing.path}.`, `Open it with \`kunj worktree open ${branch}\`.`);
     }
 
     const hookOptions = { hooks: config.hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
@@ -541,23 +541,23 @@ export class WorktreeCommand extends BaseCommand {
 
   private async remove(target?: string, options: WorktreeOptions = {}): Promise<void> {
     if (!target) {
-      throw new Error('Usage: kunj worktree remove <branch|path> [--force]');
+      throw new UserError('Name the worktree to remove.', 'Usage: kunj worktree remove <branch|path> [--force]');
     }
 
     const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
     const wt = findWorktreeIn(listing.worktrees, target);
     if (!wt) {
-      throw new Error(`No worktree found for '${target}'`);
+      throw new UserError(`No worktree for ${target}.`, 'See `kunj worktree list` for the branches and paths you can name.');
     }
     if (wt.isMain) {
-      throw new Error('The main worktree cannot be removed');
+      throw new UserError('The main worktree cannot be removed.');
     }
     if (wt.isCurrent && !options.force) {
-      throw new Error('Refusing to remove the worktree you are currently in (use --force)');
+      throw new UserError(`You are inside the worktree ${wt.path}.`, '`cd` out of it first, or pass --force to remove it anyway.');
     }
     if (wt.sessions.length > 0 && !options.force) {
       const where = wt.sessions.map(s => this.describeSession(s)).join(', ');
-      throw new Error(`Worktree is open in ${where}. Close it first or use --force`);
+      throw new UserError(`The worktree ${wt.path} is open in ${where}.`, 'Close it there first, or pass --force to remove it anyway.');
     }
 
     const repo = repoVariables(listing.gitCommonDir);
@@ -610,7 +610,7 @@ export class WorktreeCommand extends BaseCommand {
   private async resolveTarget(target?: string): Promise<WorktreeInfo> {
     const wt = target ? await findWorktree(target) : await findWorktree(await getMainWorktreePath());
     if (!wt) {
-      throw new Error(`No worktree found for '${target}'`);
+      throw new UserError(`No worktree for ${target}.`, 'See `kunj worktree list` for the branches and paths you can name.');
     }
     return wt;
   }
@@ -627,7 +627,7 @@ export class WorktreeCommand extends BaseCommand {
   private async open(target?: string, options: WorktreeOptions = {}): Promise<void> {
     const wt = await this.resolveTarget(target);
     if (!wt.exists) {
-      throw new Error(`Worktree directory is missing: ${wt.path}`);
+      throw new UserError(`The worktree directory is missing: ${wt.path}.`, 'Run `kunj worktree prune` to clear the stale record.');
     }
 
     const config = loadConfig();
@@ -675,11 +675,11 @@ export class WorktreeCommand extends BaseCommand {
     if (verb === 'start' || verb === 'heartbeat') {
       const pid = options.pid ? parseInt(options.pid, 10) : process.ppid;
       if (!Number.isInteger(pid) || pid <= 0) {
-        throw new Error('A valid --pid is required');
+        throw new UserError(`--pid must be a positive process id, not ${options.pid ?? pid}.`);
       }
       const sessionPath = options.path || (await getCurrentWorktreePath());
       if (!sessionPath) {
-        throw new Error('Could not determine the worktree path (use --path)');
+        throw new UserError('Could not tell which worktree this session is for.', 'Pass the worktree with --path <dir>.');
       }
       const session = registerSession({
         path: sessionPath,
@@ -705,7 +705,7 @@ export class WorktreeCommand extends BaseCommand {
 
     if (verb === 'end' || verb === 'stop') {
       if (!options.id && !options.pid && !options.path) {
-        throw new Error('Specify --id, --pid or --path to end a session');
+        throw new UserError('Say which session to end.', 'Pass --id, --pid or --path.');
       }
       const removed = unregisterSession({
         id: options.id,
@@ -720,13 +720,13 @@ export class WorktreeCommand extends BaseCommand {
       return;
     }
 
-    throw new Error(`Unknown session action '${subAction}'. Expected: start, end, list`);
+    throw new UserError(`Unknown session action '${subAction}'.`, 'Use one of: start, end, list.');
   }
 
   // A git failure as the error the user sees: what went wrong and what to do next
   private gitError(error: unknown): UserError {
     const d = describeError(error);
-    return new UserError(d.message || 'git worktree command failed', d.hint);
+    return new UserError(d.message || 'The git worktree command failed.', d.hint);
   }
 
   // ---------------------------------------------------------------------
@@ -763,7 +763,7 @@ export class WorktreeCommand extends BaseCommand {
 
   private async keepAdd(files: string[]): Promise<void> {
     if (files.length === 0) {
-      throw new Error('Usage: kunj worktree keep add <file>');
+      throw new UserError('Name the file to keep.', 'Usage: kunj worktree keep add <file>');
     }
     const root = await this.keepRoot();
     const saved: string[] = [];
@@ -805,7 +805,7 @@ export class WorktreeCommand extends BaseCommand {
 
   private async keepDelete(files: string[]): Promise<void> {
     if (files.length === 0) {
-      throw new Error('Usage: kunj worktree keep delete <file>');
+      throw new UserError('Name the keep file to delete.', 'Usage: kunj worktree keep delete <file> (see `kunj worktree keep list`).');
     }
     const root = await this.keepRoot();
     const deleted: string[] = [];
@@ -888,7 +888,7 @@ export class WorktreeCommand extends BaseCommand {
           try {
             await this.keepAdd([file.trim()]);
           } catch (error: any) {
-            console.error(chalk.red(error.message));
+            console.error(formatError(error));
           }
           break;
         }

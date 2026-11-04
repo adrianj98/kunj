@@ -7,6 +7,7 @@ import * as path from 'path';
 import { Readable } from 'stream';
 import { ContainerBackend, isImageRef } from './backend';
 import { DevcontainerSpec } from './devcontainer';
+import { ContainerError } from './errors';
 
 export interface ImageSource {
   kind: 'setting' | 'devcontainer' | 'sandbox' | 'blueprint';
@@ -109,7 +110,7 @@ export function resolveImage(input: ResolveImageInput): ImageSource {
     return { kind: 'blueprint', tag: input.snapshot.tag, user: input.snapshot.user, spec: base.spec };
   }
   if (input.setting) {
-    if (!isImageRef(input.setting)) throw new Error(`Image "${input.setting}" (--image or container.image) is not a valid image reference`);
+    if (!isImageRef(input.setting)) throw new ContainerError(`Image "${input.setting}" (--image or container.image) is not a valid image reference. Use a name such as node:20-bookworm or ghcr.io/org/image:tag.`);
     return { kind: 'setting', tag: input.setting, user: '' };
   }
 
@@ -121,7 +122,7 @@ export function resolveImage(input: ResolveImageInput): ImageSource {
       const { dockerfile, context, args } = dc.spec.build;
       const inContext = path.posix.relative(context, dockerfile);
       if (inContext.startsWith('../') || path.posix.isAbsolute(inContext)) {
-        throw new Error(`devcontainer build.dockerfile must be inside build.context (${dockerfile} is not in ${context})`);
+        throw new ContainerError(`devcontainer build.dockerfile must be inside build.context (${dockerfile} is not in ${context}). Move the Dockerfile into the context, or widen build.context.`);
       }
       return {
         kind: 'devcontainer',
@@ -151,7 +152,7 @@ export function assetBuild(name: string, buildArgs: Record<string, string> = {})
 
 export async function ensureImage(backend: ContainerBackend, source: ImageSource, warn: (msg: string) => void): Promise<string> {
   if (await backend.imageExists(source.tag)) return source.tag;
-  if (!source.build) throw new Error(`Image not found: ${source.tag} (pull it or set container.image)`);
+  if (!source.build) throw new ContainerError(`Image not found: ${source.tag} (pull it or set container.image). Pull it with docker pull ${source.tag}, or point --image, container.image or the blueprint's image at one that exists.`);
   if (source.base) await ensureImage(backend, source.base, warn);
   warn(`Building image ${source.tag} (first use; this can take a few minutes)…`);
   await backend.buildImage(source.tag, source.build.contextTar(), {
@@ -181,7 +182,7 @@ function splitName(name: string): { name: string; prefix: string } {
       if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(rest) <= 100 && rest.length > 0) return { name: rest, prefix };
     }
   }
-  throw new Error(`Path too long for a tar archive: ${name}`);
+  throw new ContainerError(`Path too long to copy into the container: ${name}. Shorten it, or leave it out of what is copied in (keep files, container.files).`);
 }
 
 function octal(buf: Buffer, offset: number, length: number, value: number): void {
@@ -200,7 +201,7 @@ function header(entry: TarEntry, size: number): Buffer {
   buf.write('        ', 148, 8, 'ascii');
   buf.write(entry.type === 'file' ? '0' : entry.type === 'dir' ? '5' : '2', 156, 1, 'ascii');
   if (entry.type === 'symlink') {
-    if (Buffer.byteLength(entry.target) > 100) throw new Error(`Symlink target too long for a tar archive: ${entry.path}`);
+    if (Buffer.byteLength(entry.target) > 100) throw new ContainerError(`Symlink target too long to copy into the container: ${entry.path} (at most 100 bytes). Shorten the link, or leave it out of what is copied in (keep files, container.files).`);
     buf.write(entry.target, 157, 100, 'utf8');
   }
   buf.write('ustar\0', 257, 6, 'ascii');

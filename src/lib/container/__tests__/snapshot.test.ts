@@ -312,7 +312,7 @@ describe('snapshotBlueprint', () => {
   it('a failed seed copy removes the temp container and commits nothing', async () => {
     const b = backendWith();
     b.execResults.set(COPY.join(' '), { exitCode: 1, stdout: '' });
-    await expect(snapshotBlueprint(b, options())).rejects.toThrow('Copying the workspace to /opt/kunj/seed failed (exit 1)');
+    await expect(snapshotBlueprint(b, options())).rejects.toThrow('Copying the workspace to /opt/kunj/seed in the snapshot container failed (exit 1)');
     expect(b.callsOf('commitContainer')).toEqual([]);
     expect(mocked.removeContainer).toHaveBeenCalledTimes(2);
   });

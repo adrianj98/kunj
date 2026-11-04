@@ -8,6 +8,7 @@
 
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
+import { UserError } from '../lib/errors';
 import { killTmuxSessionIfExists } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
 import { listRepos } from '../lib/repos';
@@ -68,7 +69,7 @@ export class SessionsCommand extends BaseCommand {
     const positionals = (optIndex === -1 ? args : args.slice(0, optIndex)).flatMap(a => (Array.isArray(a) ? a : [a])).filter((a): a is string => typeof a === 'string');
     let verb = 'list';
     if (positionals[0] && ACTIONS.includes(positionals[0])) verb = positionals.shift() as string;
-    else if (positionals.length) throw new Error(`Unknown sessions action '${positionals[0]}'. Expected one of: ${ACTIONS.join(', ')}`);
+    else if (positionals.length) throw new UserError(`Unknown sessions action '${positionals[0]}'.`, `Use one of: ${ACTIONS.join(', ')} (see \`kunj sessions --help\`).`);
 
     if (verb === 'kill') return this.kill(positionals, options);
     return this.list(options);
@@ -77,7 +78,7 @@ export class SessionsCommand extends BaseCommand {
   private idleHours(options: SessionsOptions): number {
     if (options.idleHours === undefined) return DEFAULT_IDLE_HOURS;
     const n = Number(options.idleHours);
-    if (!Number.isFinite(n) || n <= 0) throw new Error(`--idle-hours must be a positive number, not ${options.idleHours}`);
+    if (!Number.isFinite(n) || n <= 0) throw new UserError(`--idle-hours must be a positive number, not ${options.idleHours}.`);
     return n;
   }
 
@@ -177,7 +178,7 @@ export class SessionsCommand extends BaseCommand {
         const host = await hostSessions(this.idleHours(options));
         targets = [...new Set([...names, ...host.sessions.filter(s => s.orphan).map(s => s.name)])];
       }
-      if (!targets.length && !options.orphans) throw new Error('Name the sessions to end, or pass --orphans');
+      if (!targets.length && !options.orphans) throw new UserError('Name the sessions to end, or pass --orphans.', 'See `kunj sessions list` for their names.');
       // The listing may be old (the app's is up to 5 s, plus its confirmation): check attachment again
       const ifDetached = !!options.ifDetached || !!options.orphans;
       for (const name of targets) {

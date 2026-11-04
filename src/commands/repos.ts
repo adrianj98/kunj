@@ -19,6 +19,7 @@ import type { KnownRepoInfo } from '../lib/repos';
 import { kunjDirName } from '../lib/repo-identity';
 import { cloneRepo, expandCloneDir, githubRepoKey, listGitHubRepos, localReposByRemote } from '../lib/github-repos';
 import { loadConfig } from '../lib/config';
+import { UserError } from '../lib/errors';
 import { defaultWorktreePathFor } from '../lib/worktree';
 
 interface ReposOptions {
@@ -71,7 +72,7 @@ export class ReposCommand extends BaseCommand {
 
     const verb = (action || 'list').toLowerCase();
     if (!ACTIONS.includes(verb)) {
-      throw new Error(`Unknown repos action '${action}'. Expected one of: ${ACTIONS.join(', ')}`);
+      throw new UserError(`Unknown repos action '${action}'.`, `Use one of: ${ACTIONS.join(', ')} (see \`kunj repos --help\`).`);
     }
 
     switch (verb) {
@@ -115,7 +116,7 @@ export class ReposCommand extends BaseCommand {
     try {
       commonDir = await getGitCommonDir(dir);
     } catch {
-      throw new Error(`Not a git repository: ${dir}`);
+      throw new UserError(`${dir} is not a git repository.`, 'Pass the path of a repository or one of its worktrees.');
     }
     const repo = addRepo(commonDir);
     if (this.jsonMode) {
@@ -127,11 +128,11 @@ export class ReposCommand extends BaseCommand {
 
   private remove(target?: string): void {
     if (!target) {
-      throw new Error('Usage: kunj repos remove <path>');
+      throw new UserError('Name the repository to remove.', 'Usage: kunj repos remove <path> (see `kunj repos list`).');
     }
     const repo = hideRepo(path.resolve(target));
     if (!repo) {
-      throw new Error(`Not a known repository: ${target}`);
+      throw new UserError(`${target} is not in the repository list.`, 'See `kunj repos list` for the paths kunj knows.');
     }
     if (this.jsonMode) {
       this.outputJSON({ success: true, repo });
@@ -178,7 +179,7 @@ export class ReposCommand extends BaseCommand {
 
   private async clone(target: string | undefined, options: ReposOptions): Promise<void> {
     if (!target) {
-      throw new Error('Usage: kunj repos clone <owner/name | url> [--dir <path>] [--bare | --no-bare]');
+      throw new UserError('Name the repository to clone.', 'Usage: kunj repos clone <owner/name | url> [--dir <path>] [--bare | --no-bare] (see `kunj repos github` for what you can clone).');
     }
     const config = loadConfig();
     const bare = options.bare ?? config.repos?.cloneBare ?? false;

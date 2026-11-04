@@ -33,6 +33,7 @@ const EXPECTED_NAMES = new Set([
   'RemoteError',
   'GitHubError',
   'ServeError',
+  'ExecTimeoutError',
 ]);
 
 const TOOL_INSTALL: Record<string, string> = {

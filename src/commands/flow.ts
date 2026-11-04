@@ -5,7 +5,8 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
 import { loadConfig } from '../lib/config';
-import { getCurrentBranch, getAllBranches, branchExists } from '../lib/git';
+import { getCurrentBranch, getAllBranches, branchExists, wrapError } from '../lib/git';
+import { UserError, formatError } from '../lib/errors';
 import {
   initGitFlow,
   createFeatureBranch,
@@ -35,7 +36,7 @@ export class FlowCommand extends BaseCommand {
       .command('init')
       .description('Initialize Git Flow in repository')
       .action(async () => {
-        await this.initFlow();
+        await run(() => this.initFlow());
       });
 
     // flow feature - Feature branch operations
@@ -46,9 +47,9 @@ export class FlowCommand extends BaseCommand {
       .argument('[name]', 'Feature name')
       .action(async (action, name) => {
         if (action === 'start') {
-          await this.startFeature(name);
+          await run(() => this.startFeature(name));
         } else if (action === 'finish') {
-          await this.finishFeature(name);
+          await run(() => this.finishFeature(name));
         } else {
           console.log(chalk.yellow('Usage:'));
           console.log(chalk.gray('  kunj flow feature start <name>  ') + '- Start a new feature');
@@ -64,9 +65,9 @@ export class FlowCommand extends BaseCommand {
       .argument('[version]', 'Release version')
       .action(async (action, version) => {
         if (action === 'start') {
-          await this.startRelease(version);
+          await run(() => this.startRelease(version));
         } else if (action === 'finish') {
-          await this.finishRelease(version);
+          await run(() => this.finishRelease(version));
         } else {
           console.log(chalk.yellow('Usage:'));
           console.log(chalk.gray('  kunj flow release start <version>  ') + '- Start a new release');
@@ -82,9 +83,9 @@ export class FlowCommand extends BaseCommand {
       .argument('[version]', 'Hotfix version')
       .action(async (action, version) => {
         if (action === 'start') {
-          await this.startHotfix(version);
+          await run(() => this.startHotfix(version));
         } else if (action === 'finish') {
-          await this.finishHotfix(version);
+          await run(() => this.finishHotfix(version));
         } else {
           console.log(chalk.yellow('Usage:'));
           console.log(chalk.gray('  kunj flow hotfix start <version>  ') + '- Start a new hotfix');
@@ -193,10 +194,10 @@ export class FlowCommand extends BaseCommand {
         console.log(chalk.gray('  kunj flow release start <version> - Start a new release'));
         console.log(chalk.gray('  kunj flow hotfix start <version>  - Start a new hotfix'));
       } else {
-        console.log(chalk.red('\n✗ ' + result.message));
+        throw new UserError(result.message);
       }
     } catch (error: any) {
-      console.log(chalk.red(`\n✗ Error: ${error.message}`));
+      throw wrapError('Git Flow failed', error);
     }
   }
 
@@ -204,8 +205,7 @@ export class FlowCommand extends BaseCommand {
     try {
       const config = await loadConfig();
       if (!config.flow?.enabled) {
-        console.log(chalk.yellow('\n⚠ Git Flow not initialized. Run "kunj flow init" first.'));
-        return;
+        throw notInitialized();
       }
 
       // Prompt for feature name if not provided
@@ -227,8 +227,7 @@ export class FlowCommand extends BaseCommand {
 
       // Ensure feature name is provided
       if (!featureName || !featureName.trim()) {
-        console.log(chalk.red('\n✗ Feature name is required'));
-        return;
+        throw new UserError('A feature name is required.', 'Pass it, as in `kunj flow feature start <name>`.');
       }
 
       // Create feature branch
@@ -239,10 +238,10 @@ export class FlowCommand extends BaseCommand {
         console.log(chalk.gray('\nWhen ready to merge back:'));
         console.log(chalk.gray('  kunj flow feature finish'));
       } else {
-        console.log(chalk.red('\n✗ ' + result.message));
+        throw new UserError(result.message);
       }
     } catch (error: any) {
-      console.log(chalk.red(`\n✗ Error: ${error.message}`));
+      throw wrapError('Git Flow failed', error);
     }
   }
 
@@ -250,8 +249,7 @@ export class FlowCommand extends BaseCommand {
     try {
       const config = await loadConfig();
       if (!config.flow?.enabled) {
-        console.log(chalk.yellow('\n⚠ Git Flow not initialized. Run "kunj flow init" first.'));
-        return;
+        throw notInitialized();
       }
 
       // Determine feature branch
@@ -298,15 +296,13 @@ export class FlowCommand extends BaseCommand {
 
       // Ensure featureBranch is defined
       if (!featureBranch) {
-        console.log(chalk.red('\n✗ Could not determine feature branch'));
-        return;
+        throw new UserError('Could not tell which feature branch to finish.', 'Name it, as in `kunj flow feature finish <name>`.');
       }
 
       // Check if branch exists before prompting
       const exists = await branchExists(featureBranch);
       if (!exists) {
-        console.log(chalk.red(`\n✗ Branch '${featureBranch}' does not exist`));
-        return;
+        throw new UserError(`There is no local branch named ${featureBranch}.`, 'Run `kunj list` to see the branches.');
       }
 
       // Confirm before finishing
@@ -330,10 +326,10 @@ export class FlowCommand extends BaseCommand {
       if (result.success) {
         console.log(chalk.green('\n✓ ' + result.message));
       } else {
-        console.log(chalk.red('\n✗ ' + result.message));
+        throw new UserError(result.message);
       }
     } catch (error: any) {
-      console.log(chalk.red(`\n✗ Error: ${error.message}`));
+      throw wrapError('Git Flow failed', error);
     }
   }
 
@@ -341,8 +337,7 @@ export class FlowCommand extends BaseCommand {
     try {
       const config = await loadConfig();
       if (!config.flow?.enabled) {
-        console.log(chalk.yellow('\n⚠ Git Flow not initialized. Run "kunj flow init" first.'));
-        return;
+        throw notInitialized();
       }
 
       // Prompt for version if not provided
@@ -364,8 +359,7 @@ export class FlowCommand extends BaseCommand {
 
       // Ensure version is provided
       if (!releaseVersion || !releaseVersion.trim()) {
-        console.log(chalk.red('\n✗ Release version is required'));
-        return;
+        throw new UserError('A release version is required.', 'Pass it, as in `kunj flow release start <version>`.');
       }
 
       // Create release branch
@@ -376,10 +370,10 @@ export class FlowCommand extends BaseCommand {
         console.log(chalk.gray('\nMake release preparation commits, then:'));
         console.log(chalk.gray('  kunj flow release finish'));
       } else {
-        console.log(chalk.red('\n✗ ' + result.message));
+        throw new UserError(result.message);
       }
     } catch (error: any) {
-      console.log(chalk.red(`\n✗ Error: ${error.message}`));
+      throw wrapError('Git Flow failed', error);
     }
   }
 
@@ -387,8 +381,7 @@ export class FlowCommand extends BaseCommand {
     try {
       const config = await loadConfig();
       if (!config.flow?.enabled) {
-        console.log(chalk.yellow('\n⚠ Git Flow not initialized. Run "kunj flow init" first.'));
-        return;
+        throw notInitialized();
       }
 
       // Determine release branch
@@ -441,15 +434,13 @@ export class FlowCommand extends BaseCommand {
 
       // Ensure releaseBranch is defined
       if (!releaseBranch) {
-        console.log(chalk.red('\n✗ Could not determine release branch'));
-        return;
+        throw new UserError('Could not tell which release branch to finish.', 'Name it, as in `kunj flow release finish <version>`.');
       }
 
       // Check if branch exists before prompting
       const exists = await branchExists(releaseBranch);
       if (!exists) {
-        console.log(chalk.red(`\n✗ Branch '${releaseBranch}' does not exist`));
-        return;
+        throw new UserError(`There is no local branch named ${releaseBranch}.`, 'Run `kunj list` to see the branches.');
       }
 
       // Prompt whether to create a tag
@@ -502,10 +493,10 @@ export class FlowCommand extends BaseCommand {
       if (result.success) {
         console.log(chalk.green('\n✓ ' + result.message));
       } else {
-        console.log(chalk.red('\n✗ ' + result.message));
+        throw new UserError(result.message);
       }
     } catch (error: any) {
-      console.log(chalk.red(`\n✗ Error: ${error.message}`));
+      throw wrapError('Git Flow failed', error);
     }
   }
 
@@ -513,8 +504,7 @@ export class FlowCommand extends BaseCommand {
     try {
       const config = await loadConfig();
       if (!config.flow?.enabled) {
-        console.log(chalk.yellow('\n⚠ Git Flow not initialized. Run "kunj flow init" first.'));
-        return;
+        throw notInitialized();
       }
 
       // Prompt for version if not provided
@@ -536,8 +526,7 @@ export class FlowCommand extends BaseCommand {
 
       // Ensure version is provided
       if (!hotfixVersion || !hotfixVersion.trim()) {
-        console.log(chalk.red('\n✗ Hotfix version is required'));
-        return;
+        throw new UserError('A hotfix version is required.', 'Pass it, as in `kunj flow hotfix start <version>`.');
       }
 
       // Create hotfix branch
@@ -548,10 +537,10 @@ export class FlowCommand extends BaseCommand {
         console.log(chalk.gray('\nMake hotfix commits, then:'));
         console.log(chalk.gray('  kunj flow hotfix finish'));
       } else {
-        console.log(chalk.red('\n✗ ' + result.message));
+        throw new UserError(result.message);
       }
     } catch (error: any) {
-      console.log(chalk.red(`\n✗ Error: ${error.message}`));
+      throw wrapError('Git Flow failed', error);
     }
   }
 
@@ -559,8 +548,7 @@ export class FlowCommand extends BaseCommand {
     try {
       const config = await loadConfig();
       if (!config.flow?.enabled) {
-        console.log(chalk.yellow('\n⚠ Git Flow not initialized. Run "kunj flow init" first.'));
-        return;
+        throw notInitialized();
       }
 
       // Determine hotfix branch
@@ -613,15 +601,13 @@ export class FlowCommand extends BaseCommand {
 
       // Ensure hotfixBranch is defined
       if (!hotfixBranch) {
-        console.log(chalk.red('\n✗ Could not determine hotfix branch'));
-        return;
+        throw new UserError('Could not tell which hotfix branch to finish.', 'Name it, as in `kunj flow hotfix finish <version>`.');
       }
 
       // Check if branch exists before prompting
       const exists = await branchExists(hotfixBranch);
       if (!exists) {
-        console.log(chalk.red(`\n✗ Branch '${hotfixBranch}' does not exist`));
-        return;
+        throw new UserError(`There is no local branch named ${hotfixBranch}.`, 'Run `kunj list` to see the branches.');
       }
 
       // Prompt whether to create a tag
@@ -674,14 +660,28 @@ export class FlowCommand extends BaseCommand {
       if (result.success) {
         console.log(chalk.green('\n✓ ' + result.message));
       } else {
-        console.log(chalk.red('\n✗ ' + result.message));
+        throw new UserError(result.message);
       }
     } catch (error: any) {
-      console.log(chalk.red(`\n✗ Error: ${error.message}`));
+      throw wrapError('Git Flow failed', error);
     }
   }
 
   public async execute(): Promise<void> {
     // Not used - subcommands handle execution
+  }
+}
+
+function notInitialized(): UserError {
+  return new UserError('Git Flow is not set up in this repository.', 'Run `kunj flow init` first.');
+}
+
+// The flow subcommands are registered by hand, so they print their own errors like BaseCommand does
+async function run(action: () => Promise<void>): Promise<void> {
+  try {
+    await action();
+  } catch (error) {
+    console.error(formatError(error));
+    process.exit(1);
   }
 }

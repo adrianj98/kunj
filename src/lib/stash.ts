@@ -5,7 +5,7 @@ import { promisify } from 'util';
 import chalk from 'chalk';
 import { BranchStash } from '../types';
 import { getBranchMetadataItem, updateBranchMetadata } from './metadata';
-import { executeGitCommand, hasUncommittedChanges } from './git';
+import { executeGitCommand, gitFailureLine, hasUncommittedChanges } from './git';
 import { HookError, RunHookOptions, runActionHook } from './hooks';
 
 const execAsync = promisify(exec);
@@ -70,6 +70,7 @@ export async function createStash(branchName: string, hookOptions: RunHookOption
       await runActionHook('post-stash', hookValues, hookOptions);
       return true;
     }
+    console.error(chalk.yellow(`⚠ Could not stash the changes on ${branchName}: ${gitFailureLine(result.message)}`));
     return false;
   } catch (error) {
     if (error instanceof HookError) throw error;
@@ -137,13 +138,14 @@ export async function popStashForBranch(branchName: string): Promise<boolean> {
       } else {
         console.log(
           chalk.yellow(
-            `⚠️  Stash applied with conflicts. Please resolve them manually.`
+            `⚠ The stashed changes of ${branchName} were restored with merge conflicts. Resolve them, then \`git add\` the files.`
           )
         );
       }
       return true;
     }
 
+    console.error(chalk.yellow(`⚠ Could not restore the stashed changes of ${branchName}: ${gitFailureLine(result.message).replace(/\.?$/, '.')} They are still in \`git stash list\`.`));
     return false;
   } catch {
     return false;

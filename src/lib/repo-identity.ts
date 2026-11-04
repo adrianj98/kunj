@@ -3,6 +3,7 @@ import * as path from 'path';
 import { getOriginUrl, getRepoCommonRoot, getRepoName, repoNameFromUrl } from './config';
 import { repoIdFromUrl } from './container/names';
 import { stripUserinfo } from './container/seed';
+import { UserError } from './errors';
 
 export interface RepoIdentity {
   root: string;
@@ -41,7 +42,7 @@ export function repoIdentity(where?: { commonDir: string; repoRoot: string }): R
     return { root: where.repoRoot, name, id: repoIdFromUrl(originUrl || where.repoRoot), originUrl };
   }
   const root = getRepoCommonRoot();
-  if (!root) throw new Error('Not in a git repository');
+  if (!root) throw new UserError('Not inside a git repository.', 'Run this from a repository, or `cd` into one first.');
   // Credentials in the remote URL stay on the host (seed.ts strips them too)
   const originUrl = stripUserinfo(getOriginUrl() || '');
   return { root, name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root), originUrl };

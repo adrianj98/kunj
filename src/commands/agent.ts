@@ -81,7 +81,7 @@ export class AgentCommand extends BaseCommand {
     const name = target ?? (await getCurrentBranch());
     const wt = name ? findWorktreeIn(listing.worktrees, name) : null;
     if (!wt || !wt.branch || !wt.exists || wt.bare) {
-      throw new AgentError('no-worktree', `No worktree for ${name || 'the current directory'}; see kunj worktree list`);
+      throw new AgentError('no-worktree', `No worktree for ${name || 'the current directory'}. See \`kunj worktree list\`, or create one with \`kunj worktree add <branch>\`.`);
     }
     const id = opts.session !== undefined ? checkShellSessionId(opts.session) : undefined;
     // An unknown name fails before anything starts (a reattach ignores it: the session runs already)
@@ -127,9 +127,9 @@ export class AgentCommand extends BaseCommand {
     }
 
     if (verb === 'stop') {
-      if (tmux === 'missing') throw new AgentError('tmux-missing', 'tmux is not installed; brew install tmux');
+      if (tmux === 'missing') throw new AgentError('tmux-missing', 'tmux is not installed. Install it (macOS: `brew install tmux`).');
       // When the listing failed, kill-session says whether the session exists
-      if (sessions && !sessions.includes(session)) throw new AgentError('not-running', `No agent session for ${wt.branch}`);
+      if (sessions && !sessions.includes(session)) throw new AgentError('not-running', `No agent is running for ${wt.branch}. Start one with \`kunj agent start ${wt.branch}\`.`);
       await killTmuxSession(session);
       if (this.jsonMode) {
         this.outputJSON({ success: true, branch: wt.branch, session } satisfies AgentStopJson);
@@ -139,7 +139,7 @@ export class AgentCommand extends BaseCommand {
       return;
     }
 
-    if (!process.stdin.isTTY) throw new AgentError('no-tty', 'kunj agent needs a terminal to attach to');
+    if (!process.stdin.isTTY) throw new AgentError('no-tty', 'kunj agent needs a terminal to attach to. Run it from an interactive terminal, or use `kunj agent status` to check on it.');
     const config = await loadResolvedConfig(process.cwd());
     // The Claude Code hooks report "waiting for input" into the state file (agent-session.ts)
     const kunjDir = getKunjDir();

@@ -18,6 +18,7 @@ import type { AgentSessionJson, AgentState } from './json-types';
 import type { UnlockSeam } from './secrets/host';
 import { agentRunning, agentSessionName, agentStateFile, combineAgentStates, pickSession, readAgentState, readTaggedTmuxSessions, worktreeAgentSessions, type TaggedTmuxSession } from './agent-session';
 import { repoIdentity } from './repo-identity';
+import { UserError } from './errors';
 
 const execAsync = promisify(exec);
 
@@ -283,7 +284,7 @@ async function getRepoPaths(cwd: string): Promise<{ currentPath: string; repoRoo
   }
   const [commonDir, currentPath] = stdout.trim().split('\n').map(l => l.trim());
   if (!commonDir) {
-    throw new Error('Not a git repository');
+    throw new UserError('Not inside a git repository.', 'Run this from a repository, or `cd` into one first.');
   }
   const repoRoot = repoVariables(commonDir).repoRoot;
   // Standing in a bare repo counts as being in its (bare) worktree entry

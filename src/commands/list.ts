@@ -2,7 +2,7 @@
 
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
-import { checkGitRepo, getCurrentBranch, getBranchesWithActivity } from '../lib/git';
+import { requireGitRepo, getCurrentBranch, getBranchesWithActivity } from '../lib/git';
 import { getAllStashesWithBranch } from '../lib/stash';
 import { loadBranchMetadata } from '../lib/metadata';
 import { loadConfig } from '../lib/config';
@@ -50,11 +50,7 @@ export class ListCommand extends BaseCommand {
 
   async execute(options: ListOptions = {}): Promise<void> {
     // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
     const config = loadConfig();
     const currentBranch = await getCurrentBranch();

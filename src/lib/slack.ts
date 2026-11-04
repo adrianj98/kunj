@@ -2,6 +2,7 @@
 
 import { WebClient } from '@slack/web-api';
 import { loadConfig } from './config';
+import { UserError } from './errors';
 
 let cachedClient: WebClient | null = null;
 
@@ -37,15 +38,15 @@ export function getSlackClient(explicitToken?: string): WebClient {
   const config = loadConfig();
 
   if (!config.slack?.enabled) {
-    throw new Error('Slack integration is not enabled. Run "kunj config -i" to configure Slack.');
+    throw new UserError('The Slack integration is turned off.', 'Turn it on and set its token with `kunj config -i`.');
   }
 
   const token = config.slack.token || process.env.SLACK_BOT_TOKEN;
 
   if (!token) {
-    throw new Error(
-      'Slack bot token not configured. Run "kunj config -i" or set SLACK_BOT_TOKEN env var.\n' +
-      'Create a Slack app at https://api.slack.com/apps and add scopes: channels:history, channels:read, groups:read, groups:history, users:read'
+    throw new UserError(
+      'Slack is enabled but no bot token is set.',
+      'Set slack.token with `kunj config -i` (or SLACK_BOT_TOKEN). Create the app at https://api.slack.com/apps with the scopes channels:history, channels:read, groups:read, groups:history and users:read.',
     );
   }
 

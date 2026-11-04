@@ -3,6 +3,17 @@
 import { Version3Client } from 'jira.js';
 import chalk from 'chalk';
 import { loadConfig } from './config';
+import { UserError, describeError } from './errors';
+
+const API_TOKEN_URL = 'https://id.atlassian.com/manage-profile/security/api-tokens';
+
+// Jira answered 401: the email or API token is wrong or the token was revoked
+function jiraAuthError(): UserError {
+  return new UserError(
+    'Jira rejected the email and API token kunj is configured with.',
+    `Create a new API token at ${API_TOKEN_URL}, then run \`kunj setup\` again.`,
+  );
+}
 
 // Cache for Jira client to avoid repeated authentication
 let cachedClient: Version3Client | null = null;
@@ -20,7 +31,7 @@ export function getJiraClient(): Version3Client {
 
   // Check if Jira is enabled
   if (!config.jira?.enabled) {
-    throw new Error('Jira integration is not enabled. Run "kunj setup" to configure Jira.');
+    throw new UserError('The Jira integration is not set up.', 'Run `kunj setup` to connect kunj to Jira.');
   }
 
   // Get credentials from config or environment variables
@@ -29,10 +40,10 @@ export function getJiraClient(): Version3Client {
   const apiToken = config.jira.apiToken || process.env.JIRA_API_TOKEN;
 
   if (!baseUrl || !email || !apiToken) {
-    throw new Error(
-      'Jira credentials not configured. Run "kunj setup" or set environment variables:\n' +
-      '  JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN\n' +
-      'API token can be generated at: https://id.atlassian.com/manage-profile/security/api-tokens'
+    const missing = [!baseUrl && 'jira.baseUrl', !email && 'jira.email', !apiToken && 'jira.apiToken'].filter(Boolean).join(', ');
+    throw new UserError(
+      `Jira is enabled but ${missing} is not set.`,
+      `Run \`kunj setup\`, or set JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN (create a token at ${API_TOKEN_URL}).`,
     );
   }
 
@@ -53,7 +64,7 @@ export function getJiraClient(): Version3Client {
     return cachedClient;
   } catch (error) {
     clearClientCache();
-    throw new Error(`Failed to initialize Jira client: ${error instanceof Error ? error.message : String(error)}`);
+    throw new UserError(`Could not connect to Jira at ${baseUrl}: ${describeError(error).message}`, 'Check jira.baseUrl (for example https://your-team.atlassian.net).');
   }
 }
 
@@ -76,18 +87,15 @@ export async function checkJiraCredentials(): Promise<boolean> {
     return true;
   } catch (error) {
     clearClientCache();
-    console.error(chalk.red('\nFailed to authenticate with Jira:'));
-    console.error(chalk.gray(error instanceof Error ? error.message : String(error)));
-
+    const d = describeError(error);
+    console.error(chalk.red(`✗ Could not sign in to Jira: ${d.message}`));
     if (error instanceof Error && error.message.includes('410')) {
-      console.log(chalk.yellow('\nThe API endpoint returned 410 (Gone). This may indicate:'));
-      console.log(chalk.gray('- The API endpoint has been deprecated'));
-      console.log(chalk.gray('- There may be an issue with the jira.js library version'));
-      console.log(chalk.gray('- Try updating your Jira configuration'));
+      console.error(chalk.gray('  Jira answered 410 (Gone): the API kunj uses may have been retired; updating kunj may help.'));
+    } else if (d.hint) {
+      console.error(chalk.gray(`  ${d.hint}`));
+    } else {
+      console.error(chalk.gray(`  Check jira.baseUrl, jira.email and jira.apiToken (create a token at ${API_TOKEN_URL}), or run \`kunj setup\` again.`));
     }
-
-    console.log(chalk.yellow('\nPlease check your credentials and try again.'));
-    console.log(chalk.gray('Generate API token at: https://id.atlassian.com/manage-profile/security/api-tokens\n'));
     return false;
   }
 }
@@ -128,18 +136,15 @@ export async function listMyIssues(options?: {
   } catch (error: any) {
     if (error instanceof Error && error.message.includes('401')) {
       clearClientCache();
-      throw new Error('Authentication failed. Please check your Jira credentials.');
+      throw jiraAuthError();
     }
 
     // Extract detailed error messages from Jira response
     if (error.response && error.response.data && error.response.data.errorMessages) {
       const jiraErrors = error.response.data.errorMessages;
-      console.error(chalk.red('\nJira API Error:'));
-      jiraErrors.forEach((msg: string) => console.error(chalk.gray(`  - ${msg}`)));
-      throw new Error(`Jira API Error: ${jiraErrors.join(', ')}`);
+      throw new UserError(`Jira refused the search: ${jiraErrors.join(' ')}`, options?.jql ? 'Check the JQL query.' : undefined);
     }
 
-    console.error(chalk.red('Issue search error:'), error.message);
     throw error;
   }
 }
@@ -159,11 +164,11 @@ export async function getIssue(issueKey: string): Promise<any> {
     return issue;
   } catch (error) {
     if (error instanceof Error && error.message.includes('404')) {
-      throw new Error(`Issue ${issueKey} not found`);
+      throw new UserError(`There is no Jira issue ${issueKey}, or you cannot see it.`, 'Check the key (for example PROJ-123) and your access to the project.');
     }
     if (error instanceof Error && error.message.includes('401')) {
       clearClientCache();
-      throw new Error('Authentication failed. Please check your Jira credentials.');
+      throw jiraAuthError();
     }
     throw error;
   }
@@ -225,7 +230,7 @@ export async function createIssue(params: {
   } catch (error) {
     if (error instanceof Error && error.message.includes('401')) {
       clearClientCache();
-      throw new Error('Authentication failed. Please check your Jira credentials.');
+      throw jiraAuthError();
     }
     throw error;
   }
@@ -256,7 +261,7 @@ export async function getCurrentSprint(boardId: string): Promise<any | null> {
   } catch (error: any) {
     if (error instanceof Error && error.message.includes('401')) {
       clearClientCache();
-      throw new Error('Authentication failed. Please check your Jira credentials.');
+      throw jiraAuthError();
     }
 
     // Extract error details if available
@@ -289,13 +294,13 @@ export async function addIssueToSprint(issueKey: string, sprintId: number): Prom
   } catch (error: any) {
     if (error instanceof Error && error.message.includes('401')) {
       clearClientCache();
-      throw new Error('Authentication failed. Please check your Jira credentials.');
+      throw jiraAuthError();
     }
 
     // Extract error details if available
     if (error.response?.data?.errorMessages) {
       const errorMsg = error.response.data.errorMessages.join(', ');
-      throw new Error(`Failed to add issue to sprint: ${errorMsg}`);
+      throw new UserError(`Could not add ${issueKey} to the sprint: ${errorMsg}`);
     }
 
     throw error;

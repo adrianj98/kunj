@@ -5,6 +5,7 @@ import * as path from 'path';
 import { BranchesMetadata, BranchMetadata } from '../types';
 import { getKunjDir, initKunjDirectory } from './config';
 import { BRANCHES_FILE } from '../constants';
+import { describeError } from './errors';
 
 // Helper function to get branches metadata file path
 export function getBranchesPath(): string {
@@ -33,7 +34,7 @@ export function saveBranchMetadata(metadata: BranchesMetadata): void {
     const branchesPath = getBranchesPath();
     fs.writeFileSync(branchesPath, JSON.stringify(metadata, null, 2));
   } catch (error) {
-    console.error('Failed to save branch metadata:', error);
+    console.error(`kunj: could not save the branch notes to ${getBranchesPath()}: ${describeError(error).message}`);
   }
 }
 

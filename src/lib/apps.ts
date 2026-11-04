@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
+import { UserError } from './errors';
 
 const execFileAsync = promisify(execFile);
 
@@ -49,7 +50,12 @@ async function githubJson<T>(url: string): Promise<T> {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'kunj-cli' },
   });
   if (!response.ok) {
-    throw new Error(`GitHub API ${response.status} for ${url}`);
+    throw new UserError(
+      `GitHub answered ${response.status} when looking up kunj's releases.`,
+      response.status === 403 || response.status === 429
+        ? 'GitHub is rate limiting this address: wait a while and try again.'
+        : `Try again later, or download the app from https://github.com/${RELEASES_REPO}/releases.`
+    );
   }
   return (await response.json()) as T;
 }
@@ -78,7 +84,7 @@ export async function findReleaseAsset(app: CompanionApp, version?: string): Pro
 export async function downloadAsset(asset: ReleaseAsset): Promise<string> {
   const response = await fetch(asset.url, { headers: { 'User-Agent': 'kunj-cli' } });
   if (!response.ok) {
-    throw new Error(`Download failed (${response.status}): ${asset.url}`);
+    throw new UserError(`Downloading ${asset.name} failed (HTTP ${response.status}).`, `Try again, or download it by hand from ${asset.url}.`);
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-install-'));
   const file = path.join(dir, asset.name);
@@ -110,11 +116,13 @@ export async function installVscodeExtension(vsixPath: string, editor?: string):
     await execFileAsync(cli, ['--install-extension', vsixPath, '--force'], { timeout: 120000 });
   } catch (error: any) {
     if (error?.code === 'ENOENT') {
-      throw new Error(
-        `'${cli}' was not found. In VS Code run "Shell Command: Install 'code' command in PATH", or pass --editor <cli>`
+      throw new UserError(
+        `The editor command ${cli} is not installed or not on your PATH.`,
+        `In VS Code run "Shell Command: Install 'code' command in PATH", or pass --editor <cli>.`
       );
     }
-    throw new Error((error?.stderr || error?.message || String(error)).trim());
+    const detail = String(error?.stderr || error?.message || error).trim().split('\n').pop();
+    throw new UserError(`${cli} could not install the extension: ${detail}`, `Install ${vsixPath} by hand from the editor's Extensions view.`);
   }
 }
 
@@ -153,7 +161,7 @@ export interface InstallMacAppOptions {
 // clear the download quarantine (the app is not notarized) and launch it.
 export async function installMacApp(zipPath: string, options: InstallMacAppOptions = {}): Promise<string> {
   if (process.platform !== 'darwin') {
-    throw new Error('The macOS apps are only available on macOS');
+    throw new UserError('The macOS apps only run on macOS.', 'On this system install the VS Code extension: `kunj install vscode`.');
   }
   const app = options.app ?? MAC_APP_NAME;
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-app-'));
@@ -161,7 +169,7 @@ export async function installMacApp(zipPath: string, options: InstallMacAppOptio
     await execFileAsync('/usr/bin/ditto', ['-x', '-k', zipPath, staging]);
     const built = path.join(staging, app);
     if (!fs.existsSync(built)) {
-      throw new Error(`${app} not found in ${path.basename(zipPath)}`);
+      throw new UserError(`${app} not found in ${path.basename(zipPath)}.`, 'The download looks incomplete: run `kunj install` again.');
     }
 
     const installed = installedMacApp(app, options.dirs);

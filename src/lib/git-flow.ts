@@ -11,8 +11,10 @@ import {
   deleteBranch,
   hasUncommittedChanges,
   pullBranch,
-  pushBranch
+  pushBranch,
+  gitFailureLine
 } from './git';
+import { UserError, describeError } from './errors';
 import { GitCommandResult } from '../types';
 import { updateBranchMetadata } from './metadata';
 import { loadConfig, saveConfig } from './config';
@@ -33,7 +35,7 @@ export async function initGitFlow(
     if (!mainExists) {
       return {
         success: false,
-        message: `Main branch '${mainBranch}' does not exist`
+        message: `There is no branch named ${mainBranch} to use as the main branch.`
       };
     }
 
@@ -71,7 +73,7 @@ export async function initGitFlow(
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to initialize Git Flow'
+      message: describeError(error).message
     };
   }
 }
@@ -80,7 +82,7 @@ export async function initGitFlow(
 async function getFlowConfig(): Promise<FlowConfig> {
   const config = await loadConfig();
   if (!config.flow?.enabled) {
-    throw new Error('Git Flow not initialized. Run "kunj flow init" first.');
+    throw new UserError('Git Flow is not set up in this repository.', 'Run `kunj flow init` first.');
   }
   return config.flow;
 }
@@ -96,7 +98,7 @@ export async function createFeatureBranch(name: string): Promise<GitCommandResul
     if (exists) {
       return {
         success: false,
-        message: `Branch '${branchName}' already exists`
+        message: `A branch named ${branchName} already exists.`
       };
     }
 
@@ -114,7 +116,7 @@ export async function createFeatureBranch(name: string): Promise<GitCommandResul
       if (!pullResult.success) {
         return {
           success: false,
-          message: `Failed to pull ${flowConfig.developBranch}: ${pullResult.message}`
+          message: pullResult.message
         };
       }
 
@@ -129,7 +131,7 @@ export async function createFeatureBranch(name: string): Promise<GitCommandResul
       if (!pushResult.success) {
         return {
           success: false,
-          message: `Created branch but failed to push: ${pushResult.message}`
+          message: `Created the branch, but ${lowerFirst(pushResult.message)}`
         };
       }
 
@@ -166,7 +168,7 @@ export async function createFeatureBranch(name: string): Promise<GitCommandResul
         }
         return {
           success: true,
-          message: `Created and pushed feature branch '${branchName}', but PR creation failed: ${prResult.message}`
+          message: `Created and pushed feature branch '${branchName}', but could not create the PR: ${gitFailureLine(prResult.message)}`
         };
       }
     } else {
@@ -194,7 +196,7 @@ export async function createFeatureBranch(name: string): Promise<GitCommandResul
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to create feature branch'
+      message: describeError(error).message
     };
   }
 }
@@ -210,7 +212,7 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
     if (!exists) {
       return {
         success: false,
-        message: `Branch '${branchName}' does not exist`
+        message: `There is no local branch named ${branchName}.`
       };
     }
 
@@ -231,7 +233,7 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
     if (hasChanges) {
       return {
         success: false,
-        message: 'You have uncommitted changes. Please commit or stash them first.'
+        message: 'You have uncommitted changes. Commit or stash them (`kunj stash`), then try again.'
       };
     }
 
@@ -243,7 +245,7 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
       if (!pushResult.success) {
         return {
           success: false,
-          message: `Failed to push branch: ${pushResult.message}`
+          message: pushResult.message
         };
       }
 
@@ -271,7 +273,7 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
       if (!mergeResult.success) {
         return {
           success: false,
-          message: `Failed to merge PR: ${mergeResult.message}`
+          message: `Could not merge the PR: ${gitFailureLine(mergeResult.message)}`
         };
       }
 
@@ -280,7 +282,7 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
       if (!switchToDevelop.success) {
         return {
           success: false,
-          message: `PR merged but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
+          message: `The PR was merged, but ${lowerFirst(switchToDevelop.message)}`
         };
       }
 
@@ -288,7 +290,7 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
       if (!pullResult.success) {
         return {
           success: false,
-          message: `PR merged but failed to pull ${flowConfig.developBranch}: ${pullResult.message}`
+          message: `The PR was merged, but ${lowerFirst(pullResult.message)}`
         };
       }
 
@@ -303,7 +305,7 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
         if (!deleteResult.success) {
           return {
             success: true,
-            message: `Finished feature '${branchName}': ${mergeResult.message}, but failed to delete local branch: ${deleteResult.message}`
+            message: `Finished feature '${branchName}': ${mergeResult.message}, but could not delete the local branch: ${gitFailureLine(deleteResult.message)}`
           };
         }
         return {
@@ -342,7 +344,7 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
         if (!deleteResult.success) {
           return {
             success: true,
-            message: `Merged '${branchName}' into '${flowConfig.developBranch}' but failed to delete: ${deleteResult.message}`
+            message: `Merged '${branchName}' into '${flowConfig.developBranch}' but could not delete it: ${gitFailureLine(deleteResult.message)}`
           };
         }
         return {
@@ -359,7 +361,7 @@ export async function finishFeatureBranch(branchName: string, deleteAfter?: bool
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to finish feature branch'
+      message: describeError(error).message
     };
   }
 }
@@ -375,7 +377,7 @@ export async function createReleaseBranch(version: string): Promise<GitCommandRe
     if (exists) {
       return {
         success: false,
-        message: `Branch '${branchName}' already exists`
+        message: `A branch named ${branchName} already exists.`
       };
     }
 
@@ -393,7 +395,7 @@ export async function createReleaseBranch(version: string): Promise<GitCommandRe
       if (!pullResult.success) {
         return {
           success: false,
-          message: `Failed to pull ${flowConfig.developBranch}: ${pullResult.message}`
+          message: pullResult.message
         };
       }
 
@@ -408,7 +410,7 @@ export async function createReleaseBranch(version: string): Promise<GitCommandRe
       if (!pushResult.success) {
         return {
           success: false,
-          message: `Created branch but failed to push: ${pushResult.message}`
+          message: `Created the branch, but ${lowerFirst(pushResult.message)}`
         };
       }
 
@@ -445,7 +447,7 @@ export async function createReleaseBranch(version: string): Promise<GitCommandRe
         }
         return {
           success: true,
-          message: `Created and pushed release branch '${branchName}', but PR creation failed: ${prResult.message}`
+          message: `Created and pushed release branch '${branchName}', but could not create the PR: ${gitFailureLine(prResult.message)}`
         };
       }
     } else {
@@ -473,7 +475,7 @@ export async function createReleaseBranch(version: string): Promise<GitCommandRe
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to create release branch'
+      message: describeError(error).message
     };
   }
 }
@@ -489,7 +491,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
     if (!exists) {
       return {
         success: false,
-        message: `Branch '${branchName}' does not exist`
+        message: `There is no local branch named ${branchName}.`
       };
     }
 
@@ -510,7 +512,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
     if (hasChanges) {
       return {
         success: false,
-        message: 'You have uncommitted changes. Please commit or stash them first.'
+        message: 'You have uncommitted changes. Commit or stash them (`kunj stash`), then try again.'
       };
     }
 
@@ -522,7 +524,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
       if (!pushResult.success) {
         return {
           success: false,
-          message: `Failed to push branch: ${pushResult.message}`
+          message: pushResult.message
         };
       }
 
@@ -533,7 +535,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
       if (!mergeToMainResult.success) {
         return {
           success: false,
-          message: `Failed to merge PR to ${flowConfig.mainBranch}: ${mergeToMainResult.message}`
+          message: `Could not merge the PR to ${flowConfig.mainBranch}: ${gitFailureLine(mergeToMainResult.message)}`
         };
       }
 
@@ -542,7 +544,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
       if (!switchToMain.success) {
         return {
           success: false,
-          message: `PR merged but failed to switch to ${flowConfig.mainBranch}: ${switchToMain.message}`
+          message: `The PR was merged, but ${lowerFirst(switchToMain.message)}`
         };
       }
 
@@ -550,7 +552,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
       if (!pullMain.success) {
         return {
           success: false,
-          message: `PR merged but failed to pull ${flowConfig.mainBranch}: ${pullMain.message}`
+          message: `The PR was merged, but ${lowerFirst(pullMain.message)}`
         };
       }
 
@@ -561,7 +563,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
         if (!tagResult.success) {
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch} but failed to create tag: ${tagResult.message}`
+            message: `Merged to ${flowConfig.mainBranch}, but ${lowerFirst(tagResult.message)}`
           };
         }
 
@@ -570,7 +572,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
         if (!pushTagResult.success) {
           return {
             success: false,
-            message: `Created tag ${tagName} but failed to push: ${pushTagResult.message}`
+            message: `Created tag ${tagName}, but ${lowerFirst(pushTagResult.message)}`
           };
         }
 
@@ -594,10 +596,10 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
           if (mergeBackResult.success) {
             mergeBackMsg = `, merged back to ${flowConfig.developBranch}`;
           } else {
-            mergeBackMsg = `, created merge-back PR but auto-merge failed: ${mergeBackResult.message}`;
+            mergeBackMsg = `, created a merge-back PR but could not merge it: ${gitFailureLine(mergeBackResult.message)}`;
           }
         } else {
-          mergeBackMsg = `, failed to create merge-back PR: ${mergeBackPRResult.message}`;
+          mergeBackMsg = `, could not create a merge-back PR: ${gitFailureLine(mergeBackPRResult.message)}`;
         }
       }
 
@@ -606,7 +608,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
       if (!switchToDevelop.success) {
         return {
           success: false,
-          message: `Release finished but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
+          message: `Release finished, but ${lowerFirst(switchToDevelop.message)}`
         };
       }
 
@@ -614,7 +616,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
       if (!pullDevelop.success) {
         return {
           success: false,
-          message: `Release finished but failed to pull ${flowConfig.developBranch}: ${pullDevelop.message}`
+          message: `Release finished, but ${lowerFirst(pullDevelop.message)}`
         };
       }
 
@@ -636,7 +638,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
         if (!deleteResult.success) {
           return {
             success: true,
-            message: `${successMsg}, but failed to delete local branch: ${deleteResult.message}`
+            message: `${successMsg}, but could not delete the local branch: ${gitFailureLine(deleteResult.message)}`
           };
         }
         successMsg += ', and deleted local branch';
@@ -668,7 +670,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
         if (!tagResult.success) {
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch} but failed to create tag: ${tagResult.message}`
+            message: `Merged to ${flowConfig.mainBranch}, but ${lowerFirst(tagResult.message)}`
           };
         }
         tagCreated = true;
@@ -683,7 +685,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
           const tagMsg = tagCreated ? ' and tagged' : '';
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
+            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but ${lowerFirst(switchToDevelop.message)}`
           };
         }
 
@@ -693,7 +695,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
           const tagMsg = tagCreated ? ' and tagged' : '';
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to merge back to ${flowConfig.developBranch}: ${mergeToDevelop.message}`
+            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but ${lowerFirst(mergeToDevelop.message)}`
           };
         }
         mergeBackMsg = `, merged back to '${flowConfig.developBranch}'`;
@@ -704,7 +706,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
           const tagMsg = tagCreated ? ' and tagged' : '';
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
+            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but ${lowerFirst(switchToDevelop.message)}`
           };
         }
       }
@@ -727,7 +729,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
         if (!deleteResult.success) {
           return {
             success: true,
-            message: `${successMsg} but failed to delete: ${deleteResult.message}`
+            message: `${successMsg} but could not delete it: ${gitFailureLine(deleteResult.message)}`
           };
         }
         successMsg += ', and deleted';
@@ -741,7 +743,7 @@ export async function finishReleaseBranch(branchName: string, tagName?: string, 
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to finish release branch'
+      message: describeError(error).message
     };
   }
 }
@@ -757,7 +759,7 @@ export async function createHotfixBranch(version: string): Promise<GitCommandRes
     if (exists) {
       return {
         success: false,
-        message: `Branch '${branchName}' already exists`
+        message: `A branch named ${branchName} already exists.`
       };
     }
 
@@ -775,7 +777,7 @@ export async function createHotfixBranch(version: string): Promise<GitCommandRes
       if (!pullResult.success) {
         return {
           success: false,
-          message: `Failed to pull ${flowConfig.mainBranch}: ${pullResult.message}`
+          message: pullResult.message
         };
       }
 
@@ -790,7 +792,7 @@ export async function createHotfixBranch(version: string): Promise<GitCommandRes
       if (!pushResult.success) {
         return {
           success: false,
-          message: `Created branch but failed to push: ${pushResult.message}`
+          message: `Created the branch, but ${lowerFirst(pushResult.message)}`
         };
       }
 
@@ -827,7 +829,7 @@ export async function createHotfixBranch(version: string): Promise<GitCommandRes
         }
         return {
           success: true,
-          message: `Created and pushed hotfix branch '${branchName}', but PR creation failed: ${prResult.message}`
+          message: `Created and pushed hotfix branch '${branchName}', but could not create the PR: ${gitFailureLine(prResult.message)}`
         };
       }
     } else {
@@ -855,7 +857,7 @@ export async function createHotfixBranch(version: string): Promise<GitCommandRes
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to create hotfix branch'
+      message: describeError(error).message
     };
   }
 }
@@ -871,7 +873,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
     if (!exists) {
       return {
         success: false,
-        message: `Branch '${branchName}' does not exist`
+        message: `There is no local branch named ${branchName}.`
       };
     }
 
@@ -892,7 +894,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
     if (hasChanges) {
       return {
         success: false,
-        message: 'You have uncommitted changes. Please commit or stash them first.'
+        message: 'You have uncommitted changes. Commit or stash them (`kunj stash`), then try again.'
       };
     }
 
@@ -904,7 +906,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
       if (!pushResult.success) {
         return {
           success: false,
-          message: `Failed to push branch: ${pushResult.message}`
+          message: pushResult.message
         };
       }
 
@@ -915,7 +917,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
       if (!mergeToMainResult.success) {
         return {
           success: false,
-          message: `Failed to merge PR to ${flowConfig.mainBranch}: ${mergeToMainResult.message}`
+          message: `Could not merge the PR to ${flowConfig.mainBranch}: ${gitFailureLine(mergeToMainResult.message)}`
         };
       }
 
@@ -924,7 +926,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
       if (!switchToMain.success) {
         return {
           success: false,
-          message: `PR merged but failed to switch to ${flowConfig.mainBranch}: ${switchToMain.message}`
+          message: `The PR was merged, but ${lowerFirst(switchToMain.message)}`
         };
       }
 
@@ -932,7 +934,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
       if (!pullMain.success) {
         return {
           success: false,
-          message: `PR merged but failed to pull ${flowConfig.mainBranch}: ${pullMain.message}`
+          message: `The PR was merged, but ${lowerFirst(pullMain.message)}`
         };
       }
 
@@ -943,7 +945,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
         if (!tagResult.success) {
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch} but failed to create tag: ${tagResult.message}`
+            message: `Merged to ${flowConfig.mainBranch}, but ${lowerFirst(tagResult.message)}`
           };
         }
 
@@ -952,7 +954,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
         if (!pushTagResult.success) {
           return {
             success: false,
-            message: `Created tag ${tagName} but failed to push: ${pushTagResult.message}`
+            message: `Created tag ${tagName}, but ${lowerFirst(pushTagResult.message)}`
           };
         }
 
@@ -976,10 +978,10 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
           if (mergeBackResult.success) {
             mergeBackMsg = `, merged back to ${flowConfig.developBranch}`;
           } else {
-            mergeBackMsg = `, created merge-back PR but auto-merge failed: ${mergeBackResult.message}`;
+            mergeBackMsg = `, created a merge-back PR but could not merge it: ${gitFailureLine(mergeBackResult.message)}`;
           }
         } else {
-          mergeBackMsg = `, failed to create merge-back PR: ${mergeBackPRResult.message}`;
+          mergeBackMsg = `, could not create a merge-back PR: ${gitFailureLine(mergeBackPRResult.message)}`;
         }
       }
 
@@ -988,7 +990,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
       if (!switchToDevelop.success) {
         return {
           success: false,
-          message: `Hotfix finished but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
+          message: `Hotfix finished, but ${lowerFirst(switchToDevelop.message)}`
         };
       }
 
@@ -996,7 +998,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
       if (!pullDevelop.success) {
         return {
           success: false,
-          message: `Hotfix finished but failed to pull ${flowConfig.developBranch}: ${pullDevelop.message}`
+          message: `Hotfix finished, but ${lowerFirst(pullDevelop.message)}`
         };
       }
 
@@ -1018,7 +1020,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
         if (!deleteResult.success) {
           return {
             success: true,
-            message: `${successMsg}, but failed to delete local branch: ${deleteResult.message}`
+            message: `${successMsg}, but could not delete the local branch: ${gitFailureLine(deleteResult.message)}`
           };
         }
         successMsg += ', and deleted local branch';
@@ -1050,7 +1052,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
         if (!tagResult.success) {
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch} but failed to create tag: ${tagResult.message}`
+            message: `Merged to ${flowConfig.mainBranch}, but ${lowerFirst(tagResult.message)}`
           };
         }
         tagCreated = true;
@@ -1065,7 +1067,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
           const tagMsg = tagCreated ? ' and tagged' : '';
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
+            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but ${lowerFirst(switchToDevelop.message)}`
           };
         }
 
@@ -1075,7 +1077,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
           const tagMsg = tagCreated ? ' and tagged' : '';
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to merge back to ${flowConfig.developBranch}: ${mergeToDevelop.message}`
+            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but ${lowerFirst(mergeToDevelop.message)}`
           };
         }
         mergeBackMsg = `, merged back to '${flowConfig.developBranch}'`;
@@ -1086,7 +1088,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
           const tagMsg = tagCreated ? ' and tagged' : '';
           return {
             success: false,
-            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but failed to switch to ${flowConfig.developBranch}: ${switchToDevelop.message}`
+            message: `Merged to ${flowConfig.mainBranch}${tagMsg}, but ${lowerFirst(switchToDevelop.message)}`
           };
         }
       }
@@ -1109,7 +1111,7 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
         if (!deleteResult.success) {
           return {
             success: true,
-            message: `${successMsg} but failed to delete: ${deleteResult.message}`
+            message: `${successMsg} but could not delete it: ${gitFailureLine(deleteResult.message)}`
           };
         }
         successMsg += ', and deleted';
@@ -1123,7 +1125,12 @@ export async function finishHotfixBranch(branchName: string, tagName?: string, d
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || 'Failed to finish hotfix branch'
+      message: describeError(error).message
     };
   }
+}
+
+// "Could not push x" → "could not push x", to follow "but"
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
 }

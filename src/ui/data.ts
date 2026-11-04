@@ -34,6 +34,7 @@ import {
 } from "../lib/team-analysis";
 import { getAllWorkLogs, readWorkLog, getTodayDate } from "../lib/work-log";
 import { getKunjDir } from "../lib/config";
+import { UserError } from "../lib/errors";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -504,10 +505,10 @@ export async function generateProjectDetailReport(projectName: string): Promise<
 
   // Load analysis to find the project
   const analysis = getCachedTeamAnalysis();
-  if (!analysis) throw new Error("No team analysis available. Run 'kunj team' first.");
+  if (!analysis) throw new UserError("There is no team analysis yet.", "Run `kunj team` first.");
 
   const project = analysis.projects.find((p: any) => p.name === projectName);
-  if (!project) throw new Error(`Project "${projectName}" not found in analysis.`);
+  if (!project) throw new UserError(`The team analysis has no project named ${projectName}.`, "Run `kunj team` again to refresh it.");
 
   // Load diffs from disk
   const diffsDir = path.join(teamDir, "diffs");

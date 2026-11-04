@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { shellQuote } from '../config-vars';
+import { ContainerError } from './errors';
 
 const execFileAsync = promisify(execFile);
 
@@ -98,14 +99,16 @@ export function originPort(url: string): number {
   return SCP_LIKE.test(url) ? 22 : 0;
 }
 
+const NO_ORIGIN = 'No origin remote: a branch container clones from origin. Add one with git remote add origin <url> and push the branch.';
+
 export async function inspectOrigin(branch: string, cwd: string): Promise<OriginState> {
   let rawUrl: string;
   try {
     rawUrl = await git(['remote', 'get-url', 'origin'], cwd);
   } catch {
-    throw new Error('No origin remote');
+    throw new ContainerError(NO_ORIGIN);
   }
-  if (!rawUrl) throw new Error('No origin remote');
+  if (!rawUrl) throw new ContainerError(NO_ORIGIN);
   const originUrl = stripUserinfo(rawUrl);
   const { host, credentialHost, isSsh } = parseOrigin(originUrl);
 
@@ -192,7 +195,9 @@ export interface SeedInput {
 // POSIX sh for the container's sandbox user. Safe to re-run after a partial failure.
 export function seedScript(input: SeedInput): string {
   if (!input.originHost) {
-    throw new Error('Origin has no host; a container can only clone from a remote origin');
+    throw new ContainerError(
+      'Origin has no host; a container can only clone from a remote origin. Point origin at a hosted repository (git remote set-url origin <url>).'
+    );
   }
   const q = shellQuote;
   const bundle = !input.seedFrom && input.bundlePath ? input.bundlePath : undefined;

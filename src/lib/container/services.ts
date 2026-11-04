@@ -4,6 +4,7 @@
 // branch, so it gets nothing from the host: no env but its own, no mounts but its named volumes, no
 // added capabilities, no published ports.
 import { ContainerBackend, ContainerInfo, ContainerSpec, ExecTimeoutError, Labels, isImageRef } from './backend';
+import { ContainerError } from './errors';
 import { ContainerNames, LABEL, labelsFor, optionsLabel } from './names';
 
 export interface ServiceSpec {
@@ -42,46 +43,46 @@ function validPort(v: unknown): v is number {
 /** `{ name: { image, env?, command?, port?, healthcheck?, volumes?, dependsOn? } }`; throws on anything else. */
 export function parseServices(raw: unknown, source: string): ServiceSpec[] {
   if (raw === undefined || raw === null) return [];
-  if (!isRecord(raw)) throw new Error(`${source}: services must be an object of name: { image, ... }`);
+  if (!isRecord(raw)) throw new ContainerError(`${source}: services must be an object of name: { image, ... }, e.g. {"postgres": {"image": "postgres:16"}}.`);
   const services: ServiceSpec[] = [];
   for (const [name, def] of Object.entries(raw)) {
     const where = `${source}: services.${name}`;
-    if (!SERVICE_NAME.test(name)) throw new Error(`${where}: a service name may only use a-z, 0-9 and -`);
-    if (!isRecord(def)) throw new Error(`${where} must be an object`);
+    if (!SERVICE_NAME.test(name)) throw new ContainerError(`${where}: a service name may only use a-z, 0-9 and -.`);
+    if (!isRecord(def)) throw new ContainerError(`${where} must be an object with at least an image, e.g. {"image": "redis:7"}.`);
     const unknown = Object.keys(def).filter(k => !KEYS.has(k));
-    if (unknown.length) throw new Error(`${where}: unsupported keys ${unknown.sort().join(', ')}`);
-    if (typeof def.image !== 'string' || !def.image.trim()) throw new Error(`${where}: image is required`);
-    if (!isImageRef(def.image.trim())) throw new Error(`${where}: image "${def.image}" is not a valid image reference`);
+    if (unknown.length) throw new ContainerError(`${where}: unsupported keys ${unknown.sort().join(', ')}. A service may set image, env, command, port, healthcheck, volumes, dependsOn.`);
+    if (typeof def.image !== 'string' || !def.image.trim()) throw new ContainerError(`${where}: image is required, e.g. "image": "postgres:16".`);
+    if (!isImageRef(def.image.trim())) throw new ContainerError(`${where}: image "${def.image}" is not a valid image reference.`);
 
     const env: Record<string, string> = {};
     if (def.env !== undefined) {
-      if (!isRecord(def.env)) throw new Error(`${where}: env must be an object of NAME: value`);
+      if (!isRecord(def.env)) throw new ContainerError(`${where}: env must be an object of NAME: value.`);
       for (const [k, v] of Object.entries(def.env)) {
-        if (!ENV_NAME.test(k)) throw new Error(`${where}: env.${k} is not a valid variable name`);
-        if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') throw new Error(`${where}: env.${k} must be a string`);
+        if (!ENV_NAME.test(k)) throw new ContainerError(`${where}: env.${k} is not a valid variable name; use letters, digits and _, not starting with a digit.`);
+        if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') throw new ContainerError(`${where}: env.${k} must be a string.`);
         env[k] = String(v);
       }
     }
     if (def.command !== undefined && (!isStringArray(def.command) || def.command.length === 0)) {
-      throw new Error(`${where}: command must be a non-empty array of strings`);
+      throw new ContainerError(`${where}: command must be a non-empty array of strings, e.g. ["redis-server", "--appendonly", "yes"].`);
     }
-    if (def.port !== undefined && !validPort(def.port)) throw new Error(`${where}: port must be a number from 1 to 65535`);
+    if (def.port !== undefined && !validPort(def.port)) throw new ContainerError(`${where}: port must be a number from 1 to 65535.`);
     if (def.healthcheck !== undefined && (typeof def.healthcheck !== 'string' || !def.healthcheck.trim())) {
-      throw new Error(`${where}: healthcheck must be a shell command string`);
+      throw new ContainerError(`${where}: healthcheck must be a shell command string, e.g. "pg_isready".`);
     }
 
     const volumes: Record<string, string> = {};
     if (def.volumes !== undefined) {
-      if (!isRecord(def.volumes)) throw new Error(`${where}: volumes must be an object of volumeName: containerPath`);
+      if (!isRecord(def.volumes)) throw new ContainerError(`${where}: volumes must be an object of volumeName: containerPath, e.g. {"pgdata": "/var/lib/postgresql/data"}.`);
       for (const [vol, target] of Object.entries(def.volumes)) {
         // Nothing from the host: a path where the volume name goes would be a bind mount
-        if (/^[/.~]/.test(vol) || vol.includes('/')) throw new Error(`${where}: volumes.${vol}: host paths are not allowed, only named volumes`);
-        if (!VOLUME_NAME.test(vol)) throw new Error(`${where}: volumes.${vol} is not a valid volume name`);
-        if (typeof target !== 'string' || !target.startsWith('/')) throw new Error(`${where}: volumes.${vol} must be an absolute path in the container`);
+        if (/^[/.~]/.test(vol) || vol.includes('/')) throw new ContainerError(`${where}: volumes.${vol}: host paths are not allowed, only named volumes (a plain name such as pgdata).`);
+        if (!VOLUME_NAME.test(vol)) throw new ContainerError(`${where}: volumes.${vol} is not a valid volume name.`);
+        if (typeof target !== 'string' || !target.startsWith('/')) throw new ContainerError(`${where}: volumes.${vol} must be an absolute path in the container, e.g. "/data".`);
         volumes[vol] = target;
       }
     }
-    if (def.dependsOn !== undefined && !isStringArray(def.dependsOn)) throw new Error(`${where}: dependsOn must be an array of service names`);
+    if (def.dependsOn !== undefined && !isStringArray(def.dependsOn)) throw new ContainerError(`${where}: dependsOn must be an array of service names, e.g. ["postgres"].`);
 
     services.push({
       name,
@@ -263,14 +264,14 @@ export function mergeServices(...layers: ServiceSpec[][]): ServiceSpec[] {
 export function serviceOrder(services: ServiceSpec[]): ServiceSpec[] {
   const byName = new Map(services.map(s => [s.name, s]));
   for (const s of services) {
-    for (const d of s.dependsOn) if (!byName.has(d)) throw new Error(`Service ${s.name} depends on unknown service ${d}`);
+    for (const d of s.dependsOn) if (!byName.has(d)) throw new ContainerError(`Service ${s.name} depends on unknown service ${d}. Declare ${d} or remove it from dependsOn.`);
   }
   const ordered: ServiceSpec[] = [];
   const state = new Map<string, 'visiting' | 'done'>();
   const visit = (s: ServiceSpec, path: string[]) => {
     const seen = state.get(s.name);
     if (seen === 'done') return;
-    if (seen === 'visiting') throw new Error(`Services have a dependency cycle: ${[...path.slice(path.indexOf(s.name)), s.name].join(' -> ')}`);
+    if (seen === 'visiting') throw new ContainerError(`Services have a dependency cycle: ${[...path.slice(path.indexOf(s.name)), s.name].join(' -> ')}. Remove one of these dependsOn entries.`);
     state.set(s.name, 'visiting');
     for (const d of s.dependsOn) visit(byName.get(d)!, [...path, s.name]);
     state.set(s.name, 'done');

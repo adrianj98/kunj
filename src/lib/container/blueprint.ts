@@ -5,6 +5,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { Labels, isImageRef } from './backend';
 import { parseJsonc } from './devcontainer';
+import { ContainerError } from './errors';
 import { imageRepoName } from './image';
 import { LABEL } from './names';
 import { ServiceSpec, parseServices } from './services';
@@ -53,24 +54,31 @@ function isStringArray(v: unknown): v is string[] {
 function commandList(raw: Record<string, unknown>, key: string, source: string): string[] {
   const v = raw[key];
   if (v === undefined) return [];
-  if (!isStringArray(v) || v.some(x => x.trim() === '')) throw new Error(`${source}: ${key} must be an array of strings`);
+  if (!isStringArray(v) || v.some(x => x.trim() === '')) throw new ContainerError(`${source}: ${key} must be an array of strings, one shell command each (e.g. ["npm ci"]).`);
   return v;
 }
 
 export function parseBlueprint(text: string, source: string): Blueprint {
-  const raw = parseJsonc(text);
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${source}: blueprint must be a JSON object`);
+  let raw: unknown;
+  try {
+    raw = parseJsonc(text);
+  } catch (err) {
+    throw new ContainerError(`${source} is not valid JSON: ${err instanceof Error ? err.message : String(err)}. Fix the file, or write a new one with kunj ct blueprint init.`);
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ContainerError(`${source}: blueprint must be a JSON object, e.g. {"tools": {"node": "20"}, "setup": ["npm ci"]}.`);
+  }
   const obj = raw as Record<string, unknown>;
 
   const tools: Record<string, ToolValue> = {};
   if (obj.tools !== undefined) {
     if (!obj.tools || typeof obj.tools !== 'object' || Array.isArray(obj.tools)) {
-      throw new Error(`${source}: tools must be an object`);
+      throw new ContainerError(`${source}: tools must be an object of preset name to version, e.g. {"node": "20"}.`);
     }
     for (const [key, value] of Object.entries(obj.tools as Record<string, unknown>)) {
-      if (!/^[a-z0-9-]+$/.test(key)) throw new Error(`${source}: tools.${key} is not a valid preset name`);
+      if (!/^[a-z0-9-]+$/.test(key)) throw new ContainerError(`${source}: tools.${key} is not a valid preset name; use a-z, 0-9 and - (e.g. node, apt).`);
       if (typeof value !== 'string' && value !== true && !isStringArray(value)) {
-        throw new Error(`${source}: tools.${key} must be a string, an array of strings or true`);
+        throw new ContainerError(`${source}: tools.${key} must be a version string, an array of strings or true.`);
       }
       // "*" is any version, as true is
       if (value === '*') {
@@ -80,19 +88,19 @@ export function parseBlueprint(text: string, source: string): Blueprint {
       // Values reach root-run preset scripts as words: none may look like an option or a path
       const words = value === true ? [] : Array.isArray(value) ? value : value.trim().split(/\s+/);
       const bad = words.find(w => !TOOL_WORD.test(w));
-      if (bad !== undefined) throw new Error(`${source}: tools.${key} contains an invalid value "${bad}"`);
+      if (bad !== undefined) throw new ContainerError(`${source}: tools.${key} contains an invalid value "${bad}". Values are plain words (letters, digits, . _ + : = ~ @ -) and may not start with - or contain a path.`);
       tools[key] = value as ToolValue;
     }
   }
 
   let lockfiles: string[] = [];
   if (obj.lockfiles !== undefined) {
-    if (!isStringArray(obj.lockfiles)) throw new Error(`${source}: lockfiles must be an array of strings`);
+    if (!isStringArray(obj.lockfiles)) throw new ContainerError(`${source}: lockfiles must be an array of strings, paths relative to the repository root (e.g. ["package-lock.json"]).`);
     lockfiles = obj.lockfiles;
   }
-  if (obj.notes !== undefined && typeof obj.notes !== 'string') throw new Error(`${source}: notes must be a string`);
+  if (obj.notes !== undefined && typeof obj.notes !== 'string') throw new ContainerError(`${source}: notes must be a string.`);
   if (obj.image !== undefined && (typeof obj.image !== 'string' || (obj.image !== SANDBOX_IMAGE_KEYWORD && !isImageRef(obj.image)))) {
-    throw new Error(`${source}: image must be "${SANDBOX_IMAGE_KEYWORD}" or an image reference`);
+    throw new ContainerError(`${source}: image must be "${SANDBOX_IMAGE_KEYWORD}" or an image reference (e.g. node:20-bookworm), got ${JSON.stringify(obj.image)}.`);
   }
 
   const services = parseServices(obj.services, source);
@@ -100,12 +108,12 @@ export function parseBlueprint(text: string, source: string): Blueprint {
   const aliases: Record<string, string> = {};
   if (obj.aliases !== undefined) {
     if (!obj.aliases || typeof obj.aliases !== 'object' || Array.isArray(obj.aliases)) {
-      throw new Error(`${source}: aliases must be an object`);
+      throw new ContainerError(`${source}: aliases must be an object of name to command, e.g. {"t": "npm test"}.`);
     }
     for (const [name, value] of Object.entries(obj.aliases as Record<string, unknown>)) {
-      if (!ALIAS_NAME.test(name) || name === '__proto__') throw new Error(`${source}: aliases.${name} is not a valid alias name`);
+      if (!ALIAS_NAME.test(name) || name === '__proto__') throw new ContainerError(`${source}: aliases.${name} is not a valid alias name; use letters, digits and _ . + -.`);
       if (typeof value !== 'string' || value.trim() === '' || /[\n\r]/.test(value)) {
-        throw new Error(`${source}: aliases.${name} must be a one-line command`);
+        throw new ContainerError(`${source}: aliases.${name} must be a one-line command.`);
       }
       aliases[name] = value;
     }

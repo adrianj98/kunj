@@ -134,7 +134,7 @@ describe('set', () => {
     // getKunjDir falls back to ./.kunj, which in the home directory is the global vault's directory
     dirs.repoName = null;
     dirs.kunj = dirs.global;
-    await expect(cmd().execute('set', ['DB_URL'], { branch: 'feature' })).rejects.toThrow(/not in a git repository.*--global/i);
+    await expect(cmd().execute('set', ['DB_URL'], { branch: 'feature' })).rejects.toMatchObject({ message: expect.stringMatching(/not in a git repository/i), hint: expect.stringMatching(/--global/) });
     await expect(cmd().execute('set', ['DB_URL'], {})).rejects.toThrow(/not in a git repository/i);
     expect(fs.existsSync(vaultFiles(dirs.kunj, dirs.global).global)).toBe(false);
     await cmd().execute('set', ['GH_TOKEN'], { global: true });

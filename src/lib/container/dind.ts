@@ -62,8 +62,8 @@ export async function dindHostInfo(
 
 function imageRefusal(kind: string, tag: string): StartError {
   return new StartError(
-    `container.dockerInDocker needs the kunj sandbox image in this version, but this start uses the ${kind} image ${tag}; ` +
-      'unset container.image (or --image) and use no devcontainer, or set container.dockerInDocker to "off"',
+    `container.dockerInDocker needs the kunj sandbox image, but this start uses the ${kind} image ${tag}. ` +
+      'Drop --image and container.image (and the devcontainer, or set the blueprint\'s image to "sandbox"), or set container.dockerInDocker to "off".',
     'dind'
   );
 }
@@ -94,13 +94,13 @@ export async function checkDind(
 ): Promise<void> {
   if (mode === 'off') return;
   if (!backend.features.dockerInDocker.includes(mode)) {
-    throw new StartError(`container.dockerInDocker "${mode}" is not supported by this backend; set it to "off"`, 'dind');
+    throw new StartError(`container.dockerInDocker "${mode}" is not supported by this backend. Set container.dockerInDocker to "off", or use a backend that supports it.`, 'dind');
   }
   if (mode === 'sysbox') {
     if (!info.runtimes.includes(SYSBOX_RUNTIME)) {
       throw new StartError(
-        `container.dockerInDocker is "sysbox", but the Docker daemon (context ${info.context}) has no ${SYSBOX_RUNTIME} runtime; ` +
-          'install sysbox on the Docker host (Linux), or set container.dockerInDocker to "privileged" or "off"',
+        `container.dockerInDocker is "sysbox", but the Docker daemon (context ${info.context}) has no ${SYSBOX_RUNTIME} runtime. ` +
+          'Install sysbox on the Docker host (Linux), or set container.dockerInDocker to "privileged" or "off".',
         'dind'
       );
     }
@@ -108,9 +108,9 @@ export async function checkDind(
   }
   if (!cfg.allowPrivileged) {
     throw new StartError(
-      'container.dockerInDocker is "privileged", which gives the container root on the Docker host (on a Mac, its VM); ' +
-        'set container.allowPrivileged to true to allow it, on a dedicated Docker context (e.g. a Colima profile with file sharing off), ' +
-        'or use "sysbox"',
+      'container.dockerInDocker is "privileged", which gives the container root on the Docker host (on a Mac, its VM). ' +
+        'To allow it, set container.allowPrivileged to true on a dedicated Docker context (e.g. a Colima profile with file sharing off), ' +
+        'or use "sysbox".',
       'dind'
     );
   }
@@ -118,7 +118,7 @@ export async function checkDind(
   if (info.isDockerDesktop) {
     throw new StartError(
       `container.dockerInDocker "privileged" is refused on Docker Desktop (context ${info.context}): its VM shares your home directory. ` +
-        'Point container.dockerContext at a dedicated VM (e.g. a Colima profile with file sharing off), or use "sysbox" on a Linux host',
+        'Point container.dockerContext at a dedicated VM (e.g. a Colima profile with file sharing off), or use "sysbox" on a Linux host.',
       'dind'
     );
   }
@@ -137,15 +137,15 @@ export function checkRecordedDind(
 ): void {
   if (recorded === 'privileged' && !cfg.allowPrivileged) {
     throw new StartError(
-      `${container} was created with container.dockerInDocker "privileged", and container.allowPrivileged is no longer true; ` +
-        `set it back to true to start it, or kunj ct remove (or kunj ct start --rebuild) to replace it`,
+      `${container} was created with container.dockerInDocker "privileged", and container.allowPrivileged is no longer true. ` +
+        'Set it back to true to start it, or replace the container with kunj ct start --rebuild (or kunj ct remove).',
       'dind'
     );
   }
   if (recorded === 'sysbox' && !runtimes.includes(SYSBOX_RUNTIME)) {
     throw new StartError(
-      `${container} was created with container.dockerInDocker "sysbox", but the Docker daemon no longer has the ${SYSBOX_RUNTIME} runtime; ` +
-        'install sysbox again, or kunj ct remove (or kunj ct start --rebuild) to replace it',
+      `${container} was created with container.dockerInDocker "sysbox", but the Docker daemon no longer has the ${SYSBOX_RUNTIME} runtime. ` +
+        'Install sysbox again, or replace the container with kunj ct start --rebuild (or kunj ct remove).',
       'dind'
     );
   }

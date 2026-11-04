@@ -6,7 +6,8 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { BaseCommand } from "../lib/command";
 import {
-  checkGitRepo,
+  requireGitRepo,
+  wrapError,
   getCurrentBranch,
   getCommitsSinceBranch,
   getMainBranch,
@@ -17,6 +18,8 @@ import { generateAIPRDescription, getPRDiff } from "../lib/ai-pr";
 import { checkAWSCredentials, generatePRLogEntry } from "../lib/ai-commit";
 import { appendToWorkLog } from "../lib/work-log";
 import { runActionHook } from "../lib/hooks";
+import { UserError, describeError } from "../lib/errors";
+import { requireGhCli } from "../lib/pr-providers";
 
 const execAsync = promisify(exec);
 
@@ -73,23 +76,10 @@ export class PrCommand extends BaseCommand {
 
   async execute(prNumber?: string, options: PrOptions = {}): Promise<void> {
     // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
     // Check if gh CLI is installed
-    const ghAvailable = await this.checkGhCli();
-    if (!ghAvailable) {
-      console.error(chalk.red("Error: GitHub CLI (gh) is not installed"));
-      console.log(chalk.yellow("\nTo install GitHub CLI:"));
-      console.log(chalk.gray("  macOS: brew install gh"));
-      console.log(chalk.gray("  Linux: See https://github.com/cli/cli#installation"));
-      console.log(chalk.gray("  Windows: See https://github.com/cli/cli#installation"));
-      console.log(chalk.yellow("\nThen authenticate with: gh auth login"));
-      process.exit(1);
-    }
+    await requireGhCli();
 
     // If PR number is provided, show that specific PR's status
     if (prNumber) {
@@ -98,9 +88,7 @@ export class PrCommand extends BaseCommand {
 
       // Validate it's a number
       if (!/^\d+$/.test(cleanNumber)) {
-        console.error(chalk.red(`Error: Invalid PR number '${prNumber}'`));
-        console.log(chalk.yellow("Usage: kunj pr #123  or  kunj pr 123"));
-        process.exit(1);
+        throw new UserError(`${prNumber} is not a pull request number.`, "Pass the number, as in `kunj pr 123` or `kunj pr #123`.");
       }
 
       await this.showPrStatus(options.detailed, cleanNumber);
@@ -141,9 +129,10 @@ export class PrCommand extends BaseCommand {
     }
 
     if (currentBranch === baseBranch) {
-      console.error(chalk.red(`Error: Cannot create PR from ${baseBranch} branch`));
-      console.log(chalk.yellow("Please switch to a feature branch first"));
-      process.exit(1);
+      throw new UserError(
+        `You are on ${baseBranch}, the base branch, so there is nothing to open a pull request from.`,
+        "Switch to a feature branch first (`kunj switch <branch>`), or pass another base with --base.",
+      );
     }
 
     // Get branch metadata
@@ -208,8 +197,9 @@ export class PrCommand extends BaseCommand {
             );
           }
         } catch (error: any) {
-          console.log(chalk.yellow(`⚠ AI generation failed: ${error.message}`));
-          console.log(chalk.gray("  Falling back to heuristic generation"));
+          const d = describeError(error);
+          console.log(chalk.yellow(`⚠ Could not write the description with AI (${d.message.replace(/\.$/, "")}); using one built from the commits.`));
+          if (d.hint) console.log(chalk.gray(`  ${d.hint}`));
           suggestions = await this.generatePrSuggestions(
             currentBranch,
             branchDescription,
@@ -316,8 +306,9 @@ export class PrCommand extends BaseCommand {
           }
         } catch (error: any) {
           // Don't fail the PR creation if work log fails
-          console.log(chalk.yellow("⚠ Failed to generate work log entry"));
-          console.log(chalk.gray(`  ${error.message}`));
+          const d = describeError(error);
+          console.log(chalk.yellow(`⚠ The pull request is open, but its work log entry could not be written: ${d.message}`));
+          if (d.hint) console.log(chalk.gray(`  ${d.hint}`));
         }
 
         // Show initial PR status
@@ -341,11 +332,9 @@ export class PrCommand extends BaseCommand {
         }
       }
     } catch (error: any) {
-      console.error(chalk.red("Failed to create PR:"), error.message);
-
       // Check if it's because PR already exists
-      if (error.message.includes("already exists")) {
-        console.log(chalk.yellow("\nA PR already exists for this branch"));
+      if (String(error?.stderr ?? error?.message ?? "").includes("already exists")) {
+        console.error(chalk.red(`✗ A pull request already exists for ${currentBranch}.`));
         const { viewExisting } = await inquirer.prompt([
           {
             type: "confirm",
@@ -358,19 +347,9 @@ export class PrCommand extends BaseCommand {
         if (viewExisting) {
           await execAsync(`gh pr view --web`);
         }
+        process.exit(1);
       }
-      process.exit(1);
-    }
-  }
-
-  private async checkGhCli(): Promise<boolean> {
-    try {
-      await execAsync("gh --version");
-      // Check if authenticated
-      await execAsync("gh auth status");
-      return true;
-    } catch {
-      return false;
+      throw wrapError("Could not create the pull request", error);
     }
   }
 
@@ -399,8 +378,11 @@ export class PrCommand extends BaseCommand {
         }
       }
     } catch (error: any) {
-      console.error(chalk.red("Failed to push:"), error.message);
-      throw error;
+      const d = describeError(error);
+      throw new UserError(
+        `Could not push ${branch} to origin: ${d.message.replace(/\.$/, "")}.`,
+        d.hint ?? `Push it yourself with \`git push -u origin ${branch}\`, then run \`kunj pr\` again.`,
+      );
     }
   }
 
@@ -552,8 +534,8 @@ export class PrCommand extends BaseCommand {
       const pr = JSON.parse(prJson || "{}");
 
       if (!pr.number) {
-        console.log(chalk.yellow("No PR found for the current branch"));
-        console.log(chalk.gray("Create one with: kunj pr"));
+        console.log(chalk.yellow(prNumber ? `No pull request #${prNumber} in this repository.` : "No pull request for the current branch."));
+        if (!prNumber) console.log(chalk.gray("Create one with: kunj pr"));
         return;
       }
 
@@ -687,8 +669,7 @@ export class PrCommand extends BaseCommand {
       console.log(chalk.gray("  Close PR: gh pr close"));
 
     } catch (error: any) {
-      console.error(chalk.red("Failed to get PR status:"), error.message);
-      process.exit(1);
+      throw wrapError("Could not read the pull request status", error);
     }
   }
 
@@ -764,8 +745,7 @@ export class PrCommand extends BaseCommand {
 
       console.log(chalk.gray("\nView details: kunj pr --status"));
     } catch (error: any) {
-      console.error(chalk.red("Failed to list PRs:"), error.message);
-      process.exit(1);
+      throw wrapError("Could not list pull requests", error);
     }
   }
 

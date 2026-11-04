@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ContainerBackend } from './backend';
+import { ContainerError } from './errors';
 import { Forwarder, forwardPort } from './forward';
 import { pidRegistry } from './pidregistry';
 import { kunjEntry } from '../self';
@@ -147,7 +148,7 @@ export function spawnDetached(args: string[], logFile?: string): number {
     const stdio: 'ignore' | ['ignore', number, number] = fd === undefined ? 'ignore' : ['ignore', fd, fd];
     const child = spawn(process.execPath, [entry, ...args], { detached: true, stdio, cwd: process.cwd() });
     child.unref();
-    if (!child.pid) throw new Error(`Could not start kunj ${args.slice(0, 2).join(' ')} in the background`);
+    if (!child.pid) throw new ContainerError(`Could not start kunj ${args.slice(0, 2).join(' ')} in the background${logFile ? `; see ${logFile}` : ''}.`);
     return child.pid;
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
@@ -206,8 +207,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 /** The network helper's tunnel needs socat (kunj-nethelper images before it had socat do not). */
 export const HELPER_NO_SOCAT =
-  'The network helper of this container predates port forwarding through it (it has no socat); ' +
-  'restart the container (kunj ct stop, then kunj ct start) to replace it';
+  'The network helper of this container is too old to forward ports (it has no socat). ' +
+  'Run kunj ct start for the branch to replace it.';
 
 /**
  * Forwards the listeners of the branch container `target.main` until `signal` aborts or that run of
@@ -244,7 +245,7 @@ export async function runAutoForward(
   const helperRun = await backend.containerRun(target.helper);
   if (!helperRun || helperRun.state !== 'running') return;
   const ended = (now: typeof run, was: typeof run) => now.state !== 'running' || now.startedAt !== was.startedAt;
-  if ((await backend.exec(target.helper, ['sh', '-c', 'command -v socat'])).exitCode !== 0) throw new Error(HELPER_NO_SOCAT);
+  if ((await backend.exec(target.helper, ['sh', '-c', 'command -v socat'])).exitCode !== 0) throw new ContainerError(HELPER_NO_SOCAT);
   let lastStateCheck = Date.now();
   let failedInspects = 0;
   let unreadable = false;

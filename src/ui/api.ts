@@ -39,7 +39,7 @@ export async function executeCommandForJSON(
         try {
           resolve(JSON.parse(stdout));
         } catch {
-          reject(new Error(`Invalid JSON output from ${commandName}`));
+          reject(new Error(`kunj ${commandName} --json printed something that is not JSON.`));
         }
       }
     );

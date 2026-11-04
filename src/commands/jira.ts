@@ -5,7 +5,8 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
 import { loadConfig } from '../lib/config';
-import { getCurrentBranch, getMainBranch } from '../lib/git';
+import { getCurrentBranch, getMainBranch, wrapError } from '../lib/git';
+import { UserError, describeError, formatError } from '../lib/errors';
 import { updateBranchMetadata, getBranchMetadataItem } from '../lib/metadata';
 import {
   checkJiraCredentials,
@@ -59,7 +60,7 @@ export class JiraCommand extends BaseCommand {
       .option('--json', 'Output as JSON')
       .action(async (options) => {
         if (options.json) this.jsonMode = true;
-        await this.listTickets(options);
+        await this.run(() => this.listTickets(options));
       });
 
     // jira view - View ticket details
@@ -70,7 +71,7 @@ export class JiraCommand extends BaseCommand {
       .option('--json', 'Output as JSON')
       .action(async (key, options) => {
         if (options.json) this.jsonMode = true;
-        await this.viewTicket(key);
+        await this.run(() => this.viewTicket(key));
       });
 
     // jira link - Link branch to ticket
@@ -79,7 +80,7 @@ export class JiraCommand extends BaseCommand {
       .description('Link current branch to a Jira ticket')
       .argument('<key>', 'Jira issue key (e.g., PROJ-123)')
       .action(async (key) => {
-        await this.linkTicket(key);
+        await this.run(() => this.linkTicket(key));
       });
 
     // jira create - Create new ticket
@@ -94,12 +95,26 @@ export class JiraCommand extends BaseCommand {
       .option('--ai', 'Use AI to generate ticket from branch commits')
       .option('--no-ai', 'Disable AI generation (manual input)')
       .action(async (options) => {
-        await this.createTicket(options);
+        await this.run(() => this.createTicket(options));
       });
   }
 
   public async execute(): Promise<void> {
     // Not used - subcommands handle execution
+  }
+
+  // The subcommands are registered by hand, so they print their own errors like BaseCommand does
+  private async run(action: () => Promise<void>): Promise<void> {
+    try {
+      await action();
+    } catch (error) {
+      if (this.jsonMode) {
+        process.stdout.write(JSON.stringify({ error: describeError(error).message }) + '\n');
+      } else {
+        console.error(formatError(error));
+      }
+      process.exit(1);
+    }
   }
 
   private async listTickets(options: any): Promise<void> {
@@ -109,15 +124,13 @@ export class JiraCommand extends BaseCommand {
       // Check configuration
       const config = loadConfig();
       if (!config.jira?.enabled) {
-        console.log(chalk.yellow('Jira integration is not enabled.'));
-        console.log(chalk.gray('Run "kunj setup" to configure Jira.\n'));
-        return;
+        throw new UserError('The Jira integration is not set up.', 'Run `kunj setup` to connect kunj to Jira.');
       }
 
       // Validate credentials
       const isValid = await checkJiraCredentials();
       if (!isValid) {
-        return;
+        process.exit(1);
       }
 
       let jql: string;
@@ -127,9 +140,7 @@ export class JiraCommand extends BaseCommand {
         // Sprint mode
         const boardId = getBoardId();
         if (!boardId) {
-          console.log(chalk.yellow('Board ID not configured.'));
-          console.log(chalk.gray('Run "kunj config set jira.boardId <id>" to configure.\n'));
-          return;
+          throw new UserError('No Jira board is configured, so kunj cannot find the active sprint.', 'Set it with `kunj config --set jira.boardId=<id>`.');
         }
 
         const sprint = await getCurrentSprint(boardId);
@@ -194,17 +205,7 @@ export class JiraCommand extends BaseCommand {
       console.log(chalk.gray('─'.repeat(80)));
       console.log(chalk.gray(`Total: ${issues.length} tickets\n`));
     } catch (error) {
-      console.error(chalk.red('\nError listing tickets:'));
-      if (error instanceof Error) {
-        console.error(chalk.gray(error.message));
-        if (error.stack) {
-          console.error(chalk.dim('\nStack trace:'));
-          console.error(chalk.dim(error.stack));
-        }
-      } else {
-        console.error(chalk.gray(String(error)));
-      }
-      console.log();
+      throw wrapError('Could not list your Jira tickets', error);
     }
   }
 
@@ -213,9 +214,7 @@ export class JiraCommand extends BaseCommand {
       // Check configuration
       const config = loadConfig();
       if (!config.jira?.enabled) {
-        console.log(chalk.yellow('Jira integration is not enabled.'));
-        console.log(chalk.gray('Run "kunj setup" to configure Jira.\n'));
-        return;
+        throw new UserError('The Jira integration is not set up.', 'Run `kunj setup` to connect kunj to Jira.');
       }
 
       // Auto-detect ticket from current branch if no key provided
@@ -233,9 +232,10 @@ export class JiraCommand extends BaseCommand {
             key = extractedKey;
             console.log(chalk.gray(`Extracted ticket ${key} from branch name\n`));
           } else {
-            console.log(chalk.yellow('No Jira ticket linked to current branch.'));
-            console.log(chalk.gray('Usage: kunj jira view <key> or link a ticket with: kunj jira link <key>\n'));
-            return;
+            throw new UserError(
+              `No Jira ticket is linked to ${currentBranch}, and its name has no ticket key.`,
+              'Pass the key (`kunj jira view PROJ-123`), or link one with `kunj jira link PROJ-123`.',
+            );
           }
         }
       }
@@ -245,7 +245,7 @@ export class JiraCommand extends BaseCommand {
       // Validate credentials
       const isValid = await checkJiraCredentials();
       if (!isValid) {
-        return;
+        process.exit(1);
       }
 
       const issue = await getIssue(key);
@@ -292,8 +292,7 @@ export class JiraCommand extends BaseCommand {
       console.log(chalk.bold('\nURL:      ') + chalk.cyan(`${config.jira.baseUrl}/browse/${issue.key}`));
       console.log();
     } catch (error) {
-      console.error(chalk.red('Error viewing ticket:'));
-      console.error(chalk.gray(error instanceof Error ? error.message : String(error)));
+      throw wrapError('Could not show the Jira ticket', error);
     }
   }
 
@@ -302,15 +301,13 @@ export class JiraCommand extends BaseCommand {
       // Check configuration
       const config = loadConfig();
       if (!config.jira?.enabled) {
-        console.log(chalk.yellow('Jira integration is not enabled.'));
-        console.log(chalk.gray('Run "kunj setup" to configure Jira.\n'));
-        return;
+        throw new UserError('The Jira integration is not set up.', 'Run `kunj setup` to connect kunj to Jira.');
       }
 
       // Validate credentials
       const isValid = await checkJiraCredentials();
       if (!isValid) {
-        return;
+        process.exit(1);
       }
 
       // Get current branch
@@ -333,8 +330,7 @@ export class JiraCommand extends BaseCommand {
       console.log(chalk.cyan(`  ${issue.key}: ${issue.fields.summary}`));
       console.log(chalk.gray(`  Status: ${issue.fields.status.name}\n`));
     } catch (error) {
-      console.error(chalk.red('Error linking ticket:'));
-      console.error(chalk.gray(error instanceof Error ? error.message : String(error)));
+      throw wrapError('Could not link the Jira ticket', error);
     }
   }
 
@@ -345,23 +341,19 @@ export class JiraCommand extends BaseCommand {
       // Check configuration
       const config = loadConfig();
       if (!config.jira?.enabled) {
-        console.log(chalk.yellow('Jira integration is not enabled.'));
-        console.log(chalk.gray('Run "kunj setup" to configure Jira.\n'));
-        return;
+        throw new UserError('The Jira integration is not set up.', 'Run `kunj setup` to connect kunj to Jira.');
       }
 
       // Validate credentials
       const isValid = await checkJiraCredentials();
       if (!isValid) {
-        return;
+        process.exit(1);
       }
 
       // Get project key from config
       const defaultProjectKey = config.jira?.projectKey || '';
       if (!defaultProjectKey) {
-        console.log(chalk.yellow('No default project key configured.'));
-        console.log(chalk.gray('Run "kunj config set jira.projectKey <key>" to set a default.\n'));
-        return;
+        throw new UserError('No default Jira project is configured.', 'Set one with `kunj config --set jira.projectKey=<key>`.');
       }
 
       // Get current branch to check if it's a default branch
@@ -416,8 +408,9 @@ export class JiraCommand extends BaseCommand {
             console.log(chalk.gray('You can review and edit before creating\n'));
           }
         } catch (error) {
-          console.log(chalk.yellow('⚠ AI generation failed, using manual input'));
-          console.log(chalk.gray(`  ${error instanceof Error ? error.message : String(error)}\n`));
+          const d = describeError(error);
+          console.log(chalk.yellow(`⚠ Could not write the ticket with AI (${d.message.replace(/\.$/, '')}); enter it by hand.`));
+          if (d.hint) console.log(chalk.gray(`  ${d.hint}\n`));
         }
       }
 
@@ -571,14 +564,13 @@ export class JiraCommand extends BaseCommand {
             console.log(chalk.green(`✓ Linked ticket ${issue.key} to branch`));
             console.log(chalk.gray(`  Run "kunj jira view" to see ticket details\n`));
           } catch (error) {
-            console.log(chalk.yellow(`\n⚠ Could not create branch automatically`));
-            console.log(chalk.gray(`  Run: kunj create ${finalBranchName}\n`));
+            console.log(chalk.yellow(`\n⚠ The ticket was created, but the branch was not: ${describeError(error).message}`));
+            console.log(chalk.gray(`  Create it with: kunj create ${finalBranchName}\n`));
           }
         }
       }
     } catch (error) {
-      console.error(chalk.red('Error creating ticket:'));
-      console.error(chalk.gray(error instanceof Error ? error.message : String(error)));
+      throw wrapError('Could not create the Jira ticket', error);
     }
   }
 

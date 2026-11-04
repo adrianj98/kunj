@@ -16,6 +16,8 @@ import {
   computeBlueprintHash,
   snapshotTag,
 } from './blueprint';
+import { ContainerError } from './errors';
+import { gitErrorLine } from '../errors';
 import { StartOptions, StartResult, baseImageTag, removeContainer, startContainer } from './lifecycle';
 import { LABEL, containerNames } from './names';
 import { orderTools, resolvePresets } from './presets';
@@ -108,7 +110,7 @@ async function hostGit(args: string[], cwd: string, timeout = 0): Promise<string
     return stdout.trim();
   } catch (err) {
     const stderr = String((err as { stderr?: unknown }).stderr ?? '').trim();
-    throw new Error(`git ${args[0]} failed: ${stderr || message(err)}`);
+    throw new ContainerError(`git ${args[0]} failed: ${(stderr && gitErrorLine(stderr)) || message(err)}`);
   }
 }
 
@@ -220,11 +222,11 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
     tools = result.blueprint?.tools ?? [];
     const id = result.containerId;
     const copy = await backend.exec(id, ['sh', '-c', SEED_COPY_SCRIPT], { user: 'root' });
-    if (copy.exitCode !== 0) throw new Error(`Copying the workspace to ${SEED_DIR} failed (exit ${copy.exitCode})`);
+    if (copy.exitCode !== 0) throw new ContainerError(`Copying the workspace to ${SEED_DIR} in the snapshot container failed (exit ${copy.exitCode})`);
     const read = await backend.exec(id, ['sh', '-c', SNAPSHOT_READ_SCRIPT], { user: 'root' });
     const nl = read.stdout.indexOf('\n');
     sha = (nl === -1 ? read.stdout : read.stdout.slice(0, nl)).trim();
-    if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new Error('Could not read the commit checked out in the snapshot container');
+    if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new ContainerError('Could not read the commit checked out in the snapshot container');
     const changes = envChanges(nl === -1 ? '' : read.stdout.slice(nl + 1), opts.warn);
     const labels = blueprintLabels({ repoId: opts.repo.id, hash, ref: sha, base, user: result.user });
     opts.log('Committing snapshot…');

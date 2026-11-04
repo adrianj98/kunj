@@ -3,6 +3,7 @@
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { BaseCommand } from '../lib/command';
+import { UserError, describeError } from '../lib/errors';
 import {
   loadConfig,
   saveConfig,
@@ -249,10 +250,9 @@ export class ConfigCommand extends BaseCommand {
     let value: any = config;
 
     for (const key of keys) {
-      value = value[key];
+      value = value?.[key];
       if (value === undefined) {
-        console.error(chalk.red(`✗ Configuration key '${keyPath}' not found`));
-        process.exit(1);
+        throw new UserError(`There is no setting ${keyPath}.`, 'Run `kunj config --list` to see the settings and their keys.');
       }
     }
 
@@ -262,8 +262,7 @@ export class ConfigCommand extends BaseCommand {
   private setConfigValue(config: any, input: string, isGlobal: boolean): void {
     const parsed = parseKeyValue(input);
     if (!parsed) {
-      console.error(chalk.red("✗ Invalid format. Use: --set key=value"));
-      process.exit(1);
+      throw new UserError(`${input} is not a key=value pair.`, 'Write it as `kunj config --set ai.commitStyle=conventional`.');
     }
 
     const { keys, value } = parsed;
@@ -643,7 +642,9 @@ export class ConfigCommand extends BaseCommand {
             try {
               models = await listBedrockModels();
             } catch (err: any) {
-              console.log(chalk.red(`  Failed to fetch models: ${err.message}`));
+              const d = describeError(err);
+              console.log(chalk.red(`  Could not list the Bedrock models: ${d.message}`));
+              if (d.hint) console.log(chalk.gray(`  ${d.hint}`));
               console.log(chalk.gray('  Falling back to manual entry.'));
               models = [];
             }
@@ -816,14 +817,14 @@ export class ConfigCommand extends BaseCommand {
               || '';
 
             if (!slackToken) {
-              console.log(chalk.red('  No Slack token found. Set slack.token first.'));
+              console.log(chalk.red('  No Slack token is set. Set slack.token (or SLACK_BOT_TOKEN) first.'));
               return false;
             }
 
             console.log(chalk.gray('  Checking Slack credentials...'));
             const slackOk = await checkSlackCredentials(slackToken);
             if (!slackOk) {
-              console.log(chalk.red('  Slack credentials are invalid. Check your slack.token.'));
+              console.log(chalk.red('  Slack rejected the token in slack.token. Check it, or create a new bot token.'));
               return false;
             }
 

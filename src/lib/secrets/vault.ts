@@ -91,7 +91,7 @@ export async function readVault(file: string, unlock: Unlock): Promise<SecretEnt
 // Keeps the existing file's salt and kdf; refuses to replace a file that does not parse or decrypt.
 export async function writeVault(file: string, entries: SecretEntry[], unlock: Unlock): Promise<void> {
   for (const e of entries) {
-    if (!isSecretName(e.name)) throw new SecretError(`Invalid secret name ${JSON.stringify(e.name)}: names must match [A-Za-z_][A-Za-z0-9_]*`, 'bad-name');
+    if (!isSecretName(e.name)) throw new SecretError(`${JSON.stringify(e.name)} is not a valid secret name. Use letters, digits and underscores, not starting with a digit (like API_KEY).`, 'bad-name');
   }
   const existing = readEnvelope(file);
   if (existing) checkKdf(file, existing, unlock);
@@ -134,9 +134,9 @@ async function openEnvelope(file: string, env: Envelope, unlock: Unlock): Promis
     if (plain !== null) return { key, plain };
   }
   if (attempts > 1) {
-    throw new SecretError(`${file} did not decrypt after ${attempts} tries (wrong passphrase or key, or the file was modified). The file was left untouched.`, 'secrets-locked');
+    throw new SecretError(`${file} did not decrypt after ${attempts} tries (wrong passphrase, or the file was modified). The file was left untouched; run the command again with the passphrase the vault was created with.`, 'secrets-locked');
   }
-  throw corrupt(file, 'it does not decrypt (wrong key, or the file was modified)');
+  throw corrupt(file, 'it does not decrypt (wrong key, or the file was modified)', 'Check that KUNJ_SECRETS_KEY, if set, is the key the vault was made with, and that the kunj-secrets Keychain item was not replaced.');
 }
 
 // null when the authentication check fails.
@@ -155,21 +155,23 @@ function aad(kdf: string, salt: string): Buffer {
   return Buffer.from(`kunj-secrets:${VERSION}:${kdf}:${salt}`);
 }
 
-function corrupt(file: string, why: string): SecretError {
-  return new SecretError(`${file}: ${why}. The file was left untouched.`, 'secrets-corrupt');
+const RESTORE = 'Restore it from a backup, or move it aside to start an empty vault (the secrets in it are then lost).';
+
+function corrupt(file: string, why: string, next: string = RESTORE): SecretError {
+  return new SecretError(`${file}: ${why}. The file was left untouched. ${next}`, 'secrets-corrupt');
 }
 
 async function keyOf(unlock: Unlock, salt: Buffer, attempt: number): Promise<Buffer> {
   const key = await unlock.keyFor(salt, attempt);
   if (!Buffer.isBuffer(key) || key.length !== KEY_BYTES) {
-    throw new SecretError(`The secrets key must be ${KEY_BYTES} bytes`, 'secrets-locked');
+    throw new SecretError(`The secrets key must be ${KEY_BYTES} bytes.`, 'secrets-locked');
   }
   return key;
 }
 
 function checkKdf(file: string, env: Envelope, unlock: Unlock): void {
   if (env.kdf !== unlock.kdf) {
-    throw new SecretError(`${file} is locked with the ${env.kdf} kdf, not ${unlock.kdf}`, 'secrets-locked');
+    throw new SecretError(`${file} is locked with a ${env.kdf} key, not a ${unlock.kdf} one, so it was not written. Check secrets.keyProvider and KUNJ_SECRETS_KEY.`, 'secrets-locked');
   }
 }
 

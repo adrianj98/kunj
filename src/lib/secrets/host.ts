@@ -31,7 +31,8 @@ export async function hostSecrets(opts: HostSecretsOptions): Promise<{ env: Reco
     try {
       files = await writeHostFiles(opts.root, rendered, {});
     } catch (error) {
-      opts.warn?.(`Secret files not written: ${error instanceof Error ? error.message : String(error)}`);
+      // The message already says that nothing was written and what to do
+      opts.warn?.(error instanceof Error ? error.message : String(error));
     }
   }
   return { env: envOf(entries), files };

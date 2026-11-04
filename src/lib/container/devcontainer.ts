@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { isImageRef } from './backend';
+import { ContainerError } from './errors';
 
 export interface DevcontainerSpec {
   image?: string;
@@ -103,12 +104,12 @@ function stringMap(v: unknown): Record<string, string> {
 }
 
 /** A file in the repo can be edited by an agent, so root is never accepted. */
-function validateRemoteUser(value: unknown): string | undefined {
+function validateRemoteUser(value: unknown, filePath: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   const raw = typeof value === 'string' ? value : String(value);
   const user = raw.trim().split(':')[0].toLowerCase();
   if (user === 'root' || (/^\d+$/.test(user) && Number(user) === 0)) {
-    throw new Error(`remoteUser must be a non-root user (got "${raw}")`);
+    throw new ContainerError(`${filePath}: remoteUser must be a non-root user (got "${raw}"). Set it to the image's unprivileged user, e.g. "node" or "vscode".`);
   }
   if (typeof value !== 'string') return undefined;
   return raw;
@@ -121,15 +122,20 @@ function command(v: unknown): { value?: string; ignored: boolean } {
 }
 
 export function parseDevcontainer(text: string, filePath: string): DevcontainerSpec {
-  const doc = parseJsonc(text);
-  if (!isRecord(doc)) throw new Error(`${filePath}: expected a JSON object`);
+  let doc: unknown;
+  try {
+    doc = parseJsonc(text);
+  } catch (err) {
+    throw new ContainerError(`${filePath} is not valid JSON: ${err instanceof Error ? err.message : String(err)}. Fix it and push (kunj reads it from origin), or pass --image to start without it.`);
+  }
+  if (!isRecord(doc)) throw new ContainerError(`${filePath}: expected a JSON object.`);
 
   const dir = path.posix.dirname(filePath.replace(/\\/g, '/'));
   const rel = (p: string, key: string) => {
     const resolved = path.posix.normalize(path.posix.join(dir, p));
     const absolute = path.posix.isAbsolute(p) || path.win32.isAbsolute(p);
     if (absolute || resolved === '..' || resolved.startsWith('../')) {
-      throw new Error(`${filePath}: ${key} must stay inside the repository (got "${p}")`);
+      throw new ContainerError(`${filePath}: ${key} must stay inside the repository (got "${p}"). Use a path relative to the devcontainer file.`);
     }
     return resolved;
   };
@@ -147,7 +153,7 @@ export function parseDevcontainer(text: string, filePath: string): DevcontainerS
 
   if (typeof doc.image === 'string') {
     // It reaches docker as an argument: a value starting with '-' would be read as a flag
-    if (!isImageRef(doc.image)) throw new Error(`${filePath}: image "${doc.image}" is not a valid image reference`);
+    if (!isImageRef(doc.image)) throw new ContainerError(`${filePath}: image "${doc.image}" is not a valid image reference.`);
     spec.image = doc.image;
   }
 
@@ -159,7 +165,7 @@ export function parseDevcontainer(text: string, filePath: string): DevcontainerS
     };
   }
 
-  spec.remoteUser = validateRemoteUser(doc.remoteUser);
+  spec.remoteUser = validateRemoteUser(doc.remoteUser, filePath);
 
   const compose = typeof doc.dockerComposeFile === 'string' ? [doc.dockerComposeFile] : doc.dockerComposeFile;
   if (Array.isArray(compose) && compose.every(f => typeof f === 'string')) {

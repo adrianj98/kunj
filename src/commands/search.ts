@@ -11,6 +11,7 @@
 import chalk from 'chalk';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
+import { UserError } from '../lib/errors';
 import { listWorktreesDetailed } from '../lib/worktree';
 import type { WorktreeInfo } from '../lib/worktree';
 import { getWorkLogDir } from '../lib/work-log';
@@ -84,7 +85,7 @@ export class SearchCommand extends BaseCommand {
       if (pattern !== undefined) paths = [pattern, ...paths];
       pattern = options.regexp;
     }
-    if (pattern === undefined) throw new Error('Give a pattern to search for: kunj search <pattern> [paths...]');
+    if (pattern === undefined) throw new UserError('Give a pattern to search for.', 'Usage: kunj search <pattern> [paths...]');
     const query: SearchQuery = {
       pattern,
       ignoreCase: options.ignoreCase === true,
@@ -101,7 +102,7 @@ export class SearchCommand extends BaseCommand {
   }
 
   async search(q: SearchQuery, scopes: SearchScope[], branches: string[], options: SearchOptions): Promise<SearchJson> {
-    if (!q.pattern) throw new Error('Give a pattern to search for');
+    if (!q.pattern) throw new UserError('Give a pattern to search for.', 'Usage: kunj search <pattern> [paths...]');
     const listing = await listWorktreesDetailed({ includeStatus: false });
     const cwd = listing.repoRoot;
     const wanted = (b: string | null | undefined) => branches.length === 0 || (!!b && branches.includes(b));
@@ -150,7 +151,7 @@ function parseScopes(options: SearchOptions): SearchScope[] {
   const scopes = options.in.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   for (const s of scopes) {
     if (!(SEARCH_SCOPES as readonly string[]).includes(s)) {
-      throw new Error(`Unknown search scope '${s}'. Expected some of: ${SEARCH_SCOPES.join(', ')}`);
+      throw new UserError(`Unknown search scope '${s}'.`, `--in takes a comma-separated list of: ${SEARCH_SCOPES.join(', ')}.`);
     }
   }
   return SEARCH_SCOPES.filter(s => scopes.includes(s));
@@ -159,7 +160,7 @@ function parseScopes(options: SearchOptions): SearchScope[] {
 function parseMaxCount(value: string | undefined): number {
   if (value === undefined) return DEFAULT_MAX_COUNT;
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 1) throw new Error(`--max-count must be a positive integer, not '${value}'`);
+  if (!Number.isInteger(n) || n < 1) throw new UserError(`--max-count must be a positive whole number, not '${value}'.`);
   return n;
 }
 

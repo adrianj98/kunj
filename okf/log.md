@@ -85,3 +85,4 @@
 - Quit prompt (Leave Running / Close All Sessions, 20 s timeout), Close All Sessions…, and resuming Claude agents (`SessionStart` hook saves the session id, `kunj agent --resume`). Pages updated: features/worktree-agents.md, apps/workspace-app.md.
 - Workspace app sidebar hides repositories with no open session; View > Show Repositories Without Sessions brings them back. Page updated: apps/workspace-app.md.
 - Workspace app sidebar: repositories collapse to their header on a click (▸/▾), remembered in `collapsedRepos`. Page updated: apps/workspace-app.md.
+- CLI errors: one format from `src/lib/errors.ts` (`UserError`, `describeError()`, `formatError()`): `✗ message` + hint, no stack trace unless `KUNJ_DEBUG=1`, raw git/Node/AWS errors translated, every command's messages rewritten. Page updated: architecture/command-system.md.

@@ -2,7 +2,7 @@
 
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
-import { checkGitRepo, getCurrentBranch } from '../lib/git';
+import { requireGitRepo, getCurrentBranch } from '../lib/git';
 import { getBranchMetadataItem, updateBranchMetadata } from '../lib/metadata';
 
 // Branch Note Command
@@ -20,11 +20,7 @@ export class BranchNoteCommand extends BaseCommand {
 
   async execute(branch?: string, noteArgs?: string[], options: { clear?: boolean } = {}): Promise<void> {
     // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
     // If no branch specified, use current branch
     if (!branch) {
@@ -75,11 +71,7 @@ export class BranchTagCommand extends BaseCommand {
 
   async execute(branch?: string, tagArgs?: string[], options: { clear?: boolean; remove?: string } = {}): Promise<void> {
     // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
     // If no branch specified, use current branch
     if (!branch) {
@@ -145,11 +137,7 @@ export class BranchDescCommand extends BaseCommand {
 
   async execute(branch?: string, descArgs?: string[], options: { clear?: boolean } = {}): Promise<void> {
     // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
     // If no branch specified, use current branch
     if (!branch) {

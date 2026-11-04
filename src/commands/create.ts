@@ -2,7 +2,7 @@
 
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
-import { checkGitRepo, executeGitCommand, getCurrentBranch } from '../lib/git';
+import { requireGitRepo, gitCommandError, executeGitCommand, getCurrentBranch } from '../lib/git';
 import { createStash } from '../lib/stash';
 import { updateBranchMetadata } from '../lib/metadata';
 import { loadConfig } from '../lib/config';
@@ -39,11 +39,7 @@ export class CreateCommand extends BaseCommand {
 
   async execute(branchName: string, options: CreateOptions): Promise<void> {
     // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
     // Load configuration
     const config = loadConfig();
@@ -148,8 +144,7 @@ export class CreateCommand extends BaseCommand {
 
       console.log(chalk.gray("\nTip: Add notes with 'kunj branch-note'"));
     } else {
-      console.error(chalk.red(`✗ Failed to create branch: ${result.message}`));
-      process.exit(1);
+      throw gitCommandError(`Could not create branch ${branchName}`, result.message);
     }
   }
 }

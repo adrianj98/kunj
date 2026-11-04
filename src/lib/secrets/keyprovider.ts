@@ -54,7 +54,7 @@ export async function getUnlock(opts: GetUnlockOptions): Promise<Unlock> {
   const wantsKeychainKdf = opts.existingKdf === 'keychain' || opts.mode !== 'passphrase';
   const envKey = opts.env.KUNJ_SECRETS_KEY;
   if (envKey && wantsKeychainKdf) {
-    if (!HEX_KEY.test(envKey)) throw locked('KUNJ_SECRETS_KEY must be 64 hex characters (a 32-byte key)');
+    if (!HEX_KEY.test(envKey)) throw locked('KUNJ_SECRETS_KEY must be 64 hex characters (a 32-byte key). Fix or unset it; `openssl rand -hex 32` makes a new one.');
     return keyUnlock(Buffer.from(envKey, 'hex'));
   }
   if (!wantsKeychainKdf) return passphraseUnlock(opts, opts.create);
@@ -64,18 +64,22 @@ export async function getUnlock(opts: GetUnlockOptions): Promise<Unlock> {
   const found = await store.read(run);
   if (found.status === 'not-installed') {
     if (opts.mode === 'auto' && !opts.existingKdf) return passphraseUnlock(opts, opts.create);
-    throw locked(`${store.name} is not available (${store.tool} not found); set secrets.keyProvider or KUNJ_SECRETS_KEY`);
+    throw locked(`${store.name} is not available (${store.tool} is not installed). Install it, set KUNJ_SECRETS_KEY, or pick another key store with kunj config --set secrets.keyProvider=passphrase.`);
   }
   if (found.status === 'found') return keyUnlock(found.key);
-  if (found.status === 'failed') throw locked(`Could not read the secrets key from ${store.name}`);
+  if (found.status === 'failed') throw locked(`Could not read the secrets key from ${store.name} (it is locked, or access was denied). Unlock it and try again, or set KUNJ_SECRETS_KEY.`);
 
   // No item. A new key is made only for a new vault: a keychain file whose key is gone stays locked.
-  if (!opts.create || opts.existingKdf) throw locked(`No secrets key in ${store.name} (service ${SERVICE})`);
+  if (!opts.create || opts.existingKdf) {
+    throw locked(`No secrets key in ${store.name} (service ${SERVICE}), so the existing secrets.enc cannot be opened. Restore that item, or set KUNJ_SECRETS_KEY to the key it held.`);
+  }
   const key = crypto.randomBytes(32);
   await store.write(run, key.toString('hex'));
   // `security` can exit 0 without storing; only a key that reads back is used.
   const back = await store.read(run);
-  if (back.status !== 'found' || !back.key.equals(key)) throw locked(`Could not store a new secrets key in ${store.name}`);
+  if (back.status !== 'found' || !back.key.equals(key)) {
+    throw locked(`Could not store a new secrets key in ${store.name}. Check that it is unlocked, or use a passphrase with kunj config --set secrets.keyProvider=passphrase.`);
+  }
   return keyUnlock(key);
 }
 
@@ -100,7 +104,7 @@ function storeFor(mode: KeyProviderMode, platform: NodeJS.Platform): KeyStore {
 function parseKey(stdout: string, name: string): ReadResult {
   const value = stdout.trim();
   // The message never repeats the item's value.
-  if (!HEX_KEY.test(value)) throw locked(`The secrets key in ${name} is not 64 hex characters`);
+  if (!HEX_KEY.test(value)) throw locked(`The secrets key in ${name} (service ${SERVICE}) is not 64 hex characters, so it was not used. Check that item; kunj did not change it.`);
   return { status: 'found', key: Buffer.from(value, 'hex') };
 }
 
@@ -141,7 +145,12 @@ function passphraseUnlock(opts: GetUnlockOptions, isNew: boolean): Unlock {
   const canPrompt = opts.tty ?? (!!process.stdin.isTTY && !!process.stderr.isTTY);
   const prompt = opts.prompt ?? (canPrompt ? hiddenPrompt : undefined);
   if (!prompt) {
-    throw locked('The secrets vault needs a passphrase and there is no terminal to ask for it; set KUNJ_SECRETS_KEY or use a keychain');
+    // KUNJ_SECRETS_KEY opens keychain-kdf files only, so it is no way out for an existing passphrase vault
+    throw locked(
+      isNew
+        ? 'A new secrets vault needs a passphrase and there is no terminal to ask for it. Run the command in a terminal, or set KUNJ_SECRETS_KEY or secrets.keyProvider (keychain, libsecret) instead.'
+        : 'The secrets vault is locked with a passphrase and there is no terminal to ask for it. Run the command in a terminal.',
+    );
   }
   let passphrase: string | undefined;
   return {
@@ -151,8 +160,8 @@ function passphraseUnlock(opts: GetUnlockOptions, isNew: boolean): Unlock {
       if (attempt > 1 || passphrase === undefined) {
         const first = passphrase === undefined && attempt === 1;
         const answer = await prompt(attempt > 1 ? 'Wrong passphrase. Secrets passphrase: ' : isNew && first ? 'New secrets passphrase: ' : 'Secrets passphrase: ');
-        if (!answer) throw locked('An empty passphrase cannot unlock the secrets vault');
-        if (isNew && first && (await prompt('Repeat the passphrase: ')) !== answer) throw locked('The passphrases do not match');
+        if (!answer) throw locked('An empty passphrase cannot unlock the secrets vault.');
+        if (isNew && first && (await prompt('Repeat the passphrase: ')) !== answer) throw locked('The passphrases do not match, so nothing was stored. Run the command again.');
         passphrase = answer;
       }
       return scrypt(passphrase, salt);
@@ -187,7 +196,7 @@ export function hiddenPrompt(
     rl.on('close', () => {
       if (answered) return;
       io.output.write('\n');
-      reject(locked('No passphrase given'));
+      reject(locked('Cancelled: nothing was entered.'));
     });
     rl.question('', (answer) => {
       answered = true;

@@ -46,6 +46,7 @@ import { ForwardRecord, HELPER_NO_SOCAT, autoForwardIgnore, detachedLogFile, for
 import { BridgeRecord, bridgeFor, installMcpConfig, mcpServers, portHint, readBridges, runBridge, updateBridges } from '../lib/container/mcpbridge';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerError } from '../lib/container/errors';
+import { describeError, formatError } from '../lib/errors';
 import { readWorkspaceFile, validateWorkspacePath, writeWorkspaceFile } from '../lib/container/files';
 import { grepContainer, mapLimit } from '../lib/search';
 import type { SearchQuery } from '../lib/search';
@@ -245,7 +246,7 @@ export class ContainerCommand extends BaseCommand {
       await this.dispatch(verb, target, rest, options);
     } catch (caught) {
       const error = await this.explainDockerError(caught);
-      const message = error instanceof Error ? error.message : String(error);
+      const message = describeError(error).message;
       if (this.jsonMode) {
         // Always an object here (documented for `kunj ct`): the code is the start/hook code, else the error's jsonCode, else 'error'
         const jsonCode = (error as { jsonCode?: unknown } | null)?.jsonCode;
@@ -255,7 +256,7 @@ export class ContainerCommand extends BaseCommand {
         process.exit(1);
       }
       // Every failure here is an outcome to report, not a crash: one line, no stack trace
-      console.error(chalk.red(`✗ ${message}`));
+      console.error(chalk.red(formatError(error)));
       process.exitCode = 1;
     } finally {
       await this.closeBackends();
@@ -344,7 +345,7 @@ export class ContainerCommand extends BaseCommand {
   private async context(options: ContainerOptions): Promise<Context> {
     const config = await loadResolvedConfig(process.cwd());
     const root = getRepoCommonRoot();
-    if (!root) throw new ContainerError('Not in a git repository');
+    if (!root) throw new ContainerError(NOT_IN_REPO);
     // Credentials in the remote URL stay on the host (seed.ts strips them too)
     const originUrl = stripUserinfo(getOriginUrl() || '');
     const repo = { root, name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root), originUrl };
@@ -377,14 +378,14 @@ export class ContainerCommand extends BaseCommand {
 
   private async requireMain(ctx: Context, branch: string): Promise<ContainerInfo> {
     const main = await this.findMain(ctx, branch);
-    if (!main) throw new ContainerError(`No container for ${branch}; run kunj ct start ${branch}`);
+    if (!main) throw new ContainerError(`No container for ${branch}. Start one with kunj ct start ${branch}.`);
     return main;
   }
 
   private async requireRunning(ctx: Context, branch: string): Promise<ContainerInfo> {
     const main = await this.requireMain(ctx, branch);
     if (main.state !== 'running') {
-      throw new ContainerError(`Container for ${branch} is not running; run kunj ct start ${branch}`);
+      throw new ContainerError(`The container for ${branch} is not running. Start it with kunj ct start ${branch}.`);
     }
     return main;
   }
@@ -396,7 +397,7 @@ export class ContainerCommand extends BaseCommand {
     const found = await ctx.backend.list({ [LABEL.repo]: ctx.repo.id, [LABEL.branch]: branch });
     const helper = found.find(c => c.name === names.helper);
     if (helper?.state !== 'running') {
-      throw new ContainerError(`The network helper of ${branch} is not running, so no port can be forwarded; run kunj ct start ${branch}`);
+      throw new ContainerError(`The network helper of ${branch} is not running, so no port can be forwarded. Start it with kunj ct start ${branch}.`);
     }
     return helper;
   }
@@ -417,12 +418,12 @@ export class ContainerCommand extends BaseCommand {
     const current = await getCurrentBranch();
     if (current) return current;
     if (this.jsonMode || !process.stdin.isTTY) {
-      throw new ContainerError('No branch given and not on a branch');
+      throw new ContainerError('No branch given, and this checkout is not on a branch. Name the branch, e.g. kunj ct shell <branch>.');
     }
     const containers = (await ctx.backend.list({ [LABEL.repo]: ctx.repo.id })).filter(c => this.isMain(c));
     let choices = containers.map(c => c.labels[LABEL.branch]).filter(Boolean);
     if (choices.length === 0) choices = await remoteBranches();
-    if (choices.length === 0) throw new ContainerError('No branch given and no branches to pick from');
+    if (choices.length === 0) throw new ContainerError('No branch given, and there is no branch container or origin branch to pick from. Name the branch, or create one with kunj ct start -c <branch>.');
     const inquirer = (await import('inquirer')).default;
     const { branch } = await inquirer.prompt([{ type: 'list', name: 'branch', message: 'Branch:', choices }]);
     return branch;
@@ -708,10 +709,10 @@ export class ContainerCommand extends BaseCommand {
     const session = options.session !== undefined ? `agent-${checkShellSessionId(options.session)}` : 'agent';
     const main = await this.requireRunning(ctx, branch);
     if (ctx.config.agent?.tmux === false && !(await this.agentSessionRunning(ctx, main.id, this.userOf(main) || undefined, session))) {
-      throw new ContainerError(`No agent session to attach to: agent.tmux is off, so kunj ct agent runs the agent in the terminal that started it (kunj config --set agent.tmux=true --global to use tmux)`);
+      throw new ContainerError(`No agent session to attach to: agent.tmux is off, so kunj ct agent runs the agent in the terminal that started it. To use tmux, run kunj config --set agent.tmux=true --global.`);
     }
     const r = await ctx.backend.exec(main.id, ['tmux', '-u', 'attach', '-t', session], this.interactive(main, true));
-    if (r.exitCode !== 0) throw new ContainerError(`No agent session; run kunj ct agent ${branch}`);
+    if (r.exitCode !== 0) throw new ContainerError(`No agent session ${session} in the container for ${branch}. Start one with kunj ct agent ${branch}${options.session !== undefined ? ` --session ${options.session}` : ''}.`);
   }
 
   // ---------------------------------------------------------------------
@@ -724,10 +725,10 @@ export class ContainerCommand extends BaseCommand {
     const names = this.names(ctx, branch);
     const found = await ctx.backend.list({ [LABEL.repo]: ctx.repo.id, [LABEL.branch]: branch });
     const main = found.find(c => c.name === names.container);
-    if (!main) throw new ContainerError(`No container for ${branch}; run kunj ct start ${branch}`);
+    if (!main) throw new ContainerError(`No container for ${branch}. Start one with kunj ct start ${branch}.`);
     if (ctx.remote && !ctx.backend.features.editorAttach) {
       throw new ContainerError(
-        `kunj ct open cannot attach an editor to a container on remote ${ctx.remote}: open the box through Remote-SSH and run kunj ct open there, or use kunj ct shell ${branch} --remote ${ctx.remote}`,
+        `kunj ct open cannot attach an editor to a container on remote ${ctx.remote}. Open the box through Remote-SSH and run kunj ct open there, or use kunj ct shell ${branch} --remote ${ctx.remote}.`,
         'remote-no-editor',
       );
     }
@@ -739,7 +740,7 @@ export class ContainerCommand extends BaseCommand {
     }
 
     const editor = (ctx.config.worktree?.editorCommand ?? 'code').trim();
-    if (!editor) throw new ContainerError('worktree.editorCommand is empty; set it to the editor to open');
+    if (!editor) throw new ContainerError('worktree.editorCommand is empty, so there is no editor to open. Set it with kunj config --set worktree.editorCommand=code --global.');
     const user = this.userOf(main);
     if (ctx.config.container?.network?.allow?.length) {
       this.warn(
@@ -773,7 +774,7 @@ export class ContainerCommand extends BaseCommand {
     this.writeEditorImageConfig(editor, main.image, user);
     const uri = attachedContainerUri(main.name, WORKSPACE);
     const opened = await openWorktree(editor, ['--folder-uri', uri], { newWindow: !!options.newWindow });
-    if (!opened) throw new ContainerError(`Could not run ${editor}`);
+    if (!opened) throw new ContainerError(`Could not run ${editor}. Check that it is installed and on your PATH, or set worktree.editorCommand.`);
 
     if (this.jsonMode) {
       this.outputJSON({ success: true, branch, name: main.name, editor, uri, warning: EDITOR_CREDENTIALS_WARNING });
@@ -839,13 +840,13 @@ export class ContainerCommand extends BaseCommand {
     const tunnels = new Map<string, { id: string; tool: 'socat' | 'bash' | 'nc' }>();
     for (const name of new Set(specs.map(s => s.service).filter((s): s is string => !!s))) {
       const svc = services.find(c => c.name === serviceNames(this.names(ctx, branch), name).container);
-      if (!svc) throw new ContainerError(`${branch} has no service ${name}; services: ${describeServices(services).map(s => s.name).join(', ') || 'none'}`);
-      if (svc.state !== 'running') throw new ContainerError(`Service ${name} is not running; run kunj ct start ${branch}`);
+      if (!svc) throw new ContainerError(`${branch} has no service ${name}; services: ${describeServices(services).map(s => s.name).join(', ') || 'none'}.`);
+      if (svc.state !== 'running') throw new ContainerError(`Service ${name} is not running. Start it with kunj ct start ${branch}.`);
       const tool = parseTunnelProbe((await ctx.backend.exec(svc.id, ['sh', '-c', TUNNEL_PROBE])).stdout);
       if (!tool) {
         throw new ContainerError(
-          `The ${name} image has none of socat, bash or nc, so its port cannot be tunnelled; ` +
-            `reach it from the branch container instead (kunj ct exec ${branch} -- ...), or run a forwarder there`
+          `The ${name} image has none of socat, bash or nc, so its port cannot be tunnelled. ` +
+            `Reach it from the branch container instead (kunj ct exec ${branch} -- ...), or run a forwarder there.`
         );
       }
       tunnels.set(name, { id: svc.id, tool });
@@ -923,7 +924,7 @@ export class ContainerCommand extends BaseCommand {
 
   private async autoForward(target: string | undefined, rest: string[], options: ContainerOptions): Promise<void> {
     if (rest.length > 0 || isForwardSpec(target)) {
-      throw new ContainerError('forward --auto takes no ports; it forwards whatever listens in the container');
+      throw new ContainerError('forward --auto takes no ports; it forwards whatever listens in the container. Drop the ports, or leave out --auto.');
     }
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
@@ -1022,11 +1023,11 @@ export class ContainerCommand extends BaseCommand {
     const main = await this.requireRunning(ctx, branch);
     const servers = mcpServers(ctx.config.container?.mcp, this.warn);
     if (servers.length === 0) {
-      throw new ContainerError('container.mcp has no server to bridge; set it in the host config, e.g. {"chrome": {}}');
+      throw new ContainerError('container.mcp has no server to bridge. Set it in the global config (~/.kunj/config.json), e.g. "container": {"mcp": {"chrome": {}}}.');
     }
     const pid = process.pid;
     const other = bridgeFor(main.name, undefined, pid);
-    if (other) throw new ContainerError(`An MCP bridge for ${branch} is already running (pid ${other})`);
+    if (other) throw new ContainerError(`An MCP bridge for ${branch} is already running (pid ${other}).`);
 
     const user = this.userOf(main);
     try {
@@ -1086,7 +1087,7 @@ export class ContainerCommand extends BaseCommand {
     if (service) {
       const services = await findServices(ctx.backend, this.names(ctx, branch), { repoId: ctx.repo.id, branch });
       const svc = services.find(c => c.name === serviceNames(this.names(ctx, branch), service).container);
-      if (!svc) throw new ContainerError(`${branch} has no service ${service}; services: ${describeServices(services).map(s => s.name).join(', ') || 'none'}`);
+      if (!svc) throw new ContainerError(`${branch} has no service ${service}; services: ${describeServices(services).map(s => s.name).join(', ') || 'none'}.`);
       id = svc.id;
     }
     if (this.jsonMode) {
@@ -1377,23 +1378,23 @@ export class ContainerCommand extends BaseCommand {
    * does not work is not stored.
    */
   private async tokenSetup(): Promise<void> {
-    if (this.jsonMode) throw new ContainerError('token setup is interactive and has no --json output');
-    if (!process.stdin.isTTY) throw new ContainerError('token setup needs a terminal: claude setup-token signs in through the browser');
+    if (this.jsonMode) throw new ContainerError('kunj ct token setup is interactive and has no --json output. Run it without --json.');
+    if (!process.stdin.isTTY) throw new ContainerError('kunj ct token setup needs a terminal: claude setup-token signs in through the browser. Run it in an interactive terminal.');
     const { CLAUDE_TOKEN_NAME, captureSetupToken, checkClaudeToken, claudeTokenProblem, extractClaudeToken } = await import('../lib/secrets/claude-token');
     const { code, output } = await captureSetupToken();
-    if (code === 127) throw new ContainerError('claude setup-token could not be run: is Claude Code (claude) installed, and script on the PATH?');
+    if (code === 127) throw new ContainerError('claude setup-token could not be run. Install Claude Code (npm install -g @anthropic-ai/claude-code) and make sure claude and script are on your PATH.');
     let token = extractClaudeToken(output);
     if (!token) {
       console.log(chalk.yellow(code === 0 ? 'The token was not found in what claude printed.' : `claude setup-token exited with ${code}.`));
       const { hiddenPrompt } = await import('../lib/secrets/keyprovider');
       token = (await hiddenPrompt('Paste the token (or press Enter to stop): ').catch(() => '')).trim();
-      if (!token) throw new ContainerError('No token: nothing was stored');
+      if (!token) throw new ContainerError('No token was entered, so nothing was stored. Run kunj ct token setup again.');
     }
     const problem = claudeTokenProblem(token);
-    if (problem) throw new ContainerError(`${problem}: nothing was stored`);
+    if (problem) throw new ContainerError(`${problem}, so nothing was stored. Run kunj ct token setup again.`);
     console.log(chalk.gray('Checking the token with Claude Code…'));
     const check = await checkClaudeToken(token);
-    if (check.valid === false) throw new ContainerError(`The token did not work (${check.message}): nothing was stored`);
+    if (check.valid === false) throw new ContainerError(`The token did not work (${check.message}), so nothing was stored. Run kunj ct token setup again.`);
     const { SecretCommand } = await import('./secret');
     await new SecretCommand({ isTTY: () => false, stdin: async () => token as string }).execute('set', [CLAUDE_TOKEN_NAME], { global: true, targets: 'container' });
     if (check.valid === null) console.log(chalk.yellow(`  Not checked: ${check.message}`));
@@ -1492,14 +1493,14 @@ export class ContainerCommand extends BaseCommand {
     try {
       root = await getGitRoot();
     } catch {
-      throw new ContainerError('Not in a git repository');
+      throw new ContainerError(NOT_IN_REPO);
     }
     const file = options.global ? path.join(getKunjDir(), 'blueprint.json') : path.join(root, BLUEPRINT_PATH);
     const interactive = !options.yes && !this.jsonMode && !!process.stdin.isTTY;
     const exists = fs.existsSync(file);
 
     if (exists && !options.yes) {
-      if (!interactive) throw new ContainerError(`${file} already exists; pass --yes to overwrite it`);
+      if (!interactive) throw new ContainerError(`${file} already exists. Pass --yes to overwrite it.`);
       const inquirer = (await import('inquirer')).default;
       const { overwrite } = await inquirer.prompt([
         { type: 'confirm', name: 'overwrite', message: `${file} already exists. Overwrite it?`, default: false },
@@ -1597,11 +1598,11 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const defaultBranch = (await detectDefaultBranch(ctx.repo.root)) || undefined;
     const branch = (options.base || defaultBranch)?.replace(/^origin\//, '');
-    if (!branch) throw new ContainerError('cannot detect the default branch; pass --base');
+    if (!branch) throw new ContainerError('Cannot detect the default branch of origin. Pass --base <branch>.');
     // The blueprint a start would use, so the snapshot's hash matches the starts that look for it
     const resolved = await this.resolveBlueprint(options, defaultBranch || branch);
     if (!resolved) {
-      throw new ContainerError('No blueprint; run kunj ct blueprint init');
+      throw new ContainerError(NO_BLUEPRINT);
     }
 
     this.progress(chalk.blue(`Snapshotting the blueprint (${resolved.path}) from ${branch}...`));
@@ -1631,7 +1632,7 @@ export class ContainerCommand extends BaseCommand {
         this.outputJSON({ source: null });
         return;
       }
-      throw new ContainerError('No blueprint; run kunj ct blueprint init');
+      throw new ContainerError(NO_BLUEPRINT);
     }
 
     const branch = (options.base || defaultBranch)?.replace(/^origin\//, '');
@@ -1827,7 +1828,7 @@ export class ContainerCommand extends BaseCommand {
       const problems = describeGuard(await inspectForRemove(ctx.backend, names, removeCtx));
       if (problems.length) {
         throw new ContainerError(
-          [`${names.container} holds work origin does not have:`, ...problems.map(p => `  - ${p}`), 'Push it first, or use --force'].join('\n')
+          [`${names.container} holds work origin does not have:`, ...problems.map(p => `  - ${p}`), `Push it from the container (kunj ct shell ${branch}), or use --force to remove it anyway.`].join('\n')
         );
       }
     }
@@ -1867,6 +1868,9 @@ function blueprintSummary(bp: StartResult['blueprint']): string | null {
   return ran.length ? `no snapshot; ran ${ran.join(' + ')}` : 'no snapshot';
 }
 
+const NOT_IN_REPO = 'Not inside a git repository. Run kunj ct from a repository, or cd into one first.';
+const NO_BLUEPRINT = 'No blueprint for this repository. Write one with kunj ct blueprint init.';
+
 // `node=24, apt=jq git-lfs`: what `blueprint init` shows and lets the user edit
 function formatTools(tools: Record<string, ToolValue>): string {
   return Object.entries(tools)
@@ -1879,7 +1883,7 @@ function parseToolsText(text: string, proposed: Record<string, ToolValue>): Reco
   const tools: Record<string, ToolValue> = {};
   for (const pair of text.split(',').map(p => p.trim()).filter(Boolean)) {
     const eq = pair.indexOf('=');
-    if (eq <= 0) throw new Error(`"${pair}" is not name=value`);
+    if (eq <= 0) throw new ContainerError(`"${pair}" is not name=value (e.g. node=20).`);
     const name = pair.slice(0, eq).trim();
     const value = pair.slice(eq + 1).trim();
     const words = value.split(/\s+/).filter(Boolean);
@@ -1901,7 +1905,7 @@ function parsePublish(text: string | undefined): number[] {
     .map(p => {
       const port = Number(p);
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        throw new ContainerError(`Invalid port "${p}" in --publish: expected e.g. 3000,5432`);
+        throw new ContainerError(`Invalid port "${p}" in --publish: expected a comma-separated list of ports from 1 to 65535, e.g. 3000,5432.`);
       }
       return port;
     });

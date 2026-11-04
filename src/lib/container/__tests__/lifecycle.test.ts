@@ -732,7 +732,7 @@ describe('startContainer', () => {
     b.execErrors.set(READY, new Error('docker exec failed: not running'));
     await expect(startContainer(b, options())).rejects.toMatchObject({
       code: 'firewall',
-      message: `Stopped ${names.container}: its firewall could not be re-applied (Network helper failed before the firewall was ready: docker exec failed: not running); kunj ct start ${BRANCH} retries`,
+      message: `Stopped ${names.container}: its firewall could not be re-applied (The network helper failed before the firewall was ready: docker exec failed: not running.). Run kunj ct start ${BRANCH} to try again.`,
     });
     expect(b.callsOf('stop')).toEqual([['main-id']]);
     expect(execCmds(b).filter(c => c !== READY)).toEqual([]);
@@ -1440,7 +1440,7 @@ describe('blueprint start', () => {
     b.execResults.set('sh -lc yarn build', { exitCode: 2, stdout: '' });
     const err = await startContainer(b, bpOptions()).catch(e => e);
     expect(err).toBeInstanceOf(StartError);
-    expect(err).toMatchObject({ code: 'setup', message: 'setup command failed (exit 2): yarn build' });
+    expect(err).toMatchObject({ code: 'setup', message: "The blueprint's setup command failed (exit 2): yarn build" });
     expect(b.callsOf('remove')).toEqual([[{
       containers: [names.helper, names.container],
       volumes: [names.workspaceVolume, names.homeVolume],

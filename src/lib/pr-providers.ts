@@ -2,8 +2,26 @@
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { UserError } from './errors';
 
 const execAsync = promisify(exec);
+
+// Throws a UserError when the GitHub CLI is missing or not logged in
+export async function requireGhCli(): Promise<void> {
+  try {
+    await execAsync('gh --version');
+  } catch {
+    throw new UserError(
+      'The GitHub CLI (gh) is not installed or not on your PATH.',
+      'Install it (macOS: `brew install gh`, others: https://cli.github.com), then run `gh auth login`.',
+    );
+  }
+  try {
+    await execAsync('gh auth status');
+  } catch {
+    throw new UserError('The GitHub CLI (gh) is not logged in.', 'Run `gh auth login`, then try again.');
+  }
+}
 
 export interface PRProvider {
   name: string;

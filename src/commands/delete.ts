@@ -2,7 +2,8 @@
 
 import chalk from 'chalk';
 import { BaseCommand } from '../lib/command';
-import { checkGitRepo, getCurrentBranch, executeGitCommand } from '../lib/git';
+import { requireGitRepo, gitCommandError, getCurrentBranch, executeGitCommand } from '../lib/git';
+import { UserError } from '../lib/errors';
 import { loadConfig } from '../lib/config';
 import { runActionHook } from '../lib/hooks';
 
@@ -26,21 +27,16 @@ export class DeleteCommand extends BaseCommand {
 
   async execute(branchName: string, options: DeleteOptions = {}): Promise<void> {
     // Check if we're in a git repository
-    const isGitRepo = await checkGitRepo();
-    if (!isGitRepo) {
-      console.error(chalk.red("Error: Not a git repository"));
-      process.exit(1);
-    }
+    await requireGitRepo();
 
     const currentBranch = await getCurrentBranch();
 
     // Check if trying to delete current branch
     if (branchName === currentBranch) {
-      console.error(
-        chalk.red(`✗ Cannot delete the current branch '${branchName}'`)
+      throw new UserError(
+        `${branchName} is the branch you are on, so it cannot be deleted.`,
+        'Switch to another branch first (`kunj switch <branch>`).',
       );
-      console.log(chalk.yellow("Tip: Switch to another branch first"));
-      process.exit(1);
     }
 
     const hookOptions = { hooks: loadConfig().hooks, jsonMode: this.jsonMode, skip: options.hooks === false };
@@ -68,18 +64,15 @@ export class DeleteCommand extends BaseCommand {
       );
     } else {
       if (result.message.includes("not found")) {
-        console.error(chalk.red(`✗ Branch '${branchName}' does not exist`));
-      } else if (result.message.includes("not fully merged")) {
-        console.error(
-          chalk.red(`✗ Branch '${branchName}' is not fully merged`)
-        );
-        console.log(chalk.yellow("Tip: Use --force flag to force delete"));
-      } else {
-        console.error(
-          chalk.red(`✗ Failed to delete branch: ${result.message}`)
+        throw new UserError(`There is no local branch named ${branchName}.`, 'Run `kunj list` to see the branches.');
+      }
+      if (result.message.includes("not fully merged")) {
+        throw new UserError(
+          `${branchName} has commits that are not merged into the current branch.`,
+          `Delete it anyway with \`kunj delete ${branchName} --force\` (those commits are lost unless pushed).`,
         );
       }
-      process.exit(1);
+      throw gitCommandError(`Could not delete ${branchName}`, result.message);
     }
   }
 }

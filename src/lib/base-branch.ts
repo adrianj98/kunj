@@ -101,7 +101,10 @@ export async function resolveBaseRef(options: BaseRefOptions = {}): Promise<Reso
   if (await refExists(branch, cwd)) {
     return { ref: branch, branch, fromOrigin: false, warning };
   }
-  const error = new Error(`Base branch '${requested}' not found${hasOrigin ? ` locally or on ${REMOTE}` : ''}`);
+  const error = new Error(
+    `There is no branch ${requested} to start from${hasOrigin ? `, locally or on ${REMOTE}` : ''}. ` +
+    'Pass another with --base, or change preferences.defaultBaseBranch.',
+  );
   // BaseCommand prints this without a stack trace
   error.name = 'BaseBranchError';
   throw error;

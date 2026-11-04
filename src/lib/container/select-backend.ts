@@ -59,7 +59,7 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
       await tunnel.close();
     };
   } else {
-    throw new ContainerError(`Remote "${name}" has neither url nor ssh; fix it with kunj remote add ${name} …`, 'bad-remote');
+    throw new ContainerError(`Remote "${name}" in ~/.kunj/remotes.json has neither a url nor an ssh destination. Add it again with kunj remote add ${name} --url <url> (or --ssh <user@host>).`, 'bad-remote');
   }
   const { RemoteKunjBackend } = await import('./remote');
   const backend = new RemoteKunjBackend({ baseUrl, token: entry.token, name });

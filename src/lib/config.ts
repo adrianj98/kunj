@@ -8,6 +8,7 @@ import { KunjConfig } from '../types';
 import { defaultConfig, KUNJ_DIR, CONFIG_FILE } from '../constants';
 import { expandConfigStrings, resolveConfigVariables, treeHasVariables } from './config-vars';
 import { recordRepo } from './repos';
+import { describeError } from './errors';
 
 // Helper function to get global .kunj directory path
 export function getGlobalKunjDir(): string {
@@ -273,7 +274,7 @@ export function saveGlobalConfig(config: Partial<KunjConfig>): void {
     const globalConfigPath = getGlobalConfigPath();
     fs.writeFileSync(globalConfigPath, JSON.stringify(config, null, 2));
   } catch (error) {
-    console.error('Failed to save global config:', error);
+    console.error(`kunj: could not save the settings to ${getGlobalConfigPath()}: ${describeError(error).message}`);
   }
 }
 
@@ -284,7 +285,7 @@ export function saveLocalConfig(config: Partial<KunjConfig>): void {
     const configPath = getConfigPath();
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   } catch (error) {
-    console.error('Failed to save local config:', error);
+    console.error(`kunj: could not save the settings to ${getConfigPath()}: ${describeError(error).message}`);
   }
 }
 

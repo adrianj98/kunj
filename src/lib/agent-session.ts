@@ -86,7 +86,7 @@ export const SHELL_SESSION_ID = /^[A-Za-z0-9_-]{1,32}$/;
 
 export function checkShellSessionId(id: unknown): string {
   if (typeof id !== 'string' || !SHELL_SESSION_ID.test(id)) {
-    throw new AgentError('bad-session-id', `Invalid session id ${JSON.stringify(id ?? '')}: use 1-32 letters, digits, _ or -`);
+    throw new AgentError('bad-session-id', `Invalid session id ${JSON.stringify(id ?? '')}. A --session id is 1 to 32 letters, digits, _ or -.`);
   }
   return id;
 }
@@ -341,7 +341,7 @@ export function agentCommand(name: string | undefined, agent: { command?: string
   if (name === undefined) return configured;
   if (name === 'claude') return path.basename(configured.split(/\s+/)[0] ?? '') === 'claude' ? configured : 'claude';
   if (name === 'antigravity') return agent?.antigravityCommand?.trim() || 'agy';
-  throw new AgentError('unknown-agent', `Unknown agent ${JSON.stringify(name)}: use ${AGENT_NAMES.join(' or ')}`);
+  throw new AgentError('unknown-agent', `Unknown agent ${JSON.stringify(name)}. --agent takes ${AGENT_NAMES.join(' or ')}.`);
 }
 
 // `command` with the hooks appended when it is claude (the setting agent.hooks, default on)

@@ -217,7 +217,7 @@ describe('docker backend', () => {
       results.push({ code: 1, stderr: 'test: missing file\n' });
       results.push({ code: 127, stderr: 'Error response from daemon: exec: "nope": executable file not found\n' });
       const backend = new LocalDockerBackend();
-      await expect(backend.exec('abc', ['test', '-f', '/x'])).rejects.toThrow('docker exec failed: Error response from daemon: container abc is not running');
+      await expect(backend.exec('abc', ['test', '-f', '/x'])).rejects.toThrow('docker exec failed: container abc is not running');
       await expect(backend.exec('abc', ['test', '-f', '/x'])).rejects.toThrow('docker exec failed: Error: No such container: abc');
       await expect(backend.exec('abc', ['test', '-f', '/x'])).resolves.toEqual({ exitCode: 1, stdout: '' });
       await expect(backend.exec('abc', ['nope'])).resolves.toEqual({ exitCode: 127, stdout: '' });
@@ -394,7 +394,7 @@ describe('docker backend', () => {
 
     it('remove throws on other failures', async () => {
       results.push({ code: 1, stderr: 'Error response from daemon: network n has active endpoints\n' });
-      await expect(new LocalDockerBackend().remove({ networks: ['n'] })).rejects.toThrow('docker network rm failed: Error response from daemon: network n has active endpoints');
+      await expect(new LocalDockerBackend().remove({ networks: ['n'] })).rejects.toThrow('docker network rm failed: network n has active endpoints');
     });
 
     it('commitContainer argv emits one --change per label (sorted) then id and tag', async () => {

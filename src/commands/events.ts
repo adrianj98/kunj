@@ -46,7 +46,7 @@ async function resolveRepos(paths: string[] | undefined): Promise<KnownRepoInfo[
       try {
         commonDir = await getGitCommonDir(dir);
       } catch {
-        throw new EventsError(`Not a git repository: ${dir}`);
+        throw new EventsError(`${dir} is not a git repository. Pass --repo the path of a repository or one of its worktrees.`);
       }
       const { repoRoot, repoName } = repoVariables(commonDir);
       repo = known.find(r => samePath(r.gitCommonDir, commonDir)) ?? {

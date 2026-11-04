@@ -103,7 +103,7 @@ describe('RemoteKunjBackend: unary calls', () => {
     const err = await h.remote.run({ ...spec, labels: { x: 'y' } }).catch(e => e);
     expect(err).toBeInstanceOf(RemoteError);
     expect(err.code).toBe('remote-refused');
-    expect(err.message).toMatch(/remote harness refused: .*kunj\.repo/);
+    expect(err.message).toMatch(/Remote harness refused: .*kunj\.repo/);
   });
 
   it('maps a bad token to remote-unauthorized and never retries', async () => {
@@ -123,7 +123,7 @@ describe('RemoteKunjBackend: unary calls', () => {
     const err = await closed.remote.list({ 'kunj.repo': 'r' }).catch(e => e);
     expect(err).toMatchObject({ code: 'remote-unreachable' });
     // RESET when a kept-alive socket was closed under us, REFUSED on a fresh connection
-    expect(err.message).toMatch(/^Docker is not available: remote harness is unreachable \(ECONN(REFUSED|RESET)\)$/);
+    expect(err.message).toMatch(/^Docker is not available: remote harness is unreachable \(ECONN(REFUSED|RESET)\)\. Check that kunj serve runs there, then try kunj remote ping harness\.$/);
   });
 
   it('refuses another protocol version and a server that is not kunj serve', async () => {

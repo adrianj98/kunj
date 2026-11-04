@@ -12,6 +12,7 @@ import { renderTeamPage, renderProjectDetailPage } from "./templates/team-page";
 import { escapeHtml } from "./templates/partials";
 import { APP_JS, STYLES_CSS } from "./assets";
 import * as data from "./data";
+import { describeError } from "../lib/errors";
 
 // Map command names to data fetcher functions
 const dataFetchers: Record<string, () => Promise<any>> = {
@@ -66,7 +67,7 @@ export function createServer(): express.Application {
           const widgetData = fetcher ? await fetcher() : null;
           return { command: cmd, data: widgetData };
         } catch (err: any) {
-          return { command: cmd, data: null, error: err.message };
+          return { command: cmd, data: null, error: describeError(err).message };
         }
       })
     );
@@ -90,7 +91,7 @@ export function createServer(): express.Application {
       res.send(htmlLayout("Team Report", content, sidebar, "team"));
     } catch (err: any) {
       res.status(500).send(
-        htmlLayout("Team Report", `<div class="text-red-400 p-4">${escapeHtml(err.message)}</div>`, sidebar, "team")
+        htmlLayout("Team Report", `<div class="text-red-400 p-4">${escapeHtml(describeError(err).message)}</div>`, sidebar, "team")
       );
     }
   });
@@ -141,7 +142,7 @@ export function createServer(): express.Application {
       res.send(htmlLayout(`${projectName} — Team`, content, sidebar, "team"));
     } catch (err: any) {
       res.status(500).send(
-        htmlLayout("Error", `<div class="text-red-400 p-4">${escapeHtml(err.message)}</div>`, sidebar, "team")
+        htmlLayout("Error", `<div class="text-red-400 p-4">${escapeHtml(describeError(err).message)}</div>`, sidebar, "team")
       );
     }
   });
@@ -169,7 +170,7 @@ export function createServer(): express.Application {
       send("progress", `Report generated: ${report.keyChanges.length} key changes, ${report.prReports.length} PR analyses`);
       send("done", "Report ready");
     } catch (err: any) {
-      send("error", err.message);
+      send("error", describeError(err).message);
     }
     res.end();
   });
@@ -197,7 +198,7 @@ export function createServer(): express.Application {
       send("progress", `Found ${analysis.projects.length} projects across ${analysis.prCount} PRs`);
       send("done", `${analysis.projects.length} projects`);
     } catch (err: any) {
-      send("error", err.message);
+      send("error", describeError(err).message);
     }
     res.end();
   });
@@ -213,7 +214,7 @@ export function createServer(): express.Application {
       res.send(htmlLayout("Commit", content, sidebar, "commit"));
     } catch (err: any) {
       res.status(500).send(
-        htmlLayout("Commit", `<div class="text-red-400 p-4">${escapeHtml(err.message)}</div>`, sidebar, "commit")
+        htmlLayout("Commit", `<div class="text-red-400 p-4">${escapeHtml(describeError(err).message)}</div>`, sidebar, "commit")
       );
     }
   });
@@ -242,7 +243,7 @@ export function createServer(): express.Application {
       try {
         pageData = await fetcher();
       } catch (err: any) {
-        error = err.message;
+        error = describeError(err).message;
       }
     }
 
@@ -280,7 +281,7 @@ export function createServer(): express.Application {
     try {
       res.json(await fetcher());
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: describeError(err).message });
     }
   });
 
@@ -290,7 +291,7 @@ export function createServer(): express.Application {
       const result = await data.doStageFiles(req.body.files || []);
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: describeError(err).message });
     }
   });
 
@@ -299,7 +300,7 @@ export function createServer(): express.Application {
       const result = await data.doCommit(req.body.message || "");
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: describeError(err).message });
     }
   });
 
@@ -308,7 +309,7 @@ export function createServer(): express.Application {
       const result = await data.doGenerateAIMessage();
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: describeError(err).message });
     }
   });
 
@@ -322,7 +323,7 @@ export function createServer(): express.Application {
       }
       res.json(await data.doGetDiff(filePath, withMain));
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: describeError(err).message });
     }
   });
 
@@ -330,7 +331,7 @@ export function createServer(): express.Application {
     try {
       res.json(await data.doRevertFile(req.body.file));
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: describeError(err).message });
     }
   });
 
@@ -338,7 +339,7 @@ export function createServer(): express.Application {
     try {
       res.json(await data.doDeleteFile(req.body.file));
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: describeError(err).message });
     }
   });
 
@@ -346,7 +347,7 @@ export function createServer(): express.Application {
     try {
       res.json(await data.getRecentCommits());
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: describeError(err).message });
     }
   });
 
@@ -355,7 +356,7 @@ export function createServer(): express.Application {
       const result = await data.doPush();
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: describeError(err).message });
     }
   });
 
@@ -381,7 +382,7 @@ export function createServer(): express.Application {
       res.send(renderWidgetContent(config.ui, widgetData));
     } catch (err: any) {
       res.send(
-        `<div class="text-red-400 text-sm p-4">${escapeHtml(err.message)}</div>`
+        `<div class="text-red-400 text-sm p-4">${escapeHtml(describeError(err).message)}</div>`
       );
     }
   });

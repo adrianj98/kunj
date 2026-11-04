@@ -113,14 +113,14 @@ export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
   for (;;) {
     if (spawnError) {
       release();
-      throw new ContainerError(`Could not run ${opts.sshPath ?? 'ssh'}: ${spawnError.message}`, 'bad-remote');
+      throw new ContainerError(`Could not run ${opts.sshPath ?? 'ssh'}: ${spawnError.message}. Install OpenSSH and make sure ssh is on your PATH.`, 'bad-remote');
     }
     if (exited) {
       release();
       const detail = firstLine();
       throw new ContainerError(
         `ssh to ${opts.ssh} ended before the tunnel was up${detail ? `: ${detail}` : ''}` +
-          ` (is kunj serve listening on 127.0.0.1:${opts.port} there? try: ssh ${opts.ssh} kunj serve token)`,
+          ` (is kunj serve listening on 127.0.0.1:${opts.port} there? try: ssh ${opts.ssh} kunj serve token).`,
         'remote-unreachable',
       );
     }
@@ -128,7 +128,11 @@ export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
     if (Date.now() >= deadline) {
       kill();
       release();
-      throw new ContainerError(`ssh to ${opts.ssh} did not bring the tunnel up within ${Math.round(timeoutMs / 1000)} s${firstLine() ? `: ${firstLine()}` : ''}`, 'bad-remote');
+      throw new ContainerError(
+        `ssh to ${opts.ssh} did not bring the tunnel up within ${Math.round(timeoutMs / 1000)} s${firstLine() ? `: ${firstLine()}` : ''}.` +
+          ` Check that ssh ${opts.ssh} logs in from a terminal without a prompt (host key, passphrase).`,
+        'bad-remote',
+      );
     }
     await new Promise(r => setTimeout(r, READY_POLL_MS));
   }

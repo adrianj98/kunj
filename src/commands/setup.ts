@@ -1,4 +1,5 @@
 import { BaseCommand } from '../lib/command';
+import { describeError } from '../lib/errors';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -166,7 +167,7 @@ export class SetupCommand extends BaseCommand {
     try {
       await runImport(kept);
     } catch (error) {
-      console.log(chalk.yellow(`⚠ ${error instanceof Error ? error.message : String(error)}`));
+      console.log(chalk.yellow(`⚠ ${describeError(error).message}`));
       console.log(chalk.gray(`  Try again later with: ${command}`));
     }
   }
@@ -180,7 +181,7 @@ export class SetupCommand extends BaseCommand {
       try {
         await installer.installOne(app);
       } catch (error) {
-        console.log(chalk.yellow(`⚠ ${error instanceof Error ? error.message : String(error)}`));
+        console.log(chalk.yellow(`⚠ ${describeError(error).message}`));
         console.log(chalk.gray(`  Try again later with: kunj install ${app}`));
       }
     }
@@ -305,9 +306,8 @@ export class SetupCommand extends BaseCommand {
       console.log(chalk.gray('  Try: kunj jira list'));
       console.log(chalk.gray('  Try: kunj jira create'));
     } else {
-      console.log(chalk.red('✗ Jira credentials validation failed\n'));
-      console.log(chalk.yellow('Jira integration has been disabled.'));
-      console.log(chalk.gray('You can reconfigure later with: kunj config set jira.enabled true\n'));
+      console.log(chalk.red('✗ Jira did not accept these credentials, so the Jira integration is turned off.'));
+      console.log(chalk.gray('  Check the URL, email and API token, then run `kunj setup` again (or `kunj config -i`).\n'));
 
       // Disable Jira
       config.jira!.enabled = false;
