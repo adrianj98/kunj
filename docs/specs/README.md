@@ -29,7 +29,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
-| Better error messages across the CLI: one format (`✗ message` + hint, no stack trace unless `KUNJ_DEBUG=1`), raw git/Node/AWS errors explained, every message reviewed | — | 3689dd7, dde4ddb, this commit |
+| Better error messages across the CLI: one format (`✗ message` + hint, no stack trace unless `KUNJ_DEBUG=1`), raw git/Node/AWS errors explained, every message reviewed | — | 3689dd7, dde4ddb, e7c2444 |
 | Branch containers (phase 1) | [branch-containers.md](branch-containers.md) | — |
 | Blueprints and snapshots | [blueprints.md](blueprints.md) | — |
 | Blueprint `image` key (sandbox or an image, over container.image and the devcontainer) | [blueprints.md](blueprints.md) | de46ded |
