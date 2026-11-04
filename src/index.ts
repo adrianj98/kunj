@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import { CommandRegistry } from './lib/command';
 import { loadFastCommand } from './commands/fast';
 import { getVersion } from './lib/version';
+import { formatError } from './lib/errors';
 
 // Loaded lazily: pulling in every command costs close to a second of startup
 async function getAllCommands() {
@@ -74,6 +75,6 @@ async function main() {
 
 // Run the main function
 main().catch(error => {
-  console.error('Fatal error:', error);
+  console.error(formatError(error));
   process.exit(1);
 });

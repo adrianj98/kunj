@@ -1525,3 +1525,11 @@ macOS app zip (`kunj install macos` needs a release that has one).
 ## 2026-11-04 — worktree add shows git's fatal line
 - `cleanGitError()` (src/commands/worktree.ts) now prefers git's `fatal:`/`error:` line over the first line.
   Why: `git worktree add` prints "Preparing worktree (...)" before "fatal: '<path>' already exists", so kunj showed the progress line as the error and hid the cause.
+
+## 2026-11-04 — one error format for the whole CLI (src/lib/errors.ts)
+- New `UserError(message, hint?, jsonCode?)` and `describeError()`/`formatError()`. BaseCommand and `main()` now print every error as `✗ <message>` plus an indented hint, never `Command failed: Error: ...` with a stack trace.
+  Why: plain `Error`s printed a raw stack trace and git failures echoed the whole command line; the user could not tell what went wrong or what to do.
+- Raw failures are translated: missing programs (git, gh, docker, tmux, code) say how to install them; common git errors (path exists, branch checked out elsewhere, unknown ref, would overwrite changes, auth, index.lock, conflicts) get a hint; AWS credential / Bedrock access errors say how to log in; Ctrl-C at a prompt prints "Cancelled.".
+- Stack traces only with `KUNJ_DEBUG=1`; an unexpected error says to use it.
+- `--json` errors use the same translated message (shape unchanged).
+- worktree.ts's own git-error cleaner now reuses `describeError()` and throws a `UserError` with the hint.

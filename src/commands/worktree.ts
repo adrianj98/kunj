@@ -63,6 +63,7 @@ import { recordRepo } from '../lib/repos';
 import { AgentError, agentArgv, checkShellSessionId, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, pickSession, readTaggedTmuxSessions, runTmux, shellSessionName, worktreeShellSessions } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
 import type { BranchContainerJson, ShellKillJson, WorktreeJson, WorktreeListContainersJson, WorktreeListJson } from '../lib/json-types';
+import { describeError, UserError } from '../lib/errors';
 
 interface WorktreeOptions {
   all?: boolean;
@@ -472,7 +473,7 @@ export class WorktreeCommand extends BaseCommand {
         force: options.force,
       }));
     } catch (error: any) {
-      throw new Error(this.cleanGitError(error));
+      throw this.gitError(error);
     }
     if (gitOutput) {
       this.progress(chalk.gray(gitOutput));
@@ -571,11 +572,7 @@ export class WorktreeCommand extends BaseCommand {
     try {
       await removeWorktree(wt.path, options.force);
     } catch (error: any) {
-      const message = this.cleanGitError(error);
-      if (/contains modified or untracked files/i.test(message)) {
-        throw new Error(`Worktree has uncommitted changes. Use --force to remove it anyway`);
-      }
-      throw new Error(message);
+      throw this.gitError(error);
     }
 
     unregisterSession({ path: wt.path });
@@ -726,13 +723,10 @@ export class WorktreeCommand extends BaseCommand {
     throw new Error(`Unknown session action '${subAction}'. Expected: start, end, list`);
   }
 
-  private cleanGitError(error: any): string {
-    const raw: string = error?.stderr || error?.message || String(error);
-    const all = raw.split('\n').map(l => l.trim()).filter(l => l && !/^Command failed/i.test(l));
-    // git prints progress ("Preparing worktree ...") before the fatal line, so prefer the fatal one
-    const fatal = all.find(l => /^(fatal|error):/i.test(l));
-    const line = fatal ?? all[0];
-    return line ? line.replace(/^(fatal|error):\s*/i, '') : 'git worktree command failed';
+  // A git failure as the error the user sees: what went wrong and what to do next
+  private gitError(error: unknown): UserError {
+    const d = describeError(error);
+    return new UserError(d.message || 'git worktree command failed', d.hint);
   }
 
   // ---------------------------------------------------------------------
