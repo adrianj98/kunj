@@ -1521,3 +1521,7 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - Workspace app sidebar: repositories with no open session are hidden (`sidebarGroups(hideEmpty:)`); View > Show Repositories Without Sessions (saved as `showEmptyRepos`, off by default) lists them all; ⌘K search and New Session still reach every repository. Why: the user asked to hide repos that have no sessions.
 - Workspace app sidebar: clicking a repository's name collapses it to just the name (▸ and its open-session count) and clicking again opens it (▾); collapsed repositories are remembered (`collapsedRepos` user default) and a search ignores collapsing. Why: the user asked to collapse repos to their name and toggle them open and closed.
 - Collapsible repositories: a header click during a ⌘K search is ignored (it used to collapse the repository invisibly, showing only after the search was cleared). Why: adversarial review of ce6b1d8.
+
+## 2026-11-04 — worktree add shows git's fatal line
+- `cleanGitError()` (src/commands/worktree.ts) now prefers git's `fatal:`/`error:` line over the first line.
+  Why: `git worktree add` prints "Preparing worktree (...)" before "fatal: '<path>' already exists", so kunj showed the progress line as the error and hid the cause.

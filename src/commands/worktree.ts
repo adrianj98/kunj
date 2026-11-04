@@ -728,11 +728,11 @@ export class WorktreeCommand extends BaseCommand {
 
   private cleanGitError(error: any): string {
     const raw: string = error?.stderr || error?.message || String(error);
-    const lines = raw
-      .split('\n')
-      .map(l => l.replace(/^(fatal|error):\s*/i, '').trim())
-      .filter(l => l && !/^Command failed/i.test(l));
-    return lines[0] || 'git worktree command failed';
+    const all = raw.split('\n').map(l => l.trim()).filter(l => l && !/^Command failed/i.test(l));
+    // git prints progress ("Preparing worktree ...") before the fatal line, so prefer the fatal one
+    const fatal = all.find(l => /^(fatal|error):/i.test(l));
+    const line = fatal ?? all[0];
+    return line ? line.replace(/^(fatal|error):\s*/i, '') : 'git worktree command failed';
   }
 
   // ---------------------------------------------------------------------
