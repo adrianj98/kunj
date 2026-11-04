@@ -1558,4 +1558,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - Workspace app: `KunjEvent.openAgent`, pending opens in `EnvironmentStore` (30 s for the worktree to be listed), `openHandedOffAgent` opens/selects/focuses the tab.
   Why: the user chose that the app switches to the handed-off agent.
 - Docs: workspace-app.mdx "Handing work off", okf worktree-agents, CLAUDE.md, spec status, tracker.
-- Review fixes:  now also tags an attached start; the prompt is read with  when the login shell is fish (no POSIX `$(...)`).
+- Review fixes: `--open-in-app` now also tags an attached start; the prompt is read with `(cat … | string collect)` when the login shell is fish (fish has no POSIX `$(...)`). Why: adversarial review.
