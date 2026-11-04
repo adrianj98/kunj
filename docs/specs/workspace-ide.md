@@ -481,7 +481,7 @@ All 2026-10-23.
 - **Worktree agents through `kunj agent`**, sessions named by kunj; the app never names a tmux session.
 - **Container files through `kunj ct file`;** the app never runs `docker`.
 - **Refresh through `kunj events --json`,** built before the app; no polling in the app.
-- **Editor level: Monaco with the diff editor;** no language servers in v1; VS Code/Cursor as hand-off.
+- **Editor level: Monaco with the diff editor;** no language servers in v1 (planned since 2026-11-04 in [language-servers.md](language-servers.md)); VS Code/Cursor as hand-off.
 - **Diff default against the base branch,** with uncommitted-only and last-commit options.
 - **The UI is the design package** (`docs/workspace-app/design/`, 2026-10-23): two columns under the
   header, terminals left and the Changes column on the right, sidebar rows titled by task with a

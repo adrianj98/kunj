@@ -1543,3 +1543,7 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - `ExecTimeoutError` counts as expected (no "bug" footer).
 - Review fixes: stash warnings go to stderr (they could land in `--json` stdout); a successful `kunj stash` whose follow-up listing fails now warns instead of reporting the stash failed.
 - Docs: docs-site installation page "When a command fails"; okf command-system page; tracker line moved to Done.
+
+## 2026-11-04 — language servers spec (docs/specs/language-servers.md)
+- New spec: real language servers for the workspace app's editor (definition, references, hover, diagnostics), run through a new `kunj lsp run <language>` child per worktree and language, bridged by Swift with a URI guard, started with an editor tab and stopped when idle (2 min after the last tab, 5 min idle for servers with a disk cache, 15 for tsserver, at most 3, cached ones evicted first). Option B (monaco-vscode-api) is adopted as part 1. Tracker and workspace-ide.md updated.
+  Why: the user asked for click-through to declarations and references (option C) without language servers always running and eating memory, and pointed out that many servers restart from a cached state.
