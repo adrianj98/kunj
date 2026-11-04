@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { gitPathMatters, watchEvents } from '../events';
-import { listTmuxSessions } from '../agent-session';
+import { listTmuxSessions, readTaggedTmuxSessions } from '../agent-session';
 import { FakeBackend } from '../container/__tests__/fake-backend';
 import { STATUS_SCRIPT } from '../container/env';
 import type { ContainerInfo } from '../container/backend';
@@ -17,6 +17,7 @@ jest.setTimeout(30000);
 jest.mock('../agent-session', () => ({
   ...jest.requireActual<object>('../agent-session'),
   listTmuxSessions: jest.fn(async () => []),
+  readTaggedTmuxSessions: jest.fn(async () => []),
 }));
 
 // fs.watch tests wait for real events and quiet periods; the default 5 s is too short under load
@@ -247,9 +248,17 @@ describe('watchEvents', () => {
     start({ tmuxPollMs: 10 });
     await waitFor(() => ofType('agent').length >= 2);
     expect(ofType('agent')).toEqual([
-      { type: 'agent', session: 'kunj-app-x-abc123', running: true, at: expect.any(String) },
+      { type: 'agent', session: 'kunj-app-x-abc123', running: true, id: null, at: expect.any(String) },
       { type: 'agent', session: 'kunj-app-x-abc123', running: false, at: expect.any(String) },
     ]);
+  });
+
+  it('a new session started with --open-in-app carries open, id and worktree', async () => {
+    (readTaggedTmuxSessions as unknown as jest.Mock<() => Promise<unknown>>).mockResolvedValue([{ name: 'kunj-app-x-abc123-a-handoff', worktree: '/w/x', open: 'app' }]);
+    tmuxMock.mockResolvedValueOnce([]).mockResolvedValue(['kunj-app-x-abc123-a-handoff']);
+    start({ tmuxPollMs: 10 });
+    await waitFor(() => ofType('agent').length >= 1);
+    expect(ofType('agent')[0]).toEqual({ type: 'agent', session: 'kunj-app-x-abc123-a-handoff', running: true, id: 'handoff', worktree: '/w/x', open: 'app', at: expect.any(String) });
   });
 
   it('a write to agent-state/<session> yields an agent event with the state', async () => {

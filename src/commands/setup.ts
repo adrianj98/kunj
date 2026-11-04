@@ -185,6 +185,17 @@ export class SetupCommand extends BaseCommand {
         console.log(chalk.gray(`  Try again later with: kunj install ${app}`));
       }
     }
+    const { skill } = await inquirer.prompt([{
+      type: 'confirm', name: 'skill', default: true,
+      message: 'Install the /handoff Claude Code skill (start what you are discussing in a new worktree with a new agent)?',
+    }]);
+    if (!skill) return;
+    try {
+      await installer.execute('skill', {});
+    } catch (error) {
+      console.log(chalk.yellow(`⚠ ${describeError(error).message}`));
+      console.log(chalk.gray('  Try again later with: kunj install skill'));
+    }
   }
 
   private async setupJiraIntegration(): Promise<void> {

@@ -305,8 +305,8 @@ describe('sessions follow their worktree across a checkout', () => {
   test('readTaggedTmuxSessions reads each name with its @kunj_worktree tag', async () => {
     execFileMock.mockReset();
     tmuxResult(null, `${a}\t${wt}\nplain\t\n`);
-    await expect(readTaggedTmuxSessions()).resolves.toEqual([{ name: a, worktree: wt }, { name: 'plain', worktree: '' }]);
-    expect(execFileMock.mock.calls[0][1]).toEqual(['list-sessions', '-F', '#{session_name}\t#{@kunj_worktree}']);
+    await expect(readTaggedTmuxSessions()).resolves.toEqual([{ name: a, worktree: wt, open: '' }, { name: 'plain', worktree: '', open: '' }]);
+    expect(execFileMock.mock.calls[0][1]).toEqual(['list-sessions', '-F', '#{session_name}\t#{@kunj_worktree}\t#{@kunj_open}']);
     tmuxResult(failure({ code: 'ENOENT' }));
     await expect(readTaggedTmuxSessions()).resolves.toBe('missing');
     tmuxResult(failure({ stderr: 'no server running on /tmp/x\n' }));

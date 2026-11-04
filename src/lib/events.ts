@@ -22,7 +22,7 @@ import { stripUserinfo } from './container/seed';
 import { forwardsFile } from './container/autoforward';
 import { WORKTREE_SESSIONS_FILE } from './worktree';
 import { REPOS_FILE } from './repos';
-import { agentStateDir, listTmuxSessions, readAgentState } from './agent-session';
+import { agentIdOf, agentStateDir, listTmuxSessions, readAgentState, readTaggedTmuxSessions } from './agent-session';
 import { kunjDirName } from './repo-identity';
 import type { AgentHookState } from './agent-session';
 
@@ -299,7 +299,21 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
     if (signal.aborted || sessions === null) return;
     const current = new Set(sessions.filter(s => s.startsWith('kunj-')));
     if (known) {
-      for (const s of current) if (!known.has(s)) emit({ type: 'agent', session: s, running: true, at: at() });
+      const added = [...current].filter(s => !known!.has(s));
+      // Only when a session appeared: its tags (worktree, open-in-app) in one more tmux call
+      const tagged = added.length ? await readTaggedTmuxSessions() : [];
+      const tags = new Map(Array.isArray(tagged) ? tagged.map(t => [t.name, t]) : []);
+      for (const s of added) {
+        const tag = tags.get(s);
+        const id = agentIdOf(s);
+        emit({
+          type: 'agent', session: s, running: true,
+          ...(id !== undefined ? { id } : {}),
+          ...(tag?.worktree ? { worktree: tag.worktree } : {}),
+          ...(tag?.open === 'app' ? { open: 'app' as const } : {}),
+          at: at(),
+        });
+      }
       for (const s of known) if (!current.has(s)) emit({ type: 'agent', session: s, running: false, at: at() });
     }
     known = current;

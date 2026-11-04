@@ -247,6 +247,17 @@ export interface AgentStatusJson {
   sessions?: AgentSessionJson[];
 }
 
+/** `kunj agent start --detach --json`: the session it started, or found already running. */
+export interface AgentStartJson {
+  branch: string;
+  worktree: string;
+  session: string;
+  /** The `--session <id>`; null for the default session */
+  id: string | null;
+  /** false when the session was already running (left as it was) */
+  started: boolean;
+}
+
 export interface AgentStopJson {
   success: true;
   branch: string;
@@ -278,7 +289,13 @@ export type EventJson = { at: string } & (
   | { type: 'hello'; version: string; repos: number }
   | { type: 'git' | 'sessions' | 'forwards' | 'repos'; repo?: { name: string; root: string } }
   | { type: 'container'; repo: { name: string; root: string } | null; branch: string | null; container: string; action: string }
-  | { type: 'agent'; session: string; running: boolean; state?: 'running' | 'waiting' | null; repo?: { name: string; root: string } }
+  | { type: 'agent'; session: string; running: boolean; state?: 'running' | 'waiting' | null; repo?: { name: string; root: string };
+      /** A new session's `--session` id (null: the default one), from the tmux poll */
+      id?: string | null;
+      /** A new session's worktree (its @kunj_worktree tag), from the tmux poll */
+      worktree?: string;
+      /** `app` when `kunj agent start --open-in-app` started it: the workspace app opens and focuses it */
+      open?: 'app' }
   | { type: 'backend'; status: 'available' | 'unavailable'; message?: string }
 );
 

@@ -13,7 +13,8 @@ import { kunjEntry } from './self';
 
 const execFileAsync = promisify(execFile);
 
-export type AgentErrorCode = 'tmux-missing' | 'no-tty' | 'not-running' | 'no-worktree' | 'bad-session-id' | 'unknown-agent';
+export type AgentErrorCode = 'tmux-missing' | 'no-tty' | 'not-running' | 'no-worktree' | 'bad-session-id' | 'unknown-agent'
+  | 'bad-option' | 'prompt-needs-claude' | 'prompt-not-found' | 'prompt-too-large' | 'start-failed';
 
 // Expected outcomes: printed without a stack trace
 export class AgentError extends Error {
@@ -118,22 +119,44 @@ export async function listTmuxSessions(): Promise<string[] | null> {
 export interface TaggedTmuxSession {
   name: string;
   worktree: string;
+  /** @kunj_open (SESSION_OPEN_OPTION); '' when unset */
+  open?: string;
 }
 
 // readTmuxSessions with each session's worktree tag, in the same one call. The fields are separated by
 // a literal tab (tmux does not expand `\t` in a format).
 export async function readTaggedTmuxSessions(): Promise<TaggedTmuxSession[] | 'missing' | 'failed'> {
   try {
-    const { stdout } = await execFileAsync('tmux', ['list-sessions', '-F', `#{session_name}\t#{${SESSION_WORKTREE_OPTION}}`]);
-    return stdout.split('\n').filter(l => l.trim()).map(l => {
-      const tab = l.indexOf('\t');
-      return tab === -1 ? { name: l.trim(), worktree: '' } : { name: l.slice(0, tab), worktree: l.slice(tab + 1).trim() };
-    });
+    const { stdout } = await execFileAsync('tmux', ['list-sessions', '-F', `#{session_name}\t#{${SESSION_WORKTREE_OPTION}}\t#{${SESSION_OPEN_OPTION}}`]);
+    return stdout.split('\n').filter(l => l.trim()).map(parseTaggedSessionLine);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
     const stderr = String((error as { stderr?: unknown }).stderr ?? '');
     return /no server running|error connecting to/.test(stderr) ? [] : 'failed';
   }
+}
+
+// `name<TAB>worktree<TAB>open` (a session name has no tab); a worktree path may hold one, so the
+// open flag is the last field only when it is `app` or empty
+export function parseTaggedSessionLine(line: string): TaggedTmuxSession {
+  const tab = line.indexOf('\t');
+  if (tab === -1) return { name: line.trim(), worktree: '' };
+  const name = line.slice(0, tab);
+  let rest = line.slice(tab + 1);
+  let open = '';
+  const last = rest.lastIndexOf('\t');
+  if (last !== -1 && /^(app)?$/.test(rest.slice(last + 1).trim())) {
+    open = rest.slice(last + 1).trim();
+    rest = rest.slice(0, last);
+  }
+  return { name, worktree: rest.trim(), open };
+}
+
+// The `--session` id of a kunj agent session name, null for a default one, undefined when not an agent
+export function agentIdOf(session: string): string | null | undefined {
+  const withId = AGENT_WITH_ID.exec(session);
+  if (withId) return withId[1];
+  return AGENT_DEFAULT.test(session) ? null : undefined;
 }
 
 // Any kunj agent or shell name, whatever branch it was named after: `<base>` / `<base>-a-<id>` and
@@ -203,13 +226,20 @@ export function agentRunning(sessions: string[] | null, name: string): boolean |
 // An array command is run by tmux as argv, without a shell in between.
 // `worktree` tags a host session with the user option @kunj_worktree (SESSION_WORKTREE_OPTION), so
 // `kunj sessions` finds its worktree whatever branch it has checked out since.
-export function agentArgv(name: string, cwd: string, command: string | string[], env: Record<string, string>, opts: { status?: boolean; worktree?: string } = {}): string[] {
+// `detach` starts the session without attaching (`-d` for `-A`: the caller made sure it does not run);
+// `openInApp` sets @kunj_open (SESSION_OPEN_OPTION) so the workspace app opens a tab for it.
+export function agentArgv(name: string, cwd: string, command: string | string[], env: Record<string, string>, opts: { status?: boolean; worktree?: string; detach?: boolean; openInApp?: boolean } = {}): string[] {
   const vars = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-  const tag = opts.worktree ? [';', 'set-option', '-t', name, SESSION_WORKTREE_OPTION, opts.worktree] : [];
-  return ['tmux', '-u', 'new-session', '-A', '-s', name, '-c', cwd, ...vars, ...(Array.isArray(command) ? command : [command]), ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', opts.status ? 'on' : 'off', ...tag];
+  const tag = [
+    ...(opts.worktree ? [';', 'set-option', '-t', name, SESSION_WORKTREE_OPTION, opts.worktree] : []),
+    ...(opts.openInApp ? [';', 'set-option', '-t', name, SESSION_OPEN_OPTION, 'app'] : []),
+  ];
+  return ['tmux', '-u', 'new-session', opts.detach ? '-d' : '-A', '-s', name, '-c', cwd, ...vars, ...(Array.isArray(command) ? command : [command]), ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', opts.status ? 'on' : 'off', ...tag];
 }
 
 export const SESSION_WORKTREE_OPTION = '@kunj_worktree';
+// `app` on a session `kunj agent start --open-in-app` made: the workspace app opens and focuses it
+export const SESSION_OPEN_OPTION = '@kunj_open';
 
 // A login shell in the session (no KUNJ_* variables: it is not an agent)
 export function shellArgv(name: string, cwd: string, shell: string, opts: { status?: boolean; worktree?: string } = {}): string[] {
@@ -342,6 +372,21 @@ export function agentCommand(name: string | undefined, agent: { command?: string
   if (name === 'claude') return path.basename(configured.split(/\s+/)[0] ?? '') === 'claude' ? configured : 'claude';
   if (name === 'antigravity') return agent?.antigravityCommand?.trim() || 'agy';
   throw new AgentError('unknown-agent', `Unknown agent ${JSON.stringify(name)}. --agent takes ${AGENT_NAMES.join(' or ')}.`);
+}
+
+// The first prompt for a claude command: the brief's copy read by the shell tmux runs the command
+// through, single-quoted (a path in $HOME may hold any character but NUL)
+export function withAgentPrompt(command: string, promptFile: string | null): string {
+  if (!promptFile) return command;
+  return `${command.trim()} "$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;
+}
+
+export function isClaudeCommand(command: string): boolean {
+  return path.basename(command.trim().split(/\s+/)[0] ?? '') === 'claude';
+}
+
+export function agentPromptFile(kunjDir: string, session: string): string {
+  return path.join(kunjDir, 'agent-prompts', `${session}.md`);
 }
 
 // `command` with the hooks appended when it is claude (the setting agent.hooks, default on)

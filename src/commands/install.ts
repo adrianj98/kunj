@@ -26,6 +26,7 @@ interface InstallOptions {
   release?: string;
   editor?: string;
   yes?: boolean;
+  force?: boolean;
 }
 
 // The release to install from matches the CLI version when it has the asset
@@ -51,6 +52,7 @@ export class InstallCommand extends BaseCommand {
         { flags: '--release <version>', description: 'Install from this release (default: the CLI version, else the newest)' },
         { flags: '--editor <cli>', description: 'Editor CLI for the extension, e.g. cursor (default: code)' },
         { flags: '-y, --yes', description: 'Install everything available without asking' },
+        { flags: '--force', description: "[skill] Replace a skill of the same name kunj did not install" },
       ],
       helpText: () =>
         [
@@ -59,6 +61,7 @@ export class InstallCommand extends BaseCommand {
           '  macos      Kunj menu bar app, installed to /Applications (or ~/Applications)',
           '  workspace  Kunj Workspace app: worktrees, containers, terminals and agents in one window (macOS)',
           '  all        All of them, where available',
+          '  skill      The /handoff Claude Code skill, copied to ~/.claude/skills/ (not part of all)',
           '',
           `They are downloaded from https://github.com/${RELEASES_REPO}/releases. The macOS apps are not`,
           'notarized; the download quarantine is cleared so they open without a warning.',
@@ -73,6 +76,18 @@ export class InstallCommand extends BaseCommand {
       app = undefined;
     }
 
+    if (app === 'skill' || app === 'skills') {
+      const { KUNJ_SKILLS, installSkill } = await import('../lib/skills');
+      const results = KUNJ_SKILLS.map(name => installSkill(name, { version: cliVersion() ?? 'dev', force: options.force }));
+      if (this.jsonMode) {
+        this.outputJSON({ success: true, skills: results });
+      } else {
+        for (const r of results) this.log(chalk.green(`✓ ${r.replaced ? 'Updated' : 'Installed'} /${r.name} in ${r.path}`));
+        this.log(chalk.dim('  Start a new Claude Code session to pick it up.'));
+      }
+      return;
+    }
+
     let apps: CompanionApp[];
     if (!app) {
       apps = options.yes ? availableApps() : await this.ask(options);
@@ -81,7 +96,7 @@ export class InstallCommand extends BaseCommand {
     } else if (app === 'vscode' || app === 'macos' || app === 'workspace') {
       apps = [app];
     } else {
-      throw new UserError(`Unknown app '${app}'.`, 'Use one of: vscode, macos, workspace, all.');
+      throw new UserError(`Unknown app '${app}'.`, 'Use one of: vscode, macos, workspace, all, skill.');
     }
 
     if (apps.length === 0) {

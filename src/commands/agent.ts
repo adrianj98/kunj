@@ -10,8 +10,8 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks } from '../lib/agent-session';
-import type { AgentSessionJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import type { AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
   json?: boolean;
@@ -21,7 +21,13 @@ interface AgentOptions {
   session?: string;
   all?: boolean;
   resume?: boolean;
+  detach?: boolean;
+  promptFile?: string;
+  openInApp?: boolean;
 }
+
+// The largest brief --prompt-file takes (it becomes one shell argument)
+const MAX_PROMPT_BYTES = 256 * 1024;
 
 const ACTIONS = ['start', 'status', 'stop'];
 
@@ -38,6 +44,9 @@ export class AgentCommand extends BaseCommand {
         { flags: '--session <id>', description: "One of several agents of the worktree: its own tmux session (<agent session>-a-<id>; letters, digits, _ and -, up to 32)" },
         { flags: '--resume', description: "[start] When the session is not running, resume its agent's last Claude conversation (saved by a hook)" },
         { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs)' },
+        { flags: '--detach', description: '[start] Start the tmux session without attaching to it (no terminal needed); a running one is left as it is' },
+        { flags: '--prompt-file <file>', description: "[start] The agent's first prompt, read from a file (claude only; a new session only)" },
+        { flags: '--open-in-app', description: '[start] Ask the workspace app to open, select and focus a tab for the new session' },
       ],
       helpText: [
         'Actions:',
@@ -54,6 +63,10 @@ export class AgentCommand extends BaseCommand {
         '',
         '--resume: a Claude agent saves its conversation id as it starts; when its session was ended',
         '(the app quit with Close All, a reboot), start --resume runs claude --resume <id> in a new one.',
+        '',
+        '--detach starts the session in the background and returns (with --json: branch, worktree,',
+        'session, id, started). --prompt-file gives a new claude agent its first prompt; --open-in-app',
+        'has the workspace app switch to it. The /handoff skill (kunj install skill) uses all three.',
         '',
         '--agent antigravity runs the Antigravity CLI (agy) instead of agent.command. Only Claude Code',
         'reports when it waits for input; another agent shows as running while its session lives.',
@@ -139,7 +152,10 @@ export class AgentCommand extends BaseCommand {
       return;
     }
 
-    if (!process.stdin.isTTY) throw new AgentError('no-tty', 'kunj agent needs a terminal to attach to. Run it from an interactive terminal, or use `kunj agent status` to check on it.');
+    if ((opts.detach || opts.promptFile || opts.openInApp) && verb !== 'start') {
+      throw new AgentError('bad-option', '--detach, --prompt-file and --open-in-app only go with `kunj agent start`.');
+    }
+    if (!opts.detach && !process.stdin.isTTY) throw new AgentError('no-tty', 'kunj agent needs a terminal to attach to. Run it from an interactive terminal, or use `kunj agent status` to check on it.');
     const config = await loadResolvedConfig(process.cwd());
     // The Claude Code hooks report "waiting for input" into the state file (agent-session.ts)
     const kunjDir = getKunjDir();
@@ -150,7 +166,31 @@ export class AgentCommand extends BaseCommand {
     const agentCmd = opts.command || agentCommand(opts.agent, config.agent);
     // A running session is reattached below; only a new one resumes the saved conversation
     const resumeId = opts.resume && !(sessions?.includes(session) ?? false) ? readAgentResume(resumeFile) : null;
-    const command = withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false);
+    const alreadyRunning = sessions?.includes(session) ?? false;
+    let promptCopy: string | null = null;
+    if (opts.promptFile) {
+      if (!isClaudeCommand(agentCmd)) {
+        throw new AgentError('prompt-needs-claude', `--prompt-file only works with claude, and this agent runs \`${agentCmd}\`.`);
+      }
+      let text: Buffer;
+      try {
+        text = fs.readFileSync(opts.promptFile);
+      } catch (error) {
+        throw new AgentError('prompt-not-found', `Could not read the prompt file ${opts.promptFile}: ${(error as Error).message}`);
+      }
+      if (text.length > MAX_PROMPT_BYTES) {
+        throw new AgentError('prompt-too-large', `The prompt file is ${Math.ceil(text.length / 1024)} KB; the most --prompt-file takes is ${MAX_PROMPT_BYTES / 1024} KB.`);
+      }
+      if (alreadyRunning) {
+        process.stderr.write(`⚠ ${session} is already running; --prompt-file was not sent to it.\n`);
+      } else {
+        promptCopy = agentPromptFile(kunjDir, session);
+        fs.mkdirSync(path.dirname(promptCopy), { recursive: true, mode: 0o700 });
+        fs.writeFileSync(promptCopy, text, { mode: 0o600 });
+        fs.chmodSync(promptCopy, 0o600);
+      }
+    }
+    const command = withAgentPrompt(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false), promptCopy);
     const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile };
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;
@@ -162,6 +202,27 @@ export class AgentCommand extends BaseCommand {
     const running = sessions ? sessions.includes(session) : tmux === 'failed' && config.agent?.tmux === false && opts.tmux !== false && await hasTmuxSession(session);
     const wantTmux = opts.tmux !== false && (config.agent?.tmux !== false || running);
     const direct = !wantTmux || tmux === 'missing';
+    if (opts.detach) {
+      if (direct) {
+        throw new AgentError(tmux === 'missing' ? 'tmux-missing' : 'bad-option',
+          tmux === 'missing' ? '--detach needs tmux, which is not installed. Install it (macOS: `brew install tmux`).'
+            : '--detach needs a tmux session; drop --no-tmux (or set agent.tmux to true).');
+      }
+      const result: AgentStartJson = { branch: wt.branch, worktree: wt.path, session, id: id ?? null, started: !alreadyRunning };
+      if (!alreadyRunning) {
+        const argv = agentArgv(session, wt.path, hostRunArgv(wt.branch, [loginShell(), '-lc', command]), vars,
+          { status: config.agent?.tmuxStatus === true, worktree: wt.path, detach: true, openInApp: opts.openInApp });
+        const code = await runTmux(argv, wt.path, { ...env, ...vars });
+        if (code !== 0) throw new AgentError('start-failed', `tmux could not start ${session} (exit ${code}).`);
+      }
+      if (this.jsonMode) {
+        this.outputJSON(result);
+      } else {
+        console.log(alreadyRunning ? chalk.dim(`${session} is already running`) : chalk.green(`✓ Started ${session}`));
+        console.log(chalk.dim(`  Attach with: kunj agent ${wt.branch}${id ? ` --session ${id}` : ''}`));
+      }
+      return;
+    }
     if (tmux === 'missing' && wantTmux) process.stderr.write(NO_TMUX_HINT + '\n');
     // Host secrets: in tmux, `kunj run` unlocks the vault inside the session (new-session -e would put
     // the values in argv; KUNJ_* stay there); directly, the same resolution in-process.
