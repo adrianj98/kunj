@@ -1559,3 +1559,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
   Why: the user chose that the app switches to the handed-off agent.
 - Docs: workspace-app.mdx "Handing work off", okf worktree-agents, CLAUDE.md, spec status, tracker.
 - Review fixes: `--open-in-app` now also tags an attached start; the prompt is read with `(cat … | string collect)` when the login shell is fish (fish has no POSIX `$(...)`). Why: adversarial review.
+- Second review fixes: a brief starting with `-` gets a leading newline in its copy (claude would read it as an option); a failed tmux tag read in `kunj events` reports the new session on the next poll instead of dropping its open flag; `--detach` asks tmux about the session when the listing failed (no `start-failed` on a running one); `kunj install skill` copies to a staging dir and renames, so a failed copy leaves the installed skill intact. Why: adversarial review (correctness, failure-paths).

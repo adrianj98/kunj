@@ -261,6 +261,16 @@ describe('watchEvents', () => {
     expect(ofType('agent')[0]).toEqual({ type: 'agent', session: 'kunj-app-x-abc123-a-handoff', running: true, id: 'handoff', worktree: '/w/x', open: 'app', at: expect.any(String) });
   });
 
+  it('a failed tag read reports the new session on the next poll, with its open flag', async () => {
+    (readTaggedTmuxSessions as unknown as jest.Mock<() => Promise<unknown>>)
+      .mockResolvedValueOnce('failed')
+      .mockResolvedValue([{ name: 'kunj-app-x-abc123-a-handoff', worktree: '/w/x', open: 'app' }]);
+    tmuxMock.mockResolvedValueOnce([]).mockResolvedValue(['kunj-app-x-abc123-a-handoff']);
+    start({ tmuxPollMs: 10 });
+    await waitFor(() => ofType('agent').length >= 1);
+    expect(ofType('agent')).toEqual([{ type: 'agent', session: 'kunj-app-x-abc123-a-handoff', running: true, id: 'handoff', worktree: '/w/x', open: 'app', at: expect.any(String) }]);
+  });
+
   it('a write to agent-state/<session> yields an agent event with the state', async () => {
     const stateDir = path.join(kunjDir, 'app', 'agent-state');
     fs.mkdirSync(stateDir, { recursive: true });

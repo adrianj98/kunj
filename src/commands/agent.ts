@@ -166,7 +166,8 @@ export class AgentCommand extends BaseCommand {
     const agentCmd = opts.command || agentCommand(opts.agent, config.agent);
     // A running session is reattached below; only a new one resumes the saved conversation
     const resumeId = opts.resume && !(sessions?.includes(session) ?? false) ? readAgentResume(resumeFile) : null;
-    const alreadyRunning = sessions?.includes(session) ?? false;
+    // a failed listing does not mean it is not running: ask tmux about this one
+    const alreadyRunning = sessions ? sessions.includes(session) : opts.detach === true && tmux === 'failed' && await hasTmuxSession(session);
     let promptCopy: string | null = null;
     if (opts.promptFile) {
       if (!isClaudeCommand(agentCmd)) {
@@ -186,7 +187,8 @@ export class AgentCommand extends BaseCommand {
       } else {
         promptCopy = agentPromptFile(kunjDir, session);
         fs.mkdirSync(path.dirname(promptCopy), { recursive: true, mode: 0o700 });
-        fs.writeFileSync(promptCopy, text, { mode: 0o600 });
+        // a brief starting with `-` (front matter, a bullet) would be read by claude as an option
+        fs.writeFileSync(promptCopy, text[0] === 0x2d ? Buffer.concat([Buffer.from('\n'), text]) : text, { mode: 0o600 });
         fs.chmodSync(promptCopy, 0o600);
       }
     }

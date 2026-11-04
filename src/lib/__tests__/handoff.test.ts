@@ -63,6 +63,16 @@ describe('kunj install skill', () => {
     expect(fs.readFileSync(path.join(to, 'handoff', 'SKILL.md'), 'utf8')).toBe('v1');
   });
 
+  it('a failed copy leaves the installed skill as it was', () => {
+    const { from, to } = dirs();
+    installSkill('handoff', { version: '1', from, to });
+    fs.chmodSync(path.join(from, 'handoff', 'SKILL.md'), 0o000);
+    expect(() => installSkill('handoff', { version: '2', from, to })).toThrow();
+    fs.chmodSync(path.join(from, 'handoff', 'SKILL.md'), 0o644);
+    expect(fs.readFileSync(path.join(to, 'handoff', '.kunj-version'), 'utf8')).toBe('1\n');
+    expect(fs.readdirSync(to)).toEqual(['handoff']);
+  });
+
   it('the package ships the handoff skill', () => {
     expect(fs.existsSync(path.join(__dirname, '..', '..', '..', 'skills', 'handoff', 'SKILL.md'))).toBe(true);
   });

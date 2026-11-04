@@ -35,9 +35,17 @@ export function installSkill(name: string, opts: { version: string; force?: bool
   if (exists && !fs.existsSync(path.join(target, MARKER)) && !opts.force) {
     throw new UserError(`${target} exists and was not installed by kunj.`, 'Move it away, or run `kunj install skill --force` to replace it.');
   }
-  if (exists) fs.rmSync(target, { recursive: true, force: true });
+  // copied next to it first, so a failed copy leaves the installed skill as it was
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.cpSync(source, target, { recursive: true });
-  fs.writeFileSync(path.join(target, MARKER), `${opts.version}\n`);
+  const staging = `${target}.kunj-tmp-${process.pid}`;
+  fs.rmSync(staging, { recursive: true, force: true });
+  try {
+    fs.cpSync(source, staging, { recursive: true });
+    fs.writeFileSync(path.join(staging, MARKER), `${opts.version}\n`);
+    if (exists) fs.rmSync(target, { recursive: true, force: true });
+    fs.renameSync(staging, target);
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
+  }
   return { name, path: target, replaced: exists };
 }

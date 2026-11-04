@@ -302,7 +302,15 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
       const added = [...current].filter(s => !known!.has(s));
       // Only when a session appeared: its tags (worktree, open-in-app) in one more tmux call
       const tagged = added.length ? await readTaggedTmuxSessions() : [];
-      const tags = new Map(Array.isArray(tagged) ? tagged.map(t => [t.name, t]) : []);
+      if (signal.aborted) return;
+      // A failed tag read would lose a handoff's open flag for good: report them on the next poll
+      if (!Array.isArray(tagged)) {
+        for (const s of added) current.delete(s);
+        for (const s of known) if (!current.has(s)) emit({ type: 'agent', session: s, running: false, at: at() });
+        known = current;
+        return;
+      }
+      const tags = new Map(tagged.map(t => [t.name, t]));
       for (const s of added) {
         const tag = tags.get(s);
         const id = agentIdOf(s);
