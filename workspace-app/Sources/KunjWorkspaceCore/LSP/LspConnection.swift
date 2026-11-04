@@ -16,7 +16,8 @@ public final class LspConnection: @unchecked Sendable {
     private var pending: [Int: CheckedContinuation<Any?, Error>] = [:]
     private var reader = LspFrameReader()
     private var initialized = false
-    private var readyWaiters: [CheckedContinuation<Bool, Never>] = []
+    private var readyWaiters: [Int: CheckedContinuation<Bool, Never>] = [:]
+    private var nextWaiter = 0
     /// The server's process id (for its memory), once started.
     public private(set) var pid: Int32 = 0
 
@@ -70,24 +71,22 @@ public final class LspConnection: @unchecked Sendable {
     /// True once `initialize` answered; false after `timeout` seconds or when the server ended.
     public func waitReady(timeout: TimeInterval) async -> Bool {
         if isReady { return true }
-        return await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
-                    self.lock.lock()
-                    if self.initialized { self.lock.unlock(); c.resume(returning: true); return }
-                    self.readyWaiters.append(c)
-                    self.lock.unlock()
-                }
+        let token: Int = locked { defer { nextWaiter += 1 }; return nextWaiter }
+        return await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+            lock.lock()
+            if initialized { lock.unlock(); c.resume(returning: true); return }
+            readyWaiters[token] = c
+            lock.unlock()
+            // a timeout resumes only its own waiter: another caller may wait longer (didOpen waits 120 s)
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in
+                self?.resumeWaiter(token, false)
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            if !first { self.releaseWaiters(false) }
-            return first
         }
+    }
+
+    private func resumeWaiter(_ token: Int, _ value: Bool) {
+        let c: CheckedContinuation<Bool, Never>? = locked { readyWaiters.removeValue(forKey: token) }
+        c?.resume(returning: value)
     }
 
     public var isReady: Bool { locked { initialized } }
@@ -129,10 +128,10 @@ public final class LspConnection: @unchecked Sendable {
     }
 
     private func releaseWaiters(_ value: Bool) {
-        lock.lock()
-        let waiters = readyWaiters
-        readyWaiters = []
-        lock.unlock()
+        let waiters: [CheckedContinuation<Bool, Never>] = locked {
+            defer { readyWaiters = [:] }
+            return Array(readyWaiters.values)
+        }
         for w in waiters { w.resume(returning: value) }
     }
 

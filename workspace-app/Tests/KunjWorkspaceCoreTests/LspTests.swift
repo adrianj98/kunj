@@ -70,6 +70,17 @@ import Testing
         #expect(processTreeRSS("  10 1 100\n  11 10 50\n  12 11 25\n  13 1 999\n", root: 10) == 175)
     }
 
+    /// A short wait timing out leaves a longer one waiting (the review's finding: didOpen was dropped).
+    @Test func aTimedOutWaitDoesNotReleaseTheOthers() async {
+        let c = LspConnection(key: LspKey(envId: "t", language: "x"), root: "/", spec: SpawnSpec(executable: "/bin/cat", arguments: [], cwd: "/", environment: [:]))
+        async let long = c.waitReady(timeout: 1.0)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let started = Date()
+        #expect(await c.waitReady(timeout: 0.1) == false)
+        #expect(await long == false)
+        #expect(Date().timeIntervalSince(started) > 0.7) // the long one ran to its own timeout
+    }
+
     /// The real sourcekit-lsp, when installed: initialize, open a file, go to a definition.
     @Test func sourcekitAnswersDefinition() async throws {
         guard FileManager.default.isExecutableFile(atPath: "/usr/bin/sourcekit-lsp") else { return }
