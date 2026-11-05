@@ -1579,3 +1579,9 @@ macOS app zip (`kunj install macos` needs a release that has one).
   Why: the diff web view is created before the Changes column has a frame; VS Code's layout service
   threw "Unable to figure out browser width and height" at 0×0, startup failed, and every diff stayed
   blank. Chrome never hit it because its tab always has a size.
+
+## 2026-11-05 — Workspace app: language server labels name the branch
+
+- The status bar and Session > Language Servers show `typescript · <branch>` instead of two bare
+  `typescript` entries. Why: one server runs per worktree, and two worktrees' servers looked like a
+  duplicate.

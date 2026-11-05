@@ -122,6 +122,7 @@ final class LspCoordinator {
         guard let root = env.path else { return }
         let spec = cli.spawnSpec(["lsp", "run", key.language, "--branch", env.branch], cwd: env.repo.root)
         let c = LspConnection(key: key, root: root, spec: spec)
+        branches[key] = env.branch
         c.onNotification = { [weak self] method, params in
             guard method == "textDocument/publishDiagnostics" else { return }
             let p = params as? [String: Any]
@@ -289,9 +290,17 @@ final class LspCoordinator {
         let parts = running.sorted { $0.key.description < $1.key.description }.map { c -> String in
             let kb = processTreeRSS(text, root: c.pid)
             let size = kb >= 1024 * 1024 ? String(format: "%.1f GB", Double(kb) / 1024 / 1024) : "\(kb / 1024) MB"
-            return "\(c.key.language) \(size)"
+            return "\(label(c.key)) \(size)"
         }
         onStatus?(parts.joined(separator: " · "))
+    }
+
+    /// The branch each server was started for, so two worktrees' servers of one language are told apart.
+    private var branches: [LspKey: String] = [:]
+
+    /// "typescript · feat/x": the language and the worktree's branch.
+    func label(_ key: LspKey) -> String {
+        branches[key].map { "\(key.language) · \($0)" } ?? key.language
     }
 
     /// The servers running now, for the Language Servers menu.
@@ -326,7 +335,7 @@ final class LanguageServersMenu: NSObject, NSMenuDelegate {
                 return
             }
             for key in running {
-                let item = NSMenuItem(title: "Stop \(key.language) (\(key.envId))", action: #selector(stop(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: "Stop \(coordinator()?.label(key) ?? key.language)", action: #selector(stop(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = key
                 menu.addItem(item)
