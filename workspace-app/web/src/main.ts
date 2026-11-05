@@ -52,7 +52,22 @@ const workers: Record<string, () => Worker> = {
   },
 }
 
+// The web view is often created before it has a frame (the Changes column is laid out later), and
+// VS Code's layout service throws "Unable to figure out browser width and height" at 0×0.
+function hasSize() {
+  return document.documentElement.clientWidth > 0 && document.documentElement.clientHeight > 0
+}
+function whenSized(): Promise<void> {
+  if (hasSize()) return Promise.resolve()
+  return new Promise((resolve) => {
+    const check = () => { if (hasSize()) { window.removeEventListener('resize', check); clearInterval(t); resolve() } }
+    window.addEventListener('resize', check)
+    const t = setInterval(check, 100)
+  })
+}
+
 async function boot() {
+  await whenSized()
   await initialize({
     ...getConfigurationServiceOverride(),
     ...getLanguagesServiceOverride(),

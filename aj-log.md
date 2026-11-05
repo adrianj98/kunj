@@ -1572,3 +1572,10 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - Language servers parts 3–4 (workspace app): `LspFrameReader`/`LspConnection`/`LspPolicy`/locations helpers in KunjWorkspaceCore/LSP, `LspCoordinator` + Language Servers menu in KunjWorkspace/Editor, page hooks in `web/src/app.js` (column on definition, Find References ⇧F12, hover provider, `lspChange`/`lspTrack`/`lspDiagnostics`), status bar memory. ⌘-click asks the server first, then searches. Checked: a real sourcekit-lsp test (definition found), and the app started clangd when a C++ header opened and stopped it on quit.
   Why: the user asked for click-through to declarations and references via language servers that are not always running.
 - Review fix: `LspConnection.waitReady` timeouts resume only their own waiter (a 1.5 s go-to-definition wait timing out used to release the 120 s didOpen wait, so the document never reached a slow-starting server). Not changed: rediscovery already re-registers loaded tabs (`loadConfig`); the showDiff listener overlap predates the port. Why: adversarial review.
+
+## 2026-11-05 — Workspace app: blank Changes diff after the monaco-vscode-api move
+
+- `workspace-app/web/src/main.ts` waits until the page has a non-zero size before `initialize()`.
+  Why: the diff web view is created before the Changes column has a frame; VS Code's layout service
+  threw "Unable to figure out browser width and height" at 0×0, startup failed, and every diff stayed
+  blank. Chrome never hit it because its tab always has a size.
