@@ -1591,3 +1591,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - The status bar shows the selected worktree's servers (`typescript 342 MB`) and only counts the rest
   (`+1 elsewhere`, or `1 server in other worktrees`). Why: it listed every worktree's servers, so it
   never changed when switching and showed a `develop` server while another worktree was selected.
+- Review fix: a sidebar selection redraws the indicator from the last `ps` sample (`sizes`) instead of running `ps` on the main thread.

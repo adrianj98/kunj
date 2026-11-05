@@ -25,7 +25,7 @@ final class LspCoordinator {
     /// The status bar's text (nil: none running).
     var onStatus: ((String?) -> Void)?
     /// The environment selected in the sidebar: the status bar shows its servers and only counts the rest.
-    var selectedEnvId: String? { didSet { if oldValue != selectedEnvId { updateStatus() } } }
+    var selectedEnvId: String? { didSet { if oldValue != selectedEnvId { renderStatus() } } }
     /// A message for the editor column (a server failed, nothing found).
     var onMessage: ((String) -> Void)?
 
@@ -278,7 +278,7 @@ final class LspCoordinator {
 
     private func updateStatus() {
         let running = connections.values.filter { $0.pid > 0 }
-        guard !running.isEmpty else { onStatus?(nil); return }
+        guard !running.isEmpty else { sizes = [:]; onStatus?(nil); return }
         let ps = Process()
         ps.executableURL = URL(fileURLWithPath: "/bin/ps")
         ps.arguments = ["-axo", "pid=,ppid=,rss="]
@@ -289,9 +289,20 @@ final class LspCoordinator {
         let data = out.fileHandleForReading.readDataToEndOfFile()
         ps.waitUntilExit()
         let text = String(decoding: data, as: UTF8.self)
+        sizes = Dictionary(uniqueKeysWithValues: running.map { ($0.key, processTreeRSS(text, root: $0.pid)) })
+        renderStatus()
+    }
+
+    /// Memory (KB) of each server at the last `ps` sample.
+    private var sizes: [LspKey: Int] = [:]
+
+    /// The status text from the last sample; a selection change redraws without running `ps`.
+    private func renderStatus() {
+        let running = connections.values.filter { $0.pid > 0 && sizes[$0.key] != nil }
+        guard !running.isEmpty else { onStatus?(nil); return }
         let here = running.filter { $0.key.envId == selectedEnvId }
         var parts = here.sorted { $0.key.language < $1.key.language }.map { c -> String in
-            let kb = processTreeRSS(text, root: c.pid)
+            let kb = sizes[c.key] ?? 0
             let size = kb >= 1024 * 1024 ? String(format: "%.1f GB", Double(kb) / 1024 / 1024) : "\(kb / 1024) MB"
             return "\(c.key.language) \(size)"
         }
