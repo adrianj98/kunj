@@ -626,6 +626,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lsp?.stopAll()
         lsp = nil
         windowController.statusBar.showLanguageServers(nil)
+        windowController.sidebar.lspMemory = [:]
         settings?.cli = nil
         sessionsWindow?.cli = nil
         stopUsagePoll()
@@ -925,6 +926,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let column = windowController.terminalColumn
         let coordinator = LspCoordinator(cli: cli, registry: column.registry)
         coordinator.onStatus = { [weak self] text in self?.windowController.statusBar.showLanguageServers(text) }
+        coordinator.onMemory = { [weak self] memory in self?.windowController.sidebar.lspMemory = memory }
         coordinator.onMessage = { [weak column] text in column?.showMessage(text) }
         column.registry.lsp = coordinator
         coordinator.selectedEnvId = windowController.selectedEnvironment?.id

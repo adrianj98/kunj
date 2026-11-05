@@ -27,6 +27,8 @@ final class SidebarView: NSView {
     var hideEmptyRepos = false { didSet { reload() } }
     /// The summed CPU and memory of each worktree's kunj sessions, by standardized path.
     var usage: [String: SessionUsage] = [:] { didSet { list.rows.forEach { $0.usage = usageOf($0.environment) } } }
+    /// Each worktree's language server memory in bytes (by standardized path), added to its sessions' memory.
+    var lspMemory: [String: Double] = [:] { didSet { if lspMemory != oldValue { list.rows.forEach { $0.usage = usageOf($0.environment) } } } }
     /// The rows show the usage only while the mouse is over the sidebar.
     private(set) var hovering = false {
         didSet {
@@ -150,7 +152,10 @@ final class SidebarView: NSView {
     private func timeText(_ id: String) -> String { lastActivity(id).map { relativeTime($0) } ?? "" }
 
     private func usageOf(_ e: Environment) -> SessionUsage? {
-        e.path.flatMap { usage[($0 as NSString).standardizingPath] }
+        guard let path = e.path.map({ ($0 as NSString).standardizingPath }) else { return nil }
+        let sessions = usage[path]
+        guard let lsp = lspMemory[path] else { return sessions }
+        return SessionUsage(cpu: sessions?.cpu ?? 0, memoryBytes: (sessions?.memoryBytes ?? 0) + lsp)
     }
 
     private func reload() {

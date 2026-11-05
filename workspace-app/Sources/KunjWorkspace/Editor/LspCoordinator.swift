@@ -24,6 +24,8 @@ final class LspCoordinator {
     private var menu: DefinitionMenu?
     /// The status bar's text (nil: none running).
     var onStatus: ((String?) -> Void)?
+    /// Each worktree's language server memory in bytes, by standardized path, after every sample.
+    var onMemory: (([String: Double]) -> Void)?
     /// The environment selected in the sidebar: the status bar shows its servers and only counts the rest.
     var selectedEnvId: String? { didSet { if oldValue != selectedEnvId { renderStatus() } } }
     /// A message for the editor column (a server failed, nothing found).
@@ -125,6 +127,7 @@ final class LspCoordinator {
         let spec = cli.spawnSpec(["lsp", "run", key.language, "--branch", env.branch], cwd: env.repo.root)
         let c = LspConnection(key: key, root: root, spec: spec)
         branches[key] = env.branch
+        roots[key] = (root as NSString).standardizingPath
         c.onNotification = { [weak self] method, params in
             guard method == "textDocument/publishDiagnostics" else { return }
             let p = params as? [String: Any]
@@ -278,7 +281,7 @@ final class LspCoordinator {
 
     private func updateStatus() {
         let running = connections.values.filter { $0.pid > 0 }
-        guard !running.isEmpty else { sizes = [:]; onStatus?(nil); return }
+        guard !running.isEmpty else { sizes = [:]; onStatus?(nil); onMemory?([:]); return }
         let ps = Process()
         ps.executableURL = URL(fileURLWithPath: "/bin/ps")
         ps.arguments = ["-axo", "pid=,ppid=,rss="]
@@ -291,6 +294,9 @@ final class LspCoordinator {
         let text = String(decoding: data, as: UTF8.self)
         sizes = Dictionary(uniqueKeysWithValues: running.map { ($0.key, processTreeRSS(text, root: $0.pid)) })
         renderStatus()
+        var memory: [String: Double] = [:]
+        for (key, kb) in sizes { if let root = roots[key] { memory[root, default: 0] += Double(kb) * 1024 } }
+        onMemory?(memory)
     }
 
     /// Memory (KB) of each server at the last `ps` sample.
@@ -316,6 +322,8 @@ final class LspCoordinator {
 
     /// The branch each server was started for, so two worktrees' servers of one language are told apart.
     private var branches: [LspKey: String] = [:]
+    /// The worktree path each server runs in (standardized), for the sidebar's memory total.
+    private var roots: [LspKey: String] = [:]
 
     /// "typescript · feat/x": the language and the worktree's branch.
     func label(_ key: LspKey) -> String {

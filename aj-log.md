@@ -1592,3 +1592,9 @@ macOS app zip (`kunj install macos` needs a release that has one).
   (`+1 elsewhere`, or `1 server in other worktrees`). Why: it listed every worktree's servers, so it
   never changed when switching and showed a `develop` server while another worktree was selected.
 - Review fix: a sidebar selection redraws the indicator from the last `ps` sample (`sizes`) instead of running `ps` on the main thread.
+
+## 2026-11-05 — Workspace app: language server memory counts in the sidebar's usage
+
+- The sidebar row's hover usage (its sessions' CPU and memory) now adds the memory of that worktree's
+  language servers (`LspCoordinator.onMemory` → `SidebarView.lspMemory`). Why: the servers belong to the
+  worktree and can use hundreds of MB; leaving them out understated it.
