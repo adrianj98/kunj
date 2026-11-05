@@ -24,6 +24,8 @@ final class LspCoordinator {
     private var menu: DefinitionMenu?
     /// The status bar's text (nil: none running).
     var onStatus: ((String?) -> Void)?
+    /// The environment selected in the sidebar: the status bar shows its servers and only counts the rest.
+    var selectedEnvId: String? { didSet { if oldValue != selectedEnvId { updateStatus() } } }
     /// A message for the editor column (a server failed, nothing found).
     var onMessage: ((String) -> Void)?
 
@@ -287,10 +289,16 @@ final class LspCoordinator {
         let data = out.fileHandleForReading.readDataToEndOfFile()
         ps.waitUntilExit()
         let text = String(decoding: data, as: UTF8.self)
-        let parts = running.sorted { $0.key.description < $1.key.description }.map { c -> String in
+        let here = running.filter { $0.key.envId == selectedEnvId }
+        var parts = here.sorted { $0.key.language < $1.key.language }.map { c -> String in
             let kb = processTreeRSS(text, root: c.pid)
             let size = kb >= 1024 * 1024 ? String(format: "%.1f GB", Double(kb) / 1024 / 1024) : "\(kb / 1024) MB"
-            return "\(label(c.key)) \(size)"
+            return "\(c.key.language) \(size)"
+        }
+        let elsewhere = running.count - here.count
+        if elsewhere > 0 {
+            let servers = elsewhere == 1 ? "1 server" : "\(elsewhere) servers"
+            parts.append(here.isEmpty ? "\(servers) in other worktrees" : "+\(elsewhere) elsewhere")
         }
         onStatus?(parts.joined(separator: " · "))
     }

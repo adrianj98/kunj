@@ -1585,3 +1585,9 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - The status bar and Session > Language Servers show `typescript · <branch>` instead of two bare
   `typescript` entries. Why: one server runs per worktree, and two worktrees' servers looked like a
   duplicate.
+
+## 2026-11-05 — Workspace app: language server indicator follows the selected worktree
+
+- The status bar shows the selected worktree's servers (`typescript 342 MB`) and only counts the rest
+  (`+1 elsewhere`, or `1 server in other worktrees`). Why: it listed every worktree's servers, so it
+  never changed when switching and showed a `develop` server while another worktree was selected.

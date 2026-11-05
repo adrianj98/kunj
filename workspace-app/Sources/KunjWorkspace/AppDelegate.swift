@@ -299,8 +299,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         registry.onInput = { [weak keeper] id in keeper?.input(id) }
         windowController.lastActivity = { [weak keeper] id in keeper?.lastActivity(id) }
-        windowController.onSelect = { [weak keeper] env in
+        windowController.onSelect = { [weak keeper, weak self] env in
             keeper?.selected(env)
+            self?.lsp?.selectedEnvId = env?.id
             if let env { UserDefaults.standard.set(env.id, forKey: Self.selectedEnvironmentKey) }
         }
         return keeper
@@ -926,6 +927,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator.onStatus = { [weak self] text in self?.windowController.statusBar.showLanguageServers(text) }
         coordinator.onMessage = { [weak column] text in column?.showMessage(text) }
         column.registry.lsp = coordinator
+        coordinator.selectedEnvId = windowController.selectedEnvironment?.id
         lsp = coordinator
     }
 

@@ -188,5 +188,5 @@ What shipped differs from the design above in these places:
 - **Restart after a crash:** a server that exits by itself restarts on the next request; a third exit
   within 5 minutes disables it (search instead) until the last tab of that language closes.
 - **The diff** still uses the search-based jump.
-- **Memory:** the status bar sums the RSS of each `kunj lsp run` process tree (`processTreeRSS`, from
+- **Memory:** the status bar shows the selected worktree's servers and counts the others; it sums the RSS of each `kunj lsp run` process tree (`processTreeRSS`, from
   one `ps` every 10 s while a server runs).
