@@ -47,7 +47,7 @@ final class TabRegistry {
     private var editorPage: MonacoWebView?
     /// The editor tab the editor page shows on screen (set by the TerminalColumn), so key presses
     /// in the page count as activity of its environment.
-    weak var shownEditor: EditorTab?
+    weak var shownEditor: EditorTab? { didSet { if shownEditor !== oldValue { lsp?.editorShown(shownEditor) } } }
     private var keyMonitor: Any?
 
     init(theme: Theme) {

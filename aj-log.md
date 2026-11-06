@@ -1598,3 +1598,10 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - The sidebar row's hover usage (its sessions' CPU and memory) now adds the memory of that worktree's
   language servers (`LspCoordinator.onMemory` → `SidebarView.lspMemory`). Why: the servers belong to the
   worktree and can use hundreds of MB; leaving them out understated it.
+
+## 2026-11-06 — Workspace app: language servers only for the editor tab on screen
+
+- A server starts when an editor tab of its language is shown (`TabRegistry.shownEditor` →
+  `LspCoordinator.editorShown`), not when any tab opens; it stops `lsp.closedStopMinutes` (2) after its
+  tab stops showing. Background tabs keep their document and it is replayed on start. Why: the user
+  wants servers running only while the page is showing, not for every open tab in every worktree.

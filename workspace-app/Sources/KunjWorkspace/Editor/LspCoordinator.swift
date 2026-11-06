@@ -2,8 +2,9 @@ import AppKit
 import KunjWorkspaceCore
 
 /// Language servers for the editor tabs (docs/specs/language-servers.md): one `kunj lsp run` child
-/// per worktree and language, started when a tab of that language opens and stopped by `LspPolicy`
-/// (tabs closed, idle, at most `maxServers`). Swift speaks LSP with the real file URIs it holds; the
+/// per worktree and language, started when an editor tab of that language is on screen and stopped by
+/// `LspPolicy` (`closedStopMinutes` after it stops showing, idle, at most `maxServers`). Tabs in the
+/// background keep their document; it is sent to the server when the server (re)starts. Swift speaks LSP with the real file URIs it holds; the
 /// page only sends tab ids, positions and its text. Definition and references open inside the
 /// worktree only; without a server, or when it is slow or finds nothing, the search fallback runs.
 @MainActor
@@ -47,6 +48,7 @@ final class LspCoordinator {
             policy = LspPolicy(config: list)
             log("lsp: \(list.servers.filter(\.installed).map(\.language).joined(separator: ", ")) installed")
             for tab in registry.allEditors where tab.loaded { editorLoaded(tab) }
+            editorShown(registry.shownEditor)
         } catch {
             log("lsp: kunj lsp list failed (\(error)); go to definition searches")
         }
@@ -67,24 +69,51 @@ final class LspCoordinator {
 
     // MARK: tabs
 
-    /// A tab's file reached the page: its server starts (or is reused) and the document opens.
+    /// A tab's file reached the page: the document is tracked; it goes to the server when one runs.
     func editorLoaded(_ tab: EditorTab) {
-        guard documents[tab.id] == nil, var policy, let (key, server) = key(for: tab), let uri = uri(tab) else { return }
+        guard documents[tab.id] == nil, policy != nil, let (key, _) = key(for: tab), let uri = uri(tab) else { return }
         documents[tab.id] = (key, uri, 1)
-        let evict = policy.tabOpened(key, cached: server.restart == "cached", now: Date())
-        self.policy = policy
-        for k in evict ?? [] { stop(k) }
-        if evict != nil { start(key, env: tab.env) }
         Task {
             await page.call("lspTrack", ["id": tab.id, "on": true])
             await self.sendOpen(tab.id)
+        }
+        if registry.shownEditor === tab { editorShown(tab) }
+    }
+
+    /// The editor tab on screen (nil: none). Its server starts when not running; the previous one's
+    /// server is due to stop `closedStopMinutes` later unless it shows again.
+    private var shown: (tab: String, key: LspKey)?
+    func editorShown(_ tab: EditorTab?) {
+        let next = tab.flatMap { t in documents[t.id].map { (tab: t.id, key: $0.key) } }
+        guard next?.tab != shown?.tab, var policy else { return }
+        if let old = shown { policy.tabClosed(old.key, now: Date()) }
+        shown = next
+        if let next, let tab, let server = config?.servers.first(where: { $0.language == next.key.language }) {
+            let evict = policy.tabOpened(next.key, cached: server.restart == "cached", now: Date())
+            self.policy = policy
+            if let evict { startAndReplay(next.key, env: tab.env, evict: evict) }
+        } else {
+            self.policy = policy
+        }
+    }
+
+    /// Stops `evict`, starts the server and sends it every tracked document of its language.
+    private func startAndReplay(_ key: LspKey, env: Environment, evict: [LspKey]) {
+        for k in evict { stop(k) }
+        start(key, env: env)
+        for (id, doc) in documents where doc.key == key {
+            documents[id]?.version = 1
+            Task { await self.sendOpen(id) }
         }
     }
 
     func editorClosed(_ tab: EditorTab) {
         guard let doc = documents.removeValue(forKey: tab.id) else { return }
         connections[doc.key]?.notify("textDocument/didClose", ["textDocument": ["uri": doc.uri]])
-        policy?.tabClosed(doc.key, now: Date())
+        if shown?.tab == tab.id {
+            policy?.tabClosed(doc.key, now: Date())
+            shown = nil
+        }
         // a tab of a failed server reopening later gives it another chance
         if !documents.values.contains(where: { $0.key == doc.key }) { failed.remove(doc.key) }
     }
@@ -184,14 +213,7 @@ final class LspCoordinator {
         guard var policy else { return nil }
         let evict = policy.used(key, now: Date())
         self.policy = policy
-        if let evict {
-            for k in evict { stop(k) }
-            start(key, env: env)
-            for (id, doc) in documents where doc.key == key {
-                documents[id]?.version = 1
-                Task { await self.sendOpen(id) }
-            }
-        }
+        if let evict { startAndReplay(key, env: env, evict: evict) }
         guard let c = connections[key] else { return nil }
         let timeout = (config?.readyTimeoutMs ?? 1500) / 1000
         return await c.waitReady(timeout: timeout) ? c : nil
