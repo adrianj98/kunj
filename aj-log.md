@@ -1605,3 +1605,4 @@ macOS app zip (`kunj install macos` needs a release that has one).
   `LspCoordinator.editorShown`), not when any tab opens; it stops `lsp.closedStopMinutes` (2) after its
   tab stops showing. Background tabs keep their document and it is replayed on start. Why: the user
   wants servers running only while the page is showing, not for every open tab in every worktree.
+- Review fix: `editorShown` does not restart a server disabled after repeated crashes (`failed`).

@@ -88,7 +88,9 @@ final class LspCoordinator {
         guard next?.tab != shown?.tab, var policy else { return }
         if let old = shown { policy.tabClosed(old.key, now: Date()) }
         shown = next
-        if let next, let tab, let server = config?.servers.first(where: { $0.language == next.key.language }) {
+        // a server that kept crashing stays off (search instead) until its last tab closes
+        if let next, let tab, !failed.contains(next.key),
+           let server = config?.servers.first(where: { $0.language == next.key.language }) {
             let evict = policy.tabOpened(next.key, cached: server.restart == "cached", now: Date())
             self.policy = policy
             if let evict { startAndReplay(next.key, env: tab.env, evict: evict) }
