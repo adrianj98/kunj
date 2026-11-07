@@ -26,6 +26,7 @@ page only says where each thing stands.
 | [language-servers.md](language-servers.md) | Language servers for the workspace app's editor: `kunj lsp`, the Swift bridge and URI guard, start/stop/cap lifecycle using servers' disk caches | Shipped (the diff still searches) |
 | [agent-handoff.md](agent-handoff.md) | `/handoff` skill: a brief from the conversation, a new worktree, a detached agent with the brief as its prompt, opened in the workspace app; `kunj agent start --detach --prompt-file --open-in-app`, `kunj install skill` | Shipped |
 | [github-clone.md](github-clone.md) | `kunj repos github` / `kunj repos clone`, `repos.cloneDir`/`repos.cloneBare`, the workspace app's Clone from GitHub sheet | Shipped (CLI, workspace app) |
+| [container-parity.md](container-parity.md) | Where a branch container still differs from a worktree (rows, agent, creation, inside, keep files and secrets, ending, the three apps) and what closes each gap | Gap analysis written |
 
 ## Done
 
@@ -104,9 +105,12 @@ page only says where each thing stands.
 | Work | Spec | Notes |
 | --- | --- | --- |
 | Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
+| Container parity 1–2: `changedFiles`/`behind`/`upstream`/`startedAt`/`agent.session` in `ct list`, the workspace app listing containers through `worktree list --containers` with rows paired by branch; `kunj ct agent start\|status\|stop`, `--resume`, `--detach --prompt-file --open-in-app`, `--json`, live `agent` events for containers | [container-parity.md](container-parity.md#1-the-row) | First: what a person notices in the first minute |
+| Container parity 3: `ct start -c` through `resolveBaseRef()` (existing origin branch, `-b`, `--no-origin`, commit/tag bases via the bundle), hooks in `ct start --json` | [container-parity.md](container-parity.md#3-starting) | — |
+| Container parity 5–8: `keep apply`/`secret apply` for containers, one removal guard, language servers/Create PR/Forward Port/new window/`repo: null` events in the workspace app, agent status on worktree rows in VS Code and the menu bar app | [container-parity.md](container-parity.md#5-keep-files-and-secrets) | Independent of each other |
 | Remote containers: try an `--ssh` remote against a real second machine (and a Linux Docker host) | [remote-containers.md](remote-containers.md) | Everything so far ran with `kunj serve` on the same Mac |
-| Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
-| `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
+| Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap), [container-parity.md](container-parity.md#4-inside) | Also git config beyond identity and `container.dotfiles` |
+| `kunj` inside the container | [container-system.md](container-system.md#roadmap), [container-parity.md](container-parity.md#4-inside) | — |
 | Extra repos cloned next to the workspace | [container-system.md](container-system.md#roadmap) | — |
 | Phase 2 follow-ups left | [container-phase-2.md](container-phase-2.md) | `container.services` registered as a string setting (the registry has no object type); a snapshot copy reuses its own local branch on `ct start -c <same name>` (optional `switch -C`) |
 | MCP bridge follow-ups | [container-phase-2.md](container-phase-2.md#open-questions-and-roadmap) | Verify the download block in a visible browser |
