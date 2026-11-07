@@ -23,7 +23,7 @@ below relaxes an invariant from [container-system.md](container-system.md#rules-
 | 1. Rows and status: `changedFiles`, `behind`, `upstream`, `startedAt` in `ct list`; the app lists containers with PRs and pairs rows by branch | To do |
 | 2. Agents: `kunj ct agent start\|status\|stop`, `--resume`, `--detach --prompt-file --open-in-app`, `--json`, `--no-tmux`; live `agent` events for containers | To do |
 | 3. Creation: `ct start -c` with worktree semantics (existing origin branch, `-b`, `--no-origin`), create hooks reported in `--json` | To do |
-| 4. Inside the container: safe parts of `~/.claude`, git config beyond identity, shell dotfiles, `kunj` itself | To do (roadmap items, see container-system.md) |
+| 4. Inside: the personal blueprint (`~/.kunj/blueprint.json`: `git`, `claude`, `shell`, `files`, `aliases`, `kunj`), `blueprint init --personal`, `personalChanged`; `kunj` in the image | To do (design agreed 2026-11-07) |
 | 5. Keep files and secrets: `keep apply` and `secret apply` for a container | To do |
 | 6. Ending: one removal guard for both kinds; `worktree remove` ends its sessions | To do |
 | 7. Workspace app: language servers, CPU/memory, resume, Antigravity, Create PR, forward port, open in new window, `repo: null` events | To do |
@@ -122,31 +122,88 @@ Close it by giving `ct agent` the same verbs and options, sharing the option lis
   blueprint's `setup`/`maintain` (no hook runs inside; it would need `kunj` in the image, part 4).
 - **The New session sheet** already offers both kinds; after this part the two choices behave alike.
 
-## 4. Inside
+## 4. Inside: the personal blueprint
 
-Once inside, a container shell and agent miss what the host has.
+Once inside, a container shell and agent miss what the host has: no part of `~/.claude` (CLAUDE.md,
+settings, skills, agents, commands), git config beyond identity, the image's zshrc instead of the
+user's, and no `kunj`. Copying the host's files is not the answer: `settings.json` hooks call host
+binaries on every tool use, a `.gitconfig` can carry `credential.helper osxkeychain` (shadowing kunj's
+helper), `url.insteadOf` to SSH (no key), `core.hooksPath` and `include` (host paths) and
+`commit.gpgsign` (no key), and a `.zshrc` sources Homebrew and nvm by absolute path and can hide the
+image's node. The first two break pushes silently; the rest fail loudly on every shell or tool call.
 
-- **`~/.claude`.** Nothing is copied in: no `CLAUDE.md`, settings, skills, agents or commands, and
-  `kunj install skill` writes to the host only. Copy the safe parts at seed (and on `ct start`, as file
-  deliveries are): `~/.claude/CLAUDE.md`, `settings.json` minus credentials and `env`, `skills/`,
-  `agents/`, `commands/`; never `projects/`, session history or `.credentials.json`. A setting
-  `container.claudeConfig` (default `safe`, `none` to skip) and a `claudeConfig` stamp label so
-  `ct list` can say it is out of date, like `secretsChanged`. This is the roadmap's first item.
-- **Git config.** Only `user.name` and `user.email` are copied, once, at seed. Also carry the host's
-  `alias.*`, `pull.rebase` and `init.defaultBranch`; leave `core.editor` (the host's editor is not in the
-  image) and keep `commit.gpgsign` off (no keys); re-copy on `ct start` so a later change reaches an
-  existing container.
-- **Shell.** The host shell runs `$SHELL -l` with the user's dotfiles; the container runs the image's zsh
-  with `/etc/zsh/zshrc`. `container.files` can already copy any host file in; add `container.dotfiles`
-  (a list, default empty) so `.zshrc`/`.gitconfig`-style files are copied in with one setting and
-  re-copied on `ct start`, documented with the warning that a dotfile sourcing host paths will not work.
-- **`kunj` itself.** `kunj commit`, `kunj pr`, `kunj log`, `prompt-info` and the commit/PR hooks do not
-  exist in the container (the image has git, gh, node and Claude Code). Install the same version into the
-  image (`npm install -g kunj@<version>` in the sandbox Dockerfile, or `npm pack` of the running copy
-  streamed in for a dev build) with a sanitised config: `ai.*` and `preferences.*`, none of `container.*`,
-  `secrets.*`, `hooks.*` or remotes. AWS credentials for Bedrock then travel as container-targeted
-  secrets like any other. Roadmap item two.
-- **Extra repos** next to the workspace: roadmap item three, unchanged.
+So nothing is copied unless it is named. The blueprint is already the declarative description of a
+container, and it gets a second, personal layer with the same file format.
+
+**Two layers, one schema.**
+
+| Layer | File | Holds | Applied |
+| --- | --- | --- | --- |
+| Repository (as today) | `.kunj/blueprint.json`, from the working tree, else `origin/<default>` | `tools`, `setup`, `maintain`, `lockfiles`, `notes`, `image`, `services`, `aliases` | hashed into the snapshot, presets as root, `setup`/`maintain` as the user |
+| Personal | `~/.kunj/blueprint.json` (every repo), then `~/.kunj/<repo>/blueprint.json` (one repo) over it | `git`, `claude`, `shell`, `files`, `aliases`, `kunj` | on every `ct start` and resuming `open`, as the sandbox user, into the home volume; never hashed, never in a snapshot |
+
+The personal keys are refused in a committed blueprint (`parseBlueprint` names the file and says they
+belong in `~/.kunj/blueprint.json`); the repository keys are refused in `~/.kunj/blueprint.json`
+(they are per repository and would change every snapshot's hash per person). `~/.kunj/<repo>/blueprint.json`
+keeps its present role as the host copy of the repository blueprint (`blueprint init --global`): its
+repository keys count only when the repo has no blueprint, its personal keys always apply. Objects merge
+by key with the per-repo file winning, lists are replaced.
+
+**The personal keys.**
+
+- `git`: an object of config keys written with `git config --global` in the container. Allowlist:
+  `user.name`, `user.email`, `pull.rebase`, `push.default`, `init.defaultBranch`, `fetch.prune`,
+  `rerere.enabled`, `rerere.autoupdate`, `diff.algorithm`, `merge.conflictstyle`, and `alias.*` whose
+  value does not start with `!`. Any other key is refused at parse with the reason (`credential.*`,
+  `core.hooksPath`, `core.sshCommand`, `url.*`, `include*`, `gpg.*`, `commit.gpgsign` are named in the
+  message). Values are one line. Without `git.user.*` the host identity is copied as today.
+- `claude`: `{ "claudeMd": true, "skills": true | ["name", …], "agents": true | […], "commands": true |
+  […], "settings": { "model": "…", "permissions": { "deny": […] } } }`. Copied from `~/.claude/` into
+  the container's `~/.claude/` by name; `true` means every entry present. `settings` takes only `model`
+  and `permissions.deny`; never `hooks`, `apiKeyHelper`, `statusLine`, `env`, `enabledMcpjsonServers`,
+  and never `~/.claude.json` (`mcpServers` are host commands; the bridged one is written by kunj already).
+  kunj's agent hooks still arrive through `--settings`, so the container's `settings.json` is merged key
+  by key, not replaced, and a login made inside the container survives. A named skill missing on the
+  host is a warning, not a failure.
+- `shell`: `{ "rc": "<text>" }` or `{ "rcFile": "~/.kunj/container/zshrc" }`, written to `~/.kunj-rc`
+  in the container and sourced last by the image's `/etc/zsh/zshrc` and bash profile (an image change,
+  so the sandbox hash moves once). The user's text, run as the user; capped at 64 KB, UTF-8, otherwise
+  unvalidated. This replaces copying `.zshrc`.
+- `files`: `["~/.vimrc", { "from": "~/.config/nvim", "to": ".config/nvim" }]`, home-relative on both
+  sides, regular files and directories only, symlinks not followed outside the host home, 0600/0700,
+  1 MB per file. Personal dotfiles go here; `container.files` (any host path to any container path, as
+  root) stays for the rest.
+- `aliases`: merged over the repository's; personal ones are written to `~/.kunj-rc` as the user, not
+  to `/etc/profile.d` (that file is the snapshot's).
+- `kunj`: `{ "config": true }` renders the host's `ai.*`, `preferences.*` and commit style into the
+  container's `~/.kunj/config.json`; none of `container.*`, `secrets.*`, `hooks.*` or remotes. It needs
+  `kunj` in the image (below), and Bedrock credentials as container-targeted secrets.
+
+**Application.** After the seed and the secret files, through the tar stream as the sandbox user, on
+create and on every resume; a snapshot build gets none of it, so nothing personal reaches a shared
+image. kunj records what it wrote last time (`~/.claude/.kunj-personal.json` in the container) and
+removes only those entries on the next run, so a skill made inside the container is not clobbered.
+A label `kunj.personal` stamps the merged personal blueprint and the copied files' content;
+`ct list --json` reports `personalChanged` the way it reports `secretsChanged`, and the hint is
+`kunj ct start` (no rebuild: start re-applies). The start output has one line per part,
+`personal  git 4 keys · claude 3 skills, 1 agent · shell rc · 2 files`, and one `dropped` line per
+named thing not found on the host, so a missing alias has a visible reason.
+
+**Writing it.** `kunj ct blueprint init --personal [--repo] [--yes]` drafts the file from the host:
+the git identity and the allowlisted keys found in `git config --global --list` (`!` aliases and
+refused keys are printed as skipped), which of `skills/`, `agents/` and `commands/` exist in `~/.claude`
+(listed by name, not `true`, so a new host skill is a choice), `claudeMd` when the file exists, and
+`model` from `settings.json`; nothing else. It shows the draft and asks before writing
+`~/.kunj/blueprint.json` (`--repo` for `~/.kunj/<repo>/`). `kunj ct blueprint status` shows the
+personal layer next to the repository one and whether a container is behind it. The three settings
+this replaces (`container.claudeConfig`, `container.dotfiles`, a git allowlist setting) are not added.
+
+**`kunj` in the image.** `kunj commit`, `kunj pr`, `kunj log`, `prompt-info` and the commit and PR hooks
+do not exist in the container (the sandbox has git, gh, node and Claude Code). Install the same version
+into the sandbox image (`npm install -g kunj@<version>`, or `npm pack` of the running copy streamed in
+for a dev build); the `kunj.config` key above gives it a config. Roadmap item two.
+
+**Extra repos** next to the workspace: roadmap item three, unchanged.
 
 ## 5. Keep files and secrets
 
@@ -205,8 +262,9 @@ Beyond parts 1 and 2, the app itself treats the kinds differently in these place
 
 Parts 1 and 2 are what a person notices in the first minute (the row, the agent tab coming back) and
 touch only additive JSON and the app's listing; do them first. Part 3 next, because a wrong branch at
-creation is the most expensive surprise. Part 4 is the roadmap and the largest; the `~/.claude` copy
-is the part agents feel most. Parts 5 to 7 are independent of each other.
+creation is the most expensive surprise. Part 4 is the roadmap and the largest; the `claude` key
+of the personal blueprint is the part agents feel most, so build the layer with `git` and `claude`
+first and add `shell`, `files` and `kunj` after. Parts 5 to 7 are independent of each other.
 
 ## Decisions
 
@@ -216,3 +274,10 @@ is the part agents feel most. Parts 5 to 7 are independent of each other.
 - **2026-11-07** The workspace app lists containers through `worktree list --containers`, not `ct list`,
   so both kinds come from one call with the same PR data; `ct list` keeps its own fields and grows them
   additively.
+- **2026-11-07** What of the user goes into a container is declared, not copied: a personal blueprint
+  layer (`~/.kunj/blueprint.json`, per-repo overlay in `~/.kunj/<repo>/`) with the repository
+  blueprint's format, applied into the home volume on every start and never into a snapshot. Host
+  files are copied only when the blueprint names them, through allowlists for git config and Claude
+  settings, because a copied `.gitconfig`, `settings.json` or `.zshrc` breaks the container (credential
+  helper, `insteadOf`, hooks calling host binaries, host paths in rc files). No `container.dotfiles` or
+  `container.claudeConfig` settings.
