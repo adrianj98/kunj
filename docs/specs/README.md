@@ -26,6 +26,8 @@ page only says where each thing stands.
 | [language-servers.md](language-servers.md) | Language servers for the workspace app's editor: `kunj lsp`, the Swift bridge and URI guard, start/stop/cap lifecycle using servers' disk caches | Shipped (the diff still searches) |
 | [agent-handoff.md](agent-handoff.md) | `/handoff` skill: a brief from the conversation, a new worktree, a detached agent with the brief as its prompt, opened in the workspace app; `kunj agent start --detach --prompt-file --open-in-app`, `kunj install skill` | Shipped |
 | [github-clone.md](github-clone.md) | `kunj repos github` / `kunj repos clone`, `repos.cloneDir`/`repos.cloneBare`, the workspace app's Clone from GitHub sheet | Shipped (CLI, workspace app) |
+| [container-parity.md](container-parity.md) | Where a branch container still differs from a worktree (rows, agent, creation, inside, keep files and secrets, ending, the workspace app) and what closes each gap | Gap analysis written |
+| [personal-blueprint.md](personal-blueprint.md) | `~/.kunj/blueprint.json`: what of the user goes into a container (`git`, `claude`, `shell`, `files`, `aliases`), applied into the home volume on every start, `personalChanged`, `blueprint init --personal` | Shipped (Docker test and `kunj` key to do) |
 
 ## Done
 
@@ -92,6 +94,7 @@ page only says where each thing stands.
 | Workspace app: Settings › Containers **Test** for the Claude Code token (`kunj ct token check --json`), Set Up… through `kunj ct token setup` | [workspace-ide.md](workspace-ide.md#layout) | 14778e6 |
 | `kunj search`: every worktree by default; `--in branches,containers,commits,logs` / `--all`; `SearchJson` | [search.md](search.md) | 4b23f81 |
 | Workspace app: Search mode in the Files column (⌘⇧F), the selected worktree or container by default, all worktrees (and containers) from its menu; a match opens at its line | [search.md](search.md#workspace-app) | 4f97760 |
+| Personal blueprint (container parity part 4): `~/.kunj/blueprint.json` and the personal keys of `~/.kunj/<repo>/blueprint.json` (`git` allowlist, `claude`, `shell`, `files`, `aliases`) applied into the home volume on every start and resume, never into a snapshot; `personalChanged` in `ct list`; `blueprint init --personal [--repo]`; `blueprint status`; the sandbox zshrc sources `$HOME/.kunj/rc`; user docs | [personal-blueprint.md](personal-blueprint.md) | f087adb and the commit after; the Docker test and the `kunj` key are still to do |
 
 ## In progress
 
@@ -104,9 +107,12 @@ page only says where each thing stands.
 | Work | Spec | Notes |
 | --- | --- | --- |
 | Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
+| Container parity 1–2: `changedFiles`/`behind`/`upstream`/`startedAt`/`agent.session` in `ct list`, the workspace app listing containers through `worktree list --containers` with rows paired by branch; `kunj ct agent start\|status\|stop`, `--resume`, `--detach --prompt-file --open-in-app`, `--json`, live `agent` events for containers | [container-parity.md](container-parity.md#1-the-row) | First: what a person notices in the first minute |
+| Container parity 3: `ct start -c` through `resolveBaseRef()` (existing origin branch, `-b`, `--no-origin`, commit/tag bases via the bundle), hooks in `ct start --json` | [container-parity.md](container-parity.md#3-starting) | — |
+| Container parity 5–7: `keep apply`/`secret apply` for containers, one removal guard, language servers/Create PR/Forward Port/new window/`repo: null` events in the workspace app | [container-parity.md](container-parity.md#5-keep-files-and-secrets) | Independent of each other |
 | Remote containers: try an `--ssh` remote against a real second machine (and a Linux Docker host) | [remote-containers.md](remote-containers.md) | Everything so far ran with `kunj serve` on the same Mac |
-| Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
-| `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
+| `kunj` inside the container | [container-system.md](container-system.md#roadmap), [container-parity.md](container-parity.md#4-inside-the-personal-blueprint) | With the personal blueprint's `kunj.config` |
+| Personal blueprint: the Docker test (a skill and a git alias in a real container, `$HOME/.kunj/rc` sourced, a removed skill gone and a container-made one kept) | [personal-blueprint.md](personal-blueprint.md#tests) | Needs a Docker daemon |
 | Extra repos cloned next to the workspace | [container-system.md](container-system.md#roadmap) | — |
 | Phase 2 follow-ups left | [container-phase-2.md](container-phase-2.md) | `container.services` registered as a string setting (the registry has no object type); a snapshot copy reuses its own local branch on `ct start -c <same name>` (optional `switch -C`) |
 | MCP bridge follow-ups | [container-phase-2.md](container-phase-2.md#open-questions-and-roadmap) | Verify the download block in a visible browser |

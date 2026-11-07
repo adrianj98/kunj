@@ -38,6 +38,7 @@ import { ConfigVariables, expandVariables } from '../config-vars';
 import { KunjConfig } from '../../types';
 import { ContainerError, StartError, StartErrorCode } from './errors';
 import { installMcpConfig, mcpServers, readBridges } from './mcpbridge';
+import { PersonalPlan, PersonalSummary, ResolvedPersonal, applyPersonal, planPersonal, resolvePersonal } from './personal';
 import { readForwards, recordIsFor } from './autoforward';
 import { DIND_DATA, DIND_DOMAINS, DindMode, checkDind, checkRecordedDind, composeHint, dindHostInfo, dindMode, dindSource, startDockerd } from './dind';
 
@@ -112,6 +113,10 @@ export interface StartOptions {
    * gh fallback, `files` (relative to /workspace) are rendered on create and resume, `stamp` is
    * recorded as kunj.secrets. Ignored for a snapshot build (namesFor). */
   secrets?: { env: Record<string, string>; files: Map<string, string>; stamp: string };
+  /** The personal blueprint (null: none); resolved here when undefined (~/.kunj/blueprint.json, then
+   * ~/.kunj/<repo>/blueprint.json). Applied into the home volume on create and every resume, never
+   * for a snapshot build (namesFor). */
+  personal?: ResolvedPersonal | null;
 }
 
 export interface StartResult {
@@ -143,6 +148,8 @@ export interface StartResult {
   services?: string[];
   /** Docker-in-Docker mode; only when it is on */
   dind?: Exclude<DindMode, 'off'>;
+  /** What the personal blueprint put into the home volume; only when there is one */
+  personal?: PersonalSummary;
 }
 
 function message(err: unknown): string {
@@ -729,6 +736,28 @@ async function renderSecretFiles(backend: ContainerBackend, id: string, user: st
   return rels;
 }
 
+/**
+ * The personal blueprint's plan for this start: the host side read now, so a bad file fails before
+ * anything is created; none for a snapshot build. A warning per dropped entry.
+ */
+function personalPlan(options: StartOptions): PersonalPlan | undefined {
+  if (options.namesFor !== undefined) return undefined;
+  const resolved = options.personal === undefined ? resolvePersonal({ globalKunjDir: getGlobalKunjDir(), repoKunjDir: getKunjDir() }) : options.personal;
+  if (!resolved) return undefined;
+  return planPersonal(resolved, options.warn);
+}
+
+// Into the home volume as the user, after the seed and the secret files; a failure is a warning,
+// because the container works without it and the stamp stays behind for ct list to report
+async function applyPersonalLayer(backend: ContainerBackend, id: string, user: string, home: string | null, plan: PersonalPlan | undefined, warn: (m: string) => void): Promise<void> {
+  if (!plan) return;
+  try {
+    await applyPersonal(backend, id, user, await containerHome(backend, id, user, home), plan, warn);
+  } catch (err) {
+    warn(`Personal blueprint not applied: ${message(err)}`);
+  }
+}
+
 /** Shown on a resume whose container was created with other secrets: env reaches it only on recreate. */
 export function secretsRebuildHint(container: string, branch: string): string {
   return `Secrets changed since ${container} was created; environment secrets reach it only when it is recreated: kunj ct start ${branch} --rebuild`;
@@ -832,6 +861,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     );
   }
   const secrets = checkedSecrets(options);
+  const personal = personalPlan(options);
   // A stored secret wins over container.env, and a stored token means gh is never asked
   const hostEnv = { ...forwardedEnv(cfg, options.hostEnv, vars), ...secrets?.env };
   // gh is asked only when a token is needed: a new container's env-file, or seeding a resumed one
@@ -842,7 +872,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       const env = await withTokens();
       return TOKEN_KEYS.some(k => env[k]);
     };
-    return resume(backend, options, names, origin, hostEnv, hasToken, engine.runtimes, secrets);
+    return resume(backend, options, names, origin, hostEnv, hasToken, engine.runtimes, secrets, personal);
   }
   const env = await withTokens();
   const hasToken = TOKEN_KEYS.some(k => env[k]);
@@ -1036,6 +1066,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     // 9. Files
     const files = await step('docker', () => copyFiles(backend, id, user, home, options, vars));
     if (secrets) await step('docker', () => renderSecretFiles(backend, id, user, secrets.files));
+    await applyPersonalLayer(backend, id, user, home, personal, warn);
     await mcpConfig(backend, id, user, options);
 
     // 10. Blueprint: presets and setup once (a snapshot already holds them), maintain every later start
@@ -1075,6 +1106,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       ...(blueprint ? { blueprint } : {}),
       ...(services.length ? { services: services.map(s => s.name) } : {}),
       ...(dind !== 'off' ? { dind } : {}),
+      ...(personal ? { personal: personal.summary } : {}),
     };
   } catch (err) {
     if (options.keepOnError && mainRun && !ready) {
@@ -1164,7 +1196,8 @@ async function resume(
   env: Record<string, string>,
   hasToken: () => Promise<boolean>,
   runtimes: string[],
-  secrets: StartSecrets | undefined
+  secrets: StartSecrets | undefined,
+  personal: PersonalPlan | undefined
 ): Promise<StartResult> {
   const { repo, warn } = options;
   const labelBranch = options.namesFor ?? options.branch;
@@ -1211,6 +1244,7 @@ async function resume(
     firewall,
     ...(serviceList.length ? { services: serviceList } : {}),
     ...(dind !== 'off' ? { dind } : {}),
+    ...(personal ? { personal: personal.summary } : {}),
   };
   const mainWasRunning = main.state === 'running';
   const helperRunning = helper?.state === 'running';
@@ -1241,9 +1275,10 @@ async function resume(
         keepHelper = true;
       }
     }
-    // File deliveries are rendered again on every start, the running container's included
+    // File deliveries and the personal layer are rendered again on every start, the running container's included
     const renderSecrets = async (user: string) => {
       if (secrets) await step('docker', () => renderSecretFiles(backend, main.id, user, secrets.files));
+      await applyPersonalLayer(backend, main.id, user, user ? `/home/${user}` : null, personal, warn);
     };
     if (mainWasRunning && keepHelper) {
       await renderSecrets(recorded.user ?? '');

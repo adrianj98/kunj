@@ -249,9 +249,12 @@ mirrors, the summaries and `claudeTokenSetupSpec`) and the Containers section of
 - [x] **Secret manager** ([Secrets](#secrets)): `kunj secret set|import|list|get|rm|env|apply`,
   `kunj run`, encrypted vault with a Keychain key, delivery to containers and worktrees by explicit
   target, `.env` import. Shipped; plan `docs/superpowers/plans/2026-10-23-secret-manager.md`.
-- Copy the safe parts of `~/.claude` (CLAUDE.md, settings, skills, agents, commands) into containers;
-  never session history or credentials.
-- Run `kunj` itself inside the container, with the user's kunj config minus sensitive settings.
+- The personal blueprint ([container-parity.md](container-parity.md#4-inside-the-personal-blueprint)):
+  `~/.kunj/blueprint.json` names what of the user goes into a container (`git` keys, `claude` skills,
+  agents, commands and two settings, a shell rc, home files, aliases); never session history,
+  credentials, hooks or MCP servers, and never into a snapshot.
+- Run `kunj` itself inside the container, with the user's kunj config minus sensitive settings
+  (the personal blueprint's `kunj.config`).
 - Extra repos cloned next to the workspace (driveday's `../ideazone`).
 - Containers in the VS Code extension and the macOS app, reading `kunj ct list --json`.
 - Phase 3, the workspace IDE: [workspace-ide.md](workspace-ide.md).

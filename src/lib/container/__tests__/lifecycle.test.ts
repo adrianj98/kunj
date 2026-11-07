@@ -14,6 +14,7 @@ import { describeGuard } from '../env';
 import { ResolvedBlueprint, blueprintHash, parseBlueprint, snapshotTag } from '../blueprint';
 import { Preset } from '../presets';
 import { ALIASES_FILE } from '../provision';
+import { ResolvedPersonal, parsePersonal } from '../personal';
 import { planSnapshot } from '../snapshot';
 import { KunjConfig } from '../../../types';
 import { TokenLookup } from '../tokens';
@@ -2129,5 +2130,97 @@ describe('secrets', () => {
     expect(renderCalls(b)).toEqual([]);
     expect(JSON.stringify(b.calls)).not.toContain(VALUE);
     expect(b.stdinData.join('')).not.toContain(FILE_VALUE);
+  });
+});
+
+describe('personal blueprint', () => {
+  function personal(doc: object): ResolvedPersonal {
+    const home = fs.mkdtempSync(path.join(tmp, 'home-'));
+    const claudeDir = path.join(home, '.claude');
+    fs.mkdirSync(path.join(claudeDir, 'skills', 'handoff'), { recursive: true });
+    fs.writeFileSync(path.join(claudeDir, 'skills', 'handoff', 'SKILL.md'), 'handoff\n');
+    return { blueprint: parsePersonal(JSON.stringify(doc), 'p.json', 'global'), sources: [{ path: 'p.json', scope: 'global' }], home, claudeDir };
+  }
+
+  /** The personal layer's execs: the record read, the tar write and the git config, in order */
+  function personalCalls(b: FakeBackend): Array<{ kind: 'read' | 'write' | 'git'; argv: string[]; io: ExecIO; at: number; tar: string }> {
+    const out: Array<{ kind: 'read' | 'write' | 'git'; argv: string[]; io: ExecIO; at: number; tar: string }> = [];
+    b.callsOf('exec').forEach((a, i) => {
+      const argv = a[1] as string[];
+      const script = argv[2] ?? '';
+      const kind = script.includes('personal.json') && script.includes('cat') ? 'read' : script.includes('rmdir -p') ? 'write' : script.includes('--unset-all') ? 'git' : null;
+      if (kind) out.push({ kind, argv, io: a[2] as ExecIO, at: i, tar: b.stdinData[i] ?? '' });
+    });
+    return out;
+  }
+
+  it('is applied on create after the secret files, as the user, into the home; the result summarises it', async () => {
+    const b = backend();
+    const secrets = { env: {}, files: new Map([['.env', 'A=1\n']]), stamp: 'abc123abc123' };
+    const result = await startContainer(b, options({ personal: personal({ claude: { skills: ['handoff'] }, git: { 'pull.rebase': 'true' }, aliases: { t: 'npm test' } }), secrets }));
+    const calls = personalCalls(b);
+    expect(calls.map(c => c.kind)).toEqual(['read', 'write', 'git']);
+    for (const c of calls) {
+      expect(c.io.user).toBe('dev');
+      expect(c.argv[4]).toBe('/home/dev');
+    }
+    const secretAt = b.callsOf('exec').findIndex(a => (a[1] as string[])[2]?.includes('.git/info/exclude'));
+    expect(secretAt).toBeGreaterThan(-1);
+    expect(calls[0].at).toBeGreaterThan(secretAt);
+    expect(calls[1].tar).toContain('.claude/skills/handoff/SKILL.md');
+    expect(calls[1].tar).toContain('.kunj/rc');
+    expect(calls[1].tar).toContain('.kunj/personal.json');
+    expect(calls[2].argv.slice(5)).toEqual(['0', 'pull.rebase', 'true']);
+    expect(result.personal).toEqual({ git: ['pull.rebase'], claude: { claudeMd: false, skills: ['handoff'], agents: [], commands: [], settings: [] }, shell: false, files: [], dropped: [] });
+  });
+
+  it('is applied again on a resume, also of a running container', async () => {
+    const b = backend();
+    b.execResults.set(MARKER, { exitCode: 0, stdout: '' });
+    b.existing = [info({ state: 'exited' })];
+    const result = await startContainer(b, options({ personal: personal({ claude: { skills: ['handoff'] } }) }));
+    expect(result.created).toBe(false);
+    expect(personalCalls(b).map(c => c.kind)).toEqual(['read', 'write']);
+    expect(result.personal?.claude.skills).toEqual(['handoff']);
+
+    const running = backend();
+    running.existing = [info({}), helperInfo()];
+    await startContainer(running, options({ personal: personal({ claude: { skills: ['handoff'] } }) }));
+    expect(personalCalls(running).map(c => c.kind)).toEqual(['read', 'write']);
+    expect(running.methods().filter(m => ['run', 'remove', 'stop', 'start'].includes(m))).toEqual([]);
+  });
+
+  it('never reaches a snapshot build, and nothing happens without a personal blueprint', async () => {
+    const b = backend();
+    const result = await startContainer(b, options({ namesFor: `${BRANCH}:snapshot`, personal: personal({ claude: { skills: ['handoff'] } }) }));
+    expect(personalCalls(b)).toEqual([]);
+    expect(b.stdinData.join('')).not.toContain('handoff');
+    expect(result.personal).toBeUndefined();
+
+    const none = backend();
+    const r2 = await startContainer(none, options({ personal: null }));
+    expect(personalCalls(none)).toEqual([]);
+    expect(r2.personal).toBeUndefined();
+  });
+
+  it('resolves ~/.kunj/blueprint.json itself when not given one; a bad file fails before anything is created', async () => {
+    const globalDir = path.join(tmp, 'global');
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(path.join(globalDir, 'blueprint.json'), '{"git": {"credential.helper": "osxkeychain"}}');
+    const b = backend();
+    await expect(startContainer(b, options({ personal: undefined }))).rejects.toThrow('git."credential.helper" is not allowed in a container');
+    expect(b.callsOf('run')).toEqual([]);
+    fs.rmSync(path.join(globalDir, 'blueprint.json'));
+  });
+
+  it('a failed write is a warning and the start succeeds; a dropped entry warns and is in the result', async () => {
+    const b = backend();
+    b.execHandler = (_id, cmd, io) => (io.stdin && cmd[2]?.includes('rmdir -p') ? Promise.resolve({ exitCode: 3, stdout: '' }) : undefined);
+    const warnings: string[] = [];
+    const result = await startContainer(b, options({ personal: personal({ claude: { skills: ['handoff', 'missing'] } }), warn: m => warnings.push(m) }));
+    expect(result.created).toBe(true);
+    expect(warnings).toContain('personal blueprint: claude.skills missing dropped (not in ~/.claude/skills)');
+    expect(warnings.some(w => w.startsWith('Personal blueprint not applied: Writing the personal blueprint into the container failed (exit 3)'))).toBe(true);
+    expect(result.personal?.dropped).toEqual([{ entry: 'claude.skills missing', reason: 'not in ~/.claude/skills' }]);
   });
 });

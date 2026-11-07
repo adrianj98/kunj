@@ -188,6 +188,7 @@ import inquirer from 'inquirer';
 import { NETHELPER_IMAGE } from '../../lib/container/image';
 import { getVersion } from '../../lib/version';
 import { SecretEntry, vaultFiles, vaultStamp, writeVault } from '../../lib/secrets/vault';
+import { personalStamp, resolvePersonal } from '../../lib/container/personal';
 
 const REPO_ID = repoIdFromUrl('https://github.com/acme/app.git');
 
@@ -1216,6 +1217,66 @@ describe('ContainerCommand', () => {
       expect(lines.filter(l => /push/i.test(l))).toEqual([]);
     });
 
+    it('blueprint init --personal drafts ~/.kunj/blueprint.json from the host and keeps shell, files and aliases', async () => {
+      const home = path.join(tmp, 'home');
+      const claudeDir = path.join(home, '.claude');
+      fs.mkdirSync(path.join(claudeDir, 'skills', 'handoff'), { recursive: true });
+      fs.writeFileSync(path.join(claudeDir, 'skills', 'handoff', 'SKILL.md'), 'x\n');
+      fs.writeFileSync(path.join(claudeDir, 'CLAUDE.md'), 'me\n');
+      fs.writeFileSync(path.join(claudeDir, 'settings.json'), '{"model": "opus", "hooks": {}}');
+      const globalDir = path.join(tmp, 'kunj');
+      (config.getGlobalKunjDir as jest.Mock).mockImplementation(() => globalDir);
+      const gitList = ['user.name\nAda', 'user.email\nada@example.com', 'pull.rebase\ntrue', 'credential.helper\nosxkeychain', 'alias.lg\nlog --graph', 'alias.sh\n!sh -c x', 'url.git@github.com:.insteadof\nhttps://github.com/'].join('\0') + '\0';
+      const host = { home, claudeDir, gitList: () => gitList };
+      try {
+        fs.mkdirSync(globalDir, { recursive: true });
+        fs.writeFileSync(path.join(globalDir, 'blueprint.json'), '{"git": {"pull.rebase": "false"}, "shell": {"rc": "x"}, "aliases": {"t": "npm test"}, "tools": {"node": "1"}}');
+        await new ContainerCommand({ personalHost: host }).execute('blueprint', 'init', [], { personal: true, yes: true, json: true });
+        const file = path.join(globalDir, 'blueprint.json');
+        const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+        expect(written).toEqual({
+          git: { 'user.name': 'Ada', 'user.email': 'ada@example.com', 'pull.rebase': 'true', 'alias.lg': 'log --graph' },
+          claude: { claudeMd: true, skills: ['handoff'], settings: { model: 'opus' } },
+          shell: { rc: 'x' },
+          aliases: { t: 'npm test' },
+        });
+        const json = JSON.parse(stdout.join(''));
+        expect(json.path).toBe(file);
+        expect(json.skipped).toEqual([
+          { key: 'credential.helper', reason: "it would shadow kunj's credential helper" },
+          { key: 'alias.sh', reason: 'runs a shell command' },
+          { key: 'url.git@github.com:.insteadof', reason: 'an insteadOf rewrite would break the token-based origin' },
+        ]);
+        expect(json.reasons).toEqual(['git: 4 keys from git config --global', 'claude: ~/.claude/CLAUDE.md', 'claude: 1 skills in ~/.claude/skills', 'claude: model opus from ~/.claude/settings.json']);
+
+        // --repo writes the personal keys next to the host copy's repository keys
+        fs.mkdirSync(mockKunjDir, { recursive: true });
+        fs.writeFileSync(path.join(mockKunjDir, 'blueprint.json'), '{"tools": {"node": "22"}, "setup": ["npm ci"]}');
+        stdout.length = 0;
+        await new ContainerCommand({ personalHost: host }).execute('blueprint', 'init', [], { personal: true, repo: true, yes: true });
+        const repoFile = JSON.parse(fs.readFileSync(path.join(mockKunjDir, 'blueprint.json'), 'utf8'));
+        expect(repoFile.tools).toEqual({ node: '22' });
+        expect(repoFile.setup).toEqual(['npm ci']);
+        expect(repoFile.git['user.name']).toBe('Ada');
+        const lines = logSpy.mock.calls.map(c => c.join(' '));
+        expect(lines).toContain(`✓ Wrote ${path.join(mockKunjDir, 'blueprint.json')}`);
+        expect(lines.some(l => l.includes('applies   git 4 keys · claude CLAUDE.md, 1 skill, settings'))).toBe(true);
+
+        // status shows the personal layer, with or without a repository blueprint
+        (resolveBlueprint as jest.Mock).mockResolvedValue(null);
+        stdout.length = 0;
+        await new ContainerCommand({ personalHost: host }).execute('blueprint', 'status', [], { json: true });
+        const status = JSON.parse(stdout.join(''));
+        expect(status.source).toBeNull();
+        expect(status.personal.files).toEqual([file, path.join(mockKunjDir, 'blueprint.json')]);
+        expect(status.personal.summary.git).toEqual(['alias.lg', 'pull.rebase', 'user.email', 'user.name']);
+        expect(status.personal.stamp).toMatch(/^[0-9a-f]{12}$/);
+        expect(errors).toEqual([]);
+      } finally {
+        (config.getGlobalKunjDir as jest.Mock).mockImplementation(() => '/kunj');
+      }
+    });
+
     it('blueprint init --global writes to the kunj dir', async () => {
       await new ContainerCommand().execute('blueprint', 'init', [], { yes: true, global: true });
       expect(fs.existsSync(path.join(mockKunjDir, 'blueprint.json'))).toBe(true);
@@ -2082,5 +2143,30 @@ describe('ct secrets', () => {
     const changed = Object.fromEntries(json.containers.map((c: { branch: string; secretsChanged?: boolean }) => [c.branch, c.secretsChanged]));
     expect(changed).toEqual({ same: false, old: true, none: true });
     expect(keychainRun).not.toHaveBeenCalled();
+  });
+
+  it('list --json reports personalChanged for running containers from the stamp the status script read', async () => {
+    fs.mkdirSync(globalDir(), { recursive: true });
+    fs.writeFileSync(path.join(globalDir(), 'blueprint.json'), '{"git": {"pull.rebase": "true"}}');
+    const stamp = personalStamp(resolvePersonal({ globalKunjDir: globalDir(), repoKunjDir: repoDir() }));
+    expect(stamp).toMatch(/^[0-9a-f]{12}$/);
+    const byBranch: Record<string, string | undefined> = { same: stamp, old: '000000000000', none: '', unknown: undefined };
+    backend.existing = ['same', 'old', 'none', 'unknown'].map(b => mainContainer(b, { id: `cid-${b}` }));
+    backend.existing.push(mainContainer('stopped', { id: 'cid-stopped', state: 'exited' }));
+    (lifecycle.containerStatus as jest.Mock).mockImplementation(async (_b: unknown, id: string) => {
+      const branch = id.replace('cid-', '');
+      return { agentRunning: false, agentState: null, head: null, ahead: 0, dirty: false, status: 'ok', ...(byBranch[branch] !== undefined ? { personalStamp: byBranch[branch] } : {}) };
+    });
+    await new ContainerCommand({ secretsUnlock: { ...unlock, env: {} } }).execute('list', { json: true });
+    const json = JSON.parse(stdout.join(''));
+    const changed = Object.fromEntries(json.containers.map((c: { branch: string; personalChanged?: boolean }) => [c.branch, c.personalChanged]));
+    expect(changed).toEqual({ same: false, old: true, none: true, unknown: undefined, stopped: undefined });
+
+    // a personal blueprint that does not parse is a warning, never a failed listing
+    fs.writeFileSync(path.join(globalDir(), 'blueprint.json'), '{"git": {"credential.helper": "x"}}');
+    stdout.length = 0;
+    await new ContainerCommand({ secretsUnlock: { ...unlock, env: {} } }).execute('list', { json: true });
+    const again = JSON.parse(stdout.join(''));
+    expect(again.containers.every((c: { personalChanged?: boolean }) => c.personalChanged === undefined)).toBe(true);
   });
 });

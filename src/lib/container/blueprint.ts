@@ -40,7 +40,11 @@ export interface Blueprint {
   ignoredKeys: string[];
 }
 
-const KNOWN_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes', 'image', 'services', 'aliases']);
+/** The repository blueprint's keys, hashed into the snapshot */
+export const REPO_BLUEPRINT_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes', 'image', 'services']);
+/** The personal blueprint's keys (personal.ts); `aliases` is in both */
+export const PERSONAL_KEYS = ['git', 'claude', 'shell', 'files', 'kunj'] as const;
+const KNOWN_KEYS = new Set([...REPO_BLUEPRINT_KEYS, 'aliases']);
 
 export const SANDBOX_IMAGE_KEYWORD = 'sandbox';
 
@@ -58,7 +62,12 @@ function commandList(raw: Record<string, unknown>, key: string, source: string):
   return v;
 }
 
-export function parseBlueprint(text: string, source: string): Blueprint {
+/**
+ * Parse a repository blueprint. A personal key (git, claude, ...) is refused unless `personal` is
+ * 'ignore' (~/.kunj/<repo>/blueprint.json, where personal.ts reads them): a committed blueprint
+ * would otherwise carry one person's config into everyone's snapshot.
+ */
+export function parseBlueprint(text: string, source: string, opts: { personal?: 'refuse' | 'ignore' } = {}): Blueprint {
   let raw: unknown;
   try {
     raw = parseJsonc(text);
@@ -69,6 +78,10 @@ export function parseBlueprint(text: string, source: string): Blueprint {
     throw new ContainerError(`${source}: blueprint must be a JSON object, e.g. {"tools": {"node": "20"}, "setup": ["npm ci"]}.`);
   }
   const obj = raw as Record<string, unknown>;
+  const personalKey = (PERSONAL_KEYS as readonly string[]).find(k => obj[k] !== undefined);
+  if (personalKey && opts.personal !== 'ignore') {
+    throw new ContainerError(`${source}: "${personalKey}" is personal and belongs in ~/.kunj/blueprint.json, not in the repository's blueprint.`);
+  }
 
   const tools: Record<string, ToolValue> = {};
   if (obj.tools !== undefined) {
@@ -128,7 +141,7 @@ export function parseBlueprint(text: string, source: string): Blueprint {
     ...(obj.image !== undefined ? { image: obj.image as string } : {}),
     ...(services.length ? { services } : {}),
     ...(Object.keys(aliases).length ? { aliases } : {}),
-    ignoredKeys: Object.keys(obj).filter(k => !KNOWN_KEYS.has(k)).sort(),
+    ignoredKeys: Object.keys(obj).filter(k => !KNOWN_KEYS.has(k) && !(PERSONAL_KEYS as readonly string[]).includes(k)).sort(),
   };
 }
 
@@ -182,7 +195,7 @@ export async function resolveBlueprint(opts: {
   const hostPath = path.join(opts.repoKunjDir, 'blueprint.json');
   if (fs.existsSync(hostPath)) {
     const text = fs.readFileSync(hostPath, 'utf8');
-    return { blueprint: parseBlueprint(text, hostPath), source: 'host', path: hostPath, text };
+    return { blueprint: parseBlueprint(text, hostPath, { personal: 'ignore' }), source: 'host', path: hostPath, text };
   }
   return null;
 }

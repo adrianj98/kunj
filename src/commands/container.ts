@@ -24,6 +24,7 @@
 // imports out of this module, and load inquirer lazily.
 
 import chalk from 'chalk';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -46,6 +47,7 @@ import { ForwardRecord, HELPER_NO_SOCAT, autoForwardIgnore, detachedLogFile, for
 import { BridgeRecord, bridgeFor, installMcpConfig, mcpServers, portHint, readBridges, runBridge, updateBridges } from '../lib/container/mcpbridge';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerError } from '../lib/container/errors';
+import { PersonalSummary, defaultClaudeDir, describePersonal, inferPersonal, parsePersonal, personalStamp, planPersonal, resolvePersonal } from '../lib/container/personal';
 import { describeError, formatError } from '../lib/errors';
 import { readWorkspaceFile, validateWorkspacePath, writeWorkspaceFile } from '../lib/container/files';
 import { grepContainer, mapLimit } from '../lib/search';
@@ -66,7 +68,8 @@ import {
 import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
 import { CONTAINER_AGENT_STATE_FILE, agentArgv, checkShellSessionId, withAgentHooks } from '../lib/agent-session';
 import { parseOrigin, stripUserinfo } from '../lib/container/seed';
-import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, SANDBOX_IMAGE_KEYWORD, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
+import { BLUEPRINT_PATH, Blueprint, REPO_BLUEPRINT_KEYS, ResolvedBlueprint, SANDBOX_IMAGE_KEYWORD, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
+import { parseJsonc } from '../lib/container/devcontainer';
 import { inferBlueprint } from '../lib/container/infer';
 import { precheckDind } from '../lib/container/dind';
 import { ensureSnapshot, planSnapshot, removeSnapshots, snapshotBlueprint, snapshotStatus } from '../lib/container/snapshot';
@@ -94,6 +97,8 @@ interface ContainerOptions {
   snapshot?: boolean;
   global?: boolean;
   yes?: boolean;
+  personal?: boolean;
+  repo?: boolean;
   blueprint?: string;
   bundle?: boolean;
   follow?: boolean;
@@ -137,7 +142,10 @@ export class ContainerCommand extends BaseCommand {
   private readonly selections = new Map<string, BackendSelection>();
   private readonly secretsUnlock: SecretsUnlock;
 
-  constructor(deps: { secretsUnlock?: SecretsUnlock } = {}) {
+  /** The host side `blueprint init --personal` reads (tests replace it) */
+  private readonly personalHost: { home: string; claudeDir: string; gitList: () => string };
+
+  constructor(deps: { secretsUnlock?: SecretsUnlock; personalHost?: { home: string; claudeDir: string; gitList: () => string } } = {}) {
     super({
       name: 'container',
       aliases: ['ct'],
@@ -162,6 +170,8 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--auto', description: '[forward] Forward every port the container starts listening on (>= 1024, not in container.forward.ignore)' },
         { flags: '--detach', description: '[forward --auto] Run the forwarder in the background; it exits when the container stops' },
         { flags: '--global', description: '[blueprint init] Write the host copy (~/.kunj/<repo>/blueprint.json) instead of .kunj/blueprint.json' },
+        { flags: '--personal', description: '[blueprint init] Draft your personal blueprint (~/.kunj/blueprint.json: git keys, Claude skills, model) from this machine' },
+        { flags: '--repo', description: '[blueprint init --personal] Write it for this repository only (~/.kunj/<repo>/blueprint.json)' },
         { flags: '-y, --yes', description: '[blueprint init] Accept the inferred blueprint and overwrite an existing file; [prune] remove without asking, also from a script or with --json' },
         { flags: '--no-bundle', description: '[blueprint snapshot] Clone from origin in the container instead of a bundle the host fetched (origin must be public)' },
         { flags: '--blueprint <path>', description: '[blueprint snapshot|status] Use this blueprint file instead of the resolved one' },
@@ -195,6 +205,7 @@ export class ContainerCommand extends BaseCommand {
         '',
         'Blueprint (how a new container is set up: tools, setup and maintain commands):',
         '  blueprint init [--global] [--yes]    infer one from this checkout and write .kunj/blueprint.json',
+        '  blueprint init --personal [--repo]   draft ~/.kunj/blueprint.json (what of you goes into every container)',
         '  blueprint snapshot [--base <ref>]    optional: build the snapshot ahead of time (--rebuild forces it)',
         '  blueprint status                     which blueprint, its hash and snapshot, stale or not',
         '  blueprint remove                     delete this repository\'s snapshot images',
@@ -223,6 +234,17 @@ export class ContainerCommand extends BaseCommand {
       ].join('\n'),
     });
     this.secretsUnlock = deps.secretsUnlock ?? {};
+    this.personalHost = deps.personalHost ?? {
+      home: os.homedir(),
+      claudeDir: defaultClaudeDir(),
+      gitList: () => {
+        try {
+          return execFileSync('git', ['config', '--global', '--list', '--null'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        } catch {
+          return '';
+        }
+      },
+    };
   }
 
   async execute(action?: any, target?: any, extra?: any, options: ContainerOptions = {}): Promise<void> {
@@ -469,6 +491,10 @@ export class ContainerCommand extends BaseCommand {
     for (const port of result.publish) console.log(`  port      localhost:${port.host} → :${port.container}`);
     if (result.services?.length) console.log(`  services  ${result.services.join(', ')} (reach them by name from the container)`);
     if (result.dind) console.log(`  docker    ${result.dind} (dockerd inside the container)`);
+    if (result.personal) {
+      console.log(`  personal  ${describePersonal(result.personal)}`);
+      for (const d of result.personal.dropped) console.log(chalk.yellow(`  dropped   ${d.entry} (${d.reason})`));
+    }
     console.log('');
     console.log(`Next: kunj ct agent ${branch}`);
     console.log(`      kunj ct shell ${branch}`);
@@ -1269,6 +1295,13 @@ export class ContainerCommand extends BaseCommand {
     // Ruling 2: compared with the files' stamp, never unlocked; only this repository's vault is known
     const vault = vaultFiles(getKunjDir(), getGlobalKunjDir());
     const stamp = vaultStamp([vault.global, vault.repo]);
+    // The personal blueprint's stamp a start would write now; a file that does not parse is a warning, not a failed listing
+    let hostPersonal: string | null = null;
+    try {
+      hostPersonal = personalStamp(resolvePersonal({ globalKunjDir: getGlobalKunjDir(), repoKunjDir: getKunjDir() }));
+    } catch (err) {
+      this.warn(err instanceof Error ? err.message : String(err));
+    }
     const containers: ContainerJson[] = mains.map((c, i) => {
       const s = statuses[i];
       const recorded = this.recordedOptions(c);
@@ -1294,6 +1327,7 @@ export class ContainerCommand extends BaseCommand {
         services: describeServices(servicesOf(all, c.name, { repoId: c.labels[LABEL.repo] ?? '', branch: c.labels[LABEL.branch] ?? '' })),
         bridges: bridges.filter(b => b.container === c.name).map(b => ({ name: b.name, pid: b.pid })),
         ...(c.labels[LABEL.repo] === ctx.repo.id ? { secretsChanged: (c.labels[LABEL.secrets] ?? '') !== stamp } : {}),
+        ...(c.labels[LABEL.repo] === ctx.repo.id && hostPersonal !== null && s.personalStamp !== undefined ? { personalChanged: s.personalStamp !== hostPersonal } : {}),
       };
     });
 
@@ -1489,6 +1523,7 @@ export class ContainerCommand extends BaseCommand {
   }
 
   private async blueprintInit(options: ContainerOptions): Promise<void> {
+    if (options.personal) return this.blueprintInitPersonal(options);
     let root: string;
     try {
       root = await getGitRoot();
@@ -1594,6 +1629,95 @@ export class ContainerCommand extends BaseCommand {
     }
   }
 
+  // The draft keeps an existing file's shell, files and aliases (never inferred) and, with --repo, its
+  // repository keys (the host copy of the repository blueprint lives in the same file)
+  private async blueprintInitPersonal(options: ContainerOptions): Promise<void> {
+    const file = options.repo ? path.join(getKunjDir(), 'blueprint.json') : path.join(getGlobalKunjDir(), 'blueprint.json');
+    const kind = options.repo ? 'host' : 'global';
+    const interactive = !options.yes && !this.jsonMode && !!process.stdin.isTTY;
+    const exists = fs.existsSync(file);
+    let old: Record<string, unknown> = {};
+    if (exists) {
+      try {
+        const parsed = parseJsonc(fs.readFileSync(file, 'utf8'));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) old = parsed as Record<string, unknown>;
+      } catch {
+        // an unreadable file has nothing worth keeping
+      }
+    }
+    const { home, claudeDir } = this.personalHost;
+    const inferred = inferPersonal({ gitList: this.personalHost.gitList(), claudeDir, home });
+    for (const reason of inferred.reasons) this.progress(chalk.gray(`  ${reason}`));
+    for (const skip of inferred.skipped) this.progress(chalk.gray(`  skipped ${skip.key} (${skip.reason})`));
+
+    const kept = (keys: string[]) => Object.fromEntries(keys.filter(k => old[k] !== undefined).map(k => [k, old[k]]));
+    const doc: Record<string, unknown> = {
+      ...(options.repo ? kept([...REPO_BLUEPRINT_KEYS]) : {}),
+      ...inferred.doc,
+      ...kept(['shell', 'files', 'aliases']),
+    };
+    const text = JSON.stringify(doc, null, 2) + '\n';
+    try {
+      const personal = parsePersonal(text, file, kind);
+      if (options.repo) parseBlueprint(text, file, { personal: 'ignore' });
+      if (!this.jsonMode) {
+        const summary = planPersonal({ blueprint: personal, sources: [{ path: file, scope: options.repo ? 'repo' : 'global' }], home, claudeDir }, () => {}).summary;
+        this.progress(`  applies   ${describePersonal(summary)}`);
+      }
+    } catch (err) {
+      throw new ContainerError(err instanceof Error ? err.message : String(err));
+    }
+
+    if (exists && !options.yes) {
+      if (!interactive) throw new ContainerError(`${file} already exists. Pass --yes to overwrite it (shell, files and aliases are kept).`);
+      const inquirer = (await import('inquirer')).default;
+      const { overwrite } = await inquirer.prompt([{ type: 'confirm', name: 'overwrite', message: `${file} already exists. Overwrite it (shell, files and aliases are kept)?`, default: false }]);
+      if (!overwrite) {
+        console.log(chalk.gray('Left unchanged'));
+        return;
+      }
+    } else if (interactive) {
+      console.log(text);
+      const inquirer = (await import('inquirer')).default;
+      const { write } = await inquirer.prompt([{ type: 'confirm', name: 'write', message: `Write ${file}?`, default: true }]);
+      if (!write) {
+        console.log(chalk.gray('Nothing written'));
+        return;
+      }
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+
+    if (this.jsonMode) {
+      this.outputJSON({ path: file, blueprint: doc, reasons: inferred.reasons, skipped: inferred.skipped });
+      return;
+    }
+    console.log(chalk.green(`✓ Wrote ${file}`));
+    console.log('');
+    console.log('Next: kunj ct start <branch> applies it, also to a running container; edit the file to add shell, files or aliases');
+  }
+
+  /** The personal layer for `blueprint status`: null without one; a file that does not parse is a warning */
+  private personalStatus(): { files: string[]; summary: PersonalSummary; stamp: string; ignored: string[] } | null {
+    try {
+      const resolved = resolvePersonal({ globalKunjDir: getGlobalKunjDir(), repoKunjDir: getKunjDir() });
+      if (!resolved) return null;
+      const plan = planPersonal(resolved, () => {});
+      return { files: resolved.sources.map(s => s.path), summary: plan.summary, stamp: plan.stamp, ignored: resolved.blueprint.ignoredKeys };
+    } catch (err) {
+      this.warn(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
+  private printPersonalStatus(personal: NonNullable<ReturnType<ContainerCommand['personalStatus']>>): void {
+    console.log(`Personal: ${personal.files.join(', ')}`);
+    console.log(`  applies   ${describePersonal(personal.summary)}`);
+    console.log(`  stamp     ${personal.stamp}`);
+    for (const d of personal.summary.dropped) console.log(chalk.yellow(`  dropped   ${d.entry} (${d.reason})`));
+    if (personal.ignored.length) console.log(chalk.yellow(`  ignored   ${personal.ignored.join(', ')}`));
+  }
+
   private async blueprintSnapshot(options: ContainerOptions): Promise<void> {
     const ctx = await this.context(options);
     const defaultBranch = (await detectDefaultBranch(ctx.repo.root)) || undefined;
@@ -1627,12 +1751,16 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const defaultBranch = (await detectDefaultBranch(ctx.repo.root)) || undefined;
     const resolved = await this.resolveBlueprint(options, defaultBranch);
+    const personal = this.personalStatus();
     if (!resolved) {
       if (this.jsonMode) {
-        this.outputJSON({ source: null });
+        this.outputJSON({ source: null, ...(personal ? { personal } : {}) });
         return;
       }
-      throw new ContainerError(NO_BLUEPRINT);
+      if (!personal) throw new ContainerError(NO_BLUEPRINT);
+      console.log(chalk.gray(`${NO_BLUEPRINT}`));
+      this.printPersonalStatus(personal);
+      return;
     }
 
     const branch = (options.base || defaultBranch)?.replace(/^origin\//, '');
@@ -1654,7 +1782,7 @@ export class ContainerCommand extends BaseCommand {
     const notes = resolved.blueprint.notes ?? null;
 
     if (this.jsonMode) {
-      this.outputJSON({ source: resolved.source, path: resolved.path, hash, snapshot, stale, others: others.map(i => i.tag), notes });
+      this.outputJSON({ source: resolved.source, path: resolved.path, hash, snapshot, stale, others: others.map(i => i.tag), notes, ...(personal ? { personal } : {}) });
       return;
     }
     console.log(`Blueprint: ${resolved.path} ${chalk.gray(`(${resolved.source})`)}`);
@@ -1670,6 +1798,7 @@ export class ContainerCommand extends BaseCommand {
     if (resolved.blueprint.ignoredKeys.length) {
       console.log(chalk.yellow(`  ignored   ${resolved.blueprint.ignoredKeys.join(', ')}`));
     }
+    if (personal) this.printPersonalStatus(personal);
   }
 
   private async blueprintRemove(options: ContainerOptions): Promise<void> {
