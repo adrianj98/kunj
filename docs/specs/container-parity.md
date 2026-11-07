@@ -1,13 +1,13 @@
 # Worktree and container parity
 
-*Gap analysis, 2026-11-07, from reading the CLI (`src/`), the workspace app, the VS Code extension and
-the menu bar app on `main`. Nothing here has shipped yet; the status table says what each part is
-waiting on.*
+*Gap analysis, 2026-11-07, from reading the CLI (`src/`) and the workspace app on `main`. Nothing here
+has shipped yet; the status table says what each part is waiting on. The VS Code extension and the menu
+bar app are out of scope: the workspace app is the consumer parity is measured in.*
 
 ## Goal
 
 Starting a branch in a container should feel like starting it in a worktree: the same command shape,
-the same row in every app, the same status, the same tabs, the same way of ending it. The only thing
+the same row in the workspace app, the same status, the same tabs, the same way of ending it. The only thing
 you should notice is the container mark. [containers-in-apps.md](containers-in-apps.md) states the
 principle for rows and actions; this spec lists where the two still differ end to end, in the order
 a person meets them, and what closes each gap.
@@ -27,7 +27,6 @@ below relaxes an invariant from [container-system.md](container-system.md#rules-
 | 5. Keep files and secrets: `keep apply` and `secret apply` for a container | To do |
 | 6. Ending: one removal guard for both kinds; `worktree remove` ends its sessions | To do |
 | 7. Workspace app: language servers, CPU/memory, resume, Antigravity, Create PR, forward port, open in new window, `repo: null` events | To do |
-| 8. VS Code and menu bar app: agent status and Start Agent on worktree rows, PR actions on container rows | To do |
 
 ## 1. The row
 
@@ -52,8 +51,7 @@ Add to `ct list --json`, additively:
 Changes pill shows no count, and the diff base falls back to origin/HEAD instead of the PR's base.
 Switch the listing to `kunj worktree list --json --containers` (one call per repo, the same PRs for
 both kinds) and decode the new fields. Then order rows by branch so a branch's worktree and container
-sit together (today all worktrees come first, then all containers; the menu bar app's `PlaceOrder`
-already pairs them).
+sit together (today all worktrees come first, then all containers).
 
 **Smaller row differences** (all in the workspace app): a container row has no tooltip (`path` is nil;
 show the container name), the tab bar's tmux label is the hard-coded `agent` for a container (use
@@ -188,37 +186,27 @@ Beyond parts 1 and 2, the app itself treats the kinds differently in these place
   through `ct exec`; the server then needs the language's toolchain in the image (a preset) and `cachePaths`
   excluded in the container. Until then a container editor tab gets hover, definition and references
   from the search fallback only.
-- **Create PR** is disabled for a container without a host worktree of the branch; VS Code creates it
-  from origin's branch. Do the same (`kunj pr` with `--branch`, or `kunj ct exec -- kunj pr` once part 4
-  lands).
+- **Create PR** is disabled for a container without a host worktree of the branch. Create it from
+  origin's branch instead (`kunj pr` with `--branch`, or `kunj ct exec -- kunj pr` once part 4 lands).
 - **Resume** on relaunch: part 2 step 1.
 - **Antigravity**: part 2 step 4.
-- **Forward Port…** is in the containers-in-apps table and in no app; `openPort` exists in `ActionSpec`
+- **Forward Port…** is in the containers-in-apps table and not in the app; `openPort` exists in `ActionSpec`
   unused. Add it to the overflow and row menus (an action tab running `kunj ct forward <b> <port>`).
 - **Open in New VS Code Window** exists for worktrees only; `ct open -n/--new-window` already exists,
   so the action is one flag away.
-- **`container` events with `repo: null`** trigger a full refresh in the workspace app; the other two
-  apps ignore them for the reason in containers-in-apps.md (another repository's containers would refresh
-  the view every second). Ignore them here too.
+- **`container` events with `repo: null`** trigger a full refresh; another repository's containers (a
+  functional test run, say) would refresh the view every second. Ignore them, as containers-in-apps.md
+  says for the other consumers.
 - **⌘-click on a path** in a container terminal opens the first candidate unchecked; check with one
   `ct exec test -f` as the worktree case checks the disk.
 - **Reveal in Finder** and **Copy Path** have no container meaning; keep them greyed with the reason.
-
-## 8. VS Code extension and menu bar app
-
-- Both show agent running/waiting on container rows only; worktree rows have an agent command but no
-  status, although `worktree list --json` reports `agent`. Show it on both kinds.
-- The menu bar app's worktree row has no Start Agent item; its container row has no Create/Find Pull
-  Request and no multi-select. Add the missing items on each side.
-- [containers-in-apps.md](containers-in-apps.md) still lists "try both against a live container" and
-  "refresh on `kunj events`" in progress; this spec does not repeat them.
 
 ## Order
 
 Parts 1 and 2 are what a person notices in the first minute (the row, the agent tab coming back) and
 touch only additive JSON and the app's listing; do them first. Part 3 next, because a wrong branch at
 creation is the most expensive surprise. Part 4 is the roadmap and the largest; the `~/.claude` copy
-is the part agents feel most. Parts 5 to 8 are independent of each other.
+is the part agents feel most. Parts 5 to 7 are independent of each other.
 
 ## Decisions
 
