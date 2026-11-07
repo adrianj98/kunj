@@ -32,3 +32,7 @@ bindkey -e
 
 # Shells open in the home directory; the code is in /workspace
 [ -d /workspace ] && [ "$PWD" = "$HOME" ] && cd /workspace
+
+# The personal blueprint (~/.kunj/blueprint.json on the host: aliases and shell rc), written by
+# kunj ct start as the user; last, so it can override everything above
+[ -r "$HOME/.kunj/rc" ] && . "$HOME/.kunj/rc"

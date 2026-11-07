@@ -46,6 +46,7 @@ import { ForwardRecord, HELPER_NO_SOCAT, autoForwardIgnore, detachedLogFile, for
 import { BridgeRecord, bridgeFor, installMcpConfig, mcpServers, portHint, readBridges, runBridge, updateBridges } from '../lib/container/mcpbridge';
 import { describeServices, findServices, serviceNames, servicesOf } from '../lib/container/services';
 import { ContainerError } from '../lib/container/errors';
+import { describePersonal, personalStamp, resolvePersonal } from '../lib/container/personal';
 import { describeError, formatError } from '../lib/errors';
 import { readWorkspaceFile, validateWorkspacePath, writeWorkspaceFile } from '../lib/container/files';
 import { grepContainer, mapLimit } from '../lib/search';
@@ -469,6 +470,10 @@ export class ContainerCommand extends BaseCommand {
     for (const port of result.publish) console.log(`  port      localhost:${port.host} → :${port.container}`);
     if (result.services?.length) console.log(`  services  ${result.services.join(', ')} (reach them by name from the container)`);
     if (result.dind) console.log(`  docker    ${result.dind} (dockerd inside the container)`);
+    if (result.personal) {
+      console.log(`  personal  ${describePersonal(result.personal)}`);
+      for (const d of result.personal.dropped) console.log(chalk.yellow(`  dropped   ${d.entry} (${d.reason})`));
+    }
     console.log('');
     console.log(`Next: kunj ct agent ${branch}`);
     console.log(`      kunj ct shell ${branch}`);
@@ -1269,6 +1274,13 @@ export class ContainerCommand extends BaseCommand {
     // Ruling 2: compared with the files' stamp, never unlocked; only this repository's vault is known
     const vault = vaultFiles(getKunjDir(), getGlobalKunjDir());
     const stamp = vaultStamp([vault.global, vault.repo]);
+    // The personal blueprint's stamp a start would write now; a file that does not parse is a warning, not a failed listing
+    let hostPersonal: string | null = null;
+    try {
+      hostPersonal = personalStamp(resolvePersonal({ globalKunjDir: getGlobalKunjDir(), repoKunjDir: getKunjDir() }));
+    } catch (err) {
+      this.warn(err instanceof Error ? err.message : String(err));
+    }
     const containers: ContainerJson[] = mains.map((c, i) => {
       const s = statuses[i];
       const recorded = this.recordedOptions(c);
@@ -1294,6 +1306,7 @@ export class ContainerCommand extends BaseCommand {
         services: describeServices(servicesOf(all, c.name, { repoId: c.labels[LABEL.repo] ?? '', branch: c.labels[LABEL.branch] ?? '' })),
         bridges: bridges.filter(b => b.container === c.name).map(b => ({ name: b.name, pid: b.pid })),
         ...(c.labels[LABEL.repo] === ctx.repo.id ? { secretsChanged: (c.labels[LABEL.secrets] ?? '') !== stamp } : {}),
+        ...(c.labels[LABEL.repo] === ctx.repo.id && hostPersonal !== null && s.personalStamp !== undefined ? { personalChanged: s.personalStamp !== hostPersonal } : {}),
       };
     });
 

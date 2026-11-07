@@ -37,6 +37,14 @@ describe('parseStatus', () => {
     expect(s.dirty).toBe(false);
   });
 
+  it('reads the personal blueprint stamp, empty when the container has none, unknown when the line is missing', () => {
+    expect(parseStatus('tmux=1\npersonal=abc123abc123\n' + oid).personalStamp).toBe('abc123abc123');
+    expect(parseStatus('tmux=1\npersonal=\n' + oid).personalStamp).toBe('');
+    expect(parseStatus('tmux=1\npersonal=not a stamp; rm -rf\n' + oid).personalStamp).toBe('');
+    expect(parseStatus('tmux=1\n' + oid).personalStamp).toBeUndefined();
+    expect(STATUS_SCRIPT).toContain('"$HOME/.kunj/personal.stamp"');
+  });
+
   it('the status script lists the agent and agent-* sessions with their state files', () => {
     expect(STATUS_SCRIPT).toContain('tmux list-sessions');
     expect(STATUS_SCRIPT).toContain('/tmp/kunj-agent-state');

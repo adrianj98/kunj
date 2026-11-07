@@ -188,6 +188,7 @@ import inquirer from 'inquirer';
 import { NETHELPER_IMAGE } from '../../lib/container/image';
 import { getVersion } from '../../lib/version';
 import { SecretEntry, vaultFiles, vaultStamp, writeVault } from '../../lib/secrets/vault';
+import { personalStamp, resolvePersonal } from '../../lib/container/personal';
 
 const REPO_ID = repoIdFromUrl('https://github.com/acme/app.git');
 
@@ -2082,5 +2083,30 @@ describe('ct secrets', () => {
     const changed = Object.fromEntries(json.containers.map((c: { branch: string; secretsChanged?: boolean }) => [c.branch, c.secretsChanged]));
     expect(changed).toEqual({ same: false, old: true, none: true });
     expect(keychainRun).not.toHaveBeenCalled();
+  });
+
+  it('list --json reports personalChanged for running containers from the stamp the status script read', async () => {
+    fs.mkdirSync(globalDir(), { recursive: true });
+    fs.writeFileSync(path.join(globalDir(), 'blueprint.json'), '{"git": {"pull.rebase": "true"}}');
+    const stamp = personalStamp(resolvePersonal({ globalKunjDir: globalDir(), repoKunjDir: repoDir() }));
+    expect(stamp).toMatch(/^[0-9a-f]{12}$/);
+    const byBranch: Record<string, string | undefined> = { same: stamp, old: '000000000000', none: '', unknown: undefined };
+    backend.existing = ['same', 'old', 'none', 'unknown'].map(b => mainContainer(b, { id: `cid-${b}` }));
+    backend.existing.push(mainContainer('stopped', { id: 'cid-stopped', state: 'exited' }));
+    (lifecycle.containerStatus as jest.Mock).mockImplementation(async (_b: unknown, id: string) => {
+      const branch = id.replace('cid-', '');
+      return { agentRunning: false, agentState: null, head: null, ahead: 0, dirty: false, status: 'ok', ...(byBranch[branch] !== undefined ? { personalStamp: byBranch[branch] } : {}) };
+    });
+    await new ContainerCommand({ secretsUnlock: { ...unlock, env: {} } }).execute('list', { json: true });
+    const json = JSON.parse(stdout.join(''));
+    const changed = Object.fromEntries(json.containers.map((c: { branch: string; personalChanged?: boolean }) => [c.branch, c.personalChanged]));
+    expect(changed).toEqual({ same: false, old: true, none: true, unknown: undefined, stopped: undefined });
+
+    // a personal blueprint that does not parse is a warning, never a failed listing
+    fs.writeFileSync(path.join(globalDir(), 'blueprint.json'), '{"git": {"credential.helper": "x"}}');
+    stdout.length = 0;
+    await new ContainerCommand({ secretsUnlock: { ...unlock, env: {} } }).execute('list', { json: true });
+    const again = JSON.parse(stdout.join(''));
+    expect(again.containers.every((c: { personalChanged?: boolean }) => c.personalChanged === undefined)).toBe(true);
   });
 });

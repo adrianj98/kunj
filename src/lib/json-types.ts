@@ -160,6 +160,9 @@ export interface ContainerJson {
    * stamp; read without unlocking): env secrets reach it on `kunj ct start --rebuild`. This repository's
    * containers only */
   secretsChanged?: boolean;
+  /** The personal blueprint (~/.kunj/blueprint.json) or a file it names changed since the last start
+   * applied it: `kunj ct start <branch>` applies it again. This repository's running containers only */
+  personalChanged?: boolean;
 }
 
 export interface ContainerListJson {
