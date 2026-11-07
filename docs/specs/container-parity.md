@@ -23,7 +23,7 @@ below relaxes an invariant from [container-system.md](container-system.md#rules-
 | 1. Rows and status: `changedFiles`, `behind`, `upstream`, `startedAt` in `ct list`; the app lists containers with PRs and pairs rows by branch | To do |
 | 2. Agents: `kunj ct agent start\|status\|stop`, `--resume`, `--detach --prompt-file --open-in-app`, `--json`, `--no-tmux`; live `agent` events for containers | To do |
 | 3. Creation: `ct start -c` with worktree semantics (existing origin branch, `-b`, `--no-origin`), create hooks reported in `--json` | To do |
-| 4. Inside: the personal blueprint (`~/.kunj/blueprint.json`: `git`, `claude`, `shell`, `files`, `aliases`, `kunj`), `blueprint init --personal`, `personalChanged`; `kunj` in the image | To do (design agreed 2026-11-07) |
+| 4. Inside: the personal blueprint (`~/.kunj/blueprint.json`: `git`, `claude`, `shell`, `files`, `aliases`, `kunj`), `blueprint init --personal`, `personalChanged`; `kunj` in the image | In progress ([personal-blueprint.md](personal-blueprint.md)) |
 | 5. Keep files and secrets: `keep apply` and `secret apply` for a container | To do |
 | 6. Ending: one removal guard for both kinds; `worktree remove` ends its sessions | To do |
 | 7. Workspace app: language servers, CPU/memory, resume, Antigravity, Create PR, forward port, open in new window, `repo: null` events | To do |
@@ -124,6 +124,8 @@ Close it by giving `ct agent` the same verbs and options, sharing the option lis
 
 ## 4. Inside: the personal blueprint
 
+*Full design in [personal-blueprint.md](personal-blueprint.md); this section is the summary.*
+
 Once inside, a container shell and agent miss what the host has: no part of `~/.claude` (CLAUDE.md,
 settings, skills, agents, commands), git config beyond identity, the image's zshrc instead of the
 user's, and no `kunj`. Copying the host's files is not the answer: `settings.json` hooks call host
@@ -183,9 +185,10 @@ by key with the per-repo file winning, lists are replaced.
 create and on every resume; a snapshot build gets none of it, so nothing personal reaches a shared
 image. kunj records what it wrote last time (`~/.claude/.kunj-personal.json` in the container) and
 removes only those entries on the next run, so a skill made inside the container is not clobbered.
-A label `kunj.personal` stamps the merged personal blueprint and the copied files' content;
-`ct list --json` reports `personalChanged` the way it reports `secretsChanged`, and the hint is
-`kunj ct start` (no rebuild: start re-applies). The start output has one line per part,
+A stamp of the merged personal blueprint and the copied files' content is written into the container
+(`$HOME/.kunj/personal.stamp`; labels cannot change after `docker run`), read by the status script, and
+`ct list --json` reports `personalChanged` for running containers the way it reports `secretsChanged`;
+the hint is `kunj ct start` (no rebuild: start re-applies). The start output has one line per part,
 `personal  git 4 keys · claude 3 skills, 1 agent · shell rc · 2 files`, and one `dropped` line per
 named thing not found on the host, so a missing alias has a visible reason.
 
