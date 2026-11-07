@@ -23,7 +23,7 @@ below relaxes an invariant from [container-system.md](container-system.md#rules-
 | 1. Rows and status: `changedFiles`, `behind`, `upstream`, `startedAt` in `ct list`; the app lists containers with PRs and pairs rows by branch | To do |
 | 2. Agents: `kunj ct agent start\|status\|stop`, `--resume`, `--detach --prompt-file --open-in-app`, `--json`, `--no-tmux`; live `agent` events for containers | To do |
 | 3. Creation: `ct start -c` with worktree semantics (existing origin branch, `-b`, `--no-origin`), create hooks reported in `--json` | To do |
-| 4. Inside: the personal blueprint (`~/.kunj/blueprint.json`: `git`, `claude`, `shell`, `files`, `aliases`, `kunj`), `blueprint init --personal`, `personalChanged`; `kunj` in the image | In progress ([personal-blueprint.md](personal-blueprint.md)) |
+| 4. Inside: the personal blueprint (`~/.kunj/blueprint.json`: `git`, `claude`, `shell`, `files`, `aliases`, `kunj`), `blueprint init --personal`, `personalChanged`; `kunj` in the image | Personal blueprint shipped ([personal-blueprint.md](personal-blueprint.md)); `kunj` in the image to do |
 | 5. Keep files and secrets: `keep apply` and `secret apply` for a container | To do |
 | 6. Ending: one removal guard for both kinds; `worktree remove` ends its sessions | To do |
 | 7. Workspace app: language servers, CPU/memory, resume, Antigravity, Create PR, forward port, open in new window, `repo: null` events | To do |

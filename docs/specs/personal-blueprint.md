@@ -26,15 +26,16 @@ secrets or `container.env`), and anything into a snapshot image.
 
 | Part | State |
 | --- | --- |
-| `personal.ts`: parse, resolve and merge the two files, stamp, plan, apply | To do |
-| `git` and `claude` keys applied on every `ct start` and resuming `open` | To do |
-| `shell`, `files` and `aliases` keys; `$HOME/.kunj/rc` sourced by the sandbox zshrc | To do |
-| `personal` in `ct start` output and `--json`; `personalChanged` in `ct list --json` | To do |
-| Personal keys refused in a committed blueprint | To do |
-| `kunj ct blueprint init --personal [--repo]` | To do |
-| `kunj ct blueprint status` shows the personal layer | To do |
+| `personal.ts`: parse, resolve and merge the two files, stamp, plan, apply | Shipped (f087adb) |
+| `git` and `claude` keys applied on every `ct start` and resuming `open` | Shipped (f087adb) |
+| `shell`, `files` and `aliases` keys; `$HOME/.kunj/rc` sourced by the sandbox zshrc | Shipped (f087adb) |
+| `personal` in `ct start` output and `--json`; `personalChanged` in `ct list --json` | Shipped (f087adb) |
+| Personal keys refused in a committed blueprint | Shipped (f087adb) |
+| `kunj ct blueprint init --personal [--repo]` | Shipped (the commit after f087adb) |
+| `kunj ct blueprint status` shows the personal layer | Shipped (the commit after f087adb) |
 | `kunj` key (kunj's own config, for a `kunj` installed in the image) | Later; needs `kunj` in the image (container-parity.md part 4) |
-| User docs (containers/blueprints page) | To do |
+| User docs (containers/blueprints page) | Shipped (the commit after f087adb) |
+| Docker test: a skill and a git alias in a real container, the rc sourced, a removed skill gone and a container-made one kept | To do (no Docker where this was built) |
 
 ## Two layers, one file format
 
@@ -174,10 +175,12 @@ is known up front; `applyPersonal()` then runs, as the sandbox user:
    last time minus the keys set now (to unset), the settings keys set last time minus now (to delete),
    and the merged `settings.json`;
 3. one exec with the tar stream of every file (`$HOME/.claude/…`, `$HOME/.kunj/rc`, the `files` entries,
-   the new `settings.json` at 0600, the new record) extracted into `$HOME`, preceded by the deletions
-   (`rm -rf` of recorded paths only, each checked to start with `.claude/`, `.kunj/rc` or a recorded
-   `files` target, never anything else) and followed by the git `--unset` and `config --global` calls,
-   values passed as arguments, never through the shell.
+   the new `settings.json` at 0600, the new record and the stamp) extracted into `$HOME`, preceded by the
+   deletions (`rm -rf` of recorded paths only, each checked to be relative without `..`, under
+   `.claude/`, `.kunj/rc` or a recorded `files` target, never the record, the stamp or anything else
+   under `.kunj/`; emptied `.claude` directories are removed), and one more exec for the git
+   `--unset-all` and `config --global` calls, keys and values passed as arguments, never through the
+   shell.
 
 The record holds `{ version: 1, stamp, paths: [...], gitKeys: [...], settingsKeys: [...] }`; a missing
 or unreadable record means nothing is deleted or unset (a first run, or a container made before this

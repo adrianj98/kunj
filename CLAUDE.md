@@ -152,7 +152,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj worktree keep [add|apply|delete|list]` - Manage keep files copied into every worktree (interactive menu with no args)
 - `kunj agent [start|status|stop] [branch] [--session <id>] [--all] [--agent claude|antigravity] [--resume]` - Run one or more agents in host tmux sessions for a worktree (see Worktree agents below); `--resume` starts `claude --resume <id>` from the id the SessionStart hook saved in `~/.kunj/<repo>/agent-resume/<session>.json` when the session is not running; `--agent antigravity` runs `agent.antigravityCommand` (default `agy`, the Antigravity CLI), which has no waiting state; `start --detach [--prompt-file <f>] [--open-in-app]` starts without attaching, gives claude a first prompt and sets `@kunj_open=app` so the workspace app opens the tab (the `/handoff` skill, docs/specs/agent-handoff.md)
 - `kunj container [start|shell|exec|agent|attach|open|forward|logs|list|stop|remove|prune|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
-- `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
+- `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers); `init --personal [--repo]` drafts the personal blueprint
 - `kunj ct token status [--json]` - Where a new container's GitHub token comes from (`ContainerTokenStatusJson`; never prints the token)
 - `kunj ct token setup` / `check [--json]` - Store the Claude Code token for containers from `claude setup-token` (extracted from its output, checked first), and check it with one `claude -p` that has only that token (`ContainerTokenCheckJson`; src/lib/secrets/claude-token.ts)
 - `kunj secret [set|import|list|get|rm|env|apply]` - Encrypted secrets (global, repo, branch) and where they go: host commands, worktree files, branch containers (see Secrets under Branch Containers)
@@ -409,6 +409,18 @@ streams it in as the sandbox user, `seedScript({ bundlePath })` clones it, reset
 the fetch, and the file is removed before the commit (`/tmp` is in the image). With a bundle, start
 skips the SSH `no-token` refusal and the unpushed gate. Never forward a token into a snapshot;
 `--no-bundle` is the escape hatch (public origins only).
+**Personal blueprint** (src/lib/container/personal.ts, docs/specs/personal-blueprint.md): `~/.kunj/blueprint.json`
+(every repo) and the personal keys of `~/.kunj/<repo>/blueprint.json` (`git` allowlist, `claude` skills/agents/
+commands/CLAUDE.md and only `model` + `permissions.deny`, `shell` rc, home `files`, `aliases`) are merged
+(`resolvePersonal`), read on the host (`planPersonal`: every file in memory, a stamp over all of it) and applied
+as the sandbox user into the home volume (`applyPersonal`) after the secret files on create and on every resume,
+never for a snapshot (`namesFor`). kunj records what it wrote in `$HOME/.kunj/personal.json` and deletes only
+that next time (`deletablePath`); the stamp in `$HOME/.kunj/personal.stamp` is read by `STATUS_SCRIPT` and
+compared by `ct list` (`personalChanged`, running containers only; the fix is `ct start`, not `--rebuild`,
+because labels cannot change). Nothing is copied unless named: never `~/.claude.json`, hooks, credentials,
+`credential.*`/`url.*`/`core.hooksPath` git keys, or a `.zshrc`; the sandbox zshrc sources `$HOME/.kunj/rc`
+last. `parseBlueprint` refuses the personal keys in a committed blueprint. A failed apply is a warning; a file
+that does not parse fails `ct start` before anything is created.
 Seed sentinels in `/workspace`: `.kunj-seeded` (the seed finished; ignored file, never in a snapshot),
 `.kunj-copying` (a copy from the snapshot is in progress: only then may `/workspace` be wiped and
 recopied, never a real checkout), `.kunj-fresh` (a complete copy whose branch must still be moved to

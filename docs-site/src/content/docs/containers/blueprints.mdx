@@ -172,10 +172,76 @@ only works when origin is public.
 `kunj ct start --no-snapshot` neither builds nor uses a snapshot: it clones origin and runs the tools
 and `setup` in the new container. `--image` never uses a snapshot either.
 
+## Your personal blueprint
+
+The repository's blueprint is shared by everyone who clones it. What is yours alone, your Claude Code
+skills, your git aliases, your shell setup, goes in a **personal blueprint**: `~/.kunj/blueprint.json`
+for every repository, and `~/.kunj/<repo>/blueprint.json` for one (it wins per key). Same file format,
+different keys, and it is applied as you into the container's home on every `kunj ct start` and every
+`kunj ct open` that resumes, also to a running container. It never goes into a snapshot, so nothing
+personal ends up in a shared image.
+
+Draft it from this machine, then edit it:
+
+```bash
+kunj ct blueprint init --personal        # ~/.kunj/blueprint.json
+kunj ct blueprint init --personal --repo # ~/.kunj/<repo>/blueprint.json, this repository only
+```
+
+```jsonc
+{
+  // git config --global in the container; an allowlist of per-user keys and your aliases
+  "git": {
+    "user.name": "Ada",
+    "user.email": "ada@example.com",
+    "pull.rebase": "true",
+    "alias.lg": "log --oneline --graph -20"
+  },
+  // From ~/.claude: skills, agents and commands by name (or true for all), your CLAUDE.md,
+  // and two settings keys
+  "claude": {
+    "claudeMd": true,
+    "skills": ["handoff", "review"],
+    "agents": true,
+    "settings": { "model": "opus", "permissions": { "deny": ["Bash(rm -rf *)"] } }
+  },
+  // Sourced last by the sandbox's zsh; text here or a file under your home
+  "shell": { "rcFile": "~/.kunj/container/zshrc" },
+  // Dotfiles, copied into the container home
+  "files": ["~/.vimrc", { "from": "~/.config/nvim", "to": ".config/nvim" }],
+  "aliases": { "t": "npm test" }
+}
+```
+
+| Key | What goes in |
+|---|---|
+| `git` | Config key → value, set with `git config --global` in the container. Only these keys: `user.name`, `user.email`, `pull.rebase`, `pull.ff`, `push.default`, `push.autoSetupRemote`, `init.defaultBranch`, `fetch.prune`, `rerere.enabled`, `rerere.autoupdate`, `diff.algorithm`, `diff.colorMoved`, `merge.conflictstyle`, `log.date`, `color.ui`, `core.pager`, `core.autocrlf`, and `alias.*` whose value does not start with `!`. Everything else is refused with the reason: `credential.*` would shadow kunj's credential helper, `url.*` rewrites would break the token-based origin, `core.hooksPath` and `include` are host paths, signing needs a key the container has not got. |
+| `claude` | `claudeMd` (your `~/.claude/CLAUDE.md`), `skills`, `agents`, `commands` (names, or `true` for every one present) and `settings` with only `model` and `permissions.deny`. Hooks, `apiKeyHelper`, `statusLine`, MCP servers and credentials are never copied: hooks would call programs that are not in the container. The settings keys are merged into the container's `settings.json`; a login made inside the container survives. A name that does not exist on this machine is dropped with a warning. |
+| `shell` | `rc` (text) or `rcFile` (a file under your home, at most 64 KB), written to `~/.kunj/rc` in the container and sourced last by the sandbox's `/etc/zsh/zshrc`. Your text, run as you. Do not point it at your `.zshrc`: it sources Homebrew, nvm and friends by host path. |
+| `files` | `"~/path"` or `{ "from": "~/path", "to": "path" }`: files or directories under your home, copied with their modes into the container home (`to` is relative to it, and may not be under `.kunj` or `.claude`). At most 1 MB per file and 500 files in all. |
+| `aliases` | As the repository blueprint's, written to `~/.kunj/rc` before your `shell` text. |
+
+`kunj ct start` prints what it applied, `personal  git 4 keys · claude 1 skill, settings · shell rc`,
+and a `dropped` line for anything it could not find. kunj remembers what it wrote and removes only that
+when you take something out of the file, so a skill the agent made inside the container stays.
+`kunj ct list --json` reports `personalChanged` for a running container when the file or something it
+names changed since the last start; `kunj ct start <branch>` applies it again, no rebuild needed.
+`kunj ct blueprint status` shows the personal layer under the repository's.
+
+A personal key in the repository's `.kunj/blueprint.json` is refused: it would carry one person's
+setup into everyone's snapshot.
+
+<Aside>
+`~/.kunj/<repo>/blueprint.json` is also where `kunj ct blueprint init --global` writes the host copy
+of the repository blueprint. One file: its `tools`, `setup` and the rest count only when the
+repository has no blueprint of its own, its personal keys always apply.
+</Aside>
+
 ## Commands
 
 ```bash
 kunj ct blueprint init [--global] [--yes]
+kunj ct blueprint init --personal [--repo] [--yes]
 kunj ct blueprint snapshot [--base <ref>] [--rebuild] [--blueprint <path>] [--no-bundle]
 kunj ct blueprint status [--blueprint <path>]
 kunj ct blueprint remove
@@ -222,7 +288,8 @@ Blueprint: origin/main:.kunj/blueprint.json (repo)
 
 The source in brackets is `worktree`, `repo` (origin's default branch), `host` (`~/.kunj/<repo>/`) or
 `file` (`--blueprint`). A stale snapshot is reported as such, with a note that the next start rebuilds
-it.
+it. When you have a [personal blueprint](#your-personal-blueprint) it follows, with what it applies and
+its stamp.
 
 ### remove
 

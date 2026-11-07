@@ -9,9 +9,11 @@ import {
   applyPersonal,
   deletablePath,
   describePersonal,
+  inferPersonal,
   isEmptyPersonal,
   mergePersonal,
   mergeSettings,
+  parseGitList,
   parsePersonal,
   personalStamp,
   planPersonal,
@@ -418,5 +420,30 @@ describe('applyPersonal', () => {
     b.execHandler = (_id, cmd, io) => (io.stdin ? Promise.resolve({ exitCode: 3, stdout: '' }) : undefined);
     const plan = planPersonal(resolved({ claude: { skills: ['handoff'] } }));
     await expect(applyPersonal(b, 'id-1', 'dev', HOME, plan)).rejects.toThrow('Writing the personal blueprint into the container failed (exit 3)');
+  });
+});
+
+describe('inferPersonal', () => {
+  it('takes the allowlisted git keys and the Claude entries by name, skipping the rest with a reason', () => {
+    const { home, claudeDir } = fixtureHome();
+    const gitList = ['user.name\nAda', 'Pull.Rebase\ntrue', 'core.editor\ncode --wait', 'alias.lg\nlog --graph', 'alias.pushf\n!git push --force-with-lease', 'commit.gpgsign\ntrue', 'odd.key\nx'].join('\0') + '\0';
+    const r = inferPersonal({ gitList, claudeDir, home });
+    expect(r.doc).toEqual({
+      git: { 'user.name': 'Ada', 'pull.rebase': 'true', 'alias.lg': 'log --graph' },
+      claude: { claudeMd: true, skills: ['handoff', 'review'], agents: ['planner'], commands: ['nested', 'standup'], settings: { model: 'sonnet' } },
+    });
+    expect(r.skipped).toEqual([
+      { key: 'core.editor', reason: "the host's editor is not in the image" },
+      { key: 'alias.pushf', reason: 'runs a shell command' },
+      { key: 'commit.gpgsign', reason: 'the container has no signing key' },
+      { key: 'odd.key', reason: 'not a per-user key kunj copies' },
+    ]);
+    expect(r.reasons[0]).toBe('git: 3 keys from git config --global');
+    // the draft parses as a personal blueprint
+    expect(() => parsePersonal(JSON.stringify(r.doc), 'p.json', 'global')).not.toThrow();
+    // nothing on the host: an empty draft
+    const empty = inferPersonal({ gitList: '', claudeDir: path.join(home, 'nope'), home });
+    expect(empty.doc).toEqual({});
+    expect(parseGitList('a\nb\0c\0')).toEqual([['a', 'b'], ['c', '']]);
   });
 });

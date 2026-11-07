@@ -728,3 +728,88 @@ export async function applyPersonal(backend: ContainerBackend, id: string, user:
     if (git.exitCode !== 0) throw new ContainerError(`Setting the personal blueprint's git config in the container failed (exit ${git.exitCode})`);
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// init --personal: a draft from the host
+
+export interface InferredPersonal {
+  /** The keys to write (git, claude); shell, files and aliases are never inferred */
+  doc: { git?: Record<string, string>; claude?: ClaudeSelection };
+  /** Host git keys left out, with the reason, for the user to see */
+  skipped: Array<{ key: string; reason: string }>;
+  reasons: string[];
+}
+
+/** `git config --global --list --null` output: key\nvalue\0 entries */
+export function parseGitList(text: string): Array<[string, string]> {
+  return text
+    .split('\0')
+    .filter(Boolean)
+    .map(entry => {
+      const nl = entry.indexOf('\n');
+      return nl === -1 ? [entry, ''] : [entry.slice(0, nl), entry.slice(nl + 1)];
+    });
+}
+
+/**
+ * Draft a personal blueprint from the host: the allowlisted git keys present in the global config,
+ * the Claude entries that exist (by name, so a new host skill is a choice), the model. Nothing else.
+ */
+export function inferPersonal(input: { gitList: string; claudeDir: string; home: string }): InferredPersonal {
+  const reasons: string[] = [];
+  const skipped: InferredPersonal['skipped'] = [];
+  const git: Record<string, string> = {};
+  for (const [key, value] of parseGitList(input.gitList)) {
+    const lower = key.toLowerCase();
+    const allowed = [...GIT_ALLOWED].find(k => k.toLowerCase() === lower);
+    const alias = /^alias\.(.+)$/i.exec(key);
+    if (alias) {
+      if (value.trimStart().startsWith('!')) skipped.push({ key, reason: 'runs a shell command' });
+      else if (!ALIAS_NAME.test(alias[1])) skipped.push({ key, reason: 'not a valid alias name' });
+      else if (/[\n\r]/.test(value) || value.length > MAX_GIT_VALUE) skipped.push({ key, reason: 'not one line' });
+      else git[`alias.${alias[1]}`] = value;
+      continue;
+    }
+    if (!allowed) {
+      const refused = GIT_REFUSED.find(([re]) => re.test(key));
+      skipped.push({ key, reason: refused ? refused[1] : 'not a per-user key kunj copies' });
+      continue;
+    }
+    if (/[\n\r]/.test(value) || value.length > MAX_GIT_VALUE) {
+      skipped.push({ key, reason: 'not one line' });
+      continue;
+    }
+    git[allowed] = value;
+  }
+  if (Object.keys(git).length) reasons.push(`git: ${Object.keys(git).length} ${Object.keys(git).length === 1 ? 'key' : 'keys'} from git config --global`);
+
+  const claude: ClaudeSelection = {};
+  const dir = input.claudeDir;
+  const short = dir.startsWith(input.home) ? '~' + dir.slice(input.home.length) : dir;
+  if (fs.existsSync(path.join(dir, 'CLAUDE.md'))) {
+    claude.claudeMd = true;
+    reasons.push(`claude: ${short}/CLAUDE.md`);
+  }
+  for (const key of ['skills', 'agents', 'commands'] as const) {
+    const names = claudeEntries(path.join(dir, key), true, key !== 'skills').map(e => e.name);
+    if (names.length) {
+      claude[key] = names;
+      reasons.push(`claude: ${names.length} ${key} in ${short}/${key}`);
+    }
+  }
+  try {
+    const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+    if (isObject(settings) && typeof settings.model === 'string' && settings.model.trim()) {
+      claude.settings = { model: settings.model };
+      reasons.push(`claude: model ${settings.model} from ${short}/settings.json`);
+    }
+  } catch {
+    // no settings, or not JSON: nothing to take
+  }
+
+  return {
+    doc: { ...(Object.keys(git).length ? { git } : {}), ...(Object.keys(claude).length ? { claude } : {}) },
+    skipped,
+    reasons,
+  };
+}
