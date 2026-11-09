@@ -3,6 +3,7 @@ import KunjWorkspaceCore
 
 /// One environment in the sidebar (DESIGN.md "Sidebar row"): padding 9 × 10 inside a 1 px border,
 /// radius 6; dot · branch (sans 13/500) · relative time (mono 11, `muted`), then indented 15 px:
+/// a merged-PR mark (purple, 12 px) before the time when the branch's pull request is merged; then
 /// the kind icon (11 px, a branch or a box), a worktree's folder when it is not named like the branch
 /// (mono 11; the full path in the tooltip) · status verb
 /// (sans 11, `amber` when waiting), and at the right, while the mouse is over the sidebar, the CPU and
@@ -65,7 +66,13 @@ final class SidebarRowView: NSView {
 
         let textX = padH + 15
         let timeFont = Theme.mono(DesignTokens.TypeScale.caption)
-        let timeWidth = draw(time, font: timeFont, color: theme.color(\.muted), rightEdge: bounds.maxX - padH, midY: line1)
+        var timeWidth = draw(time, font: timeFont, color: theme.color(\.muted), rightEdge: bounds.maxX - padH, midY: line1)
+        if environment.pullRequest?.state == "merged" {
+            let size: CGFloat = 12
+            let x = bounds.maxX - padH - timeWidth - (timeWidth > 0 ? 6 : 0) - size
+            Icon.merged.draw(in: NSRect(x: x, y: line1 - size / 2, width: size, height: size), color: Self.mergedColor)
+            timeWidth += size + (timeWidth > 0 ? 6 : 0)
+        }
         draw(environment.branch, font: Theme.sans(DesignTokens.TypeScale.body, weight: .medium),
              color: theme.color(selected ? \.text : \.text2),
              in: textX, width: bounds.maxX - padH - timeWidth - 8 - textX, midY: line1)
@@ -98,6 +105,9 @@ final class SidebarRowView: NSView {
         draw(environment.statusVerb, font: Theme.sans(caption), color: verbColor,
              in: x, width: right - x, midY: line2)
     }
+
+    /// GitHub's merged purple, readable on the dark and light themes.
+    static let mergedColor = NSColor(srgbRed: 0.537, green: 0.341, blue: 0.898, alpha: 1)
 
     private func width(_ s: String, _ font: NSFont) -> CGFloat {
         ceil((s as NSString).size(withAttributes: [.font: font]).width)

@@ -81,6 +81,8 @@ enum Icon {
     case shell, plus, dots, search, split, close
     /// The sidebar's kind marks: a branch (worktree) and a box (container).
     case worktree, container
+    /// A merged pull request (the git-merge mark).
+    case merged
 
     func draw(in rect: NSRect, color: NSColor) {
         let s = rect.width / 24
@@ -123,6 +125,14 @@ enum Icon {
             path.appendOval(in: NSRect(x: p(15, 0).x, y: p(0, 3).y, width: 6 * s, height: 6 * s))
             path.appendOval(in: NSRect(x: p(3, 0).x, y: p(0, 15).y, width: 6 * s, height: 6 * s))
             path.move(to: p(18, 9)); path.curve(to: p(9, 18), controlPoint1: p(18, 14), controlPoint2: p(14, 18))
+            path.stroke()
+        case .merged:
+            path.lineWidth = 2 * s
+            path.appendOval(in: NSRect(x: p(3, 0).x, y: p(0, 3).y, width: 6 * s, height: 6 * s))
+            path.appendOval(in: NSRect(x: p(3, 0).x, y: p(0, 15).y, width: 6 * s, height: 6 * s))
+            path.appendOval(in: NSRect(x: p(15, 0).x, y: p(0, 15).y, width: 6 * s, height: 6 * s))
+            path.move(to: p(6, 9)); path.line(to: p(6, 15))
+            path.move(to: p(6, 9)); path.curve(to: p(15, 18), controlPoint1: p(6, 14), controlPoint2: p(10, 18))
             path.stroke()
         case .container:
             path.lineWidth = 2 * s

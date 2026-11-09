@@ -1606,3 +1606,9 @@ macOS app zip (`kunj install macos` needs a release that has one).
   tab stops showing. Background tabs keep their document and it is replayed on start. Why: the user
   wants servers running only while the page is showing, not for every open tab in every worktree.
 - Review fix: `editorShown` does not restart a server disabled after repeated crashes (`failed`).
+
+## 2026-11-09 — Workspace app: merged-PR mark in the sidebar
+
+- A sidebar row draws a purple git-merge icon (`Icon.merged`) before the time when the branch's pull
+  request is merged. Why: the user wants merged branches visible at a glance; the "Merged #N" verb
+  hides behind "Running"/"Waiting for input" while an agent runs.
