@@ -1612,3 +1612,13 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - A sidebar row draws a purple git-merge icon (`Icon.merged`) before the time when the branch's pull
   request is merged. Why: the user wants merged branches visible at a glance; the "Merged #N" verb
   hides behind "Running"/"Waiting for input" while an agent runs.
+
+## 2026-11-11 — Spec: all settings in the workspace app
+
+- Wrote `docs/specs/workspace-settings.md`: the app's Settings window drawn from a new
+  `kunj config --schema --json`, a scope switch (Global or one repository), and an App category for
+  the app's own preferences. Why: the user asked for all settings in the workspace app, CLI ones and
+  app ones, and chose both scopes with a switch.
+- The spec adds `config --set-json` and `--unset`. Why: `--set` guesses types from text (a string
+  `true` or `12` cannot be stored, nor an empty string, an object or a list item with a comma) and
+  nothing can remove a single value, so the app could not edit 95 settings through it.
