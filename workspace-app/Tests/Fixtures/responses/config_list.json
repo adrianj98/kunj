@@ -1,0 +1,16 @@
+{
+  "global": {
+    "agent": { "tmuxStatus": false, "command": "claude --verbose" },
+    "jira": { "apiToken": "stored-token" },
+    "container": { "env": ["GH_TOKEN", "ANTHROPIC_API_KEY"] }
+  },
+  "local": {
+    "agent": { "tmuxStatus": true },
+    "preferences": { "pageSize": 20 },
+    "lsp": { "servers": { "python": { "command": "pyright-langserver --stdio" } } }
+  },
+  "merged": {
+    "agent": { "tmux": true, "tmuxStatus": true, "command": "claude --verbose" },
+    "preferences": { "pageSize": 20 }
+  }
+}
