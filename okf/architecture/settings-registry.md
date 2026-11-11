@@ -24,7 +24,7 @@ of [Configuration](/architecture/configuration.md).
 |-------|---------|
 | `key` | Dotted path into the config object, e.g. `ai.commitStyle`, `container.network.allow` |
 | `description` | One-line help |
-| `type` | `'boolean' \| 'number' \| 'string' \| 'enum' \| 'array'` |
+| `type` | `'boolean' \| 'number' \| 'string' \| 'enum' \| 'array' \| 'object'` (`object`: `lsp.servers`, `container.services`, `container.mcp`) |
 | `defaultValue` | Default; becomes part of `defaultConfig` |
 | `category` | Grouping for `kunj config` |
 | `options` | Allowed values for enums (also used by `secrets.keyProvider`, typed `string`) |
@@ -96,6 +96,21 @@ lists are converted) and writes it without consulting the registry. `container.s
 
 # Citations
 
+## The registry as JSON, and exact edits
+
+`src/lib/config-edit.ts` (pure functions; `kunj config` loads and saves the files) [13]:
+
+| Option | Function | Result |
+| --- | --- | --- |
+| `kunj config --schema [--json]` | `buildConfigSchema(settings)` | `ConfigSchemaJson`: categories in display order (`CATEGORY_TITLES`) and every setting with key, category, type, default, description, options, `sensitive` |
+| `kunj config --set-json <key>=<json> [--global]` | `parseSetJson()` → `checkSettingValue()` → `setConfigPath()` | The value stored exactly as given; `unknown-setting` for an unregistered key, `bad-value` for a wrong type, an option not listed or a failed `validate` |
+| `kunj config --unset <key> [--global]` | `unsetConfigPath()` | The key removed, with the parents it leaves empty; `removed: false` when it was not there |
+
+Both edits refuse a config file that is not JSON (`config-corrupt`), because the loaders read such a
+file as empty and a write would replace it. `--set` is unchanged and still guesses the type from
+the text. The workspace app's Settings window is built on these three
+([workspace app](/apps/workspace-app.md)).
+
 [1] [src/lib/settings-registry.ts](/src/lib/settings-registry.ts)
 [2] [src/settings/index.ts](/src/settings/index.ts)
 [3] [src/settings/core.ts](/src/settings/core.ts)
@@ -108,3 +123,4 @@ lists are converted) and writes it without consulting the registry. `container.s
 [10] [src/commands/config.ts](/src/commands/config.ts)
 [11] [src/lib/utils.ts](/src/lib/utils.ts)
 [12] [src/types/index.ts](/src/types/index.ts)
+[13] [src/lib/config-edit.ts](/src/lib/config-edit.ts)

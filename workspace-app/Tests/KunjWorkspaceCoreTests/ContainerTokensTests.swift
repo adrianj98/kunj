@@ -59,12 +59,6 @@ private let claudeHostOnly = #"{"secrets":[{"name":"CLAUDE_CODE_OAUTH_TOKEN","sc
         #expect(claudeTokenSummary(secrets: nil) == nil)
     }
 
-    @Test func useGhTokenSetting() {
-        #expect(KunjSetting.containerUseGhToken.rawValue == "container.useGhToken")
-        #expect(KunjSetting.containerUseGhToken.defaultValue == true)
-        #expect(configSetArgs(.containerUseGhToken, false) == ["config", "--set", "container.useGhToken=false", "--global"])
-    }
-
     @Test func readAndRemoveArguments() {
         #expect(tokenStatusArgs == ["ct", "token", "status"])
         #expect(globalSecretListArgs == ["secret", "list", "--global"])

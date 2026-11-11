@@ -295,18 +295,40 @@ kunj sessions kill --orphans   # end every orphaned one
 
 ## Settings and themes
 
-**Settings…** (⌘,) has:
+**Settings…** (⌘,) holds the app's own preferences and every kunj setting. Pick a category on the
+left, or type in **Search settings** to find one by name or description.
 
-- **kunj command**: `kunj` by default. Changing it reconnects; open tabs keep the command they
-  started with.
-- **Theme**: *Auto* (light or warm, following the system appearance), *Warm* (dark, the default),
-  *Light* or *Graphite*. **View › Theme** switches it too.
-- **Agents**: **Run agents in tmux** and **Show tmux status line**. These are kunj settings
-  (`agent.tmux`, `agent.tmuxStatus` in your global config), so they apply to `kunj agent` in a
-  terminal as well, and to agents started after the change.
-- **Containers**: where a new [branch container](../containers/overview/) gets its GitHub token
+- **App**: the app's own preferences, applied at once.
+  - **kunj command**: `kunj` by default. Changing it reconnects; open tabs keep the command they
+    started with.
+  - **Theme**: *Auto* (light or warm, following the system appearance), *Warm* (dark, the default),
+    *Light* or *Graphite*. **View › Theme** switches it too.
+  - **Show repositories with no sessions**, **Show the Files column** and **Show the Changes
+    column**: the same switches as in the **View** menu.
+- **General**, **Worktrees**, **Agents**, **Containers** and the other categories: the
+  [kunj settings](../configuration/settings/), the same ones `kunj config` edits, so a change here
+  also applies in a terminal. It takes effect for what starts afterwards.
+
+**Scope**, at the top right, chooses which config is shown and changed: **Global**
+(`~/.kunj/config.json`) or one repository's, which overrides the global one in that repository. It
+starts on Global each time the window opens. Under each setting is its key and where its value comes
+from: `default`, `Global` or the repository's name. **Reset** removes the value from the config
+shown, so the global one or the default applies again.
+
+A change is saved when you click (checkboxes, menus), press Return or leave the field. Lists take one
+item per line, and a few settings, such as `container.services`, are edited as JSON; press ⌘Return to
+save a text box. kunj checks every value: one it refuses is put back, with the reason under the
+setting. Tokens (Jira, Slack) are never displayed: the field says whether one is set, and typing
+replaces it.
+
+With a kunj older than this window, only **App** is shown, with a note to update kunj.
+
+**Containers** also shows, above its settings:
+
+- Where a new [branch container](../containers/overview/) gets its GitHub token
   (a [stored secret](../configuration/secrets/), `GH_TOKEN` in your environment, or your `gh` login),
-  **Use gh's GitHub token** (`container.useGhToken`), and the **Claude Code token**. **Set Up…**
+  with **Use gh's GitHub token** (`container.useGhToken`).
+- The **Claude Code token**. **Set Up…**
   opens a tab in the selected session that runs
   [`kunj ct token setup`](../containers/commands/): sign in through the browser, and kunj takes the
   token from `claude setup-token`, checks it and stores it. **Test** runs `kunj ct token check`, one

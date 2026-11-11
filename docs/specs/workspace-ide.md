@@ -426,12 +426,10 @@ the environment's kind and greys the rest with the reason as tooltip. Destructiv
 an `NSAlert` with a "Force" checkbox. A `.run` action that fails, or answers `success: false` (`worktree
 open` when the editor did not start), shows an alert; `ct open`'s `exec` (an editor that cannot attach)
 is shown as information. New session's action tab runs in the repository's main worktree, and the new
-environment is selected (its agent opened when asked) once a listing shows it usable. Settings (⌘,): the kunj command (default `kunj`), the theme
-(`auto` = light ↔ warm by system appearance, `warm`, `light`, `graphite`), and two agent toggles that
-are kunj settings, not app state: "Run agents in tmux" (`agent.tmux`) and "Show tmux status line"
-(`agent.tmuxStatus`), read with `kunj config --get <key> --global --json` and written with
-`kunj config --set <key>=<bool> --global`, so the CLI and the app share them (an unset key reads as
-kunj's default). Containers: where a new container's GitHub token comes from (`kunj ct token status
+environment is selected (its agent opened when asked) once a listing shows it usable. Settings (⌘,): the app's own preferences (the kunj command, default `kunj`; the theme, `auto` = light ↔ warm by system
+appearance, `warm`, `light`, `graphite`; the three View toggles) and every kunj setting, drawn from
+`kunj config --schema --json` and written with `kunj config --set-json` / `--unset` in the global
+config or one repository's: see [workspace-settings.md](workspace-settings.md). Containers: where a new container's GitHub token comes from (`kunj ct token status
 --json`; a stored global container `GH_TOKEN` wins, and kunj then never asks gh), "Use gh's GitHub
 token" (`container.useGhToken`, the same way), and the Claude Code token (`kunj secret list --global
 --json`, which may unlock the vault): Set Up… opens an action tab in the selected environment running

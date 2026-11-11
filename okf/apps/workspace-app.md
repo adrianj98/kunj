@@ -29,7 +29,7 @@ language mode). It is the third consumer of the [JSON contract](/architecture/js
 | Path | What |
 | --- | --- |
 | `KunjWorkspaceCore` (Foundation only) | `CLI/` (`KunjCLI`, `ShellEnvironment`, `EventStream`, `ProcessRunner`, `Version`), `JSON/KunjJSON.swift` (Codable mirrors of `src/lib/json-types.ts`), `Model/` (`Environment` id `<repo>\|<kind>\|<branch>`, `EnvironmentList`, `EnvironmentStore`, `EnvironmentFilter`), `Terminal/` (`TerminalSpec`, `HiddenFeedScheduler`), `Diff/` (`DiffService`, `DiffModel`, `ChangesList`, `GitRunner`), `Files/` (`FileAccess`, `EditorSave`, `FileTree`), `Layout/WorkspaceLayout.swift`, `Actions/` (`ActionSpec`, `ContainerTokens`), `Design/` (generated `DesignTokens`) |
-| `KunjWorkspace` (app) | `AppDelegate` (launch args, menus, wiring), `Views/` (sidebar, header, tab bar, terminal, Changes and Files columns, status bar), `Terminal/TerminalTab`, `Model/TabRegistry`, `Model/LayoutKeeper`, `Editor/MonacoWebView` + `EditorTab`, `Actions/ActionRunner`, `Sheets/NewSessionSheet`, `Settings/SettingsWindow`, `Theme/`, `Demo/` |
+| `KunjWorkspace` (app) | `AppDelegate` (launch args, menus, wiring), `Views/` (sidebar, header, tab bar, terminal, Changes and Files columns, status bar), `Terminal/TerminalTab`, `Model/TabRegistry`, `Model/LayoutKeeper`, `Editor/MonacoWebView` + `EditorTab`, `Actions/ActionRunner`, `Sheets/NewSessionSheet`, `Settings/` (`SettingsWindow`: category list, scope, search, write queue; `SettingRowView`; `AppSettingsPane`; `ContainerTokensView`), `Theme/`, `Demo/` |
 | `KunjWorkspaceCoreTests` | Swift Testing suites against `Tests/Fixtures/fake-kunj` (a `sh` script printing `responses/<name>.json`) |
 | `Resources/web/` | Monaco page: `?mode=diff` (Changes) and `?mode=editor` (editor tabs) |
 | `web/` | npm package pinning `monaco-editor` 0.57.0; `copy-monaco.js` copies `min/vs` into `Resources/web/vs` |
@@ -56,7 +56,7 @@ about +30 MB and +0.4 s to first coloured code; `monaco.editor.defineTheme` is n
 | `worktree open <path> [--new-window]`, `worktree remove <path>` | Worktree actions |
 | `worktree add <b> -c [--base <b>]`, `ct start <b> -c [--base <b>]` | New Session sheet (`newSessionPlan`) |
 | `pr` | Create PR (in the host worktree of the branch) |
-| `config --get <key> --global` / `config --set <key>=<v> --global` | Settings for `agent.tmux`, `agent.tmuxStatus`, `container.useGhToken` (`KunjSetting`) |
+| `config --schema`, `config --list`, `config --set-json <key>=<json> [--global]`, `config --unset <key> [--global]` | Settings: every kunj setting, in the global config (run in the home directory) or one repository's (run in its root); `SettingsModel` turns the schema and the two files into rows (value, source, control) |
 | `ct token status`, `ct token check --json` (Test), `ct token setup` (Set Up…, in a tab), `secret list --global`, `secret rm CLAUDE_CODE_OAUTH_TOKEN --global` | Settings › Containers ([Tokens](/containers/tokens.md), [Secrets](/secrets/overview.md)) |
 
 Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `kunj <args>`), `run`

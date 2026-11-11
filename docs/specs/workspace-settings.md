@@ -8,8 +8,8 @@ it has today. The CLI publishes its settings list; the app draws the window from
 | Part | State |
 | --- | --- |
 | CLI: `config --schema`, `--set-json`, `--unset` | Shipped (`src/lib/config-edit.ts`) |
-| App: Settings window drawn from the schema | Spec written |
-| User docs | Spec written |
+| App: Settings window drawn from the schema | Shipped |
+| User docs | Shipped (`docs-site/src/content/docs/workspace-app.mdx`) |
 
 ## Goal
 
@@ -191,7 +191,8 @@ category and one line in the left list's place for the rest: "Update kunj to edi
 | --- | --- |
 | `KunjWorkspaceCore/JSON/ConfigSchema.swift` | `ConfigSchemaJson` and `ConfigListJson` mirrors; values as a small `JSONValue` enum |
 | `KunjWorkspaceCore/Model/SettingsModel.swift` | For a schema, a list reply and a scope: the rows per category, each with value, source and control kind; search; titles from keys; text ↔ `JSONValue` for each control |
-| `KunjWorkspaceCore/Actions/ActionSpec.swift` | `configSchemaArgs`, `configListArgs`, `configSetJsonArgs`, `configUnsetArgs`; the Bool-only `KunjSetting` helpers go once the window no longer uses them |
+| `KunjWorkspaceCore/JSON/JSONValue.swift` | Any JSON value; `compact()` is what `--set-json` is given |
+| `KunjWorkspaceCore/JSON/ConfigSchema.swift` (also) | `SettingsScope`, `configSchemaArgs`, `configListArgs`, `configSetJsonArgs`, `configUnsetArgs`, `settingsCwd`; the Bool-only `KunjSetting` helpers are gone |
 | `KunjWorkspace/Settings/SettingsWindow.swift` | The window, category list, scope popup, search |
 | `KunjWorkspace/Settings/SettingRowView.swift` | One row and its control |
 | `KunjWorkspace/Settings/AppSettingsPane.swift` | The App category |
@@ -209,10 +210,24 @@ category and one line in the left list's place for the rest: "Update kunj to edi
   (default, Global, repository); control kind per type and value; text ↔ JSON round trips (lists,
   empty string, a string that looks like a number); search; the argument builders. `fake-kunj` gains
   `config --schema`, `--list`, `--set-json` and `--unset`.
-- `--demo --screenshot` renders the window with fixture data for a look at the layout.
+- Without a person at the keyboard: `--settings <category> --screenshot <png>` writes a PNG of the
+  Settings window on that category (`app`, `agent`, `container`, …), and `-settingsScope <repository
+  name>`, `-settingsSet '<key>=<json>'`, `-settingsReset <key>` do what the scope popup, a row's
+  control and its Reset do, through the row on screen. Run them with `HOME` and `CFFIXED_USER_HOME`
+  set to a scratch directory and `-kunjCommand "<node> <dist/index.js>"`, never against the real
+  `~/.kunj`.
 
 ## Docs
 
 `docs-site`: the workspace app page's Settings section; `npm run gen` for the new `config` options.
 `workspace-ide.md`'s Settings paragraph points here. CLAUDE.md: the `config` options and
 `ConfigSchemaJson` in the contract list.
+
+## Not done
+
+- The window was checked through `--settings … --screenshot` and the `-settings*` arguments (set,
+  reset, a refused value, a repository scope, the token block, a secret field, the App pane), not by
+  hand: typing in fields, search, the View-menu sync and the older-kunj note still want a person.
+- `kunj config` takes about a second (it is off the fast path), so a category shows a spinner first.
+- The schema is fetched once per CLI; a kunj upgraded while the app runs shows its new settings
+  after the app reconnects (changing the kunj command, or a restart).

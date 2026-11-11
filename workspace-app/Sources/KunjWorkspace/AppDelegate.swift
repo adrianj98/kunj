@@ -4,6 +4,9 @@ import KunjWorkspaceCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let screenshotPath: String?
+    /// `--settings <category>`: open Settings on that category (`app`, `agent`, `container`, …)
+    /// after discovery; with `--screenshot` the PNG is of the Settings window.
+    private let settingsArgument: String?
     /// `--demo`: the mockup's environments (DemoData) instead of kunj.
     private let demo: Bool
     /// `--demo --loading`: the startup state (spinner, "Finding kunj") instead of the demo data
@@ -64,6 +67,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         changesArgument = arguments.contains("--changes") ? true : (arguments.contains("--no-changes") ? false : nil)
         filesArgument = arguments.contains("--files") ? true : (arguments.contains("--no-files") ? false : nil)
+        if let i = arguments.firstIndex(of: "--settings"), i + 1 < arguments.count {
+            settingsArgument = arguments[i + 1]
+        } else {
+            settingsArgument = nil
+        }
         demo = arguments.contains("--demo")
         demoLoading = arguments.contains("--loading")
         super.init()
@@ -131,6 +139,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // -searchOpen: the search and the editor tab's Monaco page come after discovery
                 let wait: UInt64 = UserDefaults.standard.bool(forKey: "searchOpen") ? 4 : 1
                 try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
+                if let category = self?.settingsArgument {
+                    self?.showSettings(nil)
+                    self?.settings?.select(category: category)
+                    // the schema and the config come from kunj (about a second each)
+                    @MainActor func settle() async {
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        for _ in 0..<150 where self?.settings?.isSettled != true {
+                            try? await Task.sleep(nanoseconds: 100_000_000)
+                        }
+                    }
+                    await settle()
+                    let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+                    if let name = arguments["settingsScope"] as? String {
+                        log("settings scope \(name): \(self?.settings?.perform(scope: name) == true)")
+                        await settle()
+                    }
+                    if let assignment = arguments["settingsSet"] as? String {
+                        log("settings set: \(self?.settings?.perform(set: assignment) == true)")
+                        await settle()
+                    }
+                    if let key = arguments["settingsReset"] as? String {
+                        log("settings reset \(key): \(self?.settings?.perform(reset: key) == true)")
+                        await settle()
+                    }
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    if let data = self?.settings?.snapshotPNG() {
+                        FileManager.default.createFile(atPath: screenshotPath, contents: data)
+                        log("settings screenshot written to \(screenshotPath)")
+                    } else {
+                        log("settings screenshot failed")
+                    }
+                    NSApp.terminate(nil)
+                    return
+                }
                 self?.windowController.snapshotPNG { data in
                     if let data {
                         FileManager.default.createFile(atPath: screenshotPath, contents: data)
@@ -498,38 +540,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !windowController.filesVisible {
             windowController.setFilesVisible(true, animated: true)
             // -searchQuery opens it for this run only, like --files
-            if sender != nil { UserDefaults.standard.set(true, forKey: Self.showFilesKey) }
+            if sender != nil {
+                UserDefaults.standard.set(true, forKey: Self.showFilesKey)
+                NotificationCenter.default.post(name: .viewPreferenceChanged, object: Self.showFilesKey)
+            }
         }
         windowController.filesColumn.setMode(.search)
         windowController.filesColumn.searchPanel.focus()
     }
 
-    /// View > Show/Hide Files (⌘⇧E) and the tab bar's pill; saved app-wide.
     /// View > Show Repositories Without Sessions: the sidebar lists every repository, or (the
     /// default) only those with an open session; saved app-wide.
     @objc func toggleEmptyRepos(_ sender: Any?) {
-        let show = !UserDefaults.standard.bool(forKey: Self.showEmptyReposKey)
-        UserDefaults.standard.set(show, forKey: Self.showEmptyReposKey)
-        windowController.sidebar.hideEmptyRepos = !show
+        setViewPreference(Self.showEmptyReposKey, !UserDefaults.standard.bool(forKey: Self.showEmptyReposKey))
     }
 
+    /// View > Show/Hide Files (⌘⇧E) and the tab bar's pill; saved app-wide.
     @objc func toggleFiles(_ sender: Any?) {
-        let visible = !windowController.filesVisible
-        windowController.setFilesVisible(visible, animated: true)
-        UserDefaults.standard.set(visible, forKey: Self.showFilesKey)
+        setViewPreference(Self.showFilesKey, !windowController.filesVisible)
     }
 
     /// View > Show/Hide Changes (⌘⇧C) and the tab bar's pill; saved app-wide.
     @objc func toggleChanges(_ sender: Any?) {
-        let visible = !windowController.changesVisible
-        windowController.setChangesVisible(visible, animated: true)
-        UserDefaults.standard.set(visible, forKey: Self.showChangesKey)
+        setViewPreference(Self.showChangesKey, !windowController.changesVisible)
+    }
+
+    /// One path for the three view preferences, from the View menu and from Settings › App: saves
+    /// the default, changes the window and tells the other place (`.viewPreferenceChanged`).
+    func setViewPreference(_ key: String, _ on: Bool) {
+        switch key {
+        case Self.showEmptyReposKey:
+            windowController.sidebar.hideEmptyRepos = !on
+        case Self.showFilesKey:
+            windowController.setFilesVisible(on, animated: true)
+        case Self.showChangesKey:
+            windowController.setChangesVisible(on, animated: true)
+        default:
+            return
+        }
+        UserDefaults.standard.set(on, forKey: key)
+        NotificationCenter.default.post(name: .viewPreferenceChanged, object: key)
     }
 
     @objc func showSettings(_ sender: Any?) {
         if settings == nil {
             let s = SettingsWindow()
             s.onKunjCommandChanged = { [weak self] in self?.reconnect() }
+            s.onViewPreference = { [weak self] key, on in self?.setViewPreference(key, on) }
+            // every repository kunj knows that is listed, even with no session open
+            s.repositories = { [weak self] in (self?.store?.repos ?? []).map { (root: $0.repo.root, name: $0.repo.name) } }
             s.selectedEnvironment = { [weak self] in self?.windowController.selectedEnvironment }
             // the action tab is in the main window, which comes forward so the prompt can be answered
             s.openAction = { [weak self] env, spec, onFinish in

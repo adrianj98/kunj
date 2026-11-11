@@ -22,7 +22,7 @@ page only says where each thing stands.
 | [remote-containers.md](remote-containers.md) | `kunj serve` on the Docker host, `RemoteKunjBackend`, `kunj remote`, the wire protocol, auth over an SSH tunnel | Shipped (SSH to a real second machine not yet tried) |
 | [multi-remote-containers.md](multi-remote-containers.md) | A repository's containers across this Mac and several remotes: `ct list` and branch lookup ask every one; the workspace app's remote picker | Spec written |
 | [tmux-sessions.md](tmux-sessions.md) | `kunj sessions`: kunj's tmux sessions with owner, attached terminals, CPU, memory, orphans; `kill`; the workspace app's Sessions window | Shipped |
-| [workspace-settings.md](workspace-settings.md) | The workspace app's Settings window drawn from the CLI's settings list: `config --schema`, `--set-json`, `--unset`, scopes, controls | Spec written |
+| [workspace-settings.md](workspace-settings.md) | The workspace app's Settings window drawn from the CLI's settings list: `config --schema`, `--set-json`, `--unset`, scopes, controls | Shipped |
 | [search.md](search.md) | `kunj search`: worktrees (default), branches, containers, commits and work logs; `SearchJson`; the workspace app's Search panel | Shipped (CLI, workspace app); VS Code to do |
 | [language-servers.md](language-servers.md) | Language servers for the workspace app's editor: `kunj lsp`, the Swift bridge and URI guard, start/stop/cap lifecycle using servers' disk caches | Shipped (the diff still searches) |
 | [agent-handoff.md](agent-handoff.md) | `/handoff` skill: a brief from the conversation, a new worktree, a detached agent with the brief as its prompt, opened in the workspace app; `kunj agent start --detach --prompt-file --open-in-app`, `kunj install skill` | Shipped |
@@ -93,12 +93,12 @@ page only says where each thing stands.
 | Workspace app: Settings › Containers **Test** for the Claude Code token (`kunj ct token check --json`), Set Up… through `kunj ct token setup` | [workspace-ide.md](workspace-ide.md#layout) | 14778e6 |
 | `kunj search`: every worktree by default; `--in branches,containers,commits,logs` / `--all`; `SearchJson` | [search.md](search.md) | 4b23f81 |
 | Workspace app: Search mode in the Files column (⌘⇧F), the selected worktree or container by default, all worktrees (and containers) from its menu; a match opens at its line | [search.md](search.md#workspace-app) | 4f97760 |
+| Workspace app: Settings shows every kunj setting (global or one repository's) and the app's own, drawn from `kunj config --schema`; `kunj config --schema`, `--set-json`, `--unset` | [workspace-settings.md](workspace-settings.md) | efcdf10, cb8fa3a, and the window commit; plan `docs/superpowers/plans/2026-11-11-workspace-settings.md` |
 
 ## In progress
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Workspace app: every kunj setting and the app's own in Settings, global or per repository; `kunj config --schema`, `--set-json`, `--unset` | [workspace-settings.md](workspace-settings.md) | Spec written, waiting on review; no code yet |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
 
 ## To do

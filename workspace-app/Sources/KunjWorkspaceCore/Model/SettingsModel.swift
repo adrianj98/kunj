@@ -250,3 +250,16 @@ public func settingValue(from text: String, for control: SettingControl) -> Resu
 public func secretChange(typed: String, edited: Bool) -> JSONValue? {
     edited ? .string(typed) : nil
 }
+
+/// What Settings shows when a write fails. kunj's own messages never hold the value, but the
+/// fallbacks built from the command line would (`kunj config --set-json key="<token>" exited…`),
+/// so those are replaced.
+public func settingWriteMessage(_ error: Error, key: String) -> String {
+    let message = (error as? KunjCLIError)?.message ?? "\(error)"
+    return message.contains("--set-json") ? "kunj could not save \(key)." : message
+}
+
+/// kunj is older than `config --schema`: Settings shows only the app's own preferences.
+public func isSchemaUnsupported(_ error: Error) -> Bool {
+    ((error as? KunjCLIError)?.message ?? "").lowercased().contains("unknown option")
+}

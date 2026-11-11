@@ -498,7 +498,11 @@ in `kunj repos --json` as environments, with terminals, agent tabs (`kunj agent`
 reattach to kunj's tmux sessions), a Changes column and editor tabs. It runs `kunj … --json` with `cwd`
 = the repo root and the branch named, refreshes on `kunj events --json` (a child whose stdin it holds),
 never imports kunj, never runs `docker`, and runs `git` only read-only with `GIT_OPTIONAL_LOCKS=0`. Its only
-state is UI layout in `~/.kunj/<repo>/workspace.json`. `MIN_KUNJ_VERSION` is 1.3.0 (1.0.0 is accepted as a
+state is UI layout in `~/.kunj/<repo>/workspace.json`. Settings (⌘,) is drawn from `kunj config --schema --json`
+(`SettingsModel` in Core: rows with value, source and control; `Settings/SettingsWindow.swift`, `SettingRowView`,
+`AppSettingsPane`, `ContainerTokensView`) and writes with `config --set-json`/`--unset` in the global config or one
+repository's; check it with `--settings <category> --screenshot` and the `-settings*` arguments in a scratch `HOME`
+(docs/specs/workspace-settings.md). `MIN_KUNJ_VERSION` is 1.3.0 (1.0.0 is accepted as a
 dev build), so a JSON or command change it relies on must stay additive. `KunjWorkspaceCore` (Foundation
 only) is unit tested with Swift Testing against `Tests/Fixtures/fake-kunj`; build with
 `workspace-app/scripts/test.sh` and `scripts/bundle.sh` (`SCRATCH=.build/<name>` when building in

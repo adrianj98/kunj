@@ -192,4 +192,16 @@ import Testing
         #expect(sourceCaption(model([tmux], global: #"{"agent":{"tmux":false}}"#).row(for: "agent.tmux")!, scope: .global) == "Global")
         #expect(sourceCaption(model([tmux]).row(for: "agent.tmux")!, scope: .global) == "default")
     }
+
+    @Test func writeErrorsNeverCarryTheValue() {
+        let fallback = KunjCLIError(code: .commandFailed, message: #"kunj config --set-json jira.apiToken="s3cret" --global exited with code 1"#)
+        #expect(settingWriteMessage(fallback, key: "jira.apiToken") == "kunj could not save jira.apiToken.")
+        let own = KunjCLIError(code: .commandFailed, message: "agent.tmux must be true or false.")
+        #expect(settingWriteMessage(own, key: "agent.tmux") == "agent.tmux must be true or false.")
+    }
+
+    @Test func anOlderKunjIsRecognised() {
+        #expect(isSchemaUnsupported(KunjCLIError(code: .commandFailed, message: "error: unknown option '--schema'")))
+        #expect(!isSchemaUnsupported(KunjCLIError(code: .commandFailed, message: "timed out")))
+    }
 }

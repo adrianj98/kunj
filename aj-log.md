@@ -1629,3 +1629,17 @@ macOS app zip (`kunj install macos` needs a release that has one).
   loaders read such a file as `{}`, so the write would have replaced the user's file.
 - The command test mocks `os` for the home directory, with a guard. Why: its first version changed
   `HOME`, which `os.homedir()` ignores under Jest, and wrote the real `~/.kunj/config.json`.
+- Workspace app: Settings is a category list, a scope popup (Global or a repository) and rows drawn
+  from `kunj config --schema` (`SettingsModel`, `SettingRowView`); writes go through
+  `--set-json`/`--unset` one at a time. Why: the user asked for all settings in the app; drawing
+  them from the CLI's list means a new CLI setting needs no app change.
+- `SettingsWindow.swift` split into `AppSettingsPane`, `ContainerTokensView`, `SettingRowView`; the
+  three View toggles go through `AppDelegate.setViewPreference`. Why: one file did everything, and
+  the toggles now live in two places that must agree.
+- A secure field writes only after typing in it; write errors built from the command line are
+  replaced. Why: clicking through a token field must not blank it, and the fallback error text
+  would have shown the token.
+- `--settings <category>` and `-settingsSet/-settingsReset/-settingsScope` launch arguments. Why: to
+  check the window and its writes in a scratch HOME without a person at the keyboard.
+- Old `KunjSetting`/`configGetArgs`/`configSetArgs`/`ConfigValueJson` removed. Why: nothing uses
+  them now.
