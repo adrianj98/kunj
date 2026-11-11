@@ -7,7 +7,7 @@ it has today. The CLI publishes its settings list; the app draws the window from
 
 | Part | State |
 | --- | --- |
-| CLI: `config --schema`, `--set-json`, `--unset` | Spec written |
+| CLI: `config --schema`, `--set-json`, `--unset` | Shipped (`src/lib/config-edit.ts`) |
 | App: Settings window drawn from the schema | Spec written |
 | User docs | Spec written |
 
@@ -87,6 +87,8 @@ Sets one key to a JSON value, exactly: `--set-json 'agent.command="true"'` store
 - With `--json` it prints `{ key, value, scope: 'global' | 'local' }`; errors are
   `{ error: { code, message } }`.
 - `--set` is unchanged.
+- A config file that exists but is not JSON is never written (`config-corrupt`): the loaders read it
+  as empty, so a write would wipe it. A save that did not reach the file is `write-failed`.
 
 ### `kunj config --unset <key> [--global]`
 

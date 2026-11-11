@@ -457,3 +457,40 @@ export interface SessionsKillJson {
   killed: string[];
   failed: Array<{ name: string; container: string | null; error: string }>;
 }
+
+// `kunj config --schema --json`: every registered setting, for the workspace app's Settings window
+// (docs/specs/workspace-settings.md)
+export interface ConfigSettingJson {
+  key: string;
+  // One of ConfigSchemaJson.categories[].id
+  category: string;
+  type: 'boolean' | 'number' | 'string' | 'enum' | 'array' | 'object';
+  default: unknown;
+  description: string;
+  detailedDescription?: string;
+  // For type 'enum'
+  options?: string[];
+  examples?: string[];
+  // The value is a credential: never display it
+  sensitive?: boolean;
+}
+
+export interface ConfigSchemaJson {
+  // In display order
+  categories: { id: string; title: string }[];
+  settings: ConfigSettingJson[];
+}
+
+// `kunj config --set-json <key>=<json> --json`
+export interface ConfigSetJson {
+  key: string;
+  value: unknown;
+  scope: 'global' | 'local';
+}
+
+// `kunj config --unset <key> --json`
+export interface ConfigUnsetJson {
+  key: string;
+  scope: 'global' | 'local';
+  removed: boolean;
+}

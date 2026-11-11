@@ -1622,3 +1622,10 @@ macOS app zip (`kunj install macos` needs a release that has one).
 - The spec adds `config --set-json` and `--unset`. Why: `--set` guesses types from text (a string
   `true` or `12` cannot be stored, nor an empty string, an object or a list item with a comma) and
   nothing can remove a single value, so the app could not edit 95 settings through it.
+- CLI: `kunj config --schema`, `--set-json <key>=<json>` and `--unset <key>` (`src/lib/config-edit.ts`),
+  `object` setting type, `lsp.servers` registered, `container.services`/`container.mcp` retyped
+  `object`. Why: the app needs the settings list and an exact, checked way to write and clear values.
+- `--set-json`/`--unset` refuse to write a config file that is not JSON (`config-corrupt`). Why: the
+  loaders read such a file as `{}`, so the write would have replaced the user's file.
+- The command test mocks `os` for the home directory, with a guard. Why: its first version changed
+  `HOME`, which `os.homedir()` ignores under Jest, and wrote the real `~/.kunj/config.json`.

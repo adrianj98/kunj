@@ -143,7 +143,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj commit` - Interactive commit with AI-generated messages
 - `kunj pr` - Create PR with AI-generated description
 - `kunj log` - View/manage work logs
-- `kunj config` - Manage global/local settings
+- `kunj config` - Manage global/local settings; `--schema [--json]` lists every registered setting (`ConfigSchemaJson`), `--set-json <key>=<json> [--global]` sets a value exactly and checks it against the registry (`unknown-setting`, `bad-value`), `--unset <key> [--global]` removes one (src/lib/config-edit.ts, docs/specs/workspace-settings.md); the workspace app's Settings uses these, `--set` still guesses types. In a Jest test `os.homedir()` ignores a changed `HOME`: mock `os` (see src/commands/__tests__/config-edit-command.test.ts) or the test writes the real `~/.kunj`
 - `kunj setup` - Interactive onboarding
 - `kunj delete <branch>` - Delete branch
 - `kunj completion` - Manage shell completion (--install/--uninstall)
@@ -198,7 +198,7 @@ being down gives `available: false`, never a failed listing.
 The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
 
 **Workspace app contract:** the types in src/lib/json-types.ts (`WorktreeListJson`, `ContainerListJson`,
-`ReposJson`, `ErrorJson`, `AgentStatusJson`, `AgentStopJson`, `FileReadJson`, `FileWriteJson`, `EventJson`, `SearchJson`) are the
+`ReposJson`, `ErrorJson`, `AgentStatusJson`, `AgentStopJson`, `FileReadJson`, `FileWriteJson`, `EventJson`, `SearchJson`, `ConfigSchemaJson`, `ConfigSetJson`, `ConfigUnsetJson`) are the
 published, type-only JSON contract (`types` in package.json; consumers import `from 'kunj'`). Commands build their
 JSON against these types (`satisfies` or a type annotation) so the compiler checks it, and fields are only ever added, never renamed or
 removed. Consumers: the VS Code extension, the macOS app and the workspace app. Errors in `--json` mode are

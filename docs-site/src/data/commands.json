@@ -202,8 +202,23 @@
         "default": null
       },
       {
+        "flags": "--set-json <key=json>",
+        "description": "Set a value given as JSON, checked against the setting's type",
+        "default": null
+      },
+      {
+        "flags": "--unset <key>",
+        "description": "Remove a value, so the global one or the default applies",
+        "default": null
+      },
+      {
         "flags": "-g, --get <key>",
         "description": "Get a configuration value",
+        "default": null
+      },
+      {
+        "flags": "--schema",
+        "description": "List every setting with its type and default",
         "default": null
       },
       {

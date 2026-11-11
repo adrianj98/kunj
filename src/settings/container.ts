@@ -160,7 +160,7 @@ export function registerContainerSettings(): void {
     {
       key: 'container.services',
       description: 'Sidecar services (Postgres, Redis, ...) started next to each branch container, by name',
-      type: 'string',
+      type: 'object',
       defaultValue: {},
       category: 'container',
       detailedDescription:
@@ -174,7 +174,7 @@ export function registerContainerSettings(): void {
     {
       key: 'container.mcp',
       description: 'MCP servers on this machine bridged into the container for its Claude Code; only "chrome" (a browser) for now',
-      type: 'string',
+      type: 'object',
       defaultValue: {},
       category: 'container',
       detailedDescription:

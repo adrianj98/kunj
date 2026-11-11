@@ -1,6 +1,6 @@
 // Language server settings - `kunj lsp` and the workspace app's editor (docs/specs/language-servers.md).
-// lsp.servers.<language> ({ command, extensions, restart, cachePaths }) is an object and not
-// registered (the registry has no object type); it is read from the config by `kunj lsp`.
+// lsp.servers.<language> ({ command, extensions, restart, cachePaths }) is read from the config by
+// `kunj lsp`; it is registered so `kunj config --schema` lists it.
 
 import { registerSettings } from '../lib/settings-registry';
 
@@ -40,6 +40,18 @@ export function registerLspSettings(): void {
       type: 'number',
       defaultValue: 1500,
       category: 'lsp',
+    },
+    {
+      key: 'lsp.servers',
+      description: 'Language servers by language, over the built-in ones (typescript, swift, go, cpp)',
+      type: 'object',
+      defaultValue: {},
+      category: 'lsp',
+      detailedDescription:
+        'An object of language: { command, extensions?, restart?, cachePaths? }. An entry replaces the built-in server ' +
+        'of that language or adds a new one; see `kunj lsp list`.',
+      examples: ['{"python": {"command": "pyright-langserver --stdio", "extensions": [".py"]}}'],
+      validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
     },
   ]);
 }

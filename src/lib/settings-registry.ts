@@ -1,6 +1,6 @@
 // Settings registry - allows commands and features to register their settings
 
-export type SettingType = 'boolean' | 'number' | 'string' | 'enum' | 'array';
+export type SettingType = 'boolean' | 'number' | 'string' | 'enum' | 'array' | 'object';
 
 export interface SettingDefinition {
   key: string;

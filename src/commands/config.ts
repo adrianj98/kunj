@@ -1,5 +1,6 @@
 // Config command - view and edit configuration
 
+import * as fs from 'fs';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { BaseCommand } from '../lib/command';
@@ -18,6 +19,8 @@ import { defaultConfig } from '../constants';
 import { CONFIG_VARIABLES, expandVariables, hasVariables, resolveConfigVariables } from '../lib/config-vars';
 import { formatConfigValue, formatBoolValue, parseKeyValue } from '../lib/utils';
 import { settingsRegistry, SettingDefinition } from '../settings';
+import { buildConfigSchema, parseSetJson, setConfigPath, unsetConfigPath } from '../lib/config-edit';
+import type { ConfigSchemaJson, ConfigSetJson, ConfigUnsetJson } from '../lib/json-types';
 import { listBedrockModels, validateBedrockModel } from '../lib/ai-commit';
 import { checkSlackCredentials, listSlackChannels } from '../lib/slack';
 
@@ -28,6 +31,9 @@ interface ConfigOptions {
   interactive?: boolean;
   reset?: boolean;
   global?: boolean;
+  schema?: boolean;
+  setJson?: string;
+  unset?: string;
 }
 
 export class ConfigCommand extends BaseCommand {
@@ -45,7 +51,10 @@ export class ConfigCommand extends BaseCommand {
       },
       options: [
         { flags: '-s, --set <key=value>', description: 'Set a configuration value' },
+        { flags: '--set-json <key=json>', description: "Set a value given as JSON, checked against the setting's type" },
+        { flags: '--unset <key>', description: 'Remove a value, so the global one or the default applies' },
         { flags: '-g, --get <key>', description: 'Get a configuration value' },
+        { flags: '--schema', description: 'List every setting with its type and default' },
         { flags: '-l, --list', description: 'List all configuration' },
         { flags: '-i, --interactive', description: 'Interactive configuration editor' },
         { flags: '-r, --reset', description: 'Reset to default configuration' },
@@ -55,6 +64,16 @@ export class ConfigCommand extends BaseCommand {
   }
 
   async execute(options: ConfigOptions = {}): Promise<void> {
+    // Answered before any config file is read: it needs no repository
+    if (options.schema) {
+      this.printSchema();
+      return;
+    }
+    if (options.setJson !== undefined || options.unset !== undefined) {
+      this.editExact(options);
+      return;
+    }
+
     // Load appropriate config based on --global flag
     const isGlobal = options.global || false;
     const config = isGlobal ? loadGlobalConfig() : loadLocalConfig();
@@ -102,6 +121,70 @@ export class ConfigCommand extends BaseCommand {
     if (options.set) {
       this.setConfigValue(config, options.set, isGlobal);
       return;
+    }
+  }
+
+  private printSchema(): void {
+    const schema = buildConfigSchema(settingsRegistry.getAll()) satisfies ConfigSchemaJson;
+    if (this.jsonMode) {
+      this.outputJSON(schema);
+      return;
+    }
+    for (const setting of schema.settings) {
+      const value = setting.sensitive ? '' : JSON.stringify(setting.default);
+      console.log(`${setting.key}  ${chalk.cyan(setting.type)}  ${chalk.gray(value)}`);
+    }
+  }
+
+  // --set-json and --unset: one key, in the one file named by --global, nothing guessed
+  private editExact(options: ConfigOptions): void {
+    const scope = options.global ? 'global' : 'local';
+    const config: Record<string, any> = options.global ? loadGlobalConfig() : loadLocalConfig();
+    const file = options.global ? getGlobalConfigPath() : getConfigPath();
+    // The loaders read a file that does not parse as empty; writing then would wipe it
+    if (fs.existsSync(file)) {
+      try {
+        JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch {
+        throw new UserError(`${file} is not valid JSON, so nothing was changed.`, 'Fix or delete the file, then try again.', 'config-corrupt');
+      }
+    }
+    const save = () => {
+      const text = JSON.stringify(config, null, 2);
+      if (options.global) saveGlobalConfig(config);
+      else saveLocalConfig(config);
+      // The save functions only print on failure
+      let written = '';
+      try {
+        written = fs.readFileSync(file, 'utf8');
+      } catch {
+        // reported below
+      }
+      if (written !== text) throw new UserError(`Could not write ${file}.`, undefined, 'write-failed');
+    };
+
+    if (options.setJson !== undefined) {
+      const { key, value } = parseSetJson(options.setJson, settingsRegistry.getAll());
+      setConfigPath(config, key, value);
+      save();
+      if (this.jsonMode) {
+        this.outputJSON({ key, value, scope } satisfies ConfigSetJson);
+      } else {
+        // Not the value: it may be a token
+        console.log(chalk.green(`✓ Set ${scope} ${key}`));
+      }
+      return;
+    }
+
+    const key = options.unset!;
+    const removed = unsetConfigPath(config, key);
+    if (removed) save();
+    if (this.jsonMode) {
+      this.outputJSON({ key, scope, removed } satisfies ConfigUnsetJson);
+    } else if (removed) {
+      console.log(chalk.green(`✓ Removed ${scope} ${key}`));
+    } else {
+      console.log(chalk.gray(`${key} was not set in the ${scope} config`));
     }
   }
 
