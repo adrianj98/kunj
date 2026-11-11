@@ -1643,3 +1643,8 @@ macOS app zip (`kunj install macos` needs a release that has one).
   check the window and its writes in a scratch HOME without a person at the keyboard.
 - Old `KunjSetting`/`configGetArgs`/`configSetArgs`/`ConfigValueJson` removed. Why: nothing uses
   them now.
+- Adversarial review fixes: `--set-json`/`--unset` refuse a config file that is valid JSON but not
+  an object (`null`, `5`, `[1]`). Why: `null` crashed with a TypeError and a list reported success
+  while writing nothing, which the app then showed as saved.
+- Settings reloads once the write queue empties when a write overlapped a load or a scope change.
+  Why: that load could have read the file before the write landed and left the old value on screen.

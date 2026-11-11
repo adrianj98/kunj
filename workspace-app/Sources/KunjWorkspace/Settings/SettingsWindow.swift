@@ -120,6 +120,8 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSSearchFieldD
     /// Writes waiting their turn (`value` nil is an unset), with the scope they were made in.
     private var queue: [(key: String, value: JSONValue?, scope: SettingsScope)] = []
     private var draining = false
+    /// A write finished while a load was running or after the scope changed: reload when the queue empties.
+    private var staleLoad = false
 
     init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 540),
@@ -614,10 +616,19 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSSearchFieldD
                 }
             }
             self.draining = false
+            // a load that overlapped a write may have read the file before the write landed
+            if self.staleLoad {
+                self.staleLoad = false
+                self.reload()
+            }
         }
     }
 
     private func written(_ key: String, _ value: JSONValue?, in writtenScope: SettingsScope) {
+        // The scope changed, or a load is under way, while this write ran: what that load read
+        // (a repository scope shows the global file too) may predate the write, so read again
+        // once the queue is empty.
+        if writtenScope != scope || loading || model == nil { staleLoad = true }
         guard writtenScope == scope, let current = model else { return }
         let next = current.replacing(key, with: value)
         model = next

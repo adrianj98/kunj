@@ -87,7 +87,7 @@ Sets one key to a JSON value, exactly: `--set-json 'agent.command="true"'` store
 - With `--json` it prints `{ key, value, scope: 'global' | 'local' }`; errors are
   `{ error: { code, message } }`.
 - `--set` is unchanged.
-- A config file that exists but is not JSON is never written (`config-corrupt`): the loaders read it
+- A config file that exists but is not a JSON object (not JSON, or `null`, a number, a list) is never written (`config-corrupt`): the loaders read it
   as empty, so a write would wipe it. A save that did not reach the file is `write-failed`.
 
 ### `kunj config --unset <key> [--global]`
@@ -175,6 +175,8 @@ A text control saves on Return (⌘Return in a box) or when it loses focus, only
   the control goes back to the old value and the error's message shows in red under the row until
   the next change.
 - Writes run one at a time, in order, so two quick changes cannot interleave on one file.
+  A write that finishes while a load is running, or after the scope changed, is followed by another
+  load once the queue is empty: the first one may have read the file before the write landed.
 - `agent.tmux` keeps its note about tmux not being installed; the Containers category keeps the
   GitHub and Claude Code token block above its rows, unchanged, and `container.useGhToken` is drawn
   once, in that block.

@@ -142,11 +142,16 @@ export class ConfigCommand extends BaseCommand {
     const config: Record<string, any> = options.global ? loadGlobalConfig() : loadLocalConfig();
     const file = options.global ? getGlobalConfigPath() : getConfigPath();
     // The loaders read a file that does not parse as empty; writing then would wipe it
+    // (and one that holds a list or a bare value cannot take a key at all)
     if (fs.existsSync(file)) {
+      let parsed: unknown;
       try {
-        JSON.parse(fs.readFileSync(file, 'utf8'));
+        parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       } catch {
-        throw new UserError(`${file} is not valid JSON, so nothing was changed.`, 'Fix or delete the file, then try again.', 'config-corrupt');
+        parsed = undefined;
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new UserError(`${file} is not a JSON object, so nothing was changed.`, 'Fix or delete the file, then try again.', 'config-corrupt');
       }
     }
     const save = () => {

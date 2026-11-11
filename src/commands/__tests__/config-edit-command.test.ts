@@ -90,6 +90,13 @@ describe('kunj config --schema, --set-json, --unset', () => {
     expect(fs.readFileSync(globalPath, 'utf8')).toBe('{ "agent": ');
   });
 
+  test.each(['null', '5', '[1]', '"x"'])('a config file holding %s is refused, not crashed on or half-written', async text => {
+    seed(text);
+    await expect(run({ setJson: 'agent.tmux=false', global: true })).rejects.toMatchObject({ jsonCode: 'config-corrupt', name: 'UserError' });
+    await expect(run({ unset: 'agent.tmux', global: true })).rejects.toMatchObject({ jsonCode: 'config-corrupt' });
+    expect(fs.readFileSync(globalPath, 'utf8')).toBe(text);
+  });
+
   test('--unset removes, then reports removed:false', async () => {
     seed({ lsp: { maxServers: 2 }, agent: { tmux: false } });
     expect(await run({ unset: 'lsp.maxServers', global: true })).toEqual({ key: 'lsp.maxServers', scope: 'global', removed: true });
