@@ -34,8 +34,8 @@ Not in scope: editing hook scripts in `~/.kunj/hooks/`, the secret vault (`kunj 
 - No way to remove a value, except `--reset` which empties the whole file.
 - `SettingsWindow.swift` is one hand-built grid: kunj command, theme, `agent.tmux`,
   `agent.tmuxStatus`, `container.useGhToken`, the container tokens.
-- App preferences in `UserDefaults`: kunj command, theme, show containers, show empty repositories,
-  Files pane, Changes column (the last four only as menu toggles).
+- App preferences in `UserDefaults`: kunj command, theme, show empty repositories,
+  Files column, Changes column (the last three only as menu toggles).
 
 ## CLI changes
 
@@ -70,18 +70,20 @@ interface ConfigSettingJson {
 - Without `--json` it prints the same as a plain table (key, type, default). Reading needs no
   repository.
 - `object` is a new `SettingType` for values the registry could not describe before. `lsp.servers` is
-  registered with it (default `{}`), so it appears in the schema. Settings typed `array` whose items
-  are objects (`container.services`, `container.files`, …) keep their type; the app tells them apart
-  by the value (see Controls).
+  registered with it (default `{}`), so it appears in the schema, and `container.services` and
+  `container.mcp` (registered as `string` with an object check) become `object`. An `array` whose
+  items are objects (`container.files`) keeps its type; the app tells them apart by the value (see
+  Controls).
 
-### `kunj config --set-json <key> <json> [--global]`
+### `kunj config --set-json <key>=<json> [--global]`
 
-Sets one key to a JSON value, exactly: `--set-json agent.command '"true"'` stores the string.
+Sets one key to a JSON value, exactly: `--set-json 'agent.command="true"'` stores the string.
 
 - The key must be registered, else `unknown-setting`.
 - The value must match the type: boolean, finite number, string, one of `options`, array, object.
   A setting with `validate` must pass it. Else `bad-value`, with what was expected in the message.
-- Two values (`<key> <json>`), not `key=json`, so nothing has to be split.
+- One argument, split at the first `=` (a key never contains one), so a value that starts with `-`
+  is never read as an option.
 - With `--json` it prints `{ key, value, scope: 'global' | 'local' }`; errors are
   `{ error: { code, message } }`.
 - `--set` is unchanged.
@@ -129,12 +131,11 @@ Kept in `UserDefaults`, applied at once, as today:
 | --- | --- |
 | kunj command | `kunjCommandKey` |
 | Theme | theme choice |
-| Show containers in the sidebar | `containersKey` |
-| Show repositories with no environments | `showEmptyReposKey` |
-| Show the Files pane | `showFilesKey` |
+| Show repositories with no sessions | `showEmptyReposKey` |
+| Show the Files column | `showFilesKey` |
 | Show the Changes column | `showChangesKey` |
 
-The menu items for the last four stay and both places stay in step (one notification per key).
+The menu items for the last three stay and both places stay in step (one notification per key).
 
 ### Rows
 
@@ -167,7 +168,7 @@ A text control saves on Return (⌘Return in a box) or when it loses focus, only
   repository root otherwise). The rest shows a spinner until both are back.
 - Changing the scope reruns `--list`; so does the window becoming key again, in case the CLI changed
   the file.
-- Write: `config --set-json <key> <json>` plus `--global` in the Global scope, run with the
+- Write: `config --set-json <key>=<json>` plus `--global` in the Global scope, run with the
   repository root as `cwd` otherwise. On success the row takes the value from the reply. On failure
   the control goes back to the old value and the error's message shows in red under the row until
   the next change.
