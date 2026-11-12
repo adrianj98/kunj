@@ -1675,3 +1675,8 @@ macOS app zip (`kunj install macos` needs a release that has one).
   option; saving on blur, tab change and app deactivation without ⌘S.
 - An unattended save never asks: a conflict or failed write leaves the tab unsaved. Why: a modal
   alert on losing focus would steal it back, and overwriting an agent's change silently is unsafe.
+- Review fixes: a save on focus loss is held while an alert is up and dropped for a tab closed
+  meanwhile. Why: the "Save changes?" prompt takes the focus, so the text was written before the
+  answer and "Don't Save" kept it on disk.
+- ⌘S during a save on focus loss runs after it instead of being dropped. Why: text typed since
+  that save started stayed unsaved with no sign of it.

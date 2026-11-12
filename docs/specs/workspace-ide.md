@@ -406,7 +406,9 @@ unsaved edits is never replaced: its save still asks. **Save on focus loss** (Se
 by default, `editorAutoSave`): the page posts `blur` when the editor loses the keyboard; that,
 another tab or environment taking its place, and the app going to the background save a dirty tab
 with `save(interactive: false)`, which asks nothing: a conflict (`savesUnattended()`) or a failed
-write leaves the tab unsaved and is logged. No language servers. **Go to declaration:** ⌘-click (or F12, or the
+write leaves the tab unsaved and is logged. It is held while an alert is up (`NSApp.modalWindow`:
+the close, quit and close-session prompts ask about that very text, and opening one blurs the
+editor) and dropped for a tab closed meanwhile; a ⌘S that arrives during one runs after it. No language servers. **Go to declaration:** ⌘-click (or F12, or the
 editor's *Go to Declaration*) on a name in an editor tab or either side of the diff posts
 `{ type: "definition", word, line }` (plus the tab id, or the diff side); Swift ignores a word that is
 not an ASCII identifier (`isDefinitionWord`), runs `kunj search` in the environment with

@@ -121,9 +121,30 @@ final class EditorTab: WorkspaceTab {
     /// `interactive` (save on focus loss): nobody is asked, so a conflict or a failure leaves the
     /// tab unsaved, and the next ⌘S asks.
     func save(interactive: Bool = true) async -> Bool {
-        guard loaded, !saving else { return false }
+        guard loaded else { return false }
+        if saving {
+            // ⌘S while a save on focus loss is under way: saved again after it, with what was typed since
+            if interactive { saveAgain = true }
+            return false
+        }
         saving = true
         defer { saving = false }
+        var saved = await write(interactive: interactive)
+        while saveAgain {
+            saveAgain = false
+            saved = await write(interactive: true)
+        }
+        return saved
+    }
+    private var saveAgain = false
+
+    /// A save nobody asked for must not write now: the tab was closed meanwhile, or an alert is up
+    /// (the close, quit and close-session prompts ask what to do with this very text, and opening
+    /// one is itself a loss of focus).
+    private var unattendedSaveHeld: Bool { !loaded || NSApp.modalWindow != nil }
+
+    private func write(interactive: Bool) async -> Bool {
+        guard loaded else { return false }
         do {
             guard let result = await page.call("getContent", ["id": id]) as? [String: Any],
                   let content = result["content"] as? String, let version = result["version"]
@@ -135,10 +156,12 @@ final class EditorTab: WorkspaceTab {
                 onDisk = nil
             }
             let decision = saveDecision(onDisk: onDisk, openedDigest: openedDigest, content: content)
+            guard loaded else { return false } // closed while the file was read
             guard interactive || savesUnattended(decision) else {
                 log("not saved on focus loss: \(path) in \(env.id) changed on disk")
                 return false
             }
+            guard interactive || !unattendedSaveHeld else { return false }
             switch decision {
             case .conflict(let deleted):
                 guard confirmOverwrite(deleted: deleted) else { return false }

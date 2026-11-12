@@ -117,7 +117,9 @@ final class TabRegistry {
     /// With "save when the editor loses focus" on, saves the tab's unsaved edits without asking
     /// anything: a file that changed on disk meanwhile is left alone (the tab stays unsaved).
     private func saveOnFocusLoss(_ tab: EditorTab) {
-        guard UserDefaults.standard.bool(forKey: Self.autoSaveKey), tab.dirty else { return }
+        // not while an alert is up: the close and quit prompts ask about this very text, and
+        // opening one takes the focus from the editor
+        guard UserDefaults.standard.bool(forKey: Self.autoSaveKey), tab.dirty, NSApp.modalWindow == nil else { return }
         Task { await self.save(tab, interactive: false) }
     }
 
