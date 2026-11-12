@@ -1648,3 +1648,18 @@ macOS app zip (`kunj install macos` needs a release that has one).
   while writing nothing, which the app then showed as saved.
 - Settings reloads once the write queue empties when a write overlapped a load or a scope change.
   Why: that load could have read the file before the write landed and left the old value on screen.
+
+## 2026-11-12 — Workspace app: ⌘-click on `token.ts:33` and `bob.ts:44-60` in a terminal
+
+- SwiftTerm's implicit link pattern gets a branch for a bare file name with a line
+  (`scripts/prepare-swiftterm.sh`, stamp `kunj3`). Why: its pattern needs a slash, so `token.ts:33`
+  was never underlined or clickable. A name without a line stays plain text, or every dotted word
+  would be a link.
+- `terminalLinkSpot()` reads `:line`, `:line:col`, `:line-line` and `#Lline`; the editor tab opens
+  at that line. Why: the suffix was dropped and the file opened at the top; a `44-60` range was not
+  recognised at all, so the path did not resolve.
+- A relative link that is not at the shell's directory or the root is looked for among the
+  environment's files (`terminalLinkMatches()`, `FileLister`); several matches show `FileMenu`,
+  none shows a message. Why: agents print bare names (`token.ts:33`) for files deep in the tree.
+- `TerminalLinkDetectionTests` drives the patched SwiftTerm headless. Why: the pattern lives in a
+  patch applied by a script, so only a test notices when a SwiftTerm bump drops it.

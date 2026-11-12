@@ -42,8 +42,15 @@ final class TabRegistry {
     var fileAccess: FileAccess?
     /// An editor tab saved its file (the Changes column reloads).
     var onSaved: ((EditorTab) -> Void)?
-    /// Opens a file of an environment in an editor tab (a ⌘-click on a path in a terminal).
-    var onOpenFile: ((Environment, String) -> Void)?
+    /// Lists an environment's files, to find the file a terminal link names (set with `fileAccess`).
+    var fileLister: FileLister?
+    /// Opens a file of an environment in an editor tab, at the link's line when it names one
+    /// (a ⌘-click on a path in a terminal).
+    var onOpenFile: ((Environment, String, (line: Int, column: Int)?) -> Void)?
+    /// A ⌘-clicked link names several files (`token.ts:33` with two `token.ts`): the choice.
+    var onChooseFile: ((Environment, [String], (line: Int, column: Int)?) -> Void)?
+    /// A ⌘-clicked link names no file of the environment: the message to show.
+    var onLinkMessage: ((String) -> Void)?
     private var editorPage: MonacoWebView?
     /// The editor tab the editor page shows on screen (set by the TerminalColumn), so key presses
     /// in the page count as activity of its environment.
@@ -189,23 +196,46 @@ final class TabRegistry {
         return tab
     }
 
-    /// A ⌘-clicked file in a terminal opens in an editor tab: in a worktree the first candidate
-    /// that exists (else the default opener gets the link), in a container the first one (its
-    /// files are not on this Mac, and a missing one shows the editor's message).
+    /// A ⌘-clicked file in a terminal opens in an editor tab, at its line (`token.ts:33`,
+    /// `bob.ts:44-60`). In a worktree the first candidate that exists; else, and for a relative
+    /// link in a container (its files are not on this Mac), the link is looked for among the
+    /// environment's files, so a bare `token.ts:33` finds `src/lib/token.ts`: one match opens,
+    /// several ask, none says so. Anything that names no file goes to the default opener.
     private func openLink(_ link: String, from tab: TerminalTab, env: Environment) -> Bool {
         guard let onOpenFile else { return false }
         // a worktree's root and the shell's directory with symlinks resolved (`/tmp` → `/private/tmp`)
         func real(_ path: String?) -> String? {
             env.kind == .container ? path : path.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
         }
-        let cwd = tab.reportedDirectory.map { $0.hasPrefix("file://") ? URL(string: $0)?.path : $0 } ?? nil
+        let dir = tab.reportedDirectory.map { $0.hasPrefix("file://") ? URL(string: $0)?.path : $0 } ?? nil
         guard let root = real(env.kind == .container ? "/workspace" : env.path) else { return false }
-        let paths = terminalLinkPaths(link, root: root, cwd: real(cwd))
-        let path = env.kind == .container
-            ? paths.first
-            : paths.first { FileManager.default.fileExists(atPath: root + "/" + $0) }
-        guard let path else { return false }
-        onOpenFile(env, path)
+        let cwd = real(dir)
+        let paths = terminalLinkPaths(link, root: root, cwd: cwd)
+        let spot = terminalLinkSpot(link)
+        if env.kind != .container, let path = paths.first(where: { FileManager.default.fileExists(atPath: root + "/" + $0) }) {
+            onOpenFile(env, path, spot)
+            return true
+        }
+        guard let name = terminalLinkName(link), let fileLister else {
+            guard env.kind == .container, let path = paths.first else { return false }
+            onOpenFile(env, path, spot)
+            return true
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let listing = try? await fileLister.list(env: env) else {
+                // no listing (a stopped container): the path as written, as before
+                if env.kind == .container, let path = paths.first { self.onOpenFile?(env, path, spot) }
+                else { self.onLinkMessage?("Cannot list the files of \(env.branch) to find \(name)") }
+                return
+            }
+            let found = terminalLinkMatches(link, in: listing.paths, root: root, cwd: cwd)
+            switch found.count {
+            case 0: self.onLinkMessage?("No file \(name) in \(env.branch)")
+            case 1: self.onOpenFile?(env, found[0], spot)
+            default: self.onChooseFile?(env, found, spot)
+            }
+        }
         return true
     }
 

@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-12 (file:line links in terminals)
+* **Workspace app**: `apps/workspace-app.md`: ⌘-click on `token.ts:33` or `bob.ts:44-60` opens the file at the line; bare names are found among the environment's files.
+
 ## 2026-10-30 (sidebar folder, usage on hover)
 * **Features**: `features/tmux-sessions.md`: sidebar rows name the worktree folder; usage is polled and shown only while hovering.
 

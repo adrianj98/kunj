@@ -6,13 +6,16 @@
 # (its documented fallback). The second change is in Pty.swift: the forked child closes
 # every descriptor above 2 before execve, because forkpty does not, and a terminal tab must not
 # hold the app's pipes (kunj events' stdin) or other tabs' PTY masters after the app is gone.
+# The third is in Terminal.swift: the implicit link pattern only knows URLs and paths with a
+# slash, so a branch is added for a bare file name with a line (`token.ts:33`, `a.ts:12:5`,
+# `bob.ts:44-60`), which ⌘ then underlines and ⌘-click opens (TabRegistry.openLink).
 #
 # Safe to run from several agents/shells at once: the first takes a lock, the others wait.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION=1.20.0
 # Bump the suffix when the patches change, so existing checkouts are fetched again
-STAMP="$VERSION+kunj2"
+STAMP="$VERSION+kunj3"
 DIR=vendor/SwiftTerm
 ready() { [ -f "$DIR/.kunj-version" ] && [ "$(cat "$DIR/.kunj-version")" = "$STAMP" ]; }
 ready && exit 0
@@ -31,6 +34,8 @@ sed -i '' 's#\.process("Apple/Metal/Shaders.metal")#.copy("Apple/Metal/Shaders.m
 grep -q '.copy("Apple/Metal/Shaders.metal")' "$DIR.tmp/Package.swift"
 perl -0pi -e 's/(\n(\s*)if pid == 0 \{\n)/$1$2    \/\/ kunj: keep only the terminal (0-2)\n$2    let kunjMaxFd = min(getdtablesize(), 65536)\n$2    var kunjFd: Int32 = 3\n$2    while kunjFd < kunjMaxFd { close(kunjFd); kunjFd += 1 }\n/' "$DIR.tmp/Sources/SwiftTerm/Pty.swift"
 grep -q 'kunj: keep only the terminal' "$DIR.tmp/Sources/SwiftTerm/Pty.swift"
+perl -0pi -e 's/(\n(\s*)let regex = schemeURLBranch \+ "\|" \+ rootedOrRelativePathBranch \+ "\|" \+ bareRelativePathBranch)\n/\n$2\/\/ kunj: a bare file name with a line\n$2let kunjBareFileBranch = #"(?<![\\w\\-.~\\\/:\@\$])\\w[\\w\\-.]*\\.[A-Za-z]\\w*:\\d+(?:[:\\-]\\d+)?(?!\\w)"#$1 + "|" + kunjBareFileBranch\n/' "$DIR.tmp/Sources/SwiftTerm/Terminal.swift"
+grep -q 'bareRelativePathBranch + "|" + kunjBareFileBranch' "$DIR.tmp/Sources/SwiftTerm/Terminal.swift"
 echo "$STAMP" > "$DIR.tmp/.kunj-version"
 mv "$DIR.tmp" "$DIR"
-echo "SwiftTerm $VERSION ready in $DIR (Shaders.metal patched to .copy, child descriptors closed)"
+echo "SwiftTerm $VERSION ready in $DIR (Shaders.metal patched to .copy, child descriptors closed, bare file links)"

@@ -211,6 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.windowController.filesColumn.source = FileListerSource(cli: cli)
                 self.windowController.filesColumn.searchPanel.source = KunjSearchSource(cli: cli)
                 self.windowController.terminalColumn.registry.fileAccess = FileAccess(cli: cli)
+                self.windowController.terminalColumn.registry.fileLister = FileLister(cli: cli)
                 self.startLanguageServers(cli: cli)
                 self.settings?.cli = cli
                 self.sessionsWindow?.cli = cli
@@ -939,8 +940,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { column.focusActive() }
         }
         windowController.filesColumn.searchPanel.onEscape = { [weak column] in column?.focusActive() }
-        // a ⌘-click on a file path in a terminal
-        column.registry.onOpenFile = open
+        // a ⌘-click on a file path in a terminal, at its line (`token.ts:33`)
+        let openAt: (Environment, String, (line: Int, column: Int)?) -> Void = { [weak column] env, path, spot in
+            guard let column else { return }
+            column.showMessage(nil)
+            column.registry.openEditor(env: env, path: path, at: spot.map { ($0.line, $0.column, 0) }) { [weak column] reason in
+                column?.showMessage(reason)
+            }
+            DispatchQueue.main.async { column.focusActive() }
+        }
+        column.registry.onOpenFile = openAt
+        column.registry.onLinkMessage = { [weak column] text in column?.showMessage(text) }
+        column.registry.onChooseFile = { [weak self] env, paths, spot in
+            self?.linkFileMenu = FileMenu(paths: paths, line: spot?.line) { path in openAt(env, path, spot) }
+            self?.linkFileMenu?.show(at: NSEvent.mouseLocation)
+        }
         column.registry.onSaved = { [weak windowController] tab in
             windowController?.changesColumn.repoChanged(root: tab.env.repo.root)
         }
@@ -977,6 +991,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var definitionMenu: DefinitionMenu?
+    private var linkFileMenu: FileMenu?
 
     private lazy var languageServersMenu = LanguageServersMenu { [weak self] in self?.lsp }
 

@@ -94,11 +94,20 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   (⌥ or not; a plain press keeps the mode): its tmux has the mouse, and tmux's copy-mode copy never
   reached the Mac clipboard (no OSC 52 from tmux to the tab), so a plain drag copied nothing.
 - **File links in terminals:** ⌘-click on a path SwiftTerm detects (⌘ underlines it) opens it in an
-  editor tab. `terminalLinkPaths()` (Core) drops a `:line[:col]`/`#L…` suffix and makes the path
+  editor tab, at its line when it names one. SwiftTerm's own pattern needs a slash, so
+  `scripts/prepare-swiftterm.sh` adds a branch for a bare file name with a line (`token.ts:33`,
+  `a.ts:12:5`, `bob.ts:44-60`; a name without a line is not a link, or every `e.g.` would be).
+  `terminalLinkSpot()` (Core) reads the suffix: `:line`, `:line:col`, `:line-line` (a range: its
+  first line) or `#Lline[-Lline]`. `terminalLinkPaths()` drops it and makes the path
   relative to the worktree, or `/workspace` in a container: a relative one against the shell's OSC 7
   directory first, then the root; absolute and `file://` ones only inside the root. In a worktree the
-  first candidate that exists opens; in a container the first one (a missing file shows the editor's
-  message). Anything else (a URL, a path outside the root) goes to SwiftTerm's default opener.
+  first candidate that exists opens. A relative link that is not there (a bare `token.ts:33`, a
+  `lib/a.ts:4` printed from a subfolder), and any relative link in a container, is looked for among
+  the environment's files (`FileLister`, `terminalLinkMatches()`: the candidates first, then every
+  file whose path ends with the link's, nearest the root first): one match opens, several show a
+  menu at the pointer (`FileMenu`), none shows "No file … in <branch>" in the column. An absolute
+  path in a container opens as written (a missing file shows the editor's message). Anything else
+  (a URL, a path outside the root) goes to SwiftTerm's default opener.
 - **Terminal tabs:** a login shell in the worktree (`kunj worktree shell <branch> --session <id>`), or
   `kunj ct shell <branch> --session <id>` for a container: with tmux (on the host, or in the image)
   each shell tab is its own tmux session, so quitting the app keeps it and the next launch

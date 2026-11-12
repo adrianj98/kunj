@@ -39,4 +39,32 @@ import Testing
         // a directory outside the root is ignored
         #expect(terminalLinkPaths("a.ts", root: root, cwd: "/tmp") == ["a.ts"])
     }
+
+    @Test func theSuffixSaysWhereInTheFile() {
+        #expect(terminalLinkSpot("token.ts:33")! == (33, 1))
+        #expect(terminalLinkSpot("src/a.ts:12:5")! == (12, 5))
+        #expect(terminalLinkSpot("bob.ts:44-60")! == (44, 1))
+        #expect(terminalLinkSpot("bob.ts:44-30")! == (44, 1))
+        #expect(terminalLinkSpot("src/a.ts#L4-L9")! == (4, 1))
+        #expect(terminalLinkSpot("src/a.ts") == nil)
+        #expect(terminalLinkSpot("a.ts:0") == nil)
+        // a range is dropped from the path like the other suffixes
+        #expect(terminalLinkPaths("bob.ts:44-30", root: root) == ["bob.ts"])
+    }
+
+    @Test func aBareNameIsLookedForAmongTheFiles() {
+        let files = ["README.md", "src/lib/secrets/token.ts", "src/token.ts", "src/lib/mytoken.ts", "test/lib/a.ts", "src/lib/a.ts"]
+        #expect(terminalLinkName("token.ts:33") == "token.ts")
+        #expect(terminalLinkName("./lib/a.ts:4") == "lib/a.ts")
+        #expect(terminalLinkName("/etc/hosts") == nil)
+        #expect(terminalLinkName("../a.ts") == nil)
+        #expect(terminalLinkName("https://example.com/a.ts") == nil)
+        #expect(terminalLinkMatches("token.ts:33", in: files, root: root) == ["src/token.ts", "src/lib/secrets/token.ts"])
+        #expect(terminalLinkMatches("lib/a.ts:4-9", in: files, root: root) == ["src/lib/a.ts", "test/lib/a.ts"])
+        #expect(terminalLinkMatches("README.md:1", in: files, root: root) == ["README.md"])
+        #expect(terminalLinkMatches("nope.ts:1", in: files, root: root).isEmpty)
+        // the shell's directory first
+        #expect(terminalLinkMatches("a.ts", in: files, root: root, cwd: root + "/test/lib")
+                == ["test/lib/a.ts", "src/lib/a.ts"])
+    }
 }

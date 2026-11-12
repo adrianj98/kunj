@@ -72,6 +72,10 @@ Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `
 * ⌘-click on a file path in a terminal opens it in an editor tab (`terminalLinkPaths()` in
   `KunjWorkspaceCore/Terminal/TerminalLink.swift`, wired through `TerminalTab.onOpenLink` and
   `TabRegistry.onOpenFile`); URLs and paths outside the environment go to SwiftTerm's default opener.
+  A `:line`, `:line:col` or `:line-line` suffix opens the file at that line (`terminalLinkSpot()`).
+  A bare name with a line (`token.ts:33`) is a link too (a pattern added to SwiftTerm by
+  `scripts/prepare-swiftterm.sh`) and is found among the environment's files
+  (`terminalLinkMatches()`, a menu when several match).
 * Selecting over mouse reporting (`TerminalTab.mouseDown`): ⌥/⇧-drag selects where a program has the
   mouse; a shell tab selects on every press, because tmux's `mouse on` copy never reaches the clipboard.
 * Terminal colours (`TerminalTab.apply`): background, text, cursor, selection and ANSI red/green/amber/blue
