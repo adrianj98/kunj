@@ -199,6 +199,7 @@ export async function start() {
   let current = null;
 
   function postDirty(id, f) {
+    if (f.reloading) return;
     const dirty = f.model.getAlternativeVersionId() !== f.saved;
     if (dirty === f.dirty) return;
     f.dirty = dirty;
@@ -274,6 +275,22 @@ export async function start() {
       return true;
     },
 
+    /**
+     * Replaces the clean tab `id`'s text with the file's new text from disk, keeping the cursor
+     * and the scroll position. False when the tab has unsaved edits (they are never replaced).
+     */
+    reloadFile({ id, content }) {
+      const f = files.get(id);
+      if (!f || f.model.getAlternativeVersionId() !== f.saved) return false;
+      const shown = current === id && code.getModel() === f.model;
+      const view = shown ? code.saveViewState() : f.view;
+      f.reloading = true;
+      try { f.model.setValue(content || ''); } finally { f.reloading = false; }
+      f.saved = f.model.getAlternativeVersionId();
+      if (shown && view) code.restoreViewState(view);
+      return true;
+    },
+
     focus() { if (code) code.focus(); return true; },
   });
 
@@ -297,6 +314,8 @@ export async function start() {
     code.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       if (current) post({ type: 'save', id: current });
     });
+    // the editor lost the keyboard (a click in a terminal, another app): save on focus loss
+    code.onDidBlurEditorWidget(() => { if (current) post({ type: 'blur', id: current }); });
     wireDefinition(code, () => (current ? { id: current } : null));
     code.addAction({
       id: 'kunj.findReferences',

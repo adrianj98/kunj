@@ -395,7 +395,18 @@ one that changed since it was opened asks before overwriting, one that was delet
 recreating it, one that already holds the text is not written. Closing a dirty tab asks Save / Don't
 Save / Cancel, and quitting with dirty tabs asks Cancel / Quit Without Saving. Key presses in the
 editor count as the environment's activity. A crashed editor page is reloaded with every file read
-again (unsaved text is lost). No language servers. **Go to declaration:** ⌘-click (or F12, or the
+again (unsaved text is lost). **Reload from disk:** a tab without unsaved edits takes the file's
+text again when it changed underneath (an agent, a checkout): `EditorTab.reloadIfChanged()` reads
+it, `reloadsFromDisk()` (Core) decides, and the page's `reloadFile` replaces the text keeping the
+cursor and scroll position (it refuses when an edit arrived meanwhile; a deleted file, or one that
+became binary, leaves the tab as it was). Checked for the tab on screen every 2 s (a stat of a
+worktree's file; read only when its modification time moved), for any tab when it is shown, and
+when the app comes to the front; a container's file has no stat, so only the last two. A tab with
+unsaved edits is never replaced: its save still asks. **Save on focus loss** (Settings › App, off
+by default, `editorAutoSave`): the page posts `blur` when the editor loses the keyboard; that,
+another tab or environment taking its place, and the app going to the background save a dirty tab
+with `save(interactive: false)`, which asks nothing: a conflict (`savesUnattended()`) or a failed
+write leaves the tab unsaved and is logged. No language servers. **Go to declaration:** ⌘-click (or F12, or the
 editor's *Go to Declaration*) on a name in an editor tab or either side of the diff posts
 `{ type: "definition", word, line }` (plus the tab id, or the diff side); Swift ignores a word that is
 not an ASCII identifier (`isDefinitionWord`), runs `kunj search` in the environment with

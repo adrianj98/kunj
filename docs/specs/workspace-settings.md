@@ -136,6 +136,7 @@ Kept in `UserDefaults`, applied at once, as today:
 | Show repositories with no sessions | `showEmptyReposKey` |
 | Show the Files column | `showFilesKey` |
 | Show the Changes column | `showChangesKey` |
+| Save files when the editor loses focus | `TabRegistry.autoSaveKey` (`editorAutoSave`, off by default) |
 
 The menu items for the last three stay and both places stay in step (one notification per key).
 

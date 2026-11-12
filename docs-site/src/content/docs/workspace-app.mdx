@@ -158,7 +158,15 @@ menu asks which. Paths are taken relative to the worktree (or
 [Monaco](https://microsoft.github.io/monaco-editor/) editor (the editor of VS Code, without language
 servers) meant for small fixes. ⌘S saves, in the worktree or, for a container, through
 `kunj ct file write`. If the file changed on disk since you opened it, the app asks before
-overwriting it. Closing a tab or quitting with unsaved changes asks too. Binary files, files that are
+overwriting it. Closing a tab or quitting with unsaved changes asks too.
+
+A file you have not edited follows the disk: when an agent or a checkout changes it, the tab shows
+the new text within a couple of seconds (in a container, when you come back to the tab or the app),
+at the same place. A tab with unsaved changes is never replaced.
+
+To save without ⌘S, turn on **Save files when the editor loses focus** in Settings (⌘,) under App.
+The file is then saved when you click elsewhere, switch tabs or leave the app. If the file changed on
+disk in the meantime it is not overwritten: the tab stays unsaved and ⌘S asks as usual. Binary files, files that are
 not UTF-8 and files over 5 MB are not opened.
 
 ⌘-click a name in an editor tab or in a diff (or put the cursor on it and press F12, or choose

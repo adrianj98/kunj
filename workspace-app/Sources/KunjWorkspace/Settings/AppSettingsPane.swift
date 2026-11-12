@@ -13,7 +13,7 @@ extension Notification.Name {
 @MainActor
 final class AppSettingsPane: NSView, NSTextFieldDelegate {
     /// What search matches this pane on.
-    static let searchTerms = ["app", "kunj command", "theme", "repositories", "sessions", "files column", "changes column"]
+    static let searchTerms = ["app", "kunj command", "theme", "repositories", "sessions", "files column", "changes column", "editor", "auto save", "save on focus loss", "reload"]
 
     /// The kunj command changed (after editing ends): rediscover kunj with it.
     var onKunjCommandChanged: () -> Void = {}
@@ -25,6 +25,7 @@ final class AppSettingsPane: NSView, NSTextFieldDelegate {
     private let emptyReposBox = NSButton(checkboxWithTitle: "Show repositories with no sessions", target: nil, action: nil)
     private let filesBox = NSButton(checkboxWithTitle: "Show the Files column", target: nil, action: nil)
     private let changesBox = NSButton(checkboxWithTitle: "Show the Changes column", target: nil, action: nil)
+    private let autoSaveBox = NSButton(checkboxWithTitle: "Save files when the editor loses focus", target: nil, action: nil)
     private var labels: [NSTextField] = []
     private var notes: [NSTextField] = []
     private var observer: NSObjectProtocol?
@@ -63,11 +64,18 @@ final class AppSettingsPane: NSView, NSTextFieldDelegate {
         view.orientation = .vertical
         view.alignment = .leading
         view.spacing = 6
+        autoSaveBox.target = self
+        autoSaveBox.action = #selector(autoSaveToggled)
+        let editor = NSStackView(views: [autoSaveBox, note("On a click elsewhere, another tab or another app. A file that changed on disk meanwhile is not overwritten. A file without unsaved edits always reloads when it changes on disk.")])
+        editor.orientation = .vertical
+        editor.alignment = .leading
+        editor.spacing = 6
         let grid = NSGridView(views: [
             [label("kunj command"), commandField],
             [NSGridCell.emptyContentView, note("A command or path, e.g. node ~/src/kunj/dist/index.js. Empty: kunj on your login PATH.")],
             [label("Theme"), themePopup],
             [label("Window"), view],
+            [label("Editor"), editor],
         ])
         grid.translatesAutoresizingMaskIntoConstraints = false
         grid.rowSpacing = 10
@@ -77,6 +85,8 @@ final class AppSettingsPane: NSView, NSTextFieldDelegate {
         grid.row(at: 2).yPlacement = .center
         grid.row(at: 3).topPadding = 8
         grid.cell(atColumnIndex: 0, rowIndex: 3).yPlacement = .top
+        grid.row(at: 4).topPadding = 8
+        grid.cell(atColumnIndex: 0, rowIndex: 4).yPlacement = .top
         addSubview(grid)
         NSLayoutConstraint.activate([
             commandField.widthAnchor.constraint(equalToConstant: 320),
@@ -105,6 +115,7 @@ final class AppSettingsPane: NSView, NSTextFieldDelegate {
         emptyReposBox.state = d.bool(forKey: AppDelegate.showEmptyReposKey) ? .on : .off
         filesBox.state = d.bool(forKey: AppDelegate.showFilesKey) ? .on : .off
         changesBox.state = d.bool(forKey: AppDelegate.showChangesKey) ? .on : .off
+        autoSaveBox.state = d.bool(forKey: TabRegistry.autoSaveKey) ? .on : .off
     }
 
     func apply(_ t: Theme) {
@@ -129,6 +140,10 @@ final class AppSettingsPane: NSView, NSTextFieldDelegate {
         guard let raw = themePopup.selectedItem?.representedObject as? String, let c = ThemeChoice(rawValue: raw) else { return }
         ThemeManager.shared.override = nil
         ThemeManager.shared.choice = c
+    }
+
+    @objc private func autoSaveToggled() {
+        UserDefaults.standard.set(autoSaveBox.state == .on, forKey: TabRegistry.autoSaveKey)
     }
 
     @objc private func viewToggled(_ sender: NSButton) {

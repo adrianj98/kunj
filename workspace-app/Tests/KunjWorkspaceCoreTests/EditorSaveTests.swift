@@ -41,4 +41,21 @@ import Testing
         #expect(editorRefusal(decoded) == "This file is not UTF-8 text")
         #expect(editorRefusal("café\n") == nil)
     }
+
+    @Test func aCleanTabReloadsAChangedFile() {
+        let opened = digest("a\n")
+        #expect(reloadsFromDisk(onDisk: "b\n", openedDigest: opened, dirty: false))
+        #expect(!reloadsFromDisk(onDisk: "a\n", openedDigest: opened, dirty: false))
+        // unsaved edits are never replaced
+        #expect(!reloadsFromDisk(onDisk: "b\n", openedDigest: opened, dirty: true))
+        // a file that became binary stays as it was opened
+        #expect(!reloadsFromDisk(onDisk: "b\0", openedDigest: opened, dirty: false))
+    }
+
+    @Test func anUnattendedSaveNeverOverwritesAConflict() {
+        #expect(savesUnattended(.write))
+        #expect(savesUnattended(.alreadySaved))
+        #expect(!savesUnattended(.conflict(deleted: false)))
+        #expect(!savesUnattended(.conflict(deleted: true)))
+    }
 }

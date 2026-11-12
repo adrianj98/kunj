@@ -1663,3 +1663,15 @@ macOS app zip (`kunj install macos` needs a release that has one).
   none shows a message. Why: agents print bare names (`token.ts:33`) for files deep in the tree.
 - `TerminalLinkDetectionTests` drives the patched SwiftTerm headless. Why: the pattern lives in a
   patch applied by a script, so only a test notices when a SwiftTerm bump drops it.
+
+## 2026-11-12 — Workspace app: editor tabs reload from disk; save on focus loss
+
+- An editor tab without unsaved edits reloads its file when it changed on disk (2 s stat of the tab
+  on screen, on show, on app activation; cursor and scroll kept). Why: agents rewrite files while
+  they are open, and the tab showed stale text until closed and reopened.
+- A tab with unsaved edits is never replaced, and the page refuses a reload when an edit arrived
+  during the read. Why: losing typed text is worse than showing an old file.
+- Settings › App: "Save files when the editor loses focus" (off by default). Why: asked for as an
+  option; saving on blur, tab change and app deactivation without ⌘S.
+- An unattended save never asks: a conflict or failed write leaves the tab unsaved. Why: a modal
+  alert on losing focus would steal it back, and overwriting an agent's change silently is unsafe.

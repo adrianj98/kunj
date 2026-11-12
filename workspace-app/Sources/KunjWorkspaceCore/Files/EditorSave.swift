@@ -20,6 +20,19 @@ public func saveDecision(onDisk: String?, openedDigest: String, content: String)
     return .conflict(deleted: false)
 }
 
+/// What saving without a person to ask does (save on focus loss): a conflict is left unsaved, the
+/// tab stays dirty and the next ⌘S asks.
+public func savesUnattended(_ decision: SaveDecision) -> Bool {
+    if case .conflict = decision { return false }
+    return true
+}
+
+/// Whether an editor tab takes the file's text from disk again: only a tab without unsaved edits,
+/// when the file differs from what it opened (or last saved) and can still be edited here.
+public func reloadsFromDisk(onDisk: String, openedDigest: String, dirty: Bool) -> Bool {
+    !dirty && digest(onDisk) != openedDigest && editorRefusal(onDisk) == nil
+}
+
 /// An editor tab's pill title: the file name.
 public func editorTabTitle(_ path: String) -> String {
     path.split(separator: "/").last.map(String.init) ?? path

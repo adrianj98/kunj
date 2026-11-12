@@ -56,6 +56,7 @@ final class EditorTab: WorkspaceTab {
             throw EditorError.pageFailed
         }
         openedDigest = digest(text)
+        seenModified = modified
         dirty = false
         loaded = true
         if let spot = pendingReveal {
@@ -83,11 +84,46 @@ final class EditorTab: WorkspaceTab {
         Task { await page.call("closeFile", ["id": id]) }
     }
 
+    /// The file's modification time when it was last compared with the tab (a worktree's file only).
+    private var seenModified: Date?
+    private var reloading = false
+    private var saving = false
+
+    /// The file's modification time; nil in a container (its files are not on this Mac) or when gone.
+    private var modified: Date? {
+        guard env.kind != .container, let root = env.path else { return nil }
+        return (try? FileManager.default.attributesOfItem(atPath: root + "/" + path))?[.modificationDate] as? Date
+    }
+
+    /// Takes the file's text from disk again when it changed there and the tab has no unsaved
+    /// edits (an agent or a `git checkout` rewrote it), keeping the cursor and scroll position.
+    /// `ifTouched`: only when the modification time moved since the last look (the 2 s check of
+    /// the tab on screen, which must not read the file each time); a container's file has none.
+    func reloadIfChanged(ifTouched: Bool = false) async {
+        guard loaded, !dirty, !reloading, !saving else { return }
+        let stamp = modified
+        if ifTouched, stamp == nil || stamp == seenModified { return }
+        reloading = true
+        defer { reloading = false }
+        guard let text = try? await access.read(env: env, path: path) else { return }
+        seenModified = stamp
+        guard loaded, !saving, reloadsFromDisk(onDisk: text, openedDigest: openedDigest, dirty: dirty) else { return }
+        // the page refuses when an edit arrived meanwhile; a language server hears of the new text
+        // from the page, like any edit
+        guard await page.call("reloadFile", ["id": id, "content": text]) as? Bool == true else { return }
+        openedDigest = digest(text)
+        log("reloaded \(path) in \(env.id): it changed on disk")
+    }
+
     /// Saves the page's text. The file is read again first: when it changed on disk since it was
     /// opened (and does not already hold this text), an alert asks before overwriting it. Returns
-    /// false when nothing was saved (cancelled or failed; a failure shows an alert).
-    func save() async -> Bool {
-        guard loaded else { return false }
+    /// false when nothing was saved (cancelled or failed; a failure shows an alert). Not
+    /// `interactive` (save on focus loss): nobody is asked, so a conflict or a failure leaves the
+    /// tab unsaved, and the next ⌘S asks.
+    func save(interactive: Bool = true) async -> Bool {
+        guard loaded, !saving else { return false }
+        saving = true
+        defer { saving = false }
         do {
             guard let result = await page.call("getContent", ["id": id]) as? [String: Any],
                   let content = result["content"] as? String, let version = result["version"]
@@ -98,7 +134,12 @@ final class EditorTab: WorkspaceTab {
             } catch FileAccessError.notFound {
                 onDisk = nil
             }
-            switch saveDecision(onDisk: onDisk, openedDigest: openedDigest, content: content) {
+            let decision = saveDecision(onDisk: onDisk, openedDigest: openedDigest, content: content)
+            guard interactive || savesUnattended(decision) else {
+                log("not saved on focus loss: \(path) in \(env.id) changed on disk")
+                return false
+            }
+            switch decision {
             case .conflict(let deleted):
                 guard confirmOverwrite(deleted: deleted) else { return false }
                 try await access.write(env: env, path: path, content: content)
@@ -108,10 +149,15 @@ final class EditorTab: WorkspaceTab {
                 break
             }
             openedDigest = digest(content)
+            seenModified = modified
             await page.call("markSaved", ["id": id, "version": version])
             log("saved \(path) in \(env.id)")
             return true
         } catch {
+            guard interactive else {
+                log("not saved on focus loss: \(path) in \(env.id): \(error)")
+                return false
+            }
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "\(title) was not saved"

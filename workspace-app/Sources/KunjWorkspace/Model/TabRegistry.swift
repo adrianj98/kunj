@@ -54,8 +54,20 @@ final class TabRegistry {
     private var editorPage: MonacoWebView?
     /// The editor tab the editor page shows on screen (set by the TerminalColumn), so key presses
     /// in the page count as activity of its environment.
-    weak var shownEditor: EditorTab? { didSet { if shownEditor !== oldValue { lsp?.editorShown(shownEditor) } } }
+    weak var shownEditor: EditorTab? {
+        didSet {
+            guard shownEditor !== oldValue else { return }
+            lsp?.editorShown(shownEditor)
+            // another tab (or a terminal) took its place: the one that left the screen
+            if let oldValue { saveOnFocusLoss(oldValue) }
+            if let shownEditor { Task { await shownEditor.reloadIfChanged() } }
+        }
+    }
     private var keyMonitor: Any?
+    /// UserDefaults: save an editor tab's unsaved edits when it loses focus (Settings › App; off by default).
+    static let autoSaveKey = "editorAutoSave"
+    private var diskTimer: Timer?
+    private var appObservers: [NSObjectProtocol] = []
 
     init(theme: Theme) {
         self.theme = theme
@@ -75,6 +87,38 @@ final class TabRegistry {
             }
             return event
         }
+        // A file changed underneath a tab without unsaved edits (an agent, a checkout): the tab on
+        // screen follows within 2 s (a stat; the file is read only when its time moved), any tab
+        // when it is shown, and the one on screen when the app comes back to the front.
+        diskTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let editor = self?.shownEditor else { return }
+                Task { await editor.reloadIfChanged(ifTouched: true) }
+            }
+        }
+        diskTimer?.tolerance = 0.5
+        let center = NotificationCenter.default
+        appObservers = [
+            center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let editor = self?.shownEditor else { return }
+                    Task { await editor.reloadIfChanged() }
+                }
+            },
+            center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let editor = self.shownEditor else { return }
+                    self.saveOnFocusLoss(editor)
+                }
+            },
+        ]
+    }
+
+    /// With "save when the editor loses focus" on, saves the tab's unsaved edits without asking
+    /// anything: a file that changed on disk meanwhile is left alone (the tab stays unsaved).
+    private func saveOnFocusLoss(_ tab: EditorTab) {
+        guard UserDefaults.standard.bool(forKey: Self.autoSaveKey), tab.dirty else { return }
+        Task { await self.save(tab, interactive: false) }
     }
 
     var allTabs: [any WorkspaceTab] { tabsByEnv.values.flatMap { $0 } }
@@ -241,8 +285,8 @@ final class TabRegistry {
 
     /// Saves an editor tab (File > Save, ⌘S in the page); `onSaved` follows a save.
     @discardableResult
-    func save(_ tab: EditorTab) async -> Bool {
-        let saved = await tab.save()
+    func save(_ tab: EditorTab, interactive: Bool = true) async -> Bool {
+        let saved = await tab.save(interactive: interactive)
         if saved { onSaved?(tab) }
         return saved
     }
@@ -257,6 +301,10 @@ final class TabRegistry {
         case "save":
             guard let tab = editor(id: m["id"]) else { return }
             Task { await self.save(tab) }
+        case "blur":
+            // the editor lost the keyboard: a click in a terminal, a column, another window
+            guard let tab = editor(id: m["id"]) else { return }
+            saveOnFocusLoss(tab)
         case "definition":
             // ⌘-click or F12 on a name: the word and its position come from the page. The language
             // server answers when there is one; else, or when it finds nothing, the search does.

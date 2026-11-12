@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-12 (editor reload and save on focus loss)
+* **Workspace app**: `apps/workspace-app.md`: editor tabs without unsaved edits reload a file that changed on disk; optional save when the editor loses focus.
+
 ## 2026-11-12 (file:line links in terminals)
 * **Workspace app**: `apps/workspace-app.md`: ⌘-click on `token.ts:33` or `bob.ts:44-60` opens the file at the line; bare names are found among the environment's files.
 
