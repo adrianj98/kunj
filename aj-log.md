@@ -1689,3 +1689,15 @@ macOS app zip (`kunj install macos` needs a release that has one).
   from the `fix-mcp-oauth-protected-resource` worktree, which was then removed, so every new agent
   and shell tab failed with `process.cwd ... ENOENT` and the workspace app showed only `[exited]`.
 - A tmux server already in that state still has to be restarted once (`tmux kill-server`).
+
+## 2026-11-13 — tmux sessions change directory themselves
+
+- `agentArgv` wraps the session command with an explicit cd (`inDirectory()`: `sh -c 'cd "$1" && shift
+  && exec "$@"' sh <dir> …` for argv, `cd '<dir>' && …` for a shell line). Why: the earlier fix only
+  stopped kunj from starting a tmux server in a worktree. A server already sitting in a deleted
+  directory (the one from 07:52 was still running, and a server the user starts by hand can end up the
+  same way) still ignored `-c`, so agent and shell tabs kept showing `[exited]`. With the cd no
+  `tmux kill-server` is needed. Checked against that broken server: a new agent session started in
+  the worktree and stayed up.
+- Applies to host agents, host shells and container shells (they share `agentArgv`); `sh` is found on
+  PATH so it also works in a container image.

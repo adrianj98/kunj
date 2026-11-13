@@ -1,7 +1,7 @@
 // kunj worktree shell [branch] [--session <id>] [--kill]: a login shell in a worktree, kept in a host
 // tmux session (kunjsh-…) when --session is given so it survives the app that opened it.
 import { WorktreeCommand } from '../worktree';
-import { AgentError, hostRunArgv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, readTmuxSessions, runTmux, shellSessionName } from '../../lib/agent-session';
+import { AgentError, hostRunArgv, inDirectory, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, readTmuxSessions, runTmux, shellSessionName } from '../../lib/agent-session';
 import { loadResolvedConfig } from '../../lib/config';
 import { hostSecrets } from '../../lib/secrets/host';
 
@@ -109,7 +109,7 @@ test('--session: new-session -A in the worktree, no KUNJ_ agent variables, TMUX 
   await new WorktreeCommand().execute('shell', 'feature-a', { session: 'tab1' } as any);
   const [argv, cwd, env] = run.mock.calls[0];
   expect(argv).toEqual([
-    'tmux', '-u', 'new-session', '-A', '-s', session, '-c', '/wt/feature-a', ...hostRunArgv('feature-a', ['/bin/zsh', '-l']),
+    'tmux', '-u', 'new-session', '-A', '-s', session, '-c', '/wt/feature-a', ...inDirectory('/wt/feature-a', hostRunArgv('feature-a', ['/bin/zsh', '-l'])),
     ';', 'set-option', '-t', session, 'window-size', 'latest', ';', 'set-option', '-t', session, 'status', 'off',
     ';', 'set-option', '-t', session, '@kunj_worktree', '/wt/feature-a',
   ]);

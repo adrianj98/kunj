@@ -93,3 +93,4 @@
 - Workspace app sidebar: repositories collapse to their header on a click (▸/▾), remembered in `collapsedRepos`. Page updated: apps/workspace-app.md.
 - CLI errors: one format from `src/lib/errors.ts` (`UserError`, `describeError()`, `formatError()`): `✗ message` + hint, no stack trace unless `KUNJ_DEBUG=1`, raw git/Node/AWS errors translated, every command's messages rewritten. Page updated: architecture/command-system.md.
 - `/handoff`: `kunj agent start --detach/--prompt-file/--open-in-app`, `@kunj_open`, events `id`/`worktree`/`open`, `kunj install skill`, the app opening the handed-off tab. Pages updated: features/worktree-agents.md.
+- tmux sessions: `agentArgv` wraps the command with an explicit cd (`inDirectory()`), because a tmux server whose own directory was deleted ignores `-c`; `runTmux` starts tmux in the home directory (`spawnCwd`). Page updated: features/worktree-agents.md.

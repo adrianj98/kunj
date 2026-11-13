@@ -209,7 +209,7 @@ container file access.
 **Worktree agents:** `kunj agent` (src/commands/agent.ts, src/lib/agent-session.ts) runs `agent.command`
 (default `claude`) in a host tmux session for a worktree. The `KUNJ_*` variables go in argv
 (`new-session -e`, tmux 3.2+), because tmux builds a new session's environment from its server, and
-`TMUX` is dropped so it works from inside a pane. Without tmux (or with `--no-tmux`) `start` runs the
+`TMUX` is dropped so it works from inside a pane. A tmux server keeps the directory of the client that started it and, once that directory is deleted, starts every new session there whatever `-c` says (node then dies in `process.cwd()`, the pane shows `[exited]`): so `runTmux` starts tmux in the home directory (`spawnCwd()`) and `agentArgv` wraps the command with an explicit cd (`inDirectory()`); keep both. Without tmux (or with `--no-tmux`) `start` runs the
 command directly (`$SHELL -lc`, a one-line hint on stderr when tmux is missing, exit code passed
 through), like `kunj ct agent` in an image without tmux; `status` still reports `running: null` and
 `stop` fails with `tmux-missing`. `readTmuxSessions()` tells `'missing'` (ENOENT) from `'failed'`;

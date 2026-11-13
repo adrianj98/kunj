@@ -168,7 +168,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Command } from 'commander';
 import { ContainerCommand, agentCommandLine } from '../container';
-import { CONTAINER_AGENT_STATE_FILE, withAgentHooks } from '../../lib/agent-session';
+import { CONTAINER_AGENT_STATE_FILE, inDirectory, withAgentHooks } from '../../lib/agent-session';
 
 // The agent command as ct agent runs it: the state file in the env and the Claude Code hooks appended
 const agentShell = (command: string) => `KUNJ_AGENT_STATE=${CONTAINER_AGENT_STATE_FILE} ` + withAgentHooks(command, CONTAINER_AGENT_STATE_FILE, true);
@@ -391,7 +391,7 @@ describe('ContainerCommand', () => {
       expect(execs.map(c => c[1])).toEqual([
         ['sh', '-c', 'command -v tmux'],
         [
-          'tmux', '-u', 'new-session', '-A', '-s', 'sh-tab1', '-c', '/workspace', 'sh', '-lc', SH,
+          'tmux', '-u', 'new-session', '-A', '-s', 'sh-tab1', '-c', '/workspace', ...inDirectory('/workspace', ['sh', '-lc', SH]),
           ';', 'set-option', '-t', 'sh-tab1', 'window-size', 'latest', ';', 'set-option', '-t', 'sh-tab1', 'status', 'off',
         ],
       ]);

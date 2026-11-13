@@ -235,7 +235,16 @@ export function agentArgv(name: string, cwd: string, command: string | string[],
     ...(opts.worktree ? [';', 'set-option', '-t', name, SESSION_WORKTREE_OPTION, opts.worktree] : []),
     ...(opts.openInApp ? [';', 'set-option', '-t', name, SESSION_OPEN_OPTION, 'app'] : []),
   ];
-  return ['tmux', '-u', 'new-session', opts.detach ? '-d' : '-A', '-s', name, '-c', cwd, ...vars, ...(Array.isArray(command) ? command : [command]), ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', opts.status ? 'on' : 'off', ...tag];
+  return ['tmux', '-u', 'new-session', opts.detach ? '-d' : '-A', '-s', name, '-c', cwd, ...vars, ...inDirectory(cwd, command), ';', 'set-option', '-t', name, 'window-size', 'latest', ';', 'set-option', '-t', name, 'status', opts.status ? 'on' : 'off', ...tag];
+}
+
+// `command` with an explicit cd to `cwd` first. A tmux server whose own directory was deleted (it
+// keeps the directory of the client that started it, which may be a worktree removed since, and not
+// only one kunj started) ignores -c and starts every new session in that deleted directory, where
+// node dies in process.cwd() and the pane shows only [exited]. The cd does not depend on the server.
+export function inDirectory(cwd: string, command: string | string[]): string[] {
+  if (Array.isArray(command)) return ['sh', '-c', 'cd "$1" && shift && exec "$@"', 'sh', cwd, ...command];
+  return [`cd '${cwd.replace(/'/g, `'\\''`)}' && ${command}`];
 }
 
 export const SESSION_WORKTREE_OPTION = '@kunj_worktree';

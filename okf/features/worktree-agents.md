@@ -57,6 +57,9 @@ tmux -u new-session -A -s <name> -c <worktree> -e KUNJ_BRANCH=.. -e KUNJ_REPO=..
   last attached client; the status line is off unless `agent.tmuxStatus`. Both options are re-set on
   every attach. `scripts/check-tmux-agent.sh` checks these behaviours in a throwaway Debian container.
 * `TMUX` is removed from the environment so it works from inside a pane.
+* The session command is wrapped with an explicit cd to the worktree (`inDirectory()`), and tmux itself is
+  started in the home directory (`spawnCwd()`): a tmux server keeps the directory of the client that
+  started it and, once that directory is deleted, ignores `-c` and starts every new session there.
 * `hostRunArgv()` wraps the command in `kunj run --hold`, which unlocks the vault inside the session and
   injects the branch's host secrets; values never go in argv ([kunj run](/secrets/kunj-run.md)).
 * Direct mode (`--no-tmux`, `agent.tmux: false`, or tmux missing): `directArgv()` = `$SHELL -lc <cmd>`

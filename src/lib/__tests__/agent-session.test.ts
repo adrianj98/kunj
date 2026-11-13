@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { AgentError, readTaggedTmuxSessions, worktreeAgentSessions, worktreeShellSessions, pickSession, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName, kunjSelf, hostRunArgv, spawnCwd } from '../agent-session';
+import { AgentError, readTaggedTmuxSessions, worktreeAgentSessions, worktreeShellSessions, pickSession, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName, kunjSelf, hostRunArgv, spawnCwd, inDirectory } from '../agent-session';
 import { kunjEntry } from '../self';
 
 jest.mock('child_process', () => ({
@@ -37,8 +37,14 @@ test('agentArgv attaches or creates, passes the env with -e and sets window-size
   expect(agentArgv('kunj-x', '/wt', 'claude', { KUNJ_BRANCH: 'a b', KUNJ_REPO: 'app' })).toEqual([
     'tmux', '-u', 'new-session', '-A', '-s', 'kunj-x', '-c', '/wt',
     '-e', 'KUNJ_BRANCH=a b', '-e', 'KUNJ_REPO=app',
-    'claude', ';', 'set-option', '-t', 'kunj-x', 'window-size', 'latest', ';', 'set-option', '-t', 'kunj-x', 'status', 'off',
+    "cd '/wt' && claude", ';', 'set-option', '-t', 'kunj-x', 'window-size', 'latest', ';', 'set-option', '-t', 'kunj-x', 'status', 'off',
   ]);
+});
+
+// A tmux server whose own directory was deleted ignores -c, so the command changes directory itself
+test('inDirectory puts an explicit cd before the command, as argv or as a shell line', () => {
+  expect(inDirectory('/wt/a b', ['/bin/zsh', '-l'])).toEqual(['sh', '-c', 'cd "$1" && shift && exec "$@"', 'sh', '/wt/a b', '/bin/zsh', '-l']);
+  expect(inDirectory("/wt/it's", 'claude')).toEqual(["cd '/wt/it'\\''s' && claude"]);
 });
 
 describe('listTmuxSessions', () => {
@@ -166,7 +172,7 @@ describe('shell sessions', () => {
 
   test('shellArgv runs the login shell in the worktree, no -e variables, status off unless asked', () => {
     expect(shellArgv('kunjsh-x-sh-1', '/wt', '/bin/zsh')).toEqual([
-      'tmux', '-u', 'new-session', '-A', '-s', 'kunjsh-x-sh-1', '-c', '/wt', '/bin/zsh', '-l',
+      'tmux', '-u', 'new-session', '-A', '-s', 'kunjsh-x-sh-1', '-c', '/wt', ...inDirectory('/wt', ['/bin/zsh', '-l']),
       ';', 'set-option', '-t', 'kunjsh-x-sh-1', 'window-size', 'latest', ';', 'set-option', '-t', 'kunjsh-x-sh-1', 'status', 'off',
     ]);
     expect(shellArgv('s', '/wt', 'sh', { status: true }).slice(-2)).toEqual(['status', 'on']);
@@ -266,7 +272,7 @@ describe('kunjSelf and hostRunArgv', () => {
     const argv = agentArgv('kunj-x', '/wt', hostRunArgv('feature/x', ['/bin/zsh', '-lc', 'claude']), { KUNJ_BRANCH: 'feature/x' });
     expect(argv).toEqual([
       'tmux', '-u', 'new-session', '-A', '-s', 'kunj-x', '-c', '/wt', '-e', 'KUNJ_BRANCH=feature/x',
-      process.execPath, '/k/dist/index.js', 'run', '--hold', '--branch', 'feature/x', '--', '/bin/zsh', '-lc', 'claude',
+      ...inDirectory('/wt', [process.execPath, '/k/dist/index.js', 'run', '--hold', '--branch', 'feature/x', '--', '/bin/zsh', '-lc', 'claude']),
       ';', 'set-option', '-t', 'kunj-x', 'window-size', 'latest', ';', 'set-option', '-t', 'kunj-x', 'status', 'off',
     ]);
     expect(argv.some((a) => a.includes('FOO='))).toBe(false);
