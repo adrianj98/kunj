@@ -6,6 +6,7 @@
 
 import { execFile, spawn } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import { containerNames } from './container/names';
@@ -275,10 +276,18 @@ export function directArgv(command: string, shell = process.env.SHELL || 'sh'): 
 
 export const NO_TMUX_HINT = 'tmux is not installed: the agent stops when this terminal closes (brew install tmux to keep it running)';
 
+// The directory to start argv in. A tmux client that starts the server hands it its own directory
+// for good, and tmux (3.8) starts every later session in that directory, whatever -c says, once it
+// is deleted: with a worktree there, removing the worktree broke every new agent and shell until the
+// server was restarted. So tmux starts in the home directory; the session's directory is its -c.
+export function spawnCwd(argv: string[], cwd: string): string {
+  return argv[0] === 'tmux' ? os.homedir() : cwd;
+}
+
 // Run argv attached to the terminal; resolves with the exit code
 export function runTmux(argv: string[], cwd: string, env: Record<string, string | undefined>): Promise<number> {
   return new Promise((resolve, reject) => {
-    const child = spawn(argv[0], argv.slice(1), { cwd, env, stdio: 'inherit' });
+    const child = spawn(argv[0], argv.slice(1), { cwd: spawnCwd(argv, cwd), env, stdio: 'inherit' });
     child.on('error', reject);
     child.on('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)));
   });

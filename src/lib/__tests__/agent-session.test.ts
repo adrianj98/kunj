@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { AgentError, readTaggedTmuxSessions, worktreeAgentSessions, worktreeShellSessions, pickSession, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName, kunjSelf, hostRunArgv } from '../agent-session';
+import { AgentError, readTaggedTmuxSessions, worktreeAgentSessions, worktreeShellSessions, pickSession, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName, kunjSelf, hostRunArgv, spawnCwd } from '../agent-session';
 import { kunjEntry } from '../self';
 
 jest.mock('child_process', () => ({
@@ -77,6 +77,11 @@ describe('listTmuxSessions', () => {
     tmuxResult(failure({ stderr: 'no server running on /tmp/tmux-501/default\n' }));
     await expect(readTmuxSessions()).resolves.toEqual([]);
   });
+});
+
+test('tmux starts in the home directory, so its server never sits in a worktree that gets removed', () => {
+  expect(spawnCwd(agentArgv('s', '/wt/a', 'claude', {}), '/wt/a')).toBe(require('os').homedir());
+  expect(spawnCwd(['/bin/zsh', '-l'], '/wt/a')).toBe('/wt/a');
 });
 
 test('agentArgv shows the tmux status line when asked', () => {

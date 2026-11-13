@@ -1680,3 +1680,12 @@ macOS app zip (`kunj install macos` needs a release that has one).
   answer and "Don't Save" kept it on disk.
 - ⌘S during a save on focus loss runs after it instead of being dropped. Why: text typed since
   that save started stayed unsaved with no sign of it.
+
+## 2026-11-13 — tmux starts in the home directory, not the worktree
+
+- `runTmux` starts tmux in the home directory (`spawnCwd`); the session's directory is still its
+  `-c`. Why: the first tmux client hands the server its own directory, and once that directory is
+  deleted tmux 3.8 starts every later session in it whatever `-c` says. The server had been started
+  from the `fix-mcp-oauth-protected-resource` worktree, which was then removed, so every new agent
+  and shell tab failed with `process.cwd ... ENOENT` and the workspace app showed only `[exited]`.
+- A tmux server already in that state still has to be restarted once (`tmux kill-server`).
