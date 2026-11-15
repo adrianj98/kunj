@@ -90,7 +90,7 @@ page only says where each thing stands.
 | kunj serve hardening: named volumes only, kunj volumes/networks only, no extra capabilities without --allow-privileged; tunnels closed per command | [remote-containers.md](remote-containers.md) | cc94eb0 |
 | Workspace app: terminal shows programs' own 256 colours (theme no longer re-tints them) | [workspace-ide.md](workspace-ide.md#layout) | 2d4a3b3 |
 | Remote containers: `kunj remote add --url http://… --allow-insecure-http` (plain http over a tailnet or WireGuard) | [remote-containers.md](remote-containers.md#transport-and-auth) | ad5b992 |
-| Remote containers: a stdin chunk over 16 MB (a large keep file or tar entry) no longer crashes `kunj serve`: chunks are split into 1 MB frames, the server listens for socket errors | [remote-containers.md](remote-containers.md) | (this commit) |
+| Remote containers: a stdin chunk over 16 MB (a large keep file or tar entry) no longer crashes `kunj serve`: chunks are split into 1 MB frames, the server listens for socket errors | [remote-containers.md](remote-containers.md) | b6b54b0 |
 | Workspace app: ignored files (`.env`) in the Files column, ignored folders as one faint entry | [workspace-ide.md](workspace-ide.md) | 053fa54 |
 | Antigravity as an agent: `kunj agent --agent antigravity`, Antigravity Agent tabs in the workspace app (worktrees; no waiting state) | [workspace-ide.md](workspace-ide.md) | a18c172 |
 | Workspace app: Settings › Containers **Test** for the Claude Code token (`kunj ct token check --json`), Set Up… through `kunj ct token setup` | [workspace-ide.md](workspace-ide.md#layout) | 14778e6 |
