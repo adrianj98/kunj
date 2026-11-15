@@ -18,7 +18,7 @@ import {
   ServeError,
   TTY_ENV_NAMES,
   decodeFrame,
-  encodeFrame,
+  encodeFrames,
   parseControl,
   parseLabelQuery,
 } from './protocol';
@@ -38,7 +38,9 @@ export function frameWriter(ws: WebSocket, channel: Channel): Writable {
   const writer = new Writable({
     write(chunk: Buffer, _enc, cb) {
       if (ws.readyState !== WebSocket.OPEN) return cb();
-      ws.send(encodeFrame(channel, chunk), { binary: true }, err => cb(err ?? undefined));
+      // The write completes with the last frame: frames are sent in order
+      const frames = encodeFrames(channel, chunk);
+      frames.forEach((frame, i) => ws.send(frame, { binary: true }, i === frames.length - 1 ? err => cb(err ?? undefined) : undefined));
     },
   });
   // A write after end or a failed send concerns one client: never an uncaught error that ends the server
@@ -310,6 +312,9 @@ export function attachWebSockets(server: http.Server, opts: StreamOptions): { cl
     wss.handleUpgrade(req, socket, head, ws => {
       const started = Date.now();
       const what = `${route.kind} ${url.pathname}`;
+      // A frame over maxPayload, a bad frame or a reset socket is an 'error' on this socket, and an
+      // 'error' nobody listens for ends the process: it concerns one client, whose 'close' follows
+      ws.on('error', err => opts.log(`WS ${url.pathname} socket error: ${err.message}`));
       const done = (status: string) => opts.log(`WS ${url.pathname} ${status} ${Date.now() - started}ms`);
       const run =
         route.kind === 'exec' ? serveExec(ws, route.id, opts)

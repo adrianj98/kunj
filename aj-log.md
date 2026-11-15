@@ -1701,3 +1701,17 @@ macOS app zip (`kunj install macos` needs a release that has one).
   the worktree and stayed up.
 - Applies to host agents, host shells and container shells (they share `agentArgv`); `sh` is found on
   PATH so it also works in a container image.
+
+## 2026-11-15 — kunj serve: a chunk over 16 MB no longer crashes the server
+
+- `encodeFrames()` in src/lib/serve/protocol.ts splits a chunk into frames of at most 1 MB
+  (`MAX_FRAME_DATA`); the client's exec stdin (plain and TTY) and the server's `frameWriter` use it.
+  Why: a start against a remote ended `kunj serve` with `RangeError: Max payload size exceeded` right
+  after the image build. Each stream chunk was sent as one WebSocket frame, a tar stream
+  (`tarDirectory`, `tarEntries`) yields a whole file as one chunk, and both ends refuse a frame over
+  16 MB, so one file of 16 MB or more streamed into the container broke the connection.
+- `attachWebSockets` adds an `error` listener to every upgraded socket (logged). Why: the server's
+  sockets had none, so that refused frame was an unhandled `error` event and ended the whole server,
+  and every other client's work with it, rather than the one exec.
+- Tests in src/lib/serve/__tests__/streams.test.ts: one 20 MB chunk each way, and a raw 17 MB frame
+  from a client after which the server still answers. Both failed with the reported error before.

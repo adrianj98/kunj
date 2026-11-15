@@ -1,7 +1,8 @@
 import { PassThrough, Readable, Writable } from 'stream';
 import { ExecIO, ExecTimeoutError } from '../../container/backend';
 import { FakeBackend } from '../../container/__tests__/fake-backend';
-import { Harness, startHarness } from '../../container/__tests__/remote-harness';
+import WebSocket from 'ws';
+import { HARNESS_TOKEN, Harness, startHarness } from '../../container/__tests__/remote-harness';
 
 const KUNJ = { id: 'c1', name: 'kunj-r-b-1', state: 'running' as const, image: 'i', createdAt: 't', labels: { 'kunj.repo': 'r' }, ports: [] };
 
@@ -78,6 +79,50 @@ describe('RemoteKunjBackend: streams', () => {
       expect(r.exitCode).toBe(0);
       expect(Buffer.concat(chunks).equals(big)).toBe(true);
     });
+
+    it('moves one 20 MB chunk each way: a chunk larger than a frame may be is split', async () => {
+      // A tar stream yields one chunk per file, so a 20 MB keep file was one frame over the 16 MB limit
+      const big = Buffer.alloc(20 * 1024 * 1024);
+      for (let i = 0; i < big.length; i += 4099) big[i] = i % 251;
+      h.fake.execHandler = async (_id, _cmd, io) => {
+        const input = await readAll(io.stdin as NodeJS.ReadableStream);
+        await new Promise<void>(resolve => (io.stdout as Writable).write(input, () => resolve()));
+        return { exitCode: 0, stdout: '' };
+      };
+      const chunks: Buffer[] = [];
+      const out = new Writable({ write: (c: Buffer, _e, cb) => (chunks.push(c), cb()) });
+      const r = await h.remote.exec('kunj-r-b-1', ['cat'], { stdin: Readable.from([big]), stdout: out });
+      expect(r.exitCode).toBe(0);
+      expect(Buffer.concat(chunks).equals(big)).toBe(true);
+    }, 30000);
+
+    it('a client frame over the limit ends that exec, not the server', async () => {
+      const uncaught: unknown[] = [];
+      const onUncaught = (err: unknown) => uncaught.push(err);
+      process.on('uncaughtException', onUncaught);
+      try {
+        h.fake.execHandler = async (_id, _cmd, io) => {
+          await readAll(io.stdin as NodeJS.ReadableStream).catch(() => undefined);
+          return { exitCode: 0, stdout: '' };
+        };
+        const url = new URL(`ws://127.0.0.1:${h.port}/v1/containers/kunj-r-b-1/exec`);
+        const ws = new WebSocket(url, { headers: { authorization: `Bearer ${HARNESS_TOKEN}` } });
+        const closed = new Promise<number>(resolve => ws.on('close', code => resolve(code)));
+        ws.on('error', () => undefined);
+        await new Promise(resolve => ws.on('open', resolve));
+        ws.send(JSON.stringify({ cmd: ['cat'], stdin: true }));
+        ws.send(Buffer.alloc(17 * 1024 * 1024), { binary: true });
+        await closed;
+        await new Promise(resolve => setImmediate(resolve));
+        expect(uncaught).toEqual([]);
+        // The server still answers
+        h.fake.execHandler = undefined;
+        h.fake.execResults.set('id -un', { exitCode: 0, stdout: 'dev\n' });
+        expect(await h.remote.exec('kunj-r-b-1', ['id', '-un'])).toEqual({ exitCode: 0, stdout: 'dev\n' });
+      } finally {
+        process.off('uncaughtException', onUncaught);
+      }
+    }, 30000);
 
     it('delivers stdin EOF while stdout still flows, and stderr separately', async () => {
       h.fake.execHandler = async (_id, _cmd, io) => {

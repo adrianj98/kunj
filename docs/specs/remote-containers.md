@@ -169,7 +169,11 @@ Errors are `{ error: { code, message } }` with the HTTP status; the client rethr
 channel: `0` stdin (client→server), `1` stdout, `2` stderr (server→client); text frames are control:
 `{ "resize": { cols, rows } }` (client→server), `{ "exit": code }` or `{ "error": message }`
 (server→client, then close). Stdin EOF is an empty `0` frame. Backpressure: each side stops reading
-its source while the socket's buffered amount is above 1 MB, like the MCP bridge. A WebSocket closed
+its source while the socket's buffered amount is above 1 MB, like the MCP bridge. A frame carries at
+most 1 MB of data (`MAX_FRAME_DATA`, `encodeFrames()`): a larger chunk is split by the sender, because
+a stream's chunk has no size limit (a tar stream yields a whole file at once) and both ends refuse a
+frame over their 16 MB `maxPayload`. The server listens for `error` on every socket, so a frame over
+the limit or a reset connection ends that one stream (logged) and never the server. A WebSocket closed
 without `exit` is `Error('exec ended: connection closed')`, which lifecycle already treats as a failure.
 A client that leaves mid-exec: stdin is destroyed (a command reading it, like the `socat` of a
 forward, sees EOF and ends) and the exec's `AbortSignal` (`ExecIO.signal`) kills the server's

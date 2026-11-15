@@ -41,3 +41,12 @@ container; `privileged`, `securityOpt` and capabilities outside kunj's own set (
 `FOWNER`, `SETUID`, `SETGID`, `NET_ADMIN`, `NET_RAW`) need `--allow-privileged`, and `runtime` needs
 `--allow-runtime`. On the client, `kunj ct` keeps one backend per remote per command and closes its SSH
 tunnel when the command ends (`ContainerCommand.closeBackends()`).
+
+# Frames
+
+Exec streams travel as binary WebSocket frames (src/lib/serve/protocol.ts). A frame carries at most
+1 MB of data (`MAX_FRAME_DATA`): `encodeFrames()` splits a larger chunk, on the client's stdin and on
+the server's `frameWriter`. A stream's chunk has no size limit (a tar stream yields a whole file at
+once), and both ends refuse a frame over their 16 MB `maxPayload`. `attachWebSockets` listens for
+`error` on every socket, so a refused frame or a reset connection ends that one stream and is logged;
+it never ends the server.

@@ -84,6 +84,20 @@ export function encodeFrame(channel: Channel, data: Buffer | string): Buffer {
   return Buffer.concat([Buffer.from([channel]), body]);
 }
 
+/** The most data one frame carries: a larger chunk is split, far under both ends' maxPayload. */
+export const MAX_FRAME_DATA = HIGH_WATER;
+
+/**
+ * The frames for one chunk. A stream's chunk has no size limit (a tar stream yields a whole file at
+ * once), a frame has: the receiver refuses one over its maxPayload and drops the connection.
+ */
+export function encodeFrames(channel: Channel, data: Buffer): Buffer[] {
+  if (data.length <= MAX_FRAME_DATA) return [encodeFrame(channel, data)];
+  const frames: Buffer[] = [];
+  for (let at = 0; at < data.length; at += MAX_FRAME_DATA) frames.push(encodeFrame(channel, data.subarray(at, at + MAX_FRAME_DATA)));
+  return frames;
+}
+
 export function decodeFrame(frame: Buffer): { channel: Channel; data: Buffer } {
   if (frame.length === 0) throw new ServeError(400, 'bad-request', 'empty frame');
   const channel = frame[0];

@@ -22,7 +22,7 @@ import {
   LogOptions,
 } from './backend';
 import { ContainerError } from './errors';
-import { CHANNEL, ErrorBody, ExecControl, ExecRequest, HIGH_WATER, InfoJson, PROTOCOL_VERSION, decodeFrame, encodeFrame, labelQuery, parseControl } from '../serve/protocol';
+import { CHANNEL, ErrorBody, ExecControl, ExecRequest, HIGH_WATER, InfoJson, PROTOCOL_VERSION, decodeFrame, encodeFrame, encodeFrames, labelQuery, parseControl } from '../serve/protocol';
 
 export type RemoteErrorCode = 'remote-unreachable' | 'remote-unauthorized' | 'remote-protocol' | 'remote-refused';
 
@@ -380,7 +380,7 @@ export class RemoteKunjBackend implements ContainerBackend {
 
       const onData = (chunk: Buffer | string) => {
         if (ws.readyState !== WebSocket.OPEN) return;
-        ws.send(encodeFrame(CHANNEL.stdin, typeof chunk === 'string' ? Buffer.from(chunk) : chunk), { binary: true });
+        for (const frame of encodeFrames(CHANNEL.stdin, typeof chunk === 'string' ? Buffer.from(chunk) : chunk)) ws.send(frame, { binary: true });
       };
       const onEnd = () => {
         if (ws.readyState === WebSocket.OPEN) ws.send(encodeFrame(CHANNEL.stdin, ''), { binary: true });
@@ -543,9 +543,11 @@ export class RemoteKunjBackend implements ContainerBackend {
         if (ws.readyState !== WebSocket.OPEN) return;
         const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
         if (ws.bufferedAmount > HIGH_WATER) stdinStream!.pause();
-        ws.send(encodeFrame(CHANNEL.stdin, bytes), { binary: true }, () => {
-          if (ws.bufferedAmount <= HIGH_WATER && !settled) stdinStream!.resume();
-        });
+        const frames = encodeFrames(CHANNEL.stdin, bytes);
+        frames.forEach((frame, i) =>
+          ws.send(frame, { binary: true }, i < frames.length - 1 ? undefined : () => {
+            if (ws.bufferedAmount <= HIGH_WATER && !settled) stdinStream!.resume();
+          }));
       };
       const onStdinEnd = () => {
         if (ws.readyState === WebSocket.OPEN) ws.send(encodeFrame(CHANNEL.stdin, ''), { binary: true });
