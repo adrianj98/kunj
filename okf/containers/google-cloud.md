@@ -55,6 +55,14 @@ concurrent sessions, a kernel per agent) is the target when isolation matters, a
 provider (VMs named and labelled like containers, suspend/resume per branch) and a golden image baked from
 the shared recipe.
 
+# Caching across instances
+
+No shared filesystem: Docker's data root cannot be shared and Filestore starts near $200 a month. Share
+through the golden image (base images, snapshot, warm `node_modules`), Artifact Registry remote repositories
+as pull-through caches for npm, PyPI and Docker Hub (one allowlisted hostname), and for databases a seeded
+data-disk snapshot per VM or one Cloud SQL instance with a template database per branch (the firewall would
+need allowlisted private addresses ahead of its private-range reject).
+
 # Cost and idle stop
 
 A stopped VM costs only its disk, so an instance schedule or an idle power-off matters more than the

@@ -320,6 +320,39 @@ day, and it validates `kunj serve` over IAP. An instance per session is the targ
 isolation between branches matters or more than a handful of agents run: the shared recipe becomes
 the golden image, and the Compute Engine provider instantiates it per branch.
 
+## Caching across per-session instances
+
+One shared daemon shares its image layers and blueprint snapshot for free; separate VMs do not. A
+shared filesystem is the obvious fix and the wrong one in most cases:
+
+- **`/var/lib/docker` cannot be shared.** overlay2 needs a local filesystem and one daemon per data
+  root; two daemons on one directory corrupt it. Images, layers and snapshots are shared by a
+  **registry or a golden image**, never by a mount.
+- **Filestore** (managed NFS) starts at 1 TiB and about $200 a month, more than all the VMs together.
+  A small NFS VM is cheaper but is one more machine to run, and kunj's server only accepts named
+  volumes (the `Guard`), so NFS would have to arrive as a `local`-driver volume with NFS options, a
+  small backend change. pnpm's store needs hardlinks on the same filesystem as `node_modules`, so it
+  gains nothing from NFS; npm's cache tolerates it; `.git` objects should never be on it.
+
+What to share instead, cheapest first:
+
+| Need | Share it as |
+| --- | --- |
+| Base images (`kunj-sandbox`, helper, Postgres, Redis) and the blueprint snapshot | The golden Compute Engine image (pre-pulled), rebuilt when the blueprint hash changes; or Artifact Registry in the same region (no egress charge) with `ensureSnapshot()` pulling `kunj-blueprint-<repo>:<hash>` before building |
+| npm, pip, Go, Maven downloads | **Artifact Registry remote repositories**: pull-through caches for npmjs, PyPI, Maven Central and Docker Hub, one hostname (`<region>-npm.pkg.dev`) that the firewall allowlist admits, no shared mount, no locking. The snapshot's `setup` sets the registry in the sandbox |
+| Warm `node_modules`, built artefacts | Already in the blueprint snapshot's `/workspace` (`setup` runs `npm install`); per-session VMs get it from the golden image |
+| A seeded database | Per branch, not shared: a service volume seeded in the golden image's **data disk snapshot** (a new VM's disk is created from the snapshot, restore is lazy, so Postgres starts on a seeded data directory in seconds); or one small Cloud SQL instance with a `TEMPLATE` database and `CREATE DATABASE <branch> TEMPLATE seed` per branch, reached through an allowlisted address |
+| Agent state (`~/.claude`, work logs) | Stays on the laptop, as now |
+
+A shared database *instance* across branches is usually wrong anyway: branches carry different
+migrations. A template database or a seeded disk snapshot gives each branch its own copy at the cost
+of a `CREATE DATABASE`, which is what the shared daemon's per-branch service volumes give today.
+
+Two kunj details the Cloud SQL route would need: the firewall rejects private ranges before it
+consults the allowlist, so an allowlisted private address (a Cloud SQL private IP) needs the allow
+rule moved ahead of the private-range reject, and `container.network.allow` would have to accept an
+IP as well as a domain.
+
 ## Isolation on the VM
 
 Branch containers on the VM run under `runc` with capabilities dropped as locally; the helper keeps the
