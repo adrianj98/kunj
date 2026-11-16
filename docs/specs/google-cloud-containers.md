@@ -345,21 +345,33 @@ What to share instead, cheapest first:
 | Agent state (`~/.claude`, work logs) | Stays on the laptop, as now |
 
 **The concrete case: `npm run pull-main-db`.** The repository's script pulls a dump of the main
-database and restores it locally, and every fresh session would download and restore it again. Share
-the *result*, not a filesystem:
+database and restores it. It has `--cached <path>`: given a path, it restores from the tar there and
+only a deliberate run without it pulls afresh and rewrites the tar. So the shared cache is one file at
+a path every container can see, and the design is:
 
-1. A nightly job (Cloud Scheduler starting a small VM, or a Cloud Run job) runs `pull-main-db` once
-   into a Postgres data directory on a disk and takes a **disk snapshot**; the dump itself goes to a
-   bucket as the fallback.
-2. A new session VM's data disk is **created from the latest snapshot**, so its Postgres service
-   starts on yesterday's main database in seconds and `pull-main-db` is only run to refresh.
-3. On the shared VM the same job restores once into a volume, and each branch's service gets a copy
-   (`CREATE DATABASE <branch> TEMPLATE main`, or a volume clone before the service starts).
+- **A cache volume per repository** (proposed kunj feature): `container.caches` (or blueprint
+  `caches`) names mounts such as `{ "name": "main-db", "path": "/cache" }`. kunj creates one named
+  volume `kunj-<repo>-cache-<name>` per daemon, labelled `kunj.repo` and `kunj.role=cache`, and mounts
+  it into every branch container of that repository at the path, with `KUNJ_CACHE_DIR` in the
+  container's env. It is a named volume, so `kunj serve`'s `Guard` accepts it; it is never in a
+  snapshot (volumes are not committed), `ct remove` leaves it, and `ct prune` removes it only with
+  `--force`. Services do not get it.
+- The repository then runs `npm run pull-main-db --cached $KUNJ_CACHE_DIR/main-db.tar` in blueprint
+  `setup` or `maintain`: the first branch on a box pulls and writes the tar, every later branch
+  restores from it in the time a local restore takes. A fresh pull is on demand, by running the script
+  without `--cached`, and the rewritten tar is what the next branch gets.
+- **Across per-session VMs** the volume lives in `/var/lib/docker/volumes`, so the golden image's
+  data disk carries it: a nightly job runs the fresh pull once and re-snapshots, and every new VM
+  starts with the current tar already in its cache volume. A bucket copy (`gsutil cp` from the VM
+  side, with the VM's service account) is the fallback when a VM is older than the snapshot. Nothing
+  inside a container needs cloud credentials, which the firewall blocks anyway.
+- The pull itself reaches the main database's host, which must be in `container.network.allow`
+  (or the pull runs in `setup` with the allowlist already set); that is the repository's existing
+  concern, unchanged.
 
-The dump in the bucket is reached from the VM side (the provider, with the VM's service account)
-rather than from inside a container: the firewall blocks the metadata server, so a container has no
-cloud credentials, and should not. If a session must refresh from inside, a signed URL or an HMAC
-key delivered as a branch secret, and `storage.googleapis.com` in `container.network.allow`.
+A writable shared volume means the last fresh pull wins for everyone on that box, which is the
+intended behaviour of a cache; if two branches pull at once the script's own write should be a
+temp-file-and-rename, which is the repository's to check.
 
 A shared database *instance* across branches is usually wrong anyway: branches carry different
 migrations. A template database or a seeded disk snapshot gives each branch its own copy at the cost
@@ -431,6 +443,9 @@ the disk, which is why idle stop and wake matter more than the machine type.
 
 Nothing to use option A today. Two small additions would make it comfortable:
 
+- **`container.caches`**: a named cache volume per repository mounted into every branch container
+  (`KUNJ_CACHE_DIR`), as described under "Caching across per-session instances"; useful on one shared
+  VM and on the laptop too, not only in the cloud.
 - **`kunj serve --idle-after <minutes> --idle-command <cmd>`** and a **`wake` command on remote entries**,
   as described under "On demand" above (suspend when no agent runs and no TTY is open; listings
   report `sleeping`, acting commands wake).
