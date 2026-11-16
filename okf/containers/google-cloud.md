@@ -49,9 +49,11 @@ All three forms use the existing `kunj remote add`:
 Suspend (not stop) when idle, decided on the VM by agent state (no running agent, no open TTY exec for N
 minutes), resume from the laptop: today by an ssh ProxyCommand script that resumes the instance before
 opening the IAP tunnel (wakes on listings too), proposed as `kunj serve --idle-after` and a `wake` command on
-the remote entry that only acting commands run while listings report `sleeping`. One shared VM over a VM
-per branch: snapshots and image caches are per daemon, idle branches are free as stopped containers, and
-per-branch VMs would need an orchestrator; several shared VMs (multi-remote spec) come before that.
+the remote entry that only acting commands run while listings report `sleeping`. A shared VM is step one (a
+recipe, a day); an instance per session (e2-standard-2, 8 GB, about $0.067/h, cheaper below about five
+concurrent sessions, a kernel per agent) is the target when isolation matters, and needs a Compute Engine
+provider (VMs named and labelled like containers, suspend/resume per branch) and a golden image baked from
+the shared recipe.
 
 # Cost and idle stop
 

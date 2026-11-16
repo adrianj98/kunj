@@ -279,11 +279,46 @@ Shared, until a reason not to appears. The comparison in kunj's terms:
 | On demand | One suspend/resume | One per branch; resume latency on each first command |
 | Scaling | One box; beyond it, several shared VMs through the multi-remote spec | Natural |
 
-The engineering gap is the decider: a shared VM is a recipe, per-branch VMs are a project. The cases
-that would justify per-branch VMs are agents on repositories that must not see each other's work or
-secrets, or more concurrent agents than one 64 GB box carries. Both are served first by **a few shared
-VMs** (one per repository or trust level, which the [multi-remote spec](multi-remote-containers.md)
-already describes and which needs no orchestrator), and only then by a VM per branch.
+### Revised 2026-11-16: an instance per session at 8 GB
+
+Sized per session, the small VMs are small: one agent plus one service container fits an
+e2-standard-2 (2 vCPU, 8 GB, about $0.067 per hour); a light repository with no services fits an
+e2-medium (4 GB, about $0.034 per hour); Docker-in-Docker or a big monorepo wants an e2-standard-4
+(16 GB). 4 GB is tight once `tsc` or parallel Jest workers run next to the agent (each a gigabyte or
+more), so 8 GB is the default size.
+
+That changes the cost column: three sessions active at once cost about $0.20 per hour against the
+shared box's $0.36, and the break-even is about five concurrent 8 GB sessions. Over a month of three
+sessions, six hours a day, both land near $50 (shared: the VM for the hours it runs plus one disk;
+per-session: session-hours plus one small disk per branch, about $2 a month each for 20 GB, so
+branches must be deleted when merged or the disks add up).
+
+What per-session instances buy: a kernel per agent (an escape reaches that branch only), no
+contention between builds, and VMs sized to the work. What they cost: a first command that resumes or
+boots a VM instead of finding a warm container, and the orchestration below.
+
+**What kunj would need for an instance per session** (a project, not a recipe):
+
+- A **Compute Engine provider** above the backends: `kunj ct start` for a branch with no VM creates
+  one named like its container (`kunj-<repo>-<branch>-<hash>`), with GCE labels `kunj.repo`,
+  `kunj.branch`, `kunj.version` as the state (the same rule as Docker labels); `ct list` is one
+  `instances list` by label plus a `kunj serve` listing per running VM (suspended ones are reported
+  from the GCE state without waking them); `ct stop` suspends, `ct remove` deletes the VM and its
+  disk, `ct prune` deletes VMs of branches gone from origin. Each VM is reached as a dynamic `--ssh`
+  remote through IAP (instance name, zone), so no `remotes.json` entries are kept per branch.
+- A **golden image**: the shared-VM recipe (Ubuntu, Docker, Sysbox, `kunj serve`, the `kunj-sandbox`
+  and helper images, the repository's blueprint snapshot pre-pulled) baked into a custom Compute
+  Engine image with `gcloud compute images create`, rebuilt when the blueprint hash changes. New VMs
+  then boot ready in under a minute. Without it every VM would build the sandbox image and the
+  blueprint snapshot itself (minutes). An alternative is pushing snapshots to Artifact Registry and
+  pulling on first start; the golden image is simpler and also caches the base images.
+- Per-VM on-demand as described above (suspend on idle, wake on an acting command), already per
+  session by construction.
+
+**Verdict, revised:** the shared VM is still step one, because it is the same recipe and takes a
+day, and it validates `kunj serve` over IAP. An instance per session is the target design when
+isolation between branches matters or more than a handful of agents run: the shared recipe becomes
+the golden image, and the Compute Engine provider instantiates it per branch.
 
 ## Isolation on the VM
 
