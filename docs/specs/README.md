@@ -114,7 +114,7 @@ page only says where each thing stands.
 | Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
 | Google Cloud: try the Compute Engine recipe (Ubuntu 24.04, Docker, Sysbox, `kunj serve`, IAP ssh ProxyCommand, Cloud NAT) on a real VM; then `kunj serve --idle-stop`, a wake command for remotes, a docs-site page | [google-cloud-containers.md](google-cloud-containers.md) | Needs a Google Cloud project and a VM (Waiting on you) |
 | Remote containers: try an `--ssh` remote against a real second machine (and a Linux Docker host) | [remote-containers.md](remote-containers.md) | Everything so far ran with `kunj serve` on the same Mac |
-| Remote containers: check whether a closed remote terminal leaves its process in the container | [remote-containers.md](remote-containers.md) | Seen once: a `tmux attach` client still attached after its kunj client and server were gone; the spec says closing the socket hangs the pty up. Not reproduced in isolation (Docker hung) |
+| Remote containers: end a remote terminal's process when its client leaves | [remote-containers.md](remote-containers.md) | Confirmed 2026-11-16: closing the hijacked exec connection does not hang up the pty, so a closed remote shell or `tmux attach` client stays in the container and the server polls 30 s. Needs a kill of exactly that process (not the tmux server); not designed |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
 | Extra repos cloned next to the workspace | [container-system.md](container-system.md#roadmap) | — |
