@@ -25,7 +25,24 @@ export type ServeErrorCode =
   | 'bad-request'
   | 'too-large'
   | 'remote-refused'
-  | 'backend';
+  | 'pairing-closed'
+  | 'backend'
+  // the coordinator's machine routes (docs/specs/cloud-machines.md); the message says what to do
+  | MachineRouteErrorCode;
+
+export type MachineRouteErrorCode =
+  | 'machine-provider'
+  | 'machine-not-found'
+  | 'machine-ambiguous'
+  | 'machine-asleep'
+  | 'machine-exists'
+  | 'machine-not-kunj'
+  | 'machine-create-failed'
+  | 'machine-token'
+  | 'machine-timeout'
+  | 'provider-cli-missing'
+  | 'provider-failed'
+  | 'bad-machine-config';
 
 /** An error the server sends as { error: { code, message } } with `status`. */
 export class ServeError extends Error {
@@ -46,6 +63,15 @@ export interface InfoJson {
   features: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
   /** The Docker context the server uses (asked once, at its first request) */
   context: string;
+  /** Present on a coordinator (`kunj serve --machines`) */
+  machines?: MachinesInfo;
+}
+
+export interface MachinesInfo {
+  provider: string;
+  features: { suspend: boolean; spot: boolean; images: boolean; diskSnapshots: boolean; selfSuspend: boolean };
+  /** How the coordinator reaches machines */
+  network: 'private' | 'tunnel';
 }
 
 /** GET /v1/engine (the EngineInfo); GET /v1/engine/context gives { context } */

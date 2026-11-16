@@ -82,12 +82,20 @@ export function sshArgs(opts: { ssh: string; port: number; localPort: number }):
   ];
 }
 
-export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
-  const localPort = opts.localPort ?? (await findFreePort(0));
-  const timeoutMs = opts.timeoutMs ?? 120000;
+interface TunnelMessages {
+  /** spawn failed (ENOENT…) */
+  spawnFailed(err: Error): ContainerError;
+  /** the process exited before the port accepted */
+  exitedEarly(detail: string): ContainerError;
+  /** the port did not accept in time */
+  timedOut(seconds: number, detail: string): ContainerError;
+}
+
+/** Runs `cmd args`, which listens on 127.0.0.1:localPort, and waits until that port accepts. */
+async function spawnTunnel(cmd: string, args: string[], localPort: number, timeoutMs: number, messages: TunnelMessages): Promise<Tunnel> {
   const stderr: string[] = [];
-  const child: ChildProcess = spawn(opts.sshPath ?? 'ssh', sshArgs({ ssh: opts.ssh, port: opts.port, localPort }), {
-    // stdin stays ours so ssh can ask (a passphrase, a new host key) when there is a terminal
+  const child: ChildProcess = spawn(cmd, args, {
+    // stdin stays ours so ssh (or gcloud) can ask (a passphrase, a new host key) when there is a terminal
     stdio: ['inherit', 'ignore', 'pipe'],
   });
   child.stderr!.on('data', (d: Buffer) => {
@@ -113,26 +121,17 @@ export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
   for (;;) {
     if (spawnError) {
       release();
-      throw new ContainerError(`Could not run ${opts.sshPath ?? 'ssh'}: ${spawnError.message}. Install OpenSSH and make sure ssh is on your PATH.`, 'bad-remote');
+      throw messages.spawnFailed(spawnError);
     }
     if (exited) {
       release();
-      const detail = firstLine();
-      throw new ContainerError(
-        `ssh to ${opts.ssh} ended before the tunnel was up${detail ? `: ${detail}` : ''}` +
-          ` (is kunj serve listening on 127.0.0.1:${opts.port} there? try: ssh ${opts.ssh} kunj serve token).`,
-        'remote-unreachable',
-      );
+      throw messages.exitedEarly(firstLine());
     }
     if (await accepts(localPort)) break;
     if (Date.now() >= deadline) {
       kill();
       release();
-      throw new ContainerError(
-        `ssh to ${opts.ssh} did not bring the tunnel up within ${Math.round(timeoutMs / 1000)} s${firstLine() ? `: ${firstLine()}` : ''}.` +
-          ` Check that ssh ${opts.ssh} logs in from a terminal without a prompt (host key, passphrase).`,
-        'bad-remote',
-      );
+      throw messages.timedOut(Math.round(timeoutMs / 1000), firstLine());
     }
     await new Promise(r => setTimeout(r, READY_POLL_MS));
   }
@@ -150,4 +149,37 @@ export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
       await exit;
     },
   };
+}
+
+export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
+  const localPort = opts.localPort ?? (await findFreePort(0));
+  const ssh = opts.sshPath ?? 'ssh';
+  return spawnTunnel(ssh, sshArgs({ ssh: opts.ssh, port: opts.port, localPort }), localPort, opts.timeoutMs ?? 120000, {
+    spawnFailed: err => new ContainerError(`Could not run ${ssh}: ${err.message}. Install OpenSSH and make sure ssh is on your PATH.`, 'bad-remote'),
+    exitedEarly: detail =>
+      new ContainerError(
+        `ssh to ${opts.ssh} ended before the tunnel was up${detail ? `: ${detail}` : ''}` +
+          ` (is kunj serve listening on 127.0.0.1:${opts.port} there? try: ssh ${opts.ssh} kunj serve token).`,
+        'remote-unreachable',
+      ),
+    timedOut: (seconds, detail) =>
+      new ContainerError(
+        `ssh to ${opts.ssh} did not bring the tunnel up within ${seconds} s${detail ? `: ${detail}` : ''}.` +
+          ` Check that ssh ${opts.ssh} logs in from a terminal without a prompt (host key, passphrase).`,
+        'bad-remote',
+      ),
+  });
+}
+
+/**
+ * A tunnel from any port forwarder a machine provider names (`gcloud compute start-iap-tunnel …`,
+ * `aws ssm start-session …`): `argv` must listen on 127.0.0.1:localPort.
+ */
+export async function openCommandTunnel(opts: { argv: string[]; localPort: number; describe: string; timeoutMs?: number }): Promise<Tunnel> {
+  const [cmd, ...args] = opts.argv;
+  return spawnTunnel(cmd, args, opts.localPort, opts.timeoutMs ?? 120000, {
+    spawnFailed: err => new ContainerError(`Could not run ${cmd} for ${opts.describe}: ${err.message}. Install it and make sure it is on your PATH.`, 'remote-unreachable'),
+    exitedEarly: detail => new ContainerError(`${cmd} ended before ${opts.describe} was up${detail ? `: ${detail}` : ''}.`, 'remote-unreachable'),
+    timedOut: (seconds, detail) => new ContainerError(`${opts.describe} did not come up within ${seconds} s${detail ? `: ${detail}` : ''}.`, 'remote-unreachable'),
+  });
 }

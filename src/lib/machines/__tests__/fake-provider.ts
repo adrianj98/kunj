@@ -38,6 +38,10 @@ export class FakeProvider implements MachineProvider {
     return this.calls.map(c => c.method);
   }
 
+  callsOf(method: string): Array<{ method: string; args: unknown[] }> {
+    return this.calls.filter(c => c.method === method);
+  }
+
   /** A machine kunj did not make (no kunj.role), for the "never touch it" rule. */
   addForeign(name: string, labels: Labels = { team: 'other' }): void {
     this.machines.set(name, { name, state: 'running', labels, size: 'n1', createdAt: new Date(0).toISOString(), addresses: { internal: '10.9.9.9' } });

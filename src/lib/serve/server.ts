@@ -11,11 +11,22 @@ import { Guard, GuardFlags, GuardLookup, backendLookup } from './guard';
 import { EngineJson, ErrorBody, InfoJson, PROTOCOL_VERSION, ServeError, parseLabelQuery } from './protocol';
 import { bearerOf, readJsonBody } from './http';
 import { StreamOptions, attachWebSockets, serveBuild, serveCopyIn } from './streams';
-import { tokenMatches } from './token';
+import { Authenticator, newToken, singleTokenAuthenticator, tokenMatches } from './token';
 
 export interface ServeOptions {
   backend: ContainerBackend;
-  token: string;
+  /** One fixed token (client `default`); `authenticate` replaces it */
+  token?: string;
+  /** Who a bearer token belongs to (named clients, docs/specs/cloud-machines.md); null refuses */
+  authenticate?: Authenticator;
+  /**
+   * A machine's first boot (`kunj serve --allow-pairing` without a token): until `until`, one
+   * unauthenticated POST /v1/pair gets a fresh token, handed to `onPaired` to store; every other
+   * request is 401 until then. The path to the server must itself be access-controlled.
+   */
+  pairing?: { until: number; onPaired(token: string): void };
+  /** Adds routes and /v1/info fields (the coordinator's machine routes) */
+  extend?: (api: ServeExtension) => void;
   /** kunj's version, reported in /v1/info */
   version: string;
   allowPrivileged?: boolean;
@@ -35,7 +46,15 @@ export interface ServeServer {
 }
 
 type Params = Record<string, string>;
-type Handler = (req: http.IncomingMessage, params: Params, url: URL) => Promise<unknown>;
+/** `client` is the name the request's token belongs to */
+export type Handler = (req: http.IncomingMessage, params: Params, url: URL, client: string) => Promise<unknown>;
+
+export interface ServeExtension {
+  route(method: string, path: string, handler: Handler): void;
+  /** Extra fields for GET /v1/info */
+  info(extra: () => Promise<Partial<InfoJson>>): void;
+  log(line: string): void;
+}
 
 interface Route {
   method: string;
@@ -78,6 +97,11 @@ export function createServeServer(opts: ServeOptions): ServeServer {
   const routes: Route[] = [];
   const route = (method: string, path: string, handler: Handler) =>
     routes.push({ method, pattern: path.split('/').filter(Boolean), handler });
+  const infoExtras: Array<() => Promise<Partial<InfoJson>>> = [];
+
+  const base: Authenticator = opts.authenticate ?? (opts.token ? singleTokenAuthenticator(opts.token) : () => null);
+  let pairedToken: string | undefined;
+  const authenticate: Authenticator = given => (pairedToken && tokenMatches(given, pairedToken) ? 'paired' : base(given));
 
   let context: Promise<string> | undefined;
   route('GET', '/v1/info', async () => {
@@ -88,6 +112,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     const features = { ...backend.features, editorAttach: false, dockerInDocker: dind };
     context ??= backend.contextName().catch(() => 'default');
     const info: InfoJson = { kunj: opts.version, protocol: PROTOCOL_VERSION, features, context: await context };
+    for (const extra of infoExtras) Object.assign(info, await extra());
     return info;
   });
 
@@ -204,7 +229,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     unauthorizedAt.set(addr, now);
     log(`${what} from ${addr}`);
   };
-  const streamOpts: StreamOptions = { backend, guard, token: opts.token, log, logUnauthorized };
+  const streamOpts: StreamOptions = { backend, guard, authenticate, log, logUnauthorized };
   route('POST', '/v1/containers/:id/copy', (req, p, url) => serveCopyIn(req, p.id, url, streamOpts));
   route('POST', '/v1/images/:tag/build', (req, p) => serveBuild(req, p.tag, streamOpts));
 
@@ -237,9 +262,26 @@ export function createServeServer(opts: ServeOptions): ServeServer {
   const server = http.createServer(async (req, res) => {
     const started = Date.now();
     const url = new URL(req.url ?? '/', 'http://kunj.invalid');
-    const finish = (status: number) => log(`${req.method} ${url.pathname} ${status} ${Date.now() - started}ms`);
+    let client = '';
+    const finish = (status: number) => log(`${req.method} ${url.pathname} ${status} ${Date.now() - started}ms${client ? ` (${client})` : ''}`);
     res.on('finish', () => finish(res.statusCode));
-    if (!tokenMatches(bearerOf(req), opts.token)) {
+    if (req.method === 'POST' && url.pathname === '/v1/pair') {
+      req.resume();
+      if (!opts.pairing || pairedToken || Date.now() >= opts.pairing.until) {
+        return sendError(res, new ServeError(403, 'pairing-closed', 'pairing is closed on this server'));
+      }
+      const token = newToken();
+      try {
+        opts.pairing.onPaired(token);
+      } catch (err) {
+        return sendError(res, err);
+      }
+      pairedToken = token;
+      log(`paired with ${req.socket.remoteAddress ?? '?'}`);
+      return send(res, 200, { token });
+    }
+    const who = authenticate(bearerOf(req));
+    if (who === null) {
       logUnauthorized('unauthorized request', req.socket.remoteAddress);
       req.resume();
       return sendError(res, new ServeError(401, 'unauthorized', 'unauthorized'));
@@ -249,8 +291,9 @@ export function createServeServer(opts: ServeOptions): ServeServer {
       if (r.method !== req.method) continue;
       const params = matchRoute(r.pattern, segments);
       if (!params) continue;
+      client = who;
       try {
-        send(res, 200, await r.handler(req, params, url));
+        send(res, 200, await r.handler(req, params, url, who));
       } catch (err) {
         if (err instanceof ServeError && err.code === 'remote-refused') log(`refused ${req.method} ${url.pathname}: ${err.message}`);
         sendError(res, err);
@@ -260,6 +303,8 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     req.resume();
     sendError(res, new ServeError(404, 'not-found', `no route ${req.method} ${url.pathname} on kunj serve ${opts.version} (run the same kunj version on both machines)`));
   });
+
+  opts.extend?.({ route, info: extra => infoExtras.push(extra), log });
 
   const sockets = attachWebSockets(server, streamOpts);
 

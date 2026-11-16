@@ -23,12 +23,13 @@ import {
   parseLabelQuery,
 } from './protocol';
 import { bearerOf } from './http';
-import { tokenMatches } from './token';
+import { Authenticator } from './token';
 
 export interface StreamOptions {
   backend: ContainerBackend;
   guard: Guard;
-  token: string;
+  /** Who a bearer token belongs to; null refuses the upgrade */
+  authenticate: Authenticator;
   log: (line: string) => void;
   logUnauthorized?: (what: string, address: string | undefined) => void;
 }
@@ -292,7 +293,7 @@ export function attachWebSockets(server: http.Server, opts: StreamOptions): { cl
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 });
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://kunj.invalid');
-    if (!tokenMatches(bearerOf(req), opts.token)) {
+    if (opts.authenticate(bearerOf(req)) === null) {
       if (opts.logUnauthorized) opts.logUnauthorized('unauthorized upgrade', req.socket.remoteAddress);
       else opts.log(`unauthorized upgrade from ${req.socket.remoteAddress ?? '?'}`);
       socket.write('HTTP/1.1 401 Unauthorized\r\nconnection: close\r\ncontent-length: 0\r\n\r\n');
