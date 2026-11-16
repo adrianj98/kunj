@@ -32,7 +32,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | Language servers parts 2–4: `kunj lsp`, `LspConnection`/`LspPolicy`/`LspCoordinator`, definition, references, hover, diagnostics, status bar memory, Language Servers menu | [language-servers.md](language-servers.md#as-built-2026-11-04) | 41026cb, this commit |
-| Language servers part 1: the workspace app's Monaco page on monaco-vscode-api 38 (Vite, TextMate, VS Code colour themes, language by file name) | [language-servers.md](language-servers.md#1-editor-on-monaco-vscode-api) | this commit |
+| Language servers part 1: the workspace app's Monaco page on monaco-vscode-api 38 (Vite, TextMate, VS Code colour themes, language by file name) | [language-servers.md](language-servers.md#1-editor-on-monaco-vscode-api) | 80e6372 |
 | `/handoff` skill: detached agent with a brief in a new worktree, opened in the workspace app; `kunj install skill` | [agent-handoff.md](agent-handoff.md) | CLI fb3e7cc; app and docs in the commit after |
 | --- | --- | --- |
 | Better error messages across the CLI: one format (`✗ message` + hint, no stack trace unless `KUNJ_DEBUG=1`), raw git/Node/AWS errors explained, every message reviewed | — | 3689dd7, dde4ddb, e7c2444 |
