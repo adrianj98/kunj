@@ -1349,8 +1349,9 @@ export class ContainerCommand extends BaseCommand {
       }),
     );
     const byDefault = asked.find(m => m.name === defaultRemote) ?? asked[0];
-    // Parallel opens each set this.backend: the one a failure is explained with is the default's
-    if (byDefault.ctx) this.backend = byDefault.ctx.backend;
+    // Parallel opens each set this.backend: a failure is explained with the default's, and with none
+    // when the default never opened (its own error already says why)
+    this.backend = byDefault.ctx?.backend;
     const answered = asked.filter((m): m is { name: string | undefined; ctx: Context; part: ListPart } => m.part !== undefined);
     if (answered.length === 0) throw byDefault.error;
 
