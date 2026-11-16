@@ -64,10 +64,18 @@ jest.mock('../../lib/container/blueprint', () => ({
 
 // A remote whose kunj serve is a real server over a FakeBackend (the remote tests start one)
 let mockRemote: { url: string; token: string } | undefined;
+// More registered remotes, by name (the fleet tests); `box` is mockRemote
+let mockMoreRemotes: Record<string, { url: string; token: string }> = {};
+const mockAllRemotes = (): Record<string, { url: string; token: string; addedAt: string }> =>
+  Object.fromEntries(
+    Object.entries({ ...(mockRemote ? { box: mockRemote } : {}), ...mockMoreRemotes }).map(([name, r]) => [name, { ...r, addedAt: 't' }]),
+  );
 jest.mock('../../lib/remotes', () => ({
   ...jest.requireActual('../../lib/remotes'),
+  readRemotes: jest.fn(() => mockAllRemotes()),
   requireRemote: jest.fn((name: string) => {
-    if (name === 'box' && mockRemote) return { ...mockRemote, addedAt: 't' };
+    const entry = mockAllRemotes()[name];
+    if (entry) return entry;
     const { ContainerError } = jest.requireActual('../../lib/container/errors');
     throw new ContainerError(`No remote named "${name}"`, 'remote-unknown');
   }),
@@ -902,6 +910,7 @@ describe('ContainerCommand', () => {
     expect(JSON.parse(stdout.join(''))).toEqual({
       repo: 'app',
       backend: { kind: 'docker', context: 'default', features: backend.features },
+      backends: [{ kind: 'docker', context: 'default', features: backend.features, available: true }],
       containers: [
         {
           branch: 'feat-x',
@@ -1571,6 +1580,109 @@ describe('ContainerCommand', () => {
       expect(json.containers.map((c: { branch: string }) => c.branch)).toEqual(['feat']);
       expect(h.fake.callsOf('list')).toEqual([[{ 'kunj.repo': REPO_ID }]]);
       expect(backend.callsOf('list')).toEqual([]);
+    });
+
+    describe('the fleet (no --remote)', () => {
+      const status = { agentRunning: false, head: null, ahead: 0, dirty: false, status: 'ok' };
+      afterEach(() => {
+        mockMoreRemotes = {};
+      });
+
+      it('lists this Mac and every registered remote, each container saying where it is', async () => {
+        backend.existing = [mainContainer('on-mac', { id: 'cid-mac' })];
+        h.fake.existing = [mainContainer('on-box', { id: 'cid-box' })];
+        (lifecycle.containerStatus as jest.Mock).mockResolvedValue(status);
+        await new ContainerCommand().execute('list', { json: true });
+        const json = JSON.parse(stdout.join(''));
+        expect(json.containers.map((c: { branch: string; remote?: string }) => [c.branch, c.remote])).toEqual([
+          ['on-mac', undefined],
+          ['on-box', 'box'],
+        ]);
+        expect('remote' in json.containers[0]).toBe(false);
+        // The default backend, as before
+        expect(json.backend).toMatchObject({ kind: 'docker', context: 'default' });
+        expect(json.backends).toEqual([
+          { kind: 'docker', context: 'default', available: true, features: backend.features },
+          { kind: 'remote', remote: 'box', context: 'default', available: true, features: { localPorts: true, editorAttach: false, dockerInDocker: [] } },
+        ]);
+      });
+
+      it('an unreachable remote is reported, and the others are still listed', async () => {
+        backend.existing = [mainContainer('on-mac', { id: 'cid-mac' })];
+        h.fake.existing = [mainContainer('on-box', { id: 'cid-box' })];
+        mockMoreRemotes = { gone: { url: 'http://127.0.0.1:1', token: 'x' } };
+        (lifecycle.containerStatus as jest.Mock).mockResolvedValue(status);
+        await new ContainerCommand().execute('list', { json: true });
+        const json = JSON.parse(stdout.join(''));
+        expect(json.containers.map((c: { branch: string }) => c.branch)).toEqual(['on-mac', 'on-box']);
+        const gone = json.backends.find((b: { remote?: string }) => b.remote === 'gone');
+        expect(gone).toMatchObject({ kind: 'remote', remote: 'gone', available: false });
+        expect(gone.message).toEqual(expect.any(String));
+        expect(json.backends.filter((b: { available: boolean }) => b.available)).toHaveLength(2);
+      });
+
+      it('lists a container once when a remote is a kunj serve on this same Docker', async () => {
+        const same = mainContainer('feat', { id: 'cid-same' });
+        backend.existing = [same];
+        h.fake.existing = [same];
+        (lifecycle.containerStatus as jest.Mock).mockResolvedValue(status);
+        await new ContainerCommand().execute('list', { json: true });
+        const json = JSON.parse(stdout.join(''));
+        expect(json.containers.map((c: { branch: string; remote?: string }) => [c.branch, c.remote])).toEqual([['feat', undefined]]);
+      });
+
+      it('this Mac not answering still lists the remotes; nothing answering fails with the default backend\'s error', async () => {
+        h.fake.existing = [mainContainer('on-box', { id: 'cid-box' })];
+        (lifecycle.containerStatus as jest.Mock).mockResolvedValue(status);
+        backend.failOn = 'list';
+        try {
+          await new ContainerCommand().execute('list', { json: true });
+          const json = JSON.parse(stdout.join(''));
+          expect(json.containers.map((c: { branch: string; remote?: string }) => [c.branch, c.remote])).toEqual([['on-box', 'box']]);
+          expect(json.backends[0]).toMatchObject({ kind: 'docker', available: false, message: expect.stringContaining('list failed') });
+
+          stdout.length = 0;
+          mockRemote = undefined;
+          await new ContainerCommand().execute('list', { json: true });
+          expect(jsonError().message).toContain('list failed');
+        } finally {
+          backend.failOn = undefined;
+        }
+      });
+
+      it('--remote <name> and --remote local ask that one backend only', async () => {
+        backend.existing = [mainContainer('on-mac', { id: 'cid-mac' })];
+        h.fake.existing = [mainContainer('on-box', { id: 'cid-box' })];
+        (lifecycle.containerStatus as jest.Mock).mockResolvedValue(status);
+        await new ContainerCommand().execute('list', { json: true, remote: 'local' });
+        let json = JSON.parse(stdout.join(''));
+        expect(json.containers.map((c: { branch: string }) => c.branch)).toEqual(['on-mac']);
+        expect(json.backends).toHaveLength(1);
+        expect(h.fake.callsOf('list')).toEqual([]);
+        stdout.length = 0;
+        backend.calls.length = 0;
+        await new ContainerCommand().execute('list', { json: true, remote: 'box' });
+        json = JSON.parse(stdout.join(''));
+        expect(json.containers.map((c: { branch: string; remote?: string }) => [c.branch, c.remote])).toEqual([['on-box', 'box']]);
+        expect(backend.callsOf('list')).toEqual([]);
+      });
+
+      it('says which remote a container is on in the text listing', async () => {
+        backend.existing = [mainContainer('on-mac', { id: 'cid-mac' })];
+        h.fake.existing = [mainContainer('on-box', { id: 'cid-box' })];
+        mockMoreRemotes = { gone: { url: 'http://127.0.0.1:1', token: 'x' } };
+        (lifecycle.containerStatus as jest.Mock).mockResolvedValue(status);
+        const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+        try {
+          await new ContainerCommand().execute('list', {});
+          const text = log.mock.calls.map(c => String(c[0])).join('\n');
+          expect(text).toMatch(/on-box.*\[on box\]/);
+          expect(text).not.toMatch(/on-mac.*\[on /);
+          expect(text).toMatch(/remote gone did not answer/);
+        } finally {
+          log.mockRestore();
+        }
+      });
     });
 
     it('takes the remote from container.remote, and --remote local overrides it', async () => {

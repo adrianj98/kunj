@@ -38,6 +38,7 @@ import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
 import { BackendSelection, remoteNameOf, selectBackend } from '../lib/container/select-backend';
+import { readRemotes } from '../lib/remotes';
 import { ContainerStatus, describeGuard, emptyStatus, forwardedEnv } from '../lib/container/env';
 import { githubTokenSource } from '../lib/container/tokens';
 import { EDITOR_CREDENTIALS_WARNING, attachedContainerUri, imageConfigPaths, writeImageConfig } from '../lib/container/editor';
@@ -131,6 +132,33 @@ type ListStatus = Omit<ContainerStatus, 'status'> & { status: ContainerStatus['s
 
 /** How `start` unlocks the vault (tests pass a fixed key and a runner that never reaches a keychain). */
 export type SecretsUnlock = Partial<Pick<LoadSecretsOptions, 'mode' | 'env' | 'platform' | 'run' | 'prompt' | 'tty'>>;
+
+type KunjConfigOf = Awaited<ReturnType<typeof loadResolvedConfig>>;
+
+/** One backend's part of `kunj ct list`; `mains[i]` is the raw row of `containers[i]`. */
+interface ListPart {
+  containers: ContainerJson[];
+  orphans: ContainerListJson['orphans'];
+  mains: ContainerInfo[];
+  helpers: Map<string, ContainerInfo>;
+}
+
+/** A remote that has not opened (SSH tunnel, /v1/info) by then counts as not answering in a fleet listing */
+const FLEET_OPEN_TIMEOUT_MS = 5_000;
+/** ...nor one that has not listed by then; under `kunj worktree list --containers`' own 10 s */
+const FLEET_LIST_TIMEOUT_MS = 8_000;
+
+function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  // The work goes on after a timeout; its late failure is nobody's to handle
+  work.catch(() => undefined);
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new ContainerError(message, 'remote-unreachable')), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 export class ContainerCommand extends BaseCommand {
   private backend?: ContainerBackend;
@@ -342,8 +370,8 @@ export class ContainerCommand extends BaseCommand {
   // shared
   // ---------------------------------------------------------------------
 
-  private async context(options: ContainerOptions): Promise<Context> {
-    const config = await loadResolvedConfig(process.cwd());
+  private async context(options: ContainerOptions, loaded?: KunjConfigOf): Promise<Context> {
+    const config = loaded ?? (await loadResolvedConfig(process.cwd()));
     const root = getRepoCommonRoot();
     if (!root) throw new ContainerError(NOT_IN_REPO);
     // Credentials in the remote URL stay on the host (seed.ts strips them too)
@@ -1126,6 +1154,7 @@ export class ContainerCommand extends BaseCommand {
       let line = `${running ? chalk.green('●') : chalk.gray('○')} ${chalk.white(c.branch)}  ${running ? chalk.green(c.state) : chalk.gray(c.state)}  ${chalk.gray(c.image)}`;
       if (c.blueprint) line += c.blueprint.stale ? chalk.yellow('  [blueprint stale]') : chalk.cyan('  [blueprint]');
       if (c.dind !== 'off') line += chalk.magenta(`  [dind ${c.dind}]`);
+      if (c.remote) line += chalk.blue(`  [on ${c.remote}]`);
       if (c.agent.running) line += chalk.cyan('  [agent]');
       if (c.workspace.ahead) line += chalk.cyan(`  +${c.workspace.ahead} ahead`);
       if (c.workspace.dirty) line += chalk.yellow('  dirty');
@@ -1141,6 +1170,10 @@ export class ContainerCommand extends BaseCommand {
     });
     if (orphans.length) {
       console.log(chalk.yellow(`orphans: ${orphans.length} (${orphans.map(o => o.name).join(', ')}); run kunj ct prune`));
+    }
+    for (const b of json.backends ?? []) {
+      if (b.available) continue;
+      console.log(chalk.yellow(b.remote ? `remote ${b.remote} did not answer, its containers are not listed: ${b.message}` : `Docker on this machine did not answer, its containers are not listed: ${b.message}`));
     }
     console.log('');
     console.log(chalk.gray("Tip: Use 'kunj ct start <branch>' to start a container"));
@@ -1237,11 +1270,110 @@ export class ContainerCommand extends BaseCommand {
   /** Kill docker calls still running (a wedged daemon) and close remote tunnels, so the process can exit */
   abortDockerCalls(): void {
     if (this.backend instanceof LocalDockerBackend) this.backend.killChildren();
+    // A fleet listing opens several backends: the wedged daemon may not be the last one opened
+    for (const s of this.selections.values()) if (s.backend instanceof LocalDockerBackend) s.backend.killChildren();
     void this.closeBackends();
   }
 
+  /**
+   * The listing. With --remote or --context: that one backend. Without: the fleet, this Mac's Docker
+   * and every remote in ~/.kunj/remotes.json asked in parallel (docs/specs/multi-remote-containers.md).
+   * A member that does not answer is in `backends` with `available: false`; when none answers the
+   * default backend's error is thrown, as a listing of one backend always did.
+   */
   private async collectList(options: ContainerOptions): Promise<{ json: ContainerListJson; mains: ContainerInfo[]; helpers: Map<string, ContainerInfo> }> {
-    const ctx = await this.context(options);
+    const config = await loadResolvedConfig(process.cwd());
+    const describe = (ctx: Context) => ({
+      kind: ctx.remote ? ('remote' as const) : ('docker' as const),
+      context: ctx.dockerContext || 'default',
+      ...(ctx.remote ? { remote: ctx.remote } : {}),
+      features: ctx.backend.features,
+    });
+    if (options.remote !== undefined || options.context) {
+      const ctx = await this.context(options, config);
+      const part = await this.collectFrom(ctx, options);
+      const backend = describe(ctx);
+      return {
+        json: { repo: ctx.repo.name, backend, backends: [{ ...backend, available: true }], containers: part.containers, orphans: part.orphans },
+        mains: part.mains,
+        helpers: part.helpers,
+      };
+    }
+
+    const defaultRemote = remoteNameOf({}, config);
+    // This Mac first, then the remotes by name: the order of `backends` and of the rows
+    const members: Array<string | undefined> = [undefined, ...Object.keys(readRemotes()).sort()];
+    const asked = await Promise.all(
+      members.map(async name => {
+        try {
+          // This Mac's Docker is given the time it takes, as before; a remote that does not open or
+          // answer in time is left out rather than holding the whole listing
+          const opening = this.context({ ...options, remote: name ?? 'local' }, config);
+          const ctx = name ? await within(opening, FLEET_OPEN_TIMEOUT_MS, `remote ${name} did not answer within ${FLEET_OPEN_TIMEOUT_MS / 1000}s`) : await opening;
+          const listing = this.collectFrom(ctx, options);
+          const part = name ? await within(listing, FLEET_LIST_TIMEOUT_MS, `remote ${name} did not list its containers within ${FLEET_LIST_TIMEOUT_MS / 1000}s`) : await listing;
+          return { name, ctx, part };
+        } catch (error) {
+          return { name, error };
+        }
+      }),
+    );
+    const answered = asked.filter((m): m is { name: string | undefined; ctx: Context; part: ListPart } => 'part' in m);
+    const byDefault = asked.find(m => m.name === defaultRemote) ?? asked[0];
+    if (answered.length === 0) throw (byDefault as { error: unknown }).error;
+
+    // A remote may be a kunj serve on this same Docker (or two names for one box): its containers
+    // are the ones already listed, so each container id is listed once, under the first member
+    const seen = new Set<string>();
+    const containers: ContainerJson[] = [];
+    const mains: ContainerInfo[] = [];
+    const helpers = new Map<string, ContainerInfo>();
+    const orphans: ContainerListJson['orphans'] = [];
+    const orphanKeys = new Set<string>();
+    for (const m of answered) {
+      m.part.containers.forEach((c, i) => {
+        if (seen.has(c.id)) return;
+        seen.add(c.id);
+        containers.push(c);
+        mains.push(m.part.mains[i]);
+      });
+      for (const [name, helper] of m.part.helpers) if (!helpers.has(name)) helpers.set(name, helper);
+      for (const o of m.part.orphans) {
+        const key = JSON.stringify(o);
+        if (!orphanKeys.has(key)) {
+          orphanKeys.add(key);
+          orphans.push(o);
+        }
+      }
+    }
+    const backends: NonNullable<ContainerListJson['backends']> = asked.map(m =>
+      'part' in m
+        ? { ...describe(m.ctx as Context), available: true }
+        : {
+            kind: m.name ? ('remote' as const) : ('docker' as const),
+            context: (!m.name && (options.context || config.container?.dockerContext)) || 'default',
+            ...(m.name ? { remote: m.name } : {}),
+            available: false,
+            message: describeError(m.error).message,
+          },
+    );
+    const first = answered[0].ctx;
+    const defaultCtx = answered.find(m => m.name === defaultRemote)?.ctx;
+    const json: ContainerListJson = {
+      repo: first.repo.name,
+      // The default backend (where a start without --remote creates), described even when it did not answer
+      backend: defaultCtx
+        ? describe(defaultCtx)
+        : { kind: defaultRemote ? 'remote' : 'docker', context: 'default', ...(defaultRemote ? { remote: defaultRemote } : {}) },
+      backends,
+      containers,
+      orphans,
+    };
+    return { json, mains, helpers };
+  }
+
+  /** One backend's part of a listing: its containers (marked with its remote), orphans and raw rows. */
+  private async collectFrom(ctx: Context, options: ContainerOptions): Promise<ListPart> {
     const repoFilter: Record<string, string> = options.all ? {} : { [LABEL.repo]: ctx.repo.id };
     let all = await ctx.backend.list(repoFilter);
     if (options.all) all = all.filter(c => c.labels[LABEL.repo]);
@@ -1294,21 +1426,11 @@ export class ContainerCommand extends BaseCommand {
         services: describeServices(servicesOf(all, c.name, { repoId: c.labels[LABEL.repo] ?? '', branch: c.labels[LABEL.branch] ?? '' })),
         bridges: bridges.filter(b => b.container === c.name).map(b => ({ name: b.name, pid: b.pid })),
         ...(c.labels[LABEL.repo] === ctx.repo.id ? { secretsChanged: (c.labels[LABEL.secrets] ?? '') !== stamp } : {}),
+        ...(ctx.remote ? { remote: ctx.remote } : {}),
       };
     });
 
-    const json: ContainerListJson = {
-      repo: ctx.repo.name,
-      backend: {
-        kind: ctx.remote ? 'remote' : 'docker',
-        context: ctx.dockerContext || 'default',
-        ...(ctx.remote ? { remote: ctx.remote } : {}),
-        features: ctx.backend.features,
-      },
-      containers,
-      orphans,
-    };
-    return { json, mains, helpers };
+    return { containers, orphans, mains, helpers };
   }
 
   // ---------------------------------------------------------------------
