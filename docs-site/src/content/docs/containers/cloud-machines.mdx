@@ -1,0 +1,117 @@
+---
+title: Cloud machines
+description: One small cloud VM per branch session, created, woken and deleted by kunj through a coordinator. Google Cloud first; in preview.
+sidebar:
+  order: 8
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Preview">
+This is the first part of [cloud machines](https://github.com/adrianj98/kunj/blob/main/docs/specs/cloud-machines.md):
+kunj can create, list, suspend, resume and delete one machine per branch and pair with the `kunj serve`
+on it. Starting a branch container on its machine with `kunj ct start` is the next step and does not
+work yet; until then, run containers on a machine you set up yourself with
+[remote containers](/kunj/docs/containers/remote/).
+</Aside>
+
+A cloud machine is a small VM (8 GB by default) that runs Docker and `kunj serve` for one branch.
+Nothing on it but that branch's containers, its own kernel, no public address. When the branch's agent
+goes quiet the machine sleeps and costs only its disk; the next command wakes it in seconds.
+
+kunj never asks you to run cloud commands. A **coordinator** does: an ordinary `kunj serve --machines`
+that alone talks to the cloud and to the machines. It runs in one of two places:
+
+- **On your laptop.** Set `machine.provider` and kunj starts a coordinator on its own, on loopback,
+  the first time a `kunj machine` command needs one. It uses your own `gcloud` login and exits after an
+  hour without a request. Nothing to install or keep running.
+- **On a tiny always-on VM**, when more than one person or laptop shares the machines. Every client
+  connects to it with a token of its own and needs no cloud login at all.
+
+## Set up Google Cloud
+
+<Steps>
+
+1. **Install and log in to `gcloud`** on the machine that will run the coordinator (your laptop, to
+   start with):
+
+   ```bash
+   gcloud auth login
+   ```
+
+2. **Prepare the project once.** Machines get no external IP, so the network needs a Cloud NAT for
+   their outbound traffic, and a firewall rule that lets Identity-Aware Proxy reach `kunj serve` on
+   machines tagged `kunj-machine`:
+
+   ```bash
+   gcloud compute firewall-rules create kunj-serve-from-iap --network default \
+     --allow tcp:7433 --source-ranges 35.235.240.0/20 --target-tags kunj-machine
+   ```
+
+   Your account needs `roles/iap.tunnelResourceAccessor` and permission to create instances.
+
+3. **Tell kunj which project and zone:**
+
+   ```bash
+   kunj config --set machine.provider=gce --global
+   kunj config --set-json 'machine.gce={"project":"my-project","zone":"us-central1-a"}' --global
+   ```
+
+4. **Check it:**
+
+   ```bash
+   kunj machine providers
+   ```
+
+   This starts the local coordinator and prints the sizes it will use.
+
+</Steps>
+
+## Commands
+
+```bash
+kunj machine create feature/search   # make the branch's machine and wait until it answers
+kunj machine                         # this repository's machines, any state
+kunj machine suspend feature/search  # sleep now (memory kept, no compute charge)
+kunj machine resume feature/search
+kunj machine delete feature/search   # the machine and its disks; the branch is on origin
+kunj machine coordinator             # the local coordinator: pid, port, log
+```
+
+Without a branch, a command uses the current one. Every command takes `--json`; errors carry a code
+such as `machine-not-found`, `provider-cli-missing` (gcloud missing or not logged in) or
+`machine-token`.
+
+## Sizes and cost
+
+| `machine.size` | Google Cloud shape | Memory | About, per hour running |
+| --- | --- | --- | --- |
+| `small` | e2-medium | 4 GB | $0.034 |
+| `medium` (default) | e2-standard-2 | 8 GB | $0.067 |
+| `large` | e2-standard-4 | 16 GB | $0.134 |
+
+Any provider shape also works (`--size n2d-highmem-8`). A sleeping machine costs only its disk, about
+$3 a month for the default 30 GB, so delete the machines of merged branches.
+
+## A shared coordinator
+
+When a second laptop should see the same machines, run the coordinator on a small VM in the same
+network (an e2-micro is enough) with the same `machine.*` settings, and give each client a token:
+
+```bash
+kunj serve --machines --listen <internal-ip>:7433 --allow-remote-listen
+kunj serve token add laptop-b --machines
+```
+
+Set `machine.network` to `private` there, so it reaches machines on their internal address. On each
+laptop, add it like any remote and name it on the command:
+
+```bash
+kunj remote add cloud --url http://127.0.0.1:7433 --token-stdin   # through an IAP tunnel or a tailnet
+kunj machine --remote cloud
+```
+
+Do not set `container.remote` to a coordinator yet: `kunj ct` does not place containers on machines
+until the next step ships, and would fail there.
+
+`kunj serve token list --machines` shows the clients, never their tokens; `token remove` revokes one.

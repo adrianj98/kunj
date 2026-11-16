@@ -27,16 +27,17 @@ page only says where each thing stands.
 | [language-servers.md](language-servers.md) | Language servers for the workspace app's editor: `kunj lsp`, the Swift bridge and URI guard, start/stop/cap lifecycle using servers' disk caches | Shipped (the diff still searches) |
 | [agent-handoff.md](agent-handoff.md) | `/handoff` skill: a brief from the conversation, a new worktree, a detached agent with the brief as its prompt, opened in the workspace app; `kunj agent start --detach --prompt-file --open-in-app`, `kunj install skill` | Shipped |
 | [github-clone.md](github-clone.md) | `kunj repos github` / `kunj repos clone`, `repos.cloneDir`/`repos.cloneBare`, the workspace app's Clone from GitHub sheet | Shipped (CLI, workspace app) |
-| [cloud-machines.md](cloud-machines.md) | A small VM per session behind a coordinator (`kunj serve --machines`, auto-started locally or always-on in the cloud for several clients) from a pluggable `MachineProvider` (Google Cloud first): lifecycle, labels as state, wake on act, idle loop, token pairing, proxy, golden image, `container.caches`, `kunj machine`, phases | Spec written |
+| [cloud-machines.md](cloud-machines.md) | A small VM per session behind a coordinator (`kunj serve --machines`, auto-started locally or always-on in the cloud for several clients) from a pluggable `MachineProvider` (Google Cloud first): lifecycle, labels as state, wake on act, idle loop, token pairing, proxy, golden image, `container.caches`, `kunj machine`, phases | Phase 1 shipped (coordinator, provider seam, Google Cloud provider, `kunj machine`); phases 2–4 to do |
 | [google-cloud-containers.md](google-cloud-containers.md) | Google Cloud notes for the first provider: machine shape, IAP tunnel, suspend/resume, caching, cost | Notes written |
 
 ## Done
 
 | Work | Spec | Commits |
+| --- | --- | --- |
+| Cloud machines phase 1: `MachineProvider` seam and conformance suite, `GceProvider` (gcloud argv, exact labels in metadata), coordinator (`kunj serve --machines`, `/v1/machines` routes, pairing, named client tokens, `--idle-exit`), local auto-start, `kunj machine` | [cloud-machines.md](cloud-machines.md#as-built-phase-1-2026-11-16) | 924d4ae, 8423238, a2856bc, this commit |
 | Language servers parts 2–4: `kunj lsp`, `LspConnection`/`LspPolicy`/`LspCoordinator`, definition, references, hover, diagnostics, status bar memory, Language Servers menu | [language-servers.md](language-servers.md#as-built-2026-11-04) | 41026cb, this commit |
 | Language servers part 1: the workspace app's Monaco page on monaco-vscode-api 38 (Vite, TextMate, VS Code colour themes, language by file name) | [language-servers.md](language-servers.md#1-editor-on-monaco-vscode-api) | 80e6372 |
 | `/handoff` skill: detached agent with a brief in a new worktree, opened in the workspace app; `kunj install skill` | [agent-handoff.md](agent-handoff.md) | CLI fb3e7cc; app and docs in the commit after |
-| --- | --- | --- |
 | Better error messages across the CLI: one format (`✗ message` + hint, no stack trace unless `KUNJ_DEBUG=1`), raw git/Node/AWS errors explained, every message reviewed | — | 3689dd7, dde4ddb, e7c2444 |
 | Branch containers (phase 1) | [branch-containers.md](branch-containers.md) | — |
 | Blueprints and snapshots | [blueprints.md](blueprints.md) | — |
@@ -116,7 +117,7 @@ page only says where each thing stands.
 | Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
 | `container.caches`: a generic per-repository cache volume mounted into every branch container (`KUNJ_CACHE_DIR`); what a repository puts there is its own blueprint's business | [cloud-machines.md](cloud-machines.md#the-cache-volume) | Phase 3; works locally and on one shared VM too |
 | Cloud machines phase 0: one Ubuntu VM with the recipe, reached through IAP, `kunj remote add --ssh` | [cloud-machines.md](cloud-machines.md#plan) | Needs a Google Cloud project and a VM (Waiting on you) |
-| Cloud machines phases 1–4: `MachineProvider`, `FakeProvider`, `GceProvider`, `kunj serve --machines` (routes, per-client tokens, pairing, proxy), local auto-start, `kunj machine`; `kunj ct` on machines; golden image, idle loop; a second provider | [cloud-machines.md](cloud-machines.md#plan) | After phase 0 |
+| Cloud machines phases 2–4: the proxy and `kunj ct` on machines (wake on act, idle loop, self-suspend timer, prune, events); golden image build, `container.caches`, registry copy; `Ec2Provider`, workspace app rows | [cloud-machines.md](cloud-machines.md#plan) | Phase 1 is in; a real machine needs phase 0's project and the phase 3 recipe |
 | Remote containers: try an `--ssh` remote against a real second machine (and a Linux Docker host) | [remote-containers.md](remote-containers.md) | Everything so far ran with `kunj serve` on the same Mac |
 | Remote containers: end a remote terminal's process when its client leaves | [remote-containers.md](remote-containers.md) | Confirmed 2026-11-16: closing the hijacked exec connection does not hang up the pty, so a closed remote shell or `tmux attach` client stays in the container and the server polls 30 s. Needs a kill of exactly that process (not the tmux server); not designed |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |

@@ -29,7 +29,7 @@
 * [Docker-in-Docker](/containers/docker-in-docker.md) - Opt-in dockerd inside a branch container, via the sysbox runtime or privileged mode, on the kunj-sandbox-dind image.
 * [Host MCP Bridge](/containers/mcp-bridge.md) - Bridges a host stdio MCP server (v1 only a Chrome DevTools browser) into a branch container over a Unix socket, behind a deny-by-default request filter.
 * [Remotes](/containers/remotes.md) - The kunj serve machines a laptop knows in ~/.kunj/remotes.json, reached through an SSH tunnel or a URL, and the opt-in for plain http.
-* [Cloud Machines](/containers/cloud-machines.md) - Design: a small cloud VM per branch session through a pluggable MachineProvider (Google Cloud first), running Docker and kunj serve; wake on act, idle suspend, token pairing, golden image, cache volume.
+* [Cloud Machines](/containers/cloud-machines.md) - A small cloud VM per branch session through a coordinator (kunj serve --machines, auto-started locally or always-on) and a pluggable MachineProvider, Google Cloud first; phase 1 shipped (seam, GceProvider, coordinator routes, pairing, named tokens, kunj machine), containers on machines next.
 * [Google Cloud Provider Notes](/containers/google-cloud.md) - What is specific to Google Cloud for the first provider: the machine, IAP tunnel, suspend/resume, caching, cost.
 
 # Blueprints

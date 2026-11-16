@@ -807,6 +807,46 @@
     "helpText": "Actions:\n  list               the configured servers, whether each is installed, and the lifecycle settings\n  run <language>     run the server in the worktree, stdio passed through (the workspace app does this)\n\nServers are lsp.servers.<language> in the config: { \"command\": [...], \"extensions\": [...],\n\"restart\": \"cached\" | \"cold\", \"cachePaths\": [...] }, merged over kunj's defaults (typescript,\nswift, go, cpp). The app starts one when an editor tab opens and stops it when idle\n(lsp.idleStopMinutes.*, lsp.closedStopMinutes, lsp.maxServers)."
   },
   {
+    "name": "machine",
+    "usage": "machine [action] [branch]",
+    "description": "Cloud machines that run branch containers, one per branch session",
+    "arguments": "[action] [branch]",
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--remote <name>",
+        "description": "The coordinator: a remote running kunj serve --machines (local: the one kunj starts here)",
+        "default": null
+      },
+      {
+        "flags": "--all",
+        "description": "[list] Every machine of the coordinator, not only this repository's",
+        "default": null
+      },
+      {
+        "flags": "--size <size>",
+        "description": "[create] small, medium, large or a provider shape (default machine.size)",
+        "default": null
+      },
+      {
+        "flags": "-y, --yes",
+        "description": "[delete] Do not ask",
+        "default": null
+      },
+      {
+        "flags": "--keep-disks",
+        "description": "[delete] Keep the machine's disks",
+        "default": null
+      },
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Actions:\n  list (default)              this repository's machines, any state\n  status [branch]             the branch's machine (the current branch by default)\n  create [branch]             make the branch's machine and wait until its kunj serve answers\n  suspend|resume|stop|start [branch]\n  delete [branch]             delete the machine and its disks (the branch is on origin)\n  providers                   the coordinator's provider, its sizes and features\n  coordinator [status|stop]   the local coordinator kunj started on this machine\n\nMachines are created by a coordinator, kunj serve --machines: the remote that --remote or container.remote\nnames, or a local one kunj starts on its own when machine.provider is set here (machine.gce for Google Cloud).\nDesign: docs/specs/cloud-machines.md."
+  },
+  {
     "name": "pr",
     "usage": "pr [prNumber]",
     "description": "Create or view pull requests on GitHub",
@@ -1138,9 +1178,9 @@
   },
   {
     "name": "serve",
-    "usage": "serve [action]",
+    "usage": "serve [action] [sub] [client]",
     "description": "Serve this machine's Docker to kunj on other machines (remote containers)",
-    "arguments": "[action]",
+    "arguments": "[action] [sub] [client]",
     "aliases": [],
     "options": [
       {
@@ -1175,7 +1215,27 @@
       },
       {
         "flags": "--rotate",
-        "description": "[token] Replace the token; every client must be given the new one",
+        "description": "[token] Replace the token (or, with token add, that client's); every client using it must be given the new one",
+        "default": null
+      },
+      {
+        "flags": "--machines",
+        "description": "Coordinate cloud machines (machine.provider): one machine per branch session, reached through this server; token commands then act on the coordinator's tokens",
+        "default": null
+      },
+      {
+        "flags": "--idle-exit <minutes>",
+        "description": "Exit after this many minutes without a request (how kunj runs a local coordinator)",
+        "default": null
+      },
+      {
+        "flags": "--allow-pairing",
+        "description": "With no token yet, let one coordinator pair: POST /v1/pair hands out the token once (a machine's first boot)",
+        "default": null
+      },
+      {
+        "flags": "--pair-window <minutes>",
+        "description": "How long after start pairing stays open (default 10)",
         "default": null
       },
       {
@@ -1184,7 +1244,7 @@
         "default": null
       }
     ],
-    "helpText": "Actions:\n  (default)        run the server until Ctrl-C; prints the token the first time\n  token            print the token (kunj remote add <name> … needs it on the laptop)\n\nThe server listens on this machine's loopback. From the laptop, reach it through an SSH tunnel kunj\nopens (kunj remote add box --ssh user@box) or a URL you have put behind TLS (--url https://…).\nAnyone with the token controls the containers kunj makes here, so keep it like an SSH key.\nThe token is in ~/.kunj/serve/token (0600)."
+    "helpText": "Actions:\n  (default)        run the server until Ctrl-C; prints the token the first time\n  token            print the token (kunj remote add <name> … needs it on the laptop)\n  token add <name> a token for one more client, shown once (--rotate replaces it)\n  token list       the named clients, never their tokens\n  token remove <name>\n\nWith --machines this server is the coordinator of cloud machines (machine.provider, machine.<provider>):\nclients ask it for a branch's machine and it alone talks to the cloud. On a laptop, kunj starts one on its\nown when a kunj machine command needs it (docs/specs/cloud-machines.md).\n\nThe server listens on this machine's loopback. From the laptop, reach it through an SSH tunnel kunj\nopens (kunj remote add box --ssh user@box) or a URL you have put behind TLS (--url https://…).\nAnyone with the token controls the containers kunj makes here, so keep it like an SSH key.\nThe token is in ~/.kunj/serve/token (0600)."
   },
   {
     "name": "sessions",

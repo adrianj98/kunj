@@ -17,7 +17,7 @@ led here is [google-cloud-containers.md](google-cloud-containers.md).
 | --- | --- |
 | Spec | Written 2026-11-16; coordinator architecture and local auto-start adopted the same day (see Decisions) |
 | Phase 0: one VM by hand with `kunj serve`, reached through an IAP tunnel | Not started (needs a project and a VM: waiting on you) |
-| Phase 1: `MachineProvider`, `FakeProvider`, `GceProvider`; `kunj serve --machines` (routes, per-client tokens, pairing); local auto-start; `kunj machine` | Not started |
+| Phase 1: `MachineProvider`, `FakeProvider`, `GceProvider`; `kunj serve --machines` (routes, per-client tokens, pairing); local auto-start; `kunj machine` | Shipped 2026-11-16 (924d4ae, 8423238, a2856bc); unit-tested, and the local coordinator smoke-tested against the real `gcloud` without a project login. No machine has been created on a real project yet |
 | Phase 2: containers through the coordinator (`/v1/machines/<name>/…` proxy), `kunj ct` on machines, wake on act, idle loop, events | Not started |
 | Phase 3: golden image build, `container.caches`, registry copy | Not started |
 | Phase 4: a second provider (EC2) to prove the seam; workspace app rows and Wake | Not started |
@@ -81,7 +81,7 @@ Layers:
    has (the user's `gcloud auth` on a laptop, a service account on a VM). **Only a provider module
    spawns a cloud CLI.** `FakeProvider` (src/lib/machines/__tests__/fake-provider.ts) is the in-memory
    one for unit tests, like `FakeBackend`.
-3. **Machine lifecycle** (src/lib/machines/lifecycle.ts): cloud-agnostic, in the coordinator.
+3. **Machine lifecycle** (src/lib/machines/coordinator.ts, class `Coordinator`): cloud-agnostic, in the coordinator.
    `locateMachine(branch)`, `ensureMachine(branch, { wake })`, `suspendMachine`, `deleteMachine`,
    `planMachinePrune`, the idle loop, naming and labels, reaching a machine's serve (private address or
    tunnel), pairing its token.
@@ -94,12 +94,12 @@ Layers:
    path, so a backend for branch `b` on remote `cloud` is the ordinary remote backend rooted at
    `/v1/machines/<name>/`. `selectBackend()` on a remote that reports `features.machines` asks the
    coordinator for the branch's machine (`POST /v1/machines/locate`, with `wake` for acting commands) and
-   roots the backend there. Nothing in lifecycle.ts, services, snapshots, forward, prune or the MCP
+   roots the backend there (phase 2; `MachineClient` in src/lib/machines/client.ts already speaks the routes). Nothing in lifecycle.ts, services, snapshots, forward, prune or the MCP
    bridge changes: they already program against `ContainerBackend`.
 6. **Local auto-start** (src/lib/machines/local-coordinator.ts): when `machine.provider` is set in the
    client's own config and no remote is named, `selectBackend()` uses the local coordinator: it reads
-   `~/.kunj/serve/coordinator.json` (pid, port; dead pids pruned, atomic writes, the `pidRegistry`
-   pattern of forwards and bridges), starts `kunj serve --machines --listen 127.0.0.1:0` detached when
+   `~/.kunj/coordinator/coordinator.json` (pid, port, version, startedAt; written by the server once it
+   listens, removed when it stops; a dead pid reads as none), starts `kunj serve --machines --listen 127.0.0.1:0` detached when
    none runs, waits for the port, and talks to it with the local token file. The coordinator exits on its
    own after `machine.coordinatorIdleMinutes` (default 60) with no client request, never while a TTY
    proxy is open; `kunj machine coordinator status|stop` shows and ends it.
@@ -237,8 +237,8 @@ port (an ssh `ProxyCommand` alias for `--ssh`, or `--url http://127.0.0.1:<port>
 open), a tailnet address with `--allow-insecure-http`, or the user's own TLS front (`--url https://…`).
 
 **Per-client tokens.** `kunj serve token add <client> [--rotate]` on the coordinator writes a named
-token to `~/.kunj/serve/tokens.json` (0600) and prints it once; `token list` shows names and creation
-dates, never values; `token remove <client>` revokes. The legacy single `~/.kunj/serve/token` keeps
+token to `tokens.json` (0600) in the server's token directory (`~/.kunj/coordinator/` with `--machines`, `~/.kunj/serve/` otherwise) and prints it once; `token list` shows names and creation
+dates, never values; `token remove <client>` revokes. The legacy single `token` file next to it keeps
 working as the client named `default` (the local coordinator uses only that). Every request carries one;
 the server logs the client's name, and machines a client creates get `kunj.owner=<client>` as a label
 (informational: any client may act on any machine). This is the "per-user tokens" item the
@@ -260,7 +260,7 @@ remote-containers spec deferred.
 accepts, for `machine.pairWindowMinutes` (default 10), one `POST /v1/pair` and returns a fresh token;
 every other route is `401` until then. The coordinator pairs right after `create`, over the private
 network or the IAP tunnel, both access-controlled, and keeps the token in
-`~/.kunj/serve/machine-tokens.json` (0600). A machine's serve refuses `pair` unless started with
+`~/.kunj/coordinator/machine-tokens.json` (0600, keyed `<provider>/<name>`). A machine's serve refuses `pair` unless started with
 `--allow-pairing`, which the recipe sets. Metadata as the carrier was rejected: every project viewer can
 read it.
 
@@ -361,12 +361,13 @@ restores from when given the path.
 | Command | Does |
 | --- | --- |
 | `kunj machine list [--json]` | Every machine of the repository (any state), with size, state, created, image, owner, idle since |
-| `kunj machine status [branch]` | One machine, and whether its serve answers the coordinator |
+| `kunj machine status [branch]` | One machine (never wakes it) |
+| `kunj machine create [branch] [--size]` | Makes the branch's machine and waits until its serve answers (phase 1's way in, before `ct start` does it) |
 | `kunj machine suspend|resume|stop|start [branch]` | Explicitly; `resume` waits for serve |
-| `kunj machine delete [branch] [--yes]` | Deletes the machine and its disks; refuses while a container runs unless `--force` |
-| `kunj machine prune [--yes] [--force]` | Machines of gone branches and orphans; the `ct prune` plan without the containers |
-| `kunj machine image build|list|delete` | Golden images |
-| `kunj machine coordinator status|stop` | The local coordinator: pid, port, uptime, open proxies; `stop` ends it |
+| `kunj machine delete [branch] [--yes] [--keep-disks]` | Deletes the machine and its disks after a confirmation (`--yes` with `--json`); the running-container refusal and `--force` come with phase 2 |
+| `kunj machine prune [--yes] [--force]` | Machines of gone branches and orphans; the `ct prune` plan without the containers (phase 2) |
+| `kunj machine image build|list|delete` | Golden images (phase 3) |
+| `kunj machine coordinator status|stop` | The local coordinator: pid, port, version, start time, log; `stop` ends it |
 | `kunj machine providers` | The coordinator's provider and its features |
 
 All through the coordinator (local by default when `machine.provider` is set locally; `container.remote`
@@ -412,6 +413,29 @@ cloud CLI is not installed or not logged in on the coordinator's host), `coordin
   only forwards to their serve port.
 - **The local coordinator listens on loopback** with the local token; nothing on the laptop's network
   can reach it.
+
+## As built (phase 1, 2026-11-16)
+
+| Piece | Where |
+| --- | --- |
+| Interface, labels, names, `MachineError` | src/lib/machines/provider.ts (`machineName()` = the container name as a lowercase DNS label, hash kept) |
+| Registry of providers | src/lib/machines/providers/index.ts (`registerProvider`, lazy `gce`) |
+| Google Cloud | src/lib/machines/providers/gce.ts: exact labels in instance metadata `kunj-labels` (base64url JSON) because GCE label values cannot hold a branch or repo id; GCE labels carry `kunj-<key>` with the value or `h-<sha256>` for filtering; a list re-checks the exact labels. gcloud's "Some requests did not succeed" warning (exit 0, `[]`) is a failure: found by the smoke test, with bad credentials every machine would have looked gone |
+| CLI runner | src/lib/machines/cli.ts (`execFile`, missing binary → `provider-cli-missing`) |
+| Coordinator | src/lib/machines/coordinator.ts: one `locate` per branch in flight, wake only on `wake`/`create`, pairing and `ready` polls over the private address or a provider tunnel, machine tokens in a file store |
+| Routes | src/lib/serve/machines.ts (`machineRoutes()` through `createServeServer`'s `extend`); error codes mapped to HTTP statuses |
+| Server | src/lib/serve/server.ts: `authenticate` (named clients, src/lib/serve/token.ts `fileAuthenticator`), `pairing`, `extend`; src/commands/serve.ts: `--machines`, `--idle-exit`, `--allow-pairing`, `--pair-window`, `token add|list|remove` |
+| Tunnels | src/lib/serve/tunnel.ts `openCommandTunnel()` (any provider argv) beside `openTunnel()` (ssh) |
+| Local coordinator | src/lib/machines/local-coordinator.ts (`ensureLocalCoordinator`, `resolveCoordinator`), src/lib/machines/config.ts (`machineSettings`, `coordinatorPaths`) |
+| Client and command | src/lib/machines/client.ts, src/commands/machine.ts (fast path) |
+| Settings, JSON | src/settings/machine.ts; `MachineJson`, `MachineListJson`, `MachineJsonResult`, `MachineProvidersJson`, `CoordinatorStatusJson` in json-types.ts |
+| Tests | src/lib/machines/__tests__ (conformance for FakeProvider and GceProvider over a simulated gcloud, coordinator, local coordinator), src/lib/serve/__tests__/clients.test.ts, src/commands/__tests__/{machine,serve-machines}.test.ts |
+
+Not yet: the proxy to a machine's serve and `kunj ct` on machines, the idle loop and machine
+self-suspend timer (`machine.idleMinutes` is registered but unused), prune, golden images, the cache
+volume. A coordinator machine created now boots the stock Ubuntu with nothing on it, so its serve never
+answers and `create` ends in `machine-timeout` until the phase 3 recipe (or a hand-made image) puts
+`kunj serve --allow-pairing` on it.
 
 ## Decisions
 

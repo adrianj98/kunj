@@ -13,7 +13,7 @@ before the provider is built.
 | --- | --- |
 | Notes | Written 2026-11-16, trimmed to the decided design |
 | Shared-VM recipe by hand (phase 0 of cloud-machines.md) | Not started: needs a project and a VM (waiting on you) |
-| `GceProvider` | See cloud-machines.md |
+| `GceProvider` | Shipped in cloud-machines.md phase 1 (src/lib/machines/providers/gce.ts); not yet run against a real project |
 
 ## What the machine must provide
 
@@ -56,6 +56,19 @@ From the shipped container code, not a wish list:
 - **Service account:** a dedicated one with no project roles; with `machine.selfSuspend`, bound by IAM
   condition to `compute.instances.suspend` and `compute.instances.get` on the machine itself, so the
   fallback idle timer can suspend it and nothing else.
+
+## Things the provider learned from gcloud
+
+- `gcloud compute instances list` with credentials the API refuses exits 0, prints `[]` and only warns
+  `Some requests did not succeed` on stderr. The provider treats that warning as a failure
+  (`provider-cli-missing` for an authentication message, else `provider-failed`), or every machine would
+  look gone. Seen in the phase 1 smoke test.
+- GCE label values allow only `[a-z0-9_-]`, up to 63 characters, so a branch or repo id is stored exactly
+  in the instance metadata `kunj-labels` (base64url JSON; an image's description) and filtered through a
+  hashed label value.
+- `start` on a SUSPENDED instance is refused; the provider resumes it instead.
+- The firewall rule the setup needs, once per network:
+  `gcloud compute firewall-rules create kunj-serve-from-iap --network default --allow tcp:7433 --source-ranges 35.235.240.0/20 --target-tags kunj-machine`.
 
 ## Reaching machines
 

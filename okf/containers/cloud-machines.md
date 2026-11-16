@@ -1,9 +1,9 @@
 ---
 type: Container
 title: Cloud Machines
-description: Design (not shipped) for a small cloud VM per branch session behind a coordinator (kunj serve --machines, auto-started locally or always-on in the cloud) that drives a pluggable MachineProvider, Google Cloud first.
-resource: docs/specs/cloud-machines.md
-tags: [container, remote, serve, machines, provider, design]
+description: A small cloud VM per branch session behind a coordinator (kunj serve --machines, auto-started locally or always-on in the cloud) that drives a pluggable MachineProvider, Google Cloud first. Phase 1 shipped; containers on machines are phase 2.
+resource: src/lib/machines/coordinator.ts
+tags: [container, remote, serve, machines, provider, google-cloud]
 timestamp: 2026-11-16T00:00:00Z
 ---
 
@@ -16,17 +16,17 @@ The new pieces are the **coordinator**, `kunj serve --machines`, which kunj auto
 command needs it or which runs always-on on a tiny cloud VM so several clients connect with a token each, and
 the **provider** it drives.
 
-# Layers
+# Layers (phase 1 as built)
 
 | Layer | Module | Role |
 |---|---|---|
-| `MachineProvider` | src/lib/machines/provider.ts | `list/get/create/suspend/resume/stop/start/delete`, `address()` (private network) or `tunnel()` (a local-port forwarder argv), `images`, `sizes()`, `recipeEnv()`, `features` |
-| Providers | src/lib/machines/providers/gce.ts (first), ec2.ts, ssh-fleet.ts (later) | Drive the cloud through its CLI with argv arrays; the only modules that spawn one. `FakeProvider` for tests |
-| Lifecycle | src/lib/machines/lifecycle.ts | In the coordinator, cloud-agnostic: locate by labels, ensure (create, wait, pair token), wake on act, the idle loop, suspend, delete, prune |
-| Coordinator | src/lib/serve/machines.ts | `kunj serve --machines`: `/v1/machines…` routes, the proxy of `/v1/machines/<name>/<route>` to that machine's serve (WebSockets piped), per-client tokens (`kunj serve token add`), machine tokens |
-| Local auto-start | src/lib/machines/local-coordinator.ts | With `machine.provider` set locally, kunj starts `kunj serve --machines` on loopback (pid file like forwards), reuses it, lets it exit after an idle hour |
-| `kunj ct` | select-backend.ts, remote.ts | `locate` on the coordinator, then a `RemoteKunjBackend` rooted at `/v1/machines/<name>/`; container lifecycle unchanged |
-| `kunj machine` | src/commands/machine.ts | list/status/suspend/resume/stop/start/delete/prune/image/coordinator/providers |
+| `MachineProvider` | src/lib/machines/provider.ts | `list/get/create/suspend/resume/stop/start/delete`, `address()` (private network) or `tunnel()` (a local-port forwarder argv), `images`, `sizes()`, `features`; `machineName()` (the container name as a DNS label), `MachineError` |
+| Providers | src/lib/machines/providers/index.ts, gce.ts | Registered by name, loaded lazily (`registerProvider`). `GceProvider` drives gcloud with argv only; exact labels in instance metadata `kunj-labels`, GCE labels hashed for filtering; gcloud's "Some requests did not succeed" (exit 0, `[]`) is a failure. Only provider modules spawn a cloud CLI (src/lib/machines/cli.ts). `FakeProvider` and a shared conformance suite in `__tests__` |
+| Coordinator | src/lib/machines/coordinator.ts | Cloud-agnostic `Coordinator`: locate by labels (one in flight per branch), create, wake only when asked, pair with the machine's serve and wait until it answers; machine tokens in `~/.kunj/coordinator/machine-tokens.json` |
+| Routes | src/lib/serve/machines.ts | `kunj serve --machines` adds `/v1/machines` (list, providers, locate, suspend, resume, stop, start, delete) through `createServeServer`'s `extend` hook, and `machines` in `/v1/info` |
+| Local auto-start | src/lib/machines/local-coordinator.ts, config.ts | With `machine.provider` set here, kunj spawns `kunj serve --machines --listen 127.0.0.1:0 --idle-exit <min>` detached from the home directory; the server writes `~/.kunj/coordinator/coordinator.json` (pid, port) and removes it on exit; `resolveCoordinator()` prefers `--remote`/`container.remote` when that remote coordinates machines |
+| Client, command | src/lib/machines/client.ts, src/commands/machine.ts | `MachineClient` over the routes; `kunj machine list|status|create|suspend|resume|stop|start|delete|providers|coordinator` (fast path) |
+| Not yet | — | The proxy `/v1/machines/<name>/…` and `kunj ct` on machines, the idle loop, self-suspend timer, prune, golden images, `container.caches` |
 
 # Blueprint to image
 
@@ -54,6 +54,8 @@ snapshot and the generic cache volume (`container.caches`, `KUNJ_CACHE_DIR`).
 * [Blueprints](/containers/blueprints.md) - the snapshot the golden image carries
 
 # Citations
+
+[0] [src/lib/machines/provider.ts](/src/lib/machines/provider.ts)
 
 [1] [docs/specs/cloud-machines.md](/docs/specs/cloud-machines.md)
 [2] [docs/specs/remote-containers.md](/docs/specs/remote-containers.md)

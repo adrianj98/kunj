@@ -1,5 +1,10 @@
 # Directory Update Log
 
+## 2026-11-16 (cloud machines phase 1 shipped)
+* `containers/cloud-machines.md` describes the shipped modules (provider seam, GceProvider, Coordinator, machine
+  routes, local auto-start, `kunj machine`) and what is not built yet; `containers/remotes.md` gains named client
+  tokens and pairing on `kunj serve`.
+
 ## 2026-11-16 (coordinator)
 * `containers/cloud-machines.md`, `containers/google-cloud.md`: the design now has a coordinator,
   `kunj serve --machines`, auto-started on the laptop or always-on on a tiny VM, which alone drives the

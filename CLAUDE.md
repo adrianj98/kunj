@@ -163,6 +163,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj search <pattern> [paths…] [--in worktrees,branches,containers,commits,logs] [--all] [-i] [-F] [-w] [-b <branches>] [--current]` - Search every worktree (uncommitted work included) with `git grep`, and on request branches without a worktree, running branch containers, commit messages and work logs; `SearchJson` (src/lib/search.ts, docs/specs/search.md). On the fast path; the container module is loaded only for `--in containers`
 - `kunj lsp [list|run <language>] [--branch b]` - Language servers for the workspace app's editor: `list --json` (`LspListJson`: configured servers from `lsp.servers.<lang>` over the defaults typescript/swift/go/cpp, installed or not, restart class, lifecycle settings `lsp.*`), `run` starts one in the worktree with stdio passed through and its `cachePaths` added to info/exclude; codes `lsp-missing`, `lsp-unknown` (src/lib/lsp.ts, docs/specs/language-servers.md). On the fast path
 - `kunj events [--json] [--repo <path>...]` - Stream changes to worktrees, containers and agents as NDJSON (see Events below)
+- `kunj machine [list|status|create|suspend|resume|stop|start|delete|providers|coordinator] [branch] [--remote <coordinator>]` - Cloud machines, one per branch session, through a coordinator (local, auto-started, or a remote `kunj serve --machines`); `MachineListJson`, `MachineJsonResult`, codes `machine-*`, `provider-cli-missing`, `coordinator-*` (see Cloud machines under Remote Containers)
 - `kunj install [vscode|macos|workspace|all]` - Download the VS Code extension / macOS app / Workspace app from the GitHub release and install them (also offered at the end of `kunj setup`); `kunj install skill` copies the packaged Claude Code skills (`skills/handoff`) to `~/.claude/skills/` (src/lib/skills.ts)
 
 ## New Branches
@@ -472,15 +473,19 @@ remote, in parallel: `remote` on each container, `backends` with who answered, a
 `collectList()`, docs/specs/multi-remote-containers.md; branch commands still use the default backend only); detached forwarders and bridges get `--remote`. Tests: `npm run test:remote`
 runs the container suites over the wire (`testBackend()` in remote-harness.ts; `itLocal` for the few that
 compare stream objects); `remote.docker.test.ts` needs a real daemon.
-Designed, not built: **cloud machines** (docs/specs/cloud-machines.md), a small VM per branch session running
-Docker and `kunj serve`, behind a **coordinator**: `kunj serve --machines`, auto-started on the laptop by kunj when a
-command needs it or run always-on on a tiny cloud VM so several clients connect with a token each. The coordinator
-alone talks to the cloud through a pluggable `MachineProvider` (src/lib/machines/, Google Cloud first; notes in
-docs/specs/google-cloud-containers.md) and proxies `/v1/machines/<name>/…` to each machine's serve. Cloud labels are
-the only machine state, listings never wake a machine, acting commands do, the coordinator's idle loop suspends
-from agent state (machine self-suspend as the fallback for a local coordinator), machine tokens are paired once
-over an access-controlled path, and a golden image keyed by the blueprint hash carries the snapshot and the generic
-`container.caches` volume.
+**Cloud machines** (docs/specs/cloud-machines.md; phase 1 built, `kunj ct` on machines is phase 2): a small VM per
+branch session running Docker and `kunj serve`, behind a **coordinator**, `kunj serve --machines` (src/lib/serve/machines.ts
+over `Coordinator` in src/lib/machines/coordinator.ts), which alone talks to the cloud through a pluggable `MachineProvider`
+(src/lib/machines/provider.ts; providers registered by name in providers/index.ts, `gce.ts` first, notes in
+docs/specs/google-cloud-containers.md). Only a provider module spawns its cloud CLI (argv, cli.ts). Cloud labels are the
+only machine state; GCE keeps the exact labels in instance metadata `kunj-labels` because its label values cannot hold a
+branch. kunj auto-starts a local coordinator on loopback when `machine.provider` is set here
+(src/lib/machines/local-coordinator.ts: detached, `--idle-exit`, `~/.kunj/coordinator/{token,tokens.json,
+machine-tokens.json,coordinator.json,serve.log}`), or a remote named by `--remote`/`container.remote` that reports
+`machines` in `/v1/info` is used. `kunj serve` accepts named client tokens (`token add|list|remove`) and, with
+`--allow-pairing`, hands one coordinator a token on a machine's first boot (`POST /v1/pair`). Listings never wake a
+machine; `create`/`wake` locate one per branch at a time. Tests: `FakeProvider` and a conformance suite that every
+provider runs (GceProvider over a simulated gcloud).
 
 ## Repository Registry & macOS App
 

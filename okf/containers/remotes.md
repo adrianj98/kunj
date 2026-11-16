@@ -32,6 +32,15 @@ docs/specs/remote-containers.md.
 `remote list --json` reports `insecure`. The rule is only checked at `add`; the client sends to whatever
 URL the entry holds. The server must also listen there: `kunj serve --listen <addr> --allow-remote-listen`.
 
+# Tokens on the server
+
+`kunj serve` accepts the legacy `token` file (client `default`) and named clients in `tokens.json` next to
+it (`kunj serve token add|list|remove <client>`; reread when either file changes; `fileAuthenticator()` in
+src/lib/serve/token.ts). The log names the calling client. `--allow-pairing` on a server with no token yet
+(a cloud machine's first boot) lets one unauthenticated `POST /v1/pair` fetch a fresh token within
+`--pair-window` minutes; everything else is 401 until then. With `--machines` the token files live in
+`~/.kunj/coordinator/` (see [Cloud Machines](/containers/cloud-machines.md)).
+
 # What the server refuses
 
 `Guard.runSpec()` (src/lib/serve/guard.ts) checks every container a client asks `kunj serve` to create:
