@@ -9,6 +9,11 @@ Simple CI/CD setup for Kunj CLI with tag-based releases.
 - **Does**: Install → Test → Build → Verify
 - **Purpose**: Ensure code quality
 
+### Apps (`apps.yml`)
+- **Runs on**: Pull requests to main + pushes to main that touch `workspace-app/`, `macos-app/` or the workflow itself, or manually from the Actions tab
+- **Does**: Builds `Kunj Workspace.app` and `Kunj.app` with the same `scripts/bundle.sh` and on the same runner (`macos-15`) as the release
+- **Purpose**: The runner's Swift is older than a developer's Mac, so code that compiles locally can fail there; this finds out before a version tag is pushed
+
 ### Release (`release.yml`)
 - **Runs on**: Version tags (v*.*.*), or manually from the Actions tab ("Run workflow" with a version), which creates the tag for you
 - **Does**: Build → Test → Publish to NPM → Package VS Code extension → Create GitHub Release (with the `.vsix` attached), then a `macos-15` job builds the menu bar app and attaches `Kunj-macos-<version>.zip` (unsigned)

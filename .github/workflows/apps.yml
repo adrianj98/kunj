@@ -1,0 +1,60 @@
+name: Apps
+
+# Builds the two Mac apps exactly as the release does, on the release's runner, so a source change
+# its Swift cannot compile fails here and not after a version tag is pushed. Only when an app
+# changes: macOS runners are slow and cost ten times a Linux one.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'workspace-app/**'
+      - 'macos-app/**'
+      - '.github/workflows/apps.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'workspace-app/**'
+      - 'macos-app/**'
+      - '.github/workflows/apps.yml'
+  workflow_dispatch:
+
+jobs:
+  workspace-app:
+    name: Build Workspace app
+    # Keep in step with the workspace-app job in release.yml
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install the web bundle's dependencies
+        working-directory: workspace-app/web
+        run: npm ci
+
+      - name: Build Kunj Workspace.app (unsigned)
+        working-directory: workspace-app
+        run: scripts/bundle.sh
+
+      - name: Show the build log on failure
+        if: failure()
+        working-directory: workspace-app
+        run: grep -n "error:" .build/bundle-build.log || tail -n 100 .build/bundle-build.log || true
+
+  macos-app:
+    name: Build macOS app
+    # Keep in step with the macos-app job in release.yml
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Kunj.app (unsigned)
+        working-directory: macos-app
+        run: scripts/bundle.sh

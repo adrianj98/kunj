@@ -1726,3 +1726,8 @@ macOS app zip (`kunj install macos` needs a release that has one).
   in Views/SidebarRowView.swift. Both are now summed from typed `CGFloat` constants. The local Swift
   6.4 compiled the old code, and CI does not build the app, so nothing caught it before the tag.
 - The v1.3.0 release therefore has no `Kunj-workspace-1.3.0.zip` yet.
+- Added `.github/workflows/apps.yml`: builds both Mac apps on `macos-15` with the release's own
+  `scripts/bundle.sh`, on pushes and pull requests that touch `workspace-app/`, `macos-app/` or the
+  workflow, and on demand. Why: the user wants the app built on CI, not uploaded from a Mac, and the
+  v1.3.0 failure was only found after the tag because CI never built the apps. Path-filtered because
+  macOS runners are slow and costly.
