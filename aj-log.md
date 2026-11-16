@@ -1731,3 +1731,20 @@ macOS app zip (`kunj install macos` needs a release that has one).
   workflow, and on demand. Why: the user wants the app built on CI, not uploaded from a Mac, and the
   v1.3.0 failure was only found after the tag because CI never built the apps. Path-filtered because
   macOS runners are slow and costly.
+
+## 2026-11-16 — Remote containers tried end to end; kunj serve says when it waits for Docker
+
+- Ran this worktree's `kunj serve` on 127.0.0.1:7434 (remote `rc`) next to the user's server on 7433,
+  and through it started a container for the kunj branch `remote-containers-agent` and an agent in it.
+  Why: the feature had only been proven by unit tests, and the user's real start had crashed the
+  server (fixed in b6b54b0) and was never run again.
+- Result for kunj: `ct start --remote rc` built the blueprint snapshot and created the container
+  (5 min 20 s on a Mac at load 47), `ct agent --remote rc` ran Claude Code in the container's tmux
+  over the TTY WebSocket, the agent answered a prompt, `ct list --json --remote rc` showed
+  `backend.kind: "remote"` and `agent.running: true`, and the agent kept running after the client
+  left. No kunj bug was hit on that path.
+- `kunj serve` now prints `Waiting for Docker to answer (docker info)…` when `docker info` takes over
+  5 s at startup (`slowDockerMs` in `ServeCommandDeps`, timer cleared when `info()` settles). Why:
+  Docker Desktop was overloaded during this work (every docker call took 6 s to minutes), and the
+  server sat silent with nothing listening, which looked like kunj hanging. Test in
+  src/commands/__tests__/serve.test.ts (failed before: the option did not exist).

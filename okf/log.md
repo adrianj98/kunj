@@ -95,3 +95,4 @@
 - `/handoff`: `kunj agent start --detach/--prompt-file/--open-in-app`, `@kunj_open`, events `id`/`worktree`/`open`, `kunj install skill`, the app opening the handed-off tab. Pages updated: features/worktree-agents.md.
 - tmux sessions: `agentArgv` wraps the command with an explicit cd (`inDirectory()`), because a tmux server whose own directory was deleted ignores `-c`; `runTmux` starts tmux in the home directory (`spawnCwd`). Page updated: features/worktree-agents.md.
 - Remote containers: exec frames carry at most 1 MB (`encodeFrames()`, `MAX_FRAME_DATA`), so a stream chunk over the 16 MB `maxPayload` (a large file in a tar stream) is split; `kunj serve` listens for `error` on every WebSocket, so a bad frame ends one stream, not the server. Page updated: containers/remotes.md.
+- `kunj serve` prints `Waiting for Docker to answer…` when `docker info` takes over 5 s at startup (it listens only after). Page updated: containers/remotes.md.

@@ -320,6 +320,9 @@ v1; if a listing turns out slow, the first batch is a `GET /v1/containers?label=
 - Secrets: in transit inside the SSH tunnel or the user's TLS; at rest only in the env temp file during
   `docker run` and in the container's process environment, as today. The server never logs a request
   body or an exec's bytes. `--verbose` logs routes, ids and durations.
+- Startup: the server asks `docker info` before it listens (a daemon that is down fails early with
+  Docker's message). When that takes over 5 s it prints one `Waiting for Docker to answer…` line, so a
+  busy or stuck Docker Desktop does not look like a hung `kunj serve`.
 - A container on the box can reach what the box's firewall helper allows, which is the box's network,
   not the laptop's. `container.network.allow` is evaluated in the helper on the box as today; `forward`
   and the MCP bridge reach the laptop only through connections the laptop opens.

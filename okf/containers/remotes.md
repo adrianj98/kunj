@@ -50,3 +50,10 @@ the server's `frameWriter`. A stream's chunk has no size limit (a tar stream yie
 once), and both ends refuse a frame over their 16 MB `maxPayload`. `attachWebSockets` listens for
 `error` on every socket, so a refused frame or a reset connection ends that one stream and is logged;
 it never ends the server.
+
+# Starting the server
+
+`kunj serve` calls `backend.info()` (`docker info`) before it listens, so a daemon that is down fails
+early. A busy Docker Desktop can take tens of seconds or never answer: after `slowDockerMs` (5 s,
+`ServeCommandDeps`) the command prints one `Waiting for Docker to answer…` line on stderr, and clears
+the timer when `info()` settles. Nothing listens until then.
