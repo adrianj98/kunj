@@ -70,6 +70,8 @@ export interface WorktreeListContainersJson {
   available: boolean;
   message?: string;
   items: BranchContainerJson[];
+  /** `kunj ct list --json`'s `backends`: who was asked, and who did not answer (its rows are missing, not gone) */
+  backends?: ContainerListJson['backends'];
 }
 
 /** A `kunj ct list --json` container plus its branch's pull request, looked up like a worktree's */
@@ -160,6 +162,8 @@ export interface ContainerJson {
    * stamp; read without unlocking): env secrets reach it on `kunj ct start --rebuild`. This repository's
    * containers only */
   secretsChanged?: boolean;
+  /** The `kunj serve` remote the container is on (a name from kunj remote add); absent on this machine's Docker */
+  remote?: string;
 }
 
 export interface ContainerListJson {
@@ -175,6 +179,20 @@ export interface ContainerListJson {
     remote?: string;
     features?: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
   };
+  /**
+   * Every backend this listing asked: the one of --remote / --context, else the fleet (this machine's
+   * Docker, then each remote of kunj remote list). One that did not answer has `available: false`
+   * and a `message`, and its containers are missing from `containers`: not gone, just not listed.
+   * `backend` above stays the default backend, where a start without --remote creates.
+   */
+  backends?: Array<{
+    kind: 'docker' | 'remote';
+    context: string;
+    remote?: string;
+    available: boolean;
+    message?: string;
+    features?: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
+  }>;
   containers: ContainerJson[];
   // Helpers, services, volumes and networks whose branch container is gone (kunj ct prune removes them)
   orphans: PruneOrphan[];

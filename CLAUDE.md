@@ -467,7 +467,9 @@ Engine API on the server (`execTty()` in docker.ts, still the only module that t
 the client (`Terminal` seam). `kunj remote add|list|remove|ping|token` keeps `~/.kunj/remotes.json` (0600;
 https anywhere, http only to loopback unless `--allow-insecure-http`, which marks the entry `insecure`; tokens never listed); `--ssh` remotes get an `ssh -N -L` tunnel per
 process (tunnel.ts). `ct open` refuses on a remote (`remote-no-editor`); `ct list --json` reports
-`backend.kind/remote/features`; detached forwarders and bridges get `--remote`. Tests: `npm run test:remote`
+`backend.kind/remote/features`, and without `--remote`/`--context` lists the fleet (this machine's Docker and every
+remote, in parallel: `remote` on each container, `backends` with who answered, a container id listed once;
+`collectList()`, docs/specs/multi-remote-containers.md; branch commands still use the default backend only); detached forwarders and bridges get `--remote`. Tests: `npm run test:remote`
 runs the container suites over the wire (`testBackend()` in remote-harness.ts; `itLocal` for the few that
 compare stream objects); `remote.docker.test.ts` needs a real daemon.
 
@@ -497,6 +499,8 @@ the third consumer of the CLI's JSON: one window listing every worktree and bran
 in `kunj repos --json` as environments, with terminals, agent tabs (`kunj agent`/`kunj ct agent`, so they
 reattach to kunj's tmux sessions), a Changes column and editor tabs. It runs `kunj … --json` with `cwd`
 = the repo root and the branch named, refreshes on `kunj events --json` (a child whose stdin it holds),
+passes `--remote <the container's remote, or local>` on every `kunj ct` it runs for a container
+(`Environment.remoteArguments`; New session's "Run on" popup is `runOnChoices()` over the listing's `backends`),
 never imports kunj, never runs `docker`, and runs `git` only read-only with `GIT_OPTIONAL_LOCKS=0`. Its only
 state is UI layout in `~/.kunj/<repo>/workspace.json`. Settings (⌘,) is drawn from `kunj config --schema --json`
 (`SettingsModel` in Core: rows with value, source and control; `Settings/SettingsWindow.swift`, `SettingRowView`,

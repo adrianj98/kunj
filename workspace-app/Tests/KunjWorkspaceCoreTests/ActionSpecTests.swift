@@ -7,15 +7,15 @@ import Testing
         let box = testContainer()
         let stopped = testContainer(running: false)
         #expect(actionPlan(.ctStart, env: stopped, worktreeOfSameBranch: nil)
-            == .terminal(args: ["ct", "start", "feature/x"], title: "ct start", cwd: nil))
-        #expect(actionPlan(.ctStop, env: box, worktreeOfSameBranch: nil) == .run(args: ["ct", "stop", "feature/x"]))
+            == .terminal(args: ["ct", "start", "feature/x", "--remote", "local"], title: "ct start", cwd: nil))
+        #expect(actionPlan(.ctStop, env: box, worktreeOfSameBranch: nil) == .run(args: ["ct", "stop", "feature/x", "--remote", "local"]))
         #expect(actionPlan(.ctRemove(force: false), env: box, worktreeOfSameBranch: nil)
-            == .terminal(args: ["ct", "remove", "feature/x"], title: "ct remove", cwd: nil))
+            == .terminal(args: ["ct", "remove", "feature/x", "--remote", "local"], title: "ct remove", cwd: nil))
         #expect(actionPlan(.ctRemove(force: true), env: box, worktreeOfSameBranch: nil)
-            == .terminal(args: ["ct", "remove", "feature/x", "--force"], title: "ct remove", cwd: nil))
+            == .terminal(args: ["ct", "remove", "feature/x", "--force", "--remote", "local"], title: "ct remove", cwd: nil))
         #expect(actionPlan(.ctRebuild, env: box, worktreeOfSameBranch: nil)
-            == .terminal(args: ["ct", "start", "feature/x", "--rebuild"], title: "ct start", cwd: nil))
-        #expect(actionPlan(.ctOpen, env: stopped, worktreeOfSameBranch: nil) == .run(args: ["ct", "open", "feature/x"]))
+            == .terminal(args: ["ct", "start", "feature/x", "--rebuild", "--remote", "local"], title: "ct start", cwd: nil))
+        #expect(actionPlan(.ctOpen, env: stopped, worktreeOfSameBranch: nil) == .run(args: ["ct", "open", "feature/x", "--remote", "local"]))
         #expect(actionPlan(.prune, env: box, worktreeOfSameBranch: nil)
             == .terminal(args: ["ct", "prune"], title: "ct prune", cwd: nil))
         #expect(actionPlan(.openPort(3000), env: box, worktreeOfSameBranch: nil) == .external(url: "http://localhost:3000"))
@@ -76,6 +76,37 @@ import Testing
             == .terminal(args: ["pr"], title: "pr", cwd: "/w/other"))
         if case .disabled = actionPlan(.createPR, env: testContainer(), worktreeOfSameBranch: testWorktree(exists: false)) {} else { Issue.record("PR from a missing worktree") }
         if case .disabled = actionPlan(.createPR, env: testWorktree(exists: false), worktreeOfSameBranch: nil) {} else { Issue.record("PR in a missing worktree") }
+    }
+
+    /// A container on a remote: every command names it, and the editor cannot attach there.
+    @Test func containerOnARemote() {
+        var box = testContainer()
+        box.remote = "box"
+        var stopped = testContainer(running: false)
+        stopped.remote = "box"
+        #expect(box.remoteArguments == ["--remote", "box"])
+        #expect(testContainer().remoteArguments == ["--remote", "local"])
+        #expect(testWorktree().remoteArguments == [])
+        #expect(actionPlan(.ctStart, env: stopped, worktreeOfSameBranch: nil)
+            == .terminal(args: ["ct", "start", "feature/x", "--remote", "box"], title: "ct start", cwd: nil))
+        #expect(actionPlan(.ctStop, env: box, worktreeOfSameBranch: nil) == .run(args: ["ct", "stop", "feature/x", "--remote", "box"]))
+        #expect(actionPlan(.ctRemove(force: true), env: box, worktreeOfSameBranch: nil)
+            == .terminal(args: ["ct", "remove", "feature/x", "--force", "--remote", "box"], title: "ct remove", cwd: nil))
+        #expect(actionPlan(.ctRebuild, env: box, worktreeOfSameBranch: nil)
+            == .terminal(args: ["ct", "start", "feature/x", "--rebuild", "--remote", "box"], title: "ct start", cwd: nil))
+        if case .disabled(let reason) = actionPlan(.ctOpen, env: box, worktreeOfSameBranch: nil) {
+            #expect(reason.contains("box"))
+        } else { Issue.record("ct open on a remote") }
+    }
+
+    /// The sheet's "Run on" choice goes to `ct start` as `--remote`; none leaves it to kunj.
+    @Test func newSessionOnARemote() {
+        #expect(newSessionPlan(NewSessionRequest(repo: testRepo, branch: "feature/y", base: "main", kind: .container, startAgent: false, remote: "box"))
+            == .terminal(args: ["ct", "start", "feature/y", "-c", "--base", "main", "--remote", "box"], title: "ct start", cwd: nil))
+        #expect(newSessionPlan(NewSessionRequest(repo: testRepo, branch: "feature/y", base: nil, kind: .container, startAgent: false, remote: "local"))
+            == .terminal(args: ["ct", "start", "feature/y", "-c", "--remote", "local"], title: "ct start", cwd: nil))
+        #expect(newSessionPlan(NewSessionRequest(repo: testRepo, branch: "feature/y", base: nil, kind: .worktree, startAgent: false, remote: "box"))
+            == .terminal(args: ["worktree", "add", "feature/y", "-c"], title: "worktree add", cwd: nil))
     }
 
     @Test func newSessionPlans() {

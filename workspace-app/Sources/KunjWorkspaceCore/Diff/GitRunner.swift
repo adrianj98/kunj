@@ -33,7 +33,8 @@ public struct GitContext {
     /// Where diff content comes from: the worktree on disk, or the branch container through `kunj ct exec`.
     public enum Target: Equatable, Sendable {
         case worktree(path: String)
-        case container(branch: String, repoRoot: String)
+        /// `remote`: the container's `--remote` value (`local` for this Mac's Docker); nil lets kunj choose
+        case container(branch: String, repoRoot: String, remote: String? = nil)
     }
 }
 
@@ -49,7 +50,7 @@ public func gitTarget(for env: Environment) throws -> GitContext.Target {
         guard env.state == .running else {
             throw DiffError.unavailable("The container of \(env.branch) is not running")
         }
-        return .container(branch: env.branch, repoRoot: env.repo.root)
+        return .container(branch: env.branch, repoRoot: env.repo.root, remote: env.remote ?? localRemote)
     }
 }
 
@@ -78,8 +79,9 @@ public func execArgv(_ target: GitContext.Target, cli: KunjCLI, _ argv: [String]
         var env = ShellEnvironment.terminalEnvironment(path: cli.path)
         env["GIT_OPTIONAL_LOCKS"] = "0"
         return (argv, path, env)
-    case .container(let branch, let repoRoot):
-        let spec = cli.spawnSpec(["ct", "exec", branch, "--"] + argv, cwd: repoRoot)
+    case .container(let branch, let repoRoot, let remote):
+        // Before `--`: what follows it is the command's own
+        let spec = cli.spawnSpec(["ct", "exec", branch] + (remote.map { ["--remote", $0] } ?? []) + ["--"] + argv, cwd: repoRoot)
         var env = spec.environment
         env["GIT_OPTIONAL_LOCKS"] = "0"
         return ([spec.executable] + spec.arguments, spec.cwd, env)

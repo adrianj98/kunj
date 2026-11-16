@@ -46,7 +46,12 @@ enum DemoData {
             env(alertd, "fix/alert-dedupe", agent: .running, dirty: true, changed: 4),
             env(alertd, "chore/bun-upgrade", pr: pr(398, "merged", repo: "alertd-core", head: "chore/bun-upgrade")),
             env(alertd, "main", isMain: true),
-        ]),
+        ], backends: [
+            // This Mac and two remotes, one not answering: what New session's "Run on" popup lists
+            ContainerListJson.BackendInfo(kind: "docker", remote: nil, available: true),
+            ContainerListJson.BackendInfo(kind: "remote", remote: "box", available: true),
+            ContainerListJson.BackendInfo(kind: "remote", remote: "gpu-1", available: false, message: "did not answer"),
+        ], defaultRemote: "box"),
         RepoEnvironments(repo: kunj, backend: .docker, environments: [
             env(kunj, "workspace-app", agent: .running, dirty: true, changed: 7),
             env(kunj, "ct-file-cmd", pr: pr(57, "open", checks: "pending", repo: "kunj", head: "ct-file-cmd")),

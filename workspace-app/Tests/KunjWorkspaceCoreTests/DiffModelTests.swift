@@ -75,6 +75,8 @@ import Testing
 
         let ct = gitArgv(.container(branch: "feature/x", repoRoot: "/r"), cli: cli, ["status"])
         #expect(ct.argv == ["/usr/bin/env", "kunj", "ct", "exec", "feature/x", "--", "git", "status"])
+        let onBox = gitArgv(.container(branch: "feature/x", repoRoot: "/r", remote: "box"), cli: cli, ["status"])
+        #expect(onBox.argv == ["/usr/bin/env", "kunj", "ct", "exec", "feature/x", "--remote", "box", "--", "git", "status"])
         #expect(ct.cwd == "/r")
         #expect(ct.env["GIT_OPTIONAL_LOCKS"] == "0")
         #expect(ct.env["PATH"] == "/usr/bin:/bin")

@@ -39,7 +39,7 @@ public struct FileAccess: Sendable {
             return String(decoding: data, as: UTF8.self)
         case .container:
             do {
-                let result: FileReadJson = try await cli.run(["ct", "file", "read", env.branch, path], cwd: env.repo.root)
+                let result: FileReadJson = try await cli.run(["ct", "file", "read", env.branch, path] + env.remoteArguments, cwd: env.repo.root)
                 return result.content
             } catch let error as KunjCLIError {
                 throw mapped(error)
@@ -63,8 +63,8 @@ public struct FileAccess: Sendable {
             if let mode { try? fm.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path) }
         case .container:
             do {
-                let _: FileWriteJson = try await cli.run(["ct", "file", "write", env.branch, path], cwd: env.repo.root,
-                                                         stdin: Data(content.utf8))
+                let _: FileWriteJson = try await cli.run(["ct", "file", "write", env.branch, path] + env.remoteArguments,
+                                                         cwd: env.repo.root, stdin: Data(content.utf8))
             } catch let error as KunjCLIError {
                 throw mapped(error)
             }

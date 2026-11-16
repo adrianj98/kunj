@@ -1785,3 +1785,39 @@ Found while getting an agent running in an alertd-core container through the loc
   which reads the real environment and fails only inside a kunj agent session (`KUNJ_AGENT_*` set).
 - alertd-core itself was not changed: no config edits, nothing pushed, the branch exists only in the
   container.
+
+## 2026-11-16 — Choose a remote in the workspace app; kunj ct list lists every remote
+
+The user asked to be able to choose a remote in the app when remotes are available. This is the
+"Run on" picker of docs/specs/multi-remote-containers.md, which was written but not started.
+
+- `kunj ct list` without `--remote`/`--context` now asks this machine's Docker and every remote in
+  `~/.kunj/remotes.json` in parallel (`collectList()` / `collectFrom()` in src/commands/container.ts).
+  Each container on a remote has `remote`, `backends` says who was asked and who answered, and
+  `kunj worktree list --containers` passes `backends` on. Why: a picker alone would be useless, a
+  container made on a non-default remote would never show up in the app or answer its actions.
+- A container id is listed once. Why: the user's own remotes `box` and `test` are both a `kunj serve`
+  on this Mac's Docker, so every container would otherwise show three times.
+- A remote gets 5 s to open and 8 s to list; this machine's Docker is not timed, as before. Why: a
+  slow remote must not take the whole listing with it, and the worktree listing gives up at 10 s.
+- Workspace app Core: `ContainerJson.remote`, `ContainerListJson.backends`, `Environment.remote` and
+  `remoteArguments`, appended to every `kunj ct` for a container in ActionSpec, TerminalSpec,
+  FileAccess and GitRunner (`ct exec`, before `--`). Why: the CLI's branch commands do not look
+  across remotes yet, so the app says where each container is.
+- New session sheet: a "Run on" popup (`runOnChoices()`), shown for a container when a remote is
+  registered. The names come from the listing's `backends`, not `kunj remote list` as the spec said.
+  Why: one call fewer, and the listing already knows which remotes answer.
+- `ct open` is disabled for a container on a remote, with the reason. Why: the CLI refuses it
+  (`remote-no-editor`); the app now says so before running it.
+- Not built, listed in the spec and the tracker: branch lookup for bare CLI commands, events from
+  non-default remotes, greyed rows for a remote that does not answer, a row per backend when one
+  branch has containers on two.
+- Earlier in the session, at the user's request: removed the two test containers, the test server
+  on 7434 and the `rc` remote, rebuilt the main checkout and restarted the user's `kunj serve` on
+  7433 in its own shell tab.
+- After the adversarial review of the fleet listing, three fixes in src/commands/container.ts, each
+  with a test: a remote's open and listing share one 8 s budget (`fleetTimeouts`; they were 5 s plus
+  8 s, over the worktree listing's 10 s, which would have emptied the app's container rows); a
+  `remotes.json` that cannot be read lists this machine alone with a warning (it would have failed
+  a plain local listing); a remote that opens after its time is closed again (`closeSelection()`),
+  and a failure is explained with the default backend, not whichever opened last.
