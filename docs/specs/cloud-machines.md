@@ -238,6 +238,27 @@ old image), and `kunj ct blueprint status` reports the image next to the snapsho
 `kunj machine image build` from the user's scheduler keeps the data disk snapshot and the cache current;
 kunj ships no scheduler.
 
+## Blueprint, snapshot, golden image: one hash, three layers
+
+The blueprint already produces a reusable image: the **snapshot** `kunj-blueprint-<repo>:<hash>`, a
+Docker image with the tools installed and `setup` run, built once per daemon and reused by every branch
+container that daemon starts ([blueprints.md](blueprints.md)). Machines add one layer above it and,
+optionally, one beside it, all keyed by the same `computeBlueprintHash()`:
+
+| Layer | What it is | Reused by | Built by |
+| --- | --- | --- | --- |
+| Blueprint snapshot | Docker image `kunj-blueprint-<repo>:<hash>` on a daemon | Every branch on that daemon (today) | `kunj ct start` when missing, or `kunj ct blueprint snapshot` |
+| Golden machine image | A cloud VM image (labels `kunj.blueprint=<hash>`, `kunj.version`) holding Ubuntu, Docker, kunj, the base images **and the snapshot** | Every machine of the repository | `kunj machine image build`: a builder machine, `kunj ct blueprint snapshot` run against it over the wire, then `provider.images.createFrom()` |
+| Registry copy (optional) | The snapshot pushed to a registry the provider names (`machine.registry`, e.g. Artifact Registry in the machine's region) | A machine booted from an older golden image, which pulls the snapshot for the current hash instead of building it | `kunj ct blueprint snapshot --push`, and by the image build |
+
+So a new machine starts a branch in the time it takes to copy `/workspace` from the snapshot, exactly as
+a second branch on the laptop does today; nothing is rebuilt per machine. When the blueprint changes,
+the hash changes: `ensureMachine()` boots the newest golden image and warns `image-stale` until
+`kunj machine image build` runs again (a nightly build keeps it current), and in between a machine with
+`machine.registry` set pulls the new snapshot rather than building it. The snapshot inside the golden
+image is the ordinary one: built from a bundle, no secrets, no token, no `/var/lib/docker` of a running
+branch. `kunj ct blueprint status` reports all three layers for the hash.
+
 ## The cache volume
 
 `container.caches` (generic; kunj knows nothing about what goes in): a list of
@@ -280,6 +301,7 @@ provider poll. Errors: `machine-provider` (none configured or unknown), `machine
 | `machine.pairWindowMinutes` | `10` | Pairing window after boot |
 | `machine.bootTimeoutMs` | `300000` | How long `ensureMachine` waits for serve |
 | `machine.gce.project`, `.zone`, `.network`, `.subnet`, `.serviceAccount`, `.machineTypes`, `.baseImage` | — | Provider config; `machine.<provider>.*` for each |
+| `machine.registry` | `""` | A registry for snapshot pushes and pulls (e.g. `<region>-docker.pkg.dev/<project>/kunj`); empty means the golden image alone |
 | `container.caches` | `[]` | `{ name, path }` list, above |
 
 ## Security
