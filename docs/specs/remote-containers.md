@@ -199,7 +199,13 @@ drained into the socket (`finish` of the frame writer, 2 s at most), so a burst 
   dependency, so a TTY exec goes through the **Docker Engine API** on the daemon socket (the socket from
   `docker context inspect`): `POST /containers/:id/exec` with `Tty`, `AttachStdin/Stdout/Stderr`, `User`,
   `WorkingDir`, `Env`; `POST /exec/:id/start` on a hijacked connection, whose raw bytes are the pty;
-  `POST /exec/:id/resize?h=&w=` for each `resize` frame; `GET /exec/:id/json` for the exit code (polled up to 30 s after the connection ends). Closing
+  `POST /exec/:id/resize?h=&w=` for each `resize` frame; `GET /exec/:id/json` for the exit code (polled up to 30 s after the connection ends).
+  The first size is set three ways, because each alone was seen to leave a terminal at 80x24: `ConsoleSize`
+  in the create call, a resize after the start that is retried while the daemon refuses it (5 tries, as the
+  docker CLI does), and, in `serveExec`, the newest `resize` frame applied once the pty exists when it
+  landed while the exec was being created (the request and the first resize are two frames). When the
+  exec is gone at the end (the daemon restarted, the container stopped) the client is told that, not
+  `No such exec instance: <id>`. Closing
   the WebSocket closes the hijacked socket, which hangs up the pty (SIGHUP to the process group, as a
   dropped SSH session would). This is `execTty()` in docker.ts, a second way of talking to Docker that
   stays inside the one module allowed to. Non-TTY execs keep spawning `docker exec`. The env a TTY exec

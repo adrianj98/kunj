@@ -67,6 +67,9 @@ a name prefix another branch could extend.
 **Lifecycle:** `start` validates every definition before creating anything, then starts services in
 `dependsOn` order after the network and before the branch container, polling each health check every
 2 s for up to 120 s (then a warning, and the start continues). They are in the rollback list.
+Once the branch container is up, `warnStoppedServices()` lists the services once more and warns for
+each that is not running (a service without a health check that died after it was started), on a new
+start and on a resume that brought the container up.
 `--rebuild` recreates them on their kept volumes and removes services no longer declared, with their
 volumes unless `--keep-volumes`. Resume starts stopped ones and creates newly declared ones, dependencies
 first, never removing one; a service that will not start fails the start, and a failed resume stops the

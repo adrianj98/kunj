@@ -96,3 +96,5 @@
 - tmux sessions: `agentArgv` wraps the command with an explicit cd (`inDirectory()`), because a tmux server whose own directory was deleted ignores `-c`; `runTmux` starts tmux in the home directory (`spawnCwd`). Page updated: features/worktree-agents.md.
 - Remote containers: exec frames carry at most 1 MB (`encodeFrames()`, `MAX_FRAME_DATA`), so a stream chunk over the 16 MB `maxPayload` (a large file in a tar stream) is split; `kunj serve` listens for `error` on every WebSocket, so a bad frame ends one stream, not the server. Page updated: containers/remotes.md.
 - `kunj serve` prints `Waiting for Docker to answer…` when `docker info` takes over 5 s at startup (it listens only after). Page updated: containers/remotes.md.
+- Remote terminals: first size set by `ConsoleSize`, a retried first resize and a late `resize` frame applied once the pty exists (was sometimes 80x24); a lost exec says the container stopped or Docker restarted. Page updated: containers/remotes.md.
+- Services: `warnStoppedServices()` warns at the end of a start or resume about a service that is not running. Page updated: containers/services.md.

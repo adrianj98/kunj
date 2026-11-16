@@ -1748,3 +1748,34 @@ macOS app zip (`kunj install macos` needs a release that has one).
   Docker Desktop was overloaded during this work (every docker call took 6 s to minutes), and the
   server sat silent with nothing listening, which looked like kunj hanging. Test in
   src/commands/__tests__/serve.test.ts (failed before: the option did not exist).
+
+## 2026-11-16 — Remote terminals keep their size; lost terminals and dead services are said
+
+Found while getting an agent running in an alertd-core container through the local `kunj serve`
+(the agent did run and answer: container `kunj-alertd-core-kunj-remote-test-42f28f`, branch
+`kunj-remote-test` made only in the container from `origin/develop`, services db and pulsar).
+
+- Remote terminal sometimes 80x24 in a larger window (1 in 10 TTY execs in a 170x45 pane, and it
+  stayed that size). Cause: the client sends the request and the first `resize` as two frames, and
+  `serveExec` created the pty with the size it had at that moment; a resize that landed during the
+  create was stored but never applied, because the pty did not exist yet. Fix in
+  src/lib/serve/streams.ts: apply the newest size once `execTty()` returns. Tests in
+  src/lib/serve/__tests__/streams.test.ts (the first failed before).
+- `execTty()` (src/lib/container/docker.ts) also passes `ConsoleSize` in the exec create call and
+  retries its first resize up to 5 times while the daemon refuses it. Why: one ignored failure
+  there has the same effect, and the docker CLI retries for that reason. This was my first guess at
+  the cause above and was not it; kept as cheap protection, tested against the fake daemon.
+- A terminal open while Docker restarted ended with `docker exec failed: No such exec instance:
+  <64 hex>`. Now: `The terminal ended because the container stopped or Docker restarted. Start it
+  again with kunj ct start, then reattach.` Why: the user changed Docker Desktop's memory twice
+  during this work, each change restarted the VM and stopped every container, and the old message
+  did not say so.
+- `warnStoppedServices()` (src/lib/container/services.ts), called at the end of a new start and of a
+  resume that brought the container up. Why: alertd-core's Pulsar service has no health check; its
+  JVM could not get a 2 GB heap in the starved Docker VM and exited 20 s after it was started, and
+  the start still printed `services db, pulsar` with no warning.
+- Not fixed, recorded in docs/specs/README.md: after a remote terminal's client and server were
+  gone, its `tmux attach` client was still attached in the container. The check I wrote for it
+  could not run because Docker hung again.
+- alertd-core itself was not changed: no config edits, nothing pushed, the branch exists only in the
+  container.

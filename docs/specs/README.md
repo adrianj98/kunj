@@ -91,6 +91,8 @@ page only says where each thing stands.
 | Workspace app: terminal shows programs' own 256 colours (theme no longer re-tints them) | [workspace-ide.md](workspace-ide.md#layout) | 2d4a3b3 |
 | Remote containers: `kunj remote add --url http://… --allow-insecure-http` (plain http over a tailnet or WireGuard) | [remote-containers.md](remote-containers.md#transport-and-auth) | ad5b992 |
 | Remote containers: a stdin chunk over 16 MB (a large keep file or tar entry) no longer crashes `kunj serve`: chunks are split into 1 MB frames, the server listens for socket errors | [remote-containers.md](remote-containers.md) | b6b54b0 |
+| Remote containers run end to end through a local `kunj serve` (kunj and alertd-core: container, services, agent answering in tmux); `kunj serve` says when it waits for Docker | [remote-containers.md](remote-containers.md) | 0bda7c6 |
+| Remote terminals: the first size is applied (was sometimes 80x24), a terminal lost to a Docker restart says so; a service that stopped after start is warned about | [remote-containers.md](remote-containers.md), [container-phase-2.md](container-phase-2.md) | this commit |
 | Workspace app: ignored files (`.env`) in the Files column, ignored folders as one faint entry | [workspace-ide.md](workspace-ide.md) | 053fa54 |
 | Antigravity as an agent: `kunj agent --agent antigravity`, Antigravity Agent tabs in the workspace app (worktrees; no waiting state) | [workspace-ide.md](workspace-ide.md) | a18c172 |
 | Workspace app: Settings › Containers **Test** for the Claude Code token (`kunj ct token check --json`), Set Up… through `kunj ct token setup` | [workspace-ide.md](workspace-ide.md#layout) | 14778e6 |
@@ -110,6 +112,7 @@ page only says where each thing stands.
 | --- | --- | --- |
 | Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
 | Remote containers: try an `--ssh` remote against a real second machine (and a Linux Docker host) | [remote-containers.md](remote-containers.md) | Everything so far ran with `kunj serve` on the same Mac |
+| Remote containers: check whether a closed remote terminal leaves its process in the container | [remote-containers.md](remote-containers.md) | Seen once: a `tmux attach` client still attached after its kunj client and server were gone; the spec says closing the socket hangs the pty up. Not reproduced in isolation (Docker hung) |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
 | Extra repos cloned next to the workspace | [container-system.md](container-system.md#roadmap) | — |

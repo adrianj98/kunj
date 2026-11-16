@@ -63,7 +63,9 @@ YAML tag other than `!reset`/`!override` is skipped as well, and so is one with 
 
 - **start** runs the services before the branch container, in `dependsOn` order, and waits for each
   health check (every 2 seconds, up to 2 minutes; after that it warns and carries on). They are up
-  before `setup` or `postCreateCommand` runs.
+  before `setup` or `postCreateCommand` runs. When the container is ready, kunj checks the services
+  once more and warns about any that stopped in the meantime, with the `kunj ct logs` command to read
+  why. Give a service a `healthcheck` to have the start wait for it.
 - **Snapshots** start the services the same way, so a blueprint's `setup` can rely on them. Their
   data is never in the snapshot, and they are removed with the temporary container.
 - **Migrations** against a service belong in the blueprint's `maintain`, written so they are safe to
