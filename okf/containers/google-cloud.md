@@ -32,6 +32,7 @@ Docker state (labels, home volumes, snapshot images) must survive the host stopp
 | GKE with a new Kubernetes `ContainerBackend` (pod = main + helper sidecar, PVC home, exec API) | Later, for a fleet: no `commit`/`build` on nodes, Autopilot needs `--workload-policies=allow-net-admin` and never privileged |
 | Cloud Run | Ruled out: no capabilities, no daemon, no persistent disk |
 | One VM per branch | Rejected |
+| A managed Docker daemon (Container-Optimized OS, Cloud Build, Docker Offload) | None fits: COS cannot host kunj or Sysbox, Cloud Build is batch, Docker Offload deletes state after idle and runs outside the user's project |
 
 # Reaching the VM
 

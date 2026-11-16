@@ -186,6 +186,35 @@ all. The remote-containers spec lists this as the validation step that was never
 SSH connection per `docker` call, a dozen per `ct list`) and the apps cannot describe it, so it is a
 one-hour check of the VM recipe, not the way to use it.
 
+## Is there a managed Docker daemon on Google Cloud?
+
+No. Asked directly ("some type of Docker in Google"), the answer is that Google sells no hosted Docker
+*daemon*. What exists, and why each is or is not the answer:
+
+- **Container-Optimized OS** is the closest thing: a Compute Engine image with Docker, containerd and
+  cloud-init preinstalled, auto-updating weekly, and a VM created with a container to run at boot. It is
+  "Docker in Google" in the literal sense, but its root filesystem is read-only with no package manager,
+  so kunj and Node cannot be installed on it; `kunj serve` would run as a container with the daemon socket
+  mounted, and Sysbox cannot be added. Option A on Ubuntu is the same VM with those two restrictions lifted.
+- **Cloud Build** runs `docker build` (and arbitrary build steps) in a managed daemon per build, then
+  exits. Batch only: no long-lived containers, no exec, no state. Not a host for branch containers.
+- **Artifact Registry** stores images. Useful later for a GKE backend's snapshots, not a runtime.
+- **Cloud Run and GKE** run containers but not Docker: Cloud Run has no daemon at all and GKE nodes run
+  containerd (see options C and D).
+- **Docker Offload**, Docker's own hosted engine, is the one real "Docker daemon as a service" on the
+  market: `docker` on the laptop talks to a cloud engine (Docker's infrastructure, not the user's Google
+  project), pay-as-you-go by size (from about $0.07 per hour for 1 vCPU/2 GB to about $1.12 for 16
+  vCPU/32 GB on Docker's page), and it needs a Docker Business subscription and Docker Desktop. It does
+  not fit kunj: a session is ephemeral, and once idle past the timeout (5 minutes per the newest
+  write-ups) the containers, images and volumes are deleted, which destroys kunj's labels-as-state,
+  home volumes and snapshots; one session per user; and whether `--cap-add`, `--network container:` and
+  `commit` are allowed there is undocumented. It also runs in a US East region outside the user's cloud
+  account. Good for offloading one build; wrong for containers that live for the life of a branch.
+
+So on Google Cloud, "Docker" means a VM with a daemon on it, and the choice is only which OS image
+(Ubuntu for Sysbox and `kunj serve` as a plain process; COS if an auto-updating appliance matters more
+than Docker-in-Docker).
+
 ## Isolation on the VM
 
 Branch containers on the VM run under `runc` with capabilities dropped as locally; the helper keeps the
@@ -262,4 +291,6 @@ Third-party: [Cloud Workstations container breakout write-up](https://hackingthe
 [e2-standard-4 pricing](https://www.economize.cloud/resources/gcp/pricing/compute-engine/e2-standard-4/),
 [n2d-standard-4 pricing](https://www.economize.cloud/resources/gcp/pricing/compute-engine/n2d-standard-4/),
 [persistent disk pricing](https://gcloud-compute.com/pd-balanced.html),
-[instance schedules](https://oneuptime.com/blog/post/2026-02-17-how-to-configure-compute-engine-instance-scheduling-to-automatically-stop-vms-on-weekends/view).
+[instance schedules](https://oneuptime.com/blog/post/2026-02-17-how-to-configure-compute-engine-instance-scheduling-to-automatically-stop-vms-on-weekends/view),
+[Docker Offload](https://www.docker.com/products/docker-offload/) and [About Docker Offload](https://docs.docker.com/offload/about.md),
+[Container-Optimized OS overview](https://docs.cloud.google.com/container-optimized-os/docs/concepts/features-and-benefits).
