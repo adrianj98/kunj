@@ -63,6 +63,14 @@ as pull-through caches for npm, PyPI and Docker Hub (one allowlisted hostname), 
 data-disk snapshot per VM or one Cloud SQL instance with a template database per branch (the firewall would
 need allowlisted private addresses ahead of its private-range reject).
 
+# Which cloud
+
+Google Cloud first (free IAP tunnel into `kunj remote add --ssh`, suspend with the fewest conditions,
+Artifact Registry for every cache, cheapest x86 8 GB shape); AWS a close second and first when the
+organisation is there (Bedrock through the instance role, SSM port forwarding free); Azure third (hibernation
+conditions, no free CLI tunnel). Only a `Provider` layer would be cloud-specific. A pulled main database is
+shared as a nightly disk snapshot each session VM's data disk is created from, not as a shared filesystem.
+
 # Cost and idle stop
 
 A stopped VM costs only its disk, so an instance schedule or an idle power-off matters more than the

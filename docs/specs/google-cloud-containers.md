@@ -344,6 +344,23 @@ What to share instead, cheapest first:
 | A seeded database | Per branch, not shared: a service volume seeded in the golden image's **data disk snapshot** (a new VM's disk is created from the snapshot, restore is lazy, so Postgres starts on a seeded data directory in seconds); or one small Cloud SQL instance with a `TEMPLATE` database and `CREATE DATABASE <branch> TEMPLATE seed` per branch, reached through an allowlisted address |
 | Agent state (`~/.claude`, work logs) | Stays on the laptop, as now |
 
+**The concrete case: `npm run pull-main-db`.** The repository's script pulls a dump of the main
+database and restores it locally, and every fresh session would download and restore it again. Share
+the *result*, not a filesystem:
+
+1. A nightly job (Cloud Scheduler starting a small VM, or a Cloud Run job) runs `pull-main-db` once
+   into a Postgres data directory on a disk and takes a **disk snapshot**; the dump itself goes to a
+   bucket as the fallback.
+2. A new session VM's data disk is **created from the latest snapshot**, so its Postgres service
+   starts on yesterday's main database in seconds and `pull-main-db` is only run to refresh.
+3. On the shared VM the same job restores once into a volume, and each branch's service gets a copy
+   (`CREATE DATABASE <branch> TEMPLATE main`, or a volume clone before the service starts).
+
+The dump in the bucket is reached from the VM side (the provider, with the VM's service account)
+rather than from inside a container: the firewall blocks the metadata server, so a container has no
+cloud credentials, and should not. If a session must refresh from inside, a signed URL or an HMAC
+key delivered as a branch secret, and `storage.googleapis.com` in `container.network.allow`.
+
 A shared database *instance* across branches is usually wrong anyway: branches carry different
 migrations. A template database or a seeded disk snapshot gives each branch its own copy at the cost
 of a `CREATE DATABASE`, which is what the shared daemon's per-branch service volumes give today.
@@ -352,6 +369,34 @@ Two kunj details the Cloud SQL route would need: the firewall rejects private ra
 consults the allowlist, so an allowlisted private address (a Cloud SQL private IP) needs the allow
 rule moved ahead of the private-range reject, and `container.network.allow` would have to accept an
 IP as well as a domain.
+
+## Google Cloud, AWS or Azure?
+
+The design (small VMs per session, suspended when idle, reached without a public IP, built from a
+golden image, caches shared through a registry, a database per branch from a snapshot) is portable: only
+the provider layer is cloud-specific. What differs:
+
+| | Google Cloud | AWS | Azure |
+| --- | --- | --- | --- |
+| Private tunnel, no public IP | IAP TCP forwarding: free, IAM-gated, a plain ssh `ProxyCommand` | SSM Session Manager port forwarding (`AWS-StartSSHSession` as `ProxyCommand`) or EC2 Instance Connect Endpoint: free, needs the SSM agent and an instance role | Bastion Developer SKU is free but has no CLI tunnel per the docs; Standard is about $140 a month; otherwise Tailscale |
+| Suspend with memory kept | Suspend: no compute charge, up to 208 GB, 60 days, any E2/N2 shape | Hibernate: under 150 GiB, encrypted EBS root, supported families (Graviton only on AL2023), 60 days | Hibernation: Dasv5/Dsv5/Easv5 families up to 64 GB, Ubuntu 22.04, not Spot, not Trusted Launch on Linux |
+| 2 vCPU, 8 GB on demand | e2-standard-2 about $0.067 | t3.large about $0.083 (burst credits, which builds exhaust); t4g.large (arm64) about $0.067 | B2ms about $0.083 (burst); D2as_v5 about $0.086 |
+| Pull-through caches | Artifact Registry remote repositories: npm, PyPI, Maven, apt, Docker Hub in one service | CodeArtifact (npm, PyPI, Maven, NuGet) plus ECR pull-through (Docker Hub, ghcr) | Azure Artifacts lives in Azure DevOps; ACR caches Docker Hub |
+| Golden image | Custom image | AMI (encrypted for hibernate) | Compute Gallery image |
+| Egress without a public IP | Cloud NAT about $32 a month plus per GB | NAT Gateway about $32 a month plus per GB; or a public IPv4 at about $3.60 a month per VM | NAT Gateway about $32 a month; or a public IP at about $3.60 |
+| Claude from the VM without an API key | Vertex AI with the VM's service account (Claude Code supports Vertex) | Bedrock with the instance role (Claude Code supports Bedrock; kunj's own AI features already target Bedrock) | No equivalent kunj or Claude Code path today |
+
+**Verdict:** Google Cloud fits the design best: the free IAP tunnel is the simplest to wire into
+`kunj remote add --ssh`, suspend/resume has the fewest conditions, Artifact Registry covers every
+cache in one service, and the cheapest x86 8 GB shape is there. **AWS is a close second and wins when
+the organisation already lives there**, above all for Bedrock through the instance role, with SSM as
+the free tunnel; t4g (arm64) matches GCE's price if the sandbox and helper images are built
+multi-arch (Sysbox supports arm64). **Azure is third**: hibernation has the most conditions, the free
+Bastion tier does not tunnel from the CLI, and the caches are split across two products.
+
+For kunj that means a `Provider` interface (create, suspend, resume, delete, list by label, tunnel
+command, image) with a Compute Engine implementation first and an EC2 one when someone needs it; the
+containers, `kunj serve` and the laptop side are the same on all three.
 
 ## Isolation on the VM
 
@@ -416,6 +461,10 @@ Google Cloud documentation as indexed (the docs host was not reachable from the 
 [Container-Optimized OS disks and file system](https://docs.cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem),
 [Idle VM recommendations](https://docs.cloud.google.com/compute/docs/instances/idle-vm-recommendations-overview),
 [Suspend or resume an instance](https://docs.cloud.google.com/compute/docs/instances/suspend-resume-instance).
+Other clouds: [EC2 hibernation prerequisites](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/hibernating-prerequisites.html),
+[SSH through Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started-enable-ssh-connections.html),
+[Azure Bastion SKU comparison](https://learn.microsoft.com/en-us/azure/bastion/bastion-sku-comparison),
+[Azure VM hibernation](https://learn.microsoft.com/azure/virtual-machines/hibernate-resume).
 Projects: [Sysbox](https://github.com/nestybox/sysbox) and its
 [distro compatibility](https://github.com/nestybox/sysbox/blob/master/docs/distro-compat.md),
 [Docker Enhanced Container Isolation](https://docs.docker.com/desktop/enterprise/hardened-desktop/enhanced-container-isolation/),
