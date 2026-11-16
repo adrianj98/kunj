@@ -349,15 +349,17 @@ database and restores it. It has `--cached <path>`: given a path, it restores fr
 only a deliberate run without it pulls afresh and rewrites the tar. So the shared cache is one file at
 a path every container can see, and the design is:
 
-- **A cache volume per repository** (proposed kunj feature): `container.caches` (or blueprint
-  `caches`) names mounts such as `{ "name": "main-db", "path": "/cache" }`. kunj creates one named
+- **A cache volume per repository** (proposed kunj feature, generic: kunj knows nothing about databases
+  or any repository's scripts; `pull-main-db` is only the example that motivated it). `container.caches`
+  (or blueprint `caches`) names mounts such as `{ "name": "main-db", "path": "/cache" }`. kunj creates one named
   volume `kunj-<repo>-cache-<name>` per daemon, labelled `kunj.repo` and `kunj.role=cache`, and mounts
   it into every branch container of that repository at the path, with `KUNJ_CACHE_DIR` in the
   container's env. It is a named volume, so `kunj serve`'s `Guard` accepts it; it is never in a
   snapshot (volumes are not committed), `ct remove` leaves it, and `ct prune` removes it only with
   `--force`. Services do not get it.
-- The repository then runs `npm run pull-main-db --cached $KUNJ_CACHE_DIR/main-db.tar` in blueprint
-  `setup` or `maintain`: the first branch on a box pulls and writes the tar, every later branch
+- What goes into the volume is the repository's business, in its own blueprint `setup` or `maintain`.
+  This repository would run `npm run pull-main-db --cached $KUNJ_CACHE_DIR/main-db.tar` there; another
+  might keep a pnpm store, a Bazel cache or downloaded fixtures. For the database case: the first branch on a box pulls and writes the tar, every later branch
   restores from it in the time a local restore takes. A fresh pull is on demand, by running the script
   without `--cached`, and the rewritten tar is what the next branch gets.
 - **Across per-session VMs** the volume lives in `/var/lib/docker/volumes`, so the golden image's
