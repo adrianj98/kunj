@@ -364,8 +364,13 @@ final class PillView: NSButton {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 20 + textWidth(label, Theme.sans(12, weight: .medium)) + (dot == nil ? 0 : 13)
-                   + (count.map { 6 + textWidth($0, countFont) } ?? 0) + (onClose == nil ? 0 : 16), height: 26)
+        // Summed in steps: as one expression, older Swift compilers give up type-checking it
+        let labelWidth: CGFloat = textWidth(label, Theme.sans(12, weight: .medium))
+        let dotWidth: CGFloat = dot == nil ? 0 : 13
+        var countWidth: CGFloat = 0
+        if let count { countWidth = 6 + textWidth(count, countFont) }
+        let closeWidth: CGFloat = onClose == nil ? 0 : 16
+        return NSSize(width: 20 + labelWidth + dotWidth + countWidth + closeWidth, height: 26)
     }
 
     override func draw(_ dirtyRect: NSRect) {

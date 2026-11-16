@@ -1715,3 +1715,14 @@ macOS app zip (`kunj install macos` needs a release that has one).
   and every other client's work with it, rather than the one exec.
 - Tests in src/lib/serve/__tests__/streams.test.ts: one 20 MB chunk each way, and a raw 17 MB frame
   from a client after which the server still answers. Both failed with the reported error before.
+
+## 2026-11-16 — Release v1.3.0; Workspace app compiles on the release runner's Swift
+
+- Tagged `main` (bdfb74f) as `v1.3.0`. Why: the user asked for a release, and the workspace app's
+  `MIN_KUNJ_VERSION` is 1.3.0, so that is the version it was waiting for. npm, the `.vsix` and the
+  menu bar app were published by the workflow.
+- The release's "Build Workspace app" job failed on `macos-15`: its older Swift could not type-check
+  `intrinsicContentSize` in Views/Controls.swift (one long sum) and found `- (… ? 6 : 0) -` ambiguous
+  in Views/SidebarRowView.swift. Both are now summed from typed `CGFloat` constants. The local Swift
+  6.4 compiled the old code, and CI does not build the app, so nothing caught it before the tag.
+- The v1.3.0 release therefore has no `Kunj-workspace-1.3.0.zip` yet.

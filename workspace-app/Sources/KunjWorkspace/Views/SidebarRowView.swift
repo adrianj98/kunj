@@ -69,9 +69,11 @@ final class SidebarRowView: NSView {
         var timeWidth = draw(time, font: timeFont, color: theme.color(\.muted), rightEdge: bounds.maxX - padH, midY: line1)
         if environment.pullRequest?.state == "merged" {
             let size: CGFloat = 12
-            let x = bounds.maxX - padH - timeWidth - (timeWidth > 0 ? 6 : 0) - size
+            // A typed constant: older Swift compilers find `- (… ? 6 : 0) -` ambiguous
+            let gap: CGFloat = timeWidth > 0 ? 6 : 0
+            let x = bounds.maxX - padH - timeWidth - gap - size
             Icon.merged.draw(in: NSRect(x: x, y: line1 - size / 2, width: size, height: size), color: Self.mergedColor)
-            timeWidth += size + (timeWidth > 0 ? 6 : 0)
+            timeWidth += size + gap
         }
         draw(environment.branch, font: Theme.sans(DesignTokens.TypeScale.body, weight: .medium),
              color: theme.color(selected ? \.text : \.text2),
