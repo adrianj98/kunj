@@ -1,5 +1,11 @@
 # Directory Update Log
 
+## 2026-11-16 (Google Cloud research)
+* **New page**: `containers/google-cloud.md` summarises docs/specs/google-cloud-containers.md: a
+  Compute Engine VM running Docker and `kunj serve` behind IAP is the recommended way to run branch
+  containers on Google Cloud; Cloud Workstations, a GKE backend and Cloud Run are weighed and why they
+  lose. Research only; no code changed.
+
 ## 2026-11-12 (editor reload and save on focus loss)
 * **Workspace app**: `apps/workspace-app.md`: editor tabs without unsaved edits reload a file that changed on disk; optional save when the editor loses focus.
 
