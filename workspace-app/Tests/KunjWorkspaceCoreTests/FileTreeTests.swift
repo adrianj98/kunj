@@ -79,7 +79,7 @@ private func git(_ args: [String], in dir: URL) throws {
         let listing = try await lister.list(env: diffTestEnvironment(kind: .container, branch: "feature/x", path: nil))
         #expect(listing.paths == ["a.txt", "b.txt"])
         let call = try #require(runner.calls.first)
-        #expect(Array(call.prefix(6)) == ["/usr/bin/env", "kunj", "ct", "exec", "feature/x", "--"])
+        #expect(Array(call.prefix(8)) == ["/usr/bin/env", "kunj", "ct", "exec", "feature/x", "--remote", "local", "--"])
         #expect(call.contains("ls-files") && call.contains("--exclude-standard"))
     }
 

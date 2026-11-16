@@ -70,6 +70,12 @@ connection), the MCP bridge, `logs`, `stop`, `remove`, `prune`, and `kunj ct lis
 `backend` says `kind: "remote"` and names the remote. `kunj events` watches each repository on the
 backend its `container.remote` names.
 
+`kunj ct list` without `--remote` asks this machine and every remote you have added, so you see a
+repository's containers wherever they run: a remote's rows are marked `[on <name>]` (`remote` in
+`--json`), and a remote that does not answer within a few seconds is named in a warning (`backends` in
+`--json`) while the rest are still listed. `--remote <name>` or `--remote local` lists one only. Other
+commands still act on one backend: pass `--remote <name>` for a container that is not on your default.
+
 Two things differ:
 
 - **`kunj ct open` refuses** on a remote: the Dev Containers extension attaches through your laptop's

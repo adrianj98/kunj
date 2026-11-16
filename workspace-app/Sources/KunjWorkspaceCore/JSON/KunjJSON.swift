@@ -141,10 +141,31 @@ public struct ContainerListJson: Decodable, Equatable, Sendable {
     public var repo: String
     public var backend: Backend
     public var containers: [ContainerJson]
+    /// Every backend the listing asked (this Mac's Docker, then each `kunj remote`); nil from a kunj
+    /// that lists one backend only
+    public var backends: [BackendInfo]?
 
     public struct Backend: Decodable, Equatable, Sendable {
         public var kind: String
         public var context: String?
+        /// The default backend's remote name (`container.remote`); nil for this Mac
+        public var remote: String?
+    }
+
+    /// One backend of the fleet: `available` false when it did not answer (its containers are then
+    /// missing from the listing, not gone).
+    public struct BackendInfo: Decodable, Equatable, Sendable {
+        public var kind: String
+        public var remote: String?
+        public var available: Bool
+        public var message: String?
+
+        public init(kind: String, remote: String?, available: Bool, message: String? = nil) {
+            self.kind = kind
+            self.remote = remote
+            self.available = available
+            self.message = message
+        }
     }
 }
 
@@ -164,6 +185,8 @@ public struct ContainerJson: Decodable, Equatable, Sendable {
     public var workspace: ContainerWorkspace
     public var services: [ServiceState]
     public var blueprint: Blueprint?
+    /// The `kunj serve` remote the container is on; nil on this Mac's Docker
+    public var remote: String?
 
     public struct Blueprint: Decodable, Equatable, Sendable {
         public var hash: String

@@ -120,7 +120,8 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
     case .container:
         if kind == .agent, agent != nil { throw TerminalSpecError.agentNotInContainer }
         guard env.state == .running else { throw TerminalSpecError.containerStopped(env.branch) }
-        var s = kunj(["ct", kind == .agent ? "agent" : "shell", env.branch] + (session.map { ["--session", $0] } ?? []),
+        var s = kunj(["ct", kind == .agent ? "agent" : "shell", env.branch] + (session.map { ["--session", $0] } ?? [])
+                         + env.remoteArguments,
                      title: kind == .agent ? "agent" : "shell")
         s.session = session
         return s
@@ -132,9 +133,9 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
 public func sessionKillArguments(env: Environment, kind: TabKind, session: String) -> [String] {
     switch (env.kind, kind) {
     case (.worktree, .agent): return ["agent", "stop", env.branch, "--session", session]
-    case (.container, .agent): return ["ct", "agent", env.branch, "--kill", "--session", session]
+    case (.container, .agent): return ["ct", "agent", env.branch, "--kill", "--session", session] + env.remoteArguments
     case (.worktree, _): return ["worktree", "shell", env.branch, "--session", session, "--kill"]
-    case (.container, _): return ["ct", "shell", env.branch, "--session", session, "--kill"]
+    case (.container, _): return ["ct", "shell", env.branch, "--session", session, "--kill"] + env.remoteArguments
     }
 }
 
@@ -143,7 +144,8 @@ public func sessionKillArguments(env: Environment, kind: TabKind, session: Strin
 public func closeEnvironmentArguments(env: Environment) -> [[String]] {
     env.kind == .worktree
         ? [["worktree", "shell", env.branch, "--kill"], ["agent", "stop", env.branch, "--all"]]
-        : [["ct", "shell", env.branch, "--kill"], ["ct", "agent", env.branch, "--kill"]]
+        : [["ct", "shell", env.branch, "--kill"] + env.remoteArguments,
+           ["ct", "agent", env.branch, "--kill"] + env.remoteArguments]
 }
 
 /// A new shell or agent tab's session id: 8 lowercase hex characters.

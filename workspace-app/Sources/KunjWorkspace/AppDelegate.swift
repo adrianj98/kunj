@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `--settings <category>`: open Settings on that category (`app`, `agent`, `container`, …)
     /// after discovery; with `--screenshot` the PNG is of the Settings window.
     private let settingsArgument: String?
+    /// `--new-session <worktree|container>`: open the New session sheet on that kind (with --screenshot, the PNG is of it)
+    private let newSessionArgument: String?
     /// `--demo`: the mockup's environments (DemoData) instead of kunj.
     private let demo: Bool
     /// `--demo --loading`: the startup state (spinner, "Finding kunj") instead of the demo data
@@ -71,6 +73,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsArgument = arguments[i + 1]
         } else {
             settingsArgument = nil
+        }
+        if let i = arguments.firstIndex(of: "--new-session"), i + 1 < arguments.count {
+            newSessionArgument = arguments[i + 1]
+        } else {
+            newSessionArgument = nil
         }
         demo = arguments.contains("--demo")
         demoLoading = arguments.contains("--loading")
@@ -170,6 +177,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     } else {
                         log("settings screenshot failed")
                     }
+                    NSApp.terminate(nil)
+                    return
+                }
+                if let kind = self?.newSessionArgument {
+                    self?.newSession(nil)
+                    if kind == "container" { self?.newSessionSheet?.selectContainer() }
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    if let data = self?.newSessionSheet?.snapshotPNG() {
+                        FileManager.default.createFile(atPath: screenshotPath, contents: data)
+                        log("new session screenshot written to \(screenshotPath)")
+                    } else {
+                        log("new session screenshot failed")
+                    }
+                    // A window with a sheet up does not let the app quit
+                    if let panel = self?.newSessionSheet?.window { self?.windowController.window?.endSheet(panel) }
                     NSApp.terminate(nil)
                     return
                 }

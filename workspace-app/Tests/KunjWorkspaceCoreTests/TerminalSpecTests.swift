@@ -43,11 +43,11 @@ private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cw
     @Test func containerShellAndAgent() throws {
         let shell = try spec(testContainer(), .shell)
         #expect(shell.executable == "/usr/bin/env")
-        #expect(shell.arguments == ["kunj", "ct", "shell", "feature/x"])
+        #expect(shell.arguments == ["kunj", "ct", "shell", "feature/x", "--remote", "local"])
         #expect(shell.cwd == "/r/app")
         #expect(shell.title == "shell")
         let agent = try spec(testContainer(), .agent)
-        #expect(agent.arguments == ["kunj", "ct", "agent", "feature/x"])
+        #expect(agent.arguments == ["kunj", "ct", "agent", "feature/x", "--remote", "local"])
         #expect(agent.title == "agent")
     }
 
@@ -61,12 +61,12 @@ private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cw
         #expect(wt.title == "zsh")
         #expect(wt.session == "a1b2c3d4")
         let ct = try spec(testContainer(), .shell, session: "a1b2c3d4")
-        #expect(ct.arguments == ["kunj", "ct", "shell", "feature/x", "--session", "a1b2c3d4"])
+        #expect(ct.arguments == ["kunj", "ct", "shell", "feature/x", "--session", "a1b2c3d4", "--remote", "local"])
         #expect(ct.title == "shell")
         #expect(sessionKillArguments(env: testWorktree(), kind: .shell, session: "a1b2c3d4")
                 == ["worktree", "shell", "feature/x", "--session", "a1b2c3d4", "--kill"])
         #expect(sessionKillArguments(env: testContainer(), kind: .shell, session: "a1b2c3d4")
-                == ["ct", "shell", "feature/x", "--session", "a1b2c3d4", "--kill"])
+                == ["ct", "shell", "feature/x", "--session", "a1b2c3d4", "--kill", "--remote", "local"])
         #expect(try spec(testWorktree(), .shell).session == nil)
         let id = newTabSession()
         #expect(id.count == 8 && id.allSatisfy { $0.isHexDigit } && id != newTabSession())
@@ -89,17 +89,17 @@ private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cw
     @Test func agentSessions() throws {
         #expect(try spec(testWorktree(), .agent, session: "a1").arguments == ["kunj", "agent", "feature/x", "--session", "a1"])
         #expect(try spec(testWorktree(), .agent, session: "a1").session == "a1")
-        #expect(try spec(testContainer(), .agent, session: "a1").arguments == ["kunj", "ct", "agent", "feature/x", "--session", "a1"])
+        #expect(try spec(testContainer(), .agent, session: "a1").arguments == ["kunj", "ct", "agent", "feature/x", "--session", "a1", "--remote", "local"])
         #expect(try spec(testWorktree(), .agent).arguments == ["kunj", "agent", "feature/x"])
         #expect(sessionKillArguments(env: testWorktree(), kind: .agent, session: "a1")
                 == ["agent", "stop", "feature/x", "--session", "a1"])
         #expect(sessionKillArguments(env: testContainer(), kind: .agent, session: "a1")
-                == ["ct", "agent", "feature/x", "--kill", "--session", "a1"])
+                == ["ct", "agent", "feature/x", "--kill", "--session", "a1", "--remote", "local"])
         // closing the environment ends every shell and agent session of the branch
         #expect(closeEnvironmentArguments(env: testWorktree())
                 == [["worktree", "shell", "feature/x", "--kill"], ["agent", "stop", "feature/x", "--all"]])
         #expect(closeEnvironmentArguments(env: testContainer())
-                == [["ct", "shell", "feature/x", "--kill"], ["ct", "agent", "feature/x", "--kill"]])
+                == [["ct", "shell", "feature/x", "--kill", "--remote", "local"], ["ct", "agent", "feature/x", "--kill", "--remote", "local"]])
     }
 
     @Test func actionTab() throws {

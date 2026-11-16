@@ -206,7 +206,7 @@ private final class RecordingRunner: CommandRunner, @unchecked Sendable {
         #expect(summary.files.map(\.path) == ["dir/b c.txt", "new.txt", "src/a.ts"])
         #expect(summary.files.map(\.added) == [2, 3, 1])
         for call in runner.calls {
-            #expect(Array(call.prefix(7)) == ["/usr/bin/env", "kunj", "ct", "exec", "feature/x", "--", call[6]])
+            #expect(Array(call.prefix(9)) == ["/usr/bin/env", "kunj", "ct", "exec", "feature/x", "--remote", "local", "--", call[8]])
         }
         // one exec counts every untracked file's lines, never one per file
         #expect(runner.calls.filter { $0.contains("wc") }.count == 1)
