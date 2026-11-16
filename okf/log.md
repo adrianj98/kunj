@@ -1,5 +1,10 @@
 # Directory Update Log
 
+## 2026-11-16 (cloud machines design)
+* **New page**: `containers/cloud-machines.md` for docs/specs/cloud-machines.md: a VM per session from a
+  pluggable `MachineProvider`, Google Cloud first. `containers/google-cloud.md` trimmed to the provider
+  notes for that design (the option survey is gone).
+
 ## 2026-11-16 (Google Cloud research)
 * **New page**: `containers/google-cloud.md` summarises docs/specs/google-cloud-containers.md: a
   Compute Engine VM running Docker and `kunj serve` behind IAP is the recommended way to run branch

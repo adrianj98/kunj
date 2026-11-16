@@ -1,496 +1,140 @@
-# Branch containers on Google Cloud: options
+# Google Cloud: notes for the first machine provider
 
-Research into where kunj's branch containers (`kunj ct`, [container-system.md](container-system.md))
-can run on Google Cloud, so a laptop drives them with `kunj ct … --remote <name>` as
-[remote-containers.md](remote-containers.md) already allows. Written 2026-11-16 from the Google Cloud
-documentation as search engines index it, the Sysbox and gVisor project pages and third-party pricing
-pages; Google's own docs host (`docs.cloud.google.com`) could not be fetched from the session that wrote
-this, so every price and product limit below is marked as needing a check against the live page before
-anything is built.
+The decision is in [cloud-machines.md](cloud-machines.md): a small VM per session, created, suspended,
+resumed and deleted by a pluggable **machine provider**, with Google Cloud as the first provider. This
+page holds what is specific to Google Cloud for that design. Written 2026-11-16 from Google Cloud
+documentation as search engines index it and third-party pricing pages; Google's docs host could not be
+fetched from the session that wrote it, so prices and limits are to be checked against the live pages
+before the provider is built.
 
 ## Status
 
 | Part | State |
 | --- | --- |
-| Research and recommendation | Written 2026-11-16 |
-| Recipe tried on a real Compute Engine VM | Not started (waiting on you: a project and a VM) |
-| `kunj serve --idle-after`, remote `wake`, `kunj remote add --gce` (below, "On demand" and "What kunj would need") | Not started; optional |
-| User docs page (docs-site: Containers › On a cloud VM) | Not started |
+| Notes | Written 2026-11-16, trimmed to the decided design |
+| Shared-VM recipe by hand (phase 0 of cloud-machines.md) | Not started: needs a project and a VM (waiting on you) |
+| `GceProvider` | See cloud-machines.md |
 
-## What the containers need from a host
+## What the machine must provide
 
-These are the facts that decide the options. All of them come from the shipped code, not from a wish list.
+From the shipped container code, not a wish list:
 
-- **A real Docker daemon**, driven by `docker` argv from `LocalDockerBackend` (the only module that
-  spawns Docker). Used features: `run` with named volumes and user networks, `--network container:<id>`
-  (the network helper shares the main container's network namespace), `--cap-drop ALL` plus
-  `--cap-add NET_ADMIN,NET_RAW` on the helper, `build -` from a tar on stdin, `commit` (blueprint
-  snapshots), `exec` with a TTY through the Engine API socket (`shell`, `attach`, `agent`), `events`,
-  `cp`-style tar streaming, `docker compose config` (the compose plugin), and optionally
-  `--runtime sysbox-runc` or `--privileged` for Docker-in-Docker.
-- **The host kernel's netfilter.** The firewall (`firewall.sh`) is iptables, ip6tables and ipset inside
-  the helper. A sandboxed runtime with its own network stack (gVisor's netstack) only partly implements
-  iptables, has no ipset and no `nat` table, so the helper would fail before READY and nothing would
-  start. Branch containers must run under `runc` (or sysbox) on a Linux kernel; the isolation boundary
-  around the agent is then the machine the daemon runs on.
-- **Persistent Docker state.** Labels on Docker objects are the only container state, the home
-  directory is a volume, snapshots are images. Whatever stops and starts the host must keep
-  `/var/lib/docker`.
-- **`kunj serve` next to the daemon**: a Node process with the daemon socket, listening on loopback,
-  reached from the laptop by an SSH tunnel kunj opens (`kunj remote add <name> --ssh <destination>`)
-  or by a URL (`https://` anywhere; `http://` only to loopback, or `--allow-insecure-http` on an
-  already-encrypted network). The laptop keeps the vault, keep files, blueprints and hooks; the box
-  stores only Docker labels and `~/.kunj/serve/token`.
-- **Egress from the containers** to origin, `api.anthropic.com`, `registry.npmjs.org` and whatever
-  `container.network.allow` names. The firewall already rejects link-local `169.254/16`, so a container
-  on a Google VM cannot reach the metadata server (`169.254.169.254`) unless `container.network.allowHost`
-  is turned on; keep it off there.
+- **A real Docker daemon** under `runc` (or Sysbox): `--network container:<id>` sidecars, `NET_ADMIN`
+  and `NET_RAW` on the helper, `commit` for snapshots, `build -`, TTY exec through the Engine API,
+  `events`, the compose plugin.
+- **The host kernel's netfilter.** The firewall is iptables, ip6tables and ipset in the helper; a
+  sandboxed runtime with its own network stack (gVisor) has no ipset and partial iptables, so the
+  helper would never reach READY. The isolation boundary is the VM, which is why there is one per
+  session.
+- **Persistent Docker state** across suspend and resume: labels, home volumes, snapshot images, the
+  cache volume.
+- **Egress** to origin, `api.anthropic.com`, `registry.npmjs.org` and `container.network.allow`. The
+  firewall rejects `169.254/16`, so containers cannot reach the metadata server (`169.254.169.254`);
+  keep `container.network.allowHost` off.
 
-## Options
+## The machine
 
-### A. Compute Engine VM running Docker and `kunj serve` (recommended)
-
-One Linux VM is the shape `kunj serve` was designed for ("a cloud VM" is in the first sentence of its
-spec), and nothing in kunj changes.
-
-- **Image:** Ubuntu 24.04 LTS (kernel 6.8). Docker CE from Docker's apt repository (engine, CLI,
-  compose plugin), Node 20+, `npm i -g kunj`, a systemd unit for `kunj serve` as an unprivileged user in
-  the `docker` group. Debian 12 works the same way. Container-Optimized OS is not a good fit: its root
-  is read-only with no package manager, so kunj would itself have to run as a container with the daemon
-  socket mounted, and it cannot take Sysbox.
-- **Docker-in-Docker:** Sysbox is still open source, community-supported since Docker folded the
+- **Image:** Ubuntu 24.04 LTS (kernel 6.8). Docker CE from Docker's apt repository with the compose
+  plugin, Node LTS, `npm i -g kunj`, a systemd unit for `kunj serve`. Container-Optimized OS was
+  rejected: read-only root, no package manager, no Sysbox.
+- **Sysbox** for Docker-in-Docker: open source and community-supported since Docker folded the
   enterprise edition into Docker Desktop's Enhanced Container Isolation; its compatibility page lists
-  Ubuntu 24.04 (kernel 6.8+) and needs no shiftfs on kernels 5.19 and later, so a stock Ubuntu 24.04 VM
-  takes it. Start the server with `--allow-runtime sysbox-runc` and set `container.dockerInDocker:
-  sysbox` in the repository that needs it. `privileged` (`--allow-privileged`) is also reasonable on a VM
-  that holds nothing but kunj's Docker, because an escape then reaches only that VM; the Docker Desktop
-  refusal in `dind.ts` does not apply (the daemon's `operatingSystem` is Ubuntu).
-- **Network:** no external IP. Egress through a Cloud NAT gateway on the VM's subnet (the containers
-  need origin, npm and Anthropic). Inbound only through Identity-Aware Proxy TCP forwarding: a VPC
-  firewall rule allowing `35.235.240.0/20` to port 22, and the `roles/iap.tunnelResourceAccessor` role
-  for the user. No port is open to the internet, and the `kunj serve` token stays a second factor behind
-  Google's IAM.
-- **Reaching the server, three ways, all with today's kunj:**
-  1. **SSH through IAP, kunj's own tunnel.** An `~/.ssh/config` entry
-     ```
-     Host kunj-gce
-       HostName <instance>
-       User <os-login-user>
-       ProxyCommand gcloud compute start-iap-tunnel %h 22 --listen-on-stdin --zone <zone> --project <project>
-     ```
-     and `kunj remote add gce --ssh kunj-gce`. `tunnel.ts` runs `ssh -N -L … kunj-gce`, ssh runs the
-     ProxyCommand, and the tunnel lives and dies with the kunj process as it does for any `--ssh` remote.
-     This is the recommended form: no extra daemon on the laptop, nothing to keep running.
-  2. **IAP tunnel to the serve port, URL remote.** `gcloud compute start-iap-tunnel <instance> 7433
-     --local-host-port=localhost:7433` in a terminal (or a launchd agent) and `kunj remote add gce --url
-     http://127.0.0.1:7433`, which `checkRemoteUrl()` accepts because the address is loopback. Simpler
-     to explain, but the tunnel is the user's to keep alive, and `kunj events` and the workspace app
-     report the remote down whenever it is not.
-  3. **Tailscale (or WireGuard) on the VM.** `kunj serve --listen <tailnet-ip>:7433 --allow-remote-listen`
-     and `kunj remote add gce --url http://<tailnet-ip>:7433 --allow-insecure-http`. No IAP, no SSH; the
-     tailnet is the encryption. Good when a tailnet already exists.
-- **Stopping when idle is where the money is.** A stopped VM costs only its disk. Options, cheapest
-  first: a Compute Engine instance schedule (stop at night, start in the morning; one schedule per VM,
-  about a 15-minute window); a small cron on the VM that powers it off after N minutes with no
-  `kunj serve` connection and no running main container; Google's idle-VM recommendations (they only
-  advise). Starting it again is `gcloud compute instances start` (the ssh ProxyCommand has no
-  auto-start; see "What kunj would need"). Containers survive a stop as stopped containers; `kunj ct
-  start` resumes them, and the `kunj serve` unit comes back with the VM.
-- **Spot VM:** 60–70% cheaper, but Google can stop it at any time with 30 seconds' notice. An agent
-  mid-task loses its tmux session (the files are on the volume; a resumed container starts the agent
-  afresh with `--resume`). Fine for a personal box used in bursts, wrong for a long unattended run.
-- **Service account:** give the VM a dedicated service account with no roles and no scopes. The firewall
-  blocks the metadata server from containers anyway, but `kunj serve` itself and a shell on the VM
-  should not be able to mint tokens either.
-- **Backups:** a persistent-disk snapshot schedule on the data disk covers `/var/lib/docker` (home
-  volumes, snapshots). Nothing of the user's repositories lives there that is not also on origin.
+  Ubuntu 24.04 (kernel 6.8+) and needs no shiftfs on kernels 5.19 and later. The unit starts serve with
+  `--allow-runtime sysbox-runc`; `privileged` is also acceptable on a machine that holds only kunj's
+  Docker (`dind.ts`'s Docker Desktop refusal does not apply).
+- **Shapes** for `machine.size`: `small` e2-medium (2 shared vCPU, 4 GB, about $0.034 per hour),
+  `medium` e2-standard-2 (2 vCPU, 8 GB, about $0.067), `large` e2-standard-4 (4 vCPU, 16 GB, about
+  $0.134). 4 GB is tight once `tsc` or parallel Jest workers run next to the agent; 8 GB is the default.
+  Spot is about 40 percent off and may be stopped with 30 seconds' notice; a suspend in progress loses
+  to a preemption.
+- **Disk:** pd-balanced, about $0.10 per GB-month, billed while suspended too; 30 GB by default, so an
+  idle branch costs about $3 a month. Branches must be deleted when merged (`ct prune`) or the disks
+  add up.
+- **Network:** no external IP. Egress through a Cloud NAT gateway on the subnet (about $32 a month
+  plus per GB, shared by every machine; documented, not created by kunj). Inbound only through
+  Identity-Aware Proxy TCP forwarding (below).
+- **Service account:** a dedicated one with no project roles, bound by IAM condition to
+  `compute.instances.suspend` and `compute.instances.get` on the machine itself, so the idle timer can
+  suspend it and nothing else.
 
-Verdict: do this first. The recipe above is a user-docs page and an afternoon; the spec's own open item
-("try an `--ssh` remote against a real second machine") gets answered on the way.
+## Reaching it: IAP TCP forwarding
 
-### B. Cloud Workstations
+`gcloud compute start-iap-tunnel <name> 7433 --local-host-port=127.0.0.1:<port> --zone … --project …`
+is the provider's tunnel argv. IAP connects to the machine's **internal address**, not its loopback,
+so `kunj serve` on a GCE machine listens on the internal address (`--listen <ip>:7433
+--allow-remote-listen`, the unit reads the address from the metadata server at boot) and a VPC firewall
+rule admits `35.235.240.0/20` to port 7433 only. The user needs `roles/iap.tunnelResourceAccessor`.
+No sshd, no OS Login, no SSH keys on the machine. The tunnel is IAM-authenticated, which is what makes
+the one-time token pairing of cloud-machines.md safe (`features.authenticatedTunnel`).
 
-A managed per-developer VM running a container image, with a persistent home disk, an idle timeout that
-stops it, IAM-gated access and `gcloud workstations start-tcp-tunnel <workstation> 7433` (with
-`--start-workstation` to wake a stopped one), which would carry `kunj serve`'s port straight to the
-laptop as a loopback URL remote.
+For phase 0 by hand, before the provider exists: an `~/.ssh/config` entry whose `ProxyCommand` is
+`gcloud compute start-iap-tunnel %h 22 --listen-on-stdin …` and `kunj remote add gce --ssh <alias>`
+works with today's `--ssh` remotes unchanged (serve on loopback then).
 
-Why it still does not fit kunj:
+## On demand: suspend and resume
 
-- **Docker inside is a workaround, not a feature.** Third-party write-ups say the predefined images get
-  Docker by mounting the workstation VM's Docker socket or by running the workstation container
-  privileged; neither is documented as supported, and a security write-up describes the socket as a
-  container-breakout path. (Not verified against Google's docs in this session.) Either way kunj would
-  be a process in one container talking to a daemon it shares with the IDE container; the main
-  container, its helper and sidecars would then be siblings of the workstation itself.
-- **Docker state is not where the persistence is.** Only the configured home directory persists across
-  a stop; the VM's boot disk, where `/var/lib/docker` lives, does not. Every idle stop would lose
-  every branch container, image and snapshot unless the daemon's data root is moved under the home
-  disk, and that is the shared daemon's configuration, not kunj's to set.
-- **Cost.** The management fee is $0.05 per vCPU-hour while running, plus $0.20 per hour per cluster
-  whether or not anything runs (about $146 a month on its own), plus the VM and disk. For one person
-  that is more than option A's whole bill.
-- **Nested virtualization** (N1/N2 only) is for running VMs inside the workstation; it does not change
-  the Docker picture.
+Compute Engine **suspend** writes the memory to persistent storage: no vCPU or memory charge while
+suspended, the saved memory billed as standard persistent disk (a few dollars a month for 8 GB), resume
+in seconds with running containers and the agents' tmux sessions intact. Limits: at most 208 GB of
+memory, no GPUs, a guest that supports it (Ubuntu does), 60 days before Google turns it into a stopped
+instance (then `start` instead of `resume`; harmless). The machine suspends itself from
+`kunj serve --idle-after` through the idle command `gcloud compute instances suspend $(hostname)
+--zone …`, and the laptop resumes it with `gcloud compute instances resume` from the provider. An
+instance schedule that stops everything at night and a budget alert are the backstops.
 
-Verdict: only if a team already runs Workstations and wants kunj on them; then option A's recipe applies
-inside the workstation image with the data-root caveat above. Not recommended as the first target.
+## Caching across machines
 
-### C. Google Kubernetes Engine with a Kubernetes backend
-
-GKE is the right host for a fleet (many developers, many branches, autoscaling nodes), and a pod is a
-natural fit for kunj's main+helper pair: containers in a pod share a network namespace, so the helper
-sidecar with `NET_ADMIN` and `NET_RAW` filters the main container's traffic exactly as it does under
-Docker; a PersistentVolumeClaim is the home volume; `exec`/`attach` with a TTY exist in the API;
-labels and annotations carry kunj's state. Autopilot drops `NET_ADMIN` unless the cluster is created or
-updated with `--workload-policies=allow-net-admin` (GKE 1.27+) and never allows privileged pods, so
-Docker-in-Docker would need GKE Standard.
-
-What it costs in engineering:
-
-- A new `ContainerBackend` against the Kubernetes API (the size of `docker.ts` plus `remote.ts`), and
-  the laptop holds cluster credentials, so the "thin server, one token" model of `kunj serve` changes.
-- **No `commit` and no `build` on a node.** GKE nodes run containerd; there is no `docker commit`, so
-  blueprint snapshots need another design (BuildKit or kaniko in a job, or a Cloud Build step, pushing
-  to Artifact Registry) and `buildImage` for kunj's own sandbox and helper images needs one too.
-- `composeConfig()` has to run somewhere; the snapshot's "copy `/workspace` to `/opt/kunj/seed` and
-  commit" step disappears with `commit`.
-- Cost: Autopilot bills per pod vCPU/memory (no idle-node waste, but a sleeping branch still has to be
-  scaled to zero by kunj, i.e. the deployment deleted and the PVC kept); Standard bills nodes plus the
-  cluster fee after the free tier.
-
-Verdict: the second step, not the first. Keep it in the roadmap for a team-scale fleet; the
-[multi-remote spec](multi-remote-containers.md) already lets several backends coexist, so a GKE backend
-would join the fleet rather than replace the VM. Running `dockerd` itself in a privileged pod with
-`kunj serve` beside it is possible on Standard but is option A with more layers.
-
-### D. Cloud Run
-
-Ruled out. Cloud Run gives no privileged mode, no added capabilities, no Docker daemon, no persistent
-disk and a request-driven lifecycle; its first-generation sandbox is gVisor and the second a microVM,
-but neither can host `dockerd` or kunj's helper. Multi-container services do share a network namespace,
-which would suit the helper, but the helper cannot load iptables there. Cloud Run Jobs are batch, not
-interactive.
-
-### E. One VM per branch
-
-Rejected. kunj's model is one daemon with labels as the state and names derived from the branch; a VM per
-branch would need a new backend, Docker-less seeding and its own lifecycle, and the per-VM minimum
-(boot disk, start time) is worse than containers on a shared VM in every way that matters here.
-
-### Zero-code experiment: a Docker context over SSH
-
-`docker context create gce --docker host=ssh://kunj-gce` with the IAP ProxyCommand above, then
-`container.dockerContext: gce`, runs every `kunj ct` command against the VM's daemon with no server at
-all. The remote-containers spec lists this as the validation step that was never done. It is slow (an
-SSH connection per `docker` call, a dozen per `ct list`) and the apps cannot describe it, so it is a
-one-hour check of the VM recipe, not the way to use it.
-
-## Is there a managed Docker daemon on Google Cloud?
-
-No. Asked directly ("some type of Docker in Google"), the answer is that Google sells no hosted Docker
-*daemon*. What exists, and why each is or is not the answer:
-
-- **Container-Optimized OS** is the closest thing: a Compute Engine image with Docker, containerd and
-  cloud-init preinstalled, auto-updating weekly, and a VM created with a container to run at boot. It is
-  "Docker in Google" in the literal sense, but its root filesystem is read-only with no package manager,
-  so kunj and Node cannot be installed on it; `kunj serve` would run as a container with the daemon socket
-  mounted, and Sysbox cannot be added. Option A on Ubuntu is the same VM with those two restrictions lifted.
-- **Cloud Build** runs `docker build` (and arbitrary build steps) in a managed daemon per build, then
-  exits. Batch only: no long-lived containers, no exec, no state. Not a host for branch containers.
-- **Artifact Registry** stores images. Useful later for a GKE backend's snapshots, not a runtime.
-- **Cloud Run and GKE** run containers but not Docker: Cloud Run has no daemon at all and GKE nodes run
-  containerd (see options C and D).
-- **Docker Offload**, Docker's own hosted engine, is the one real "Docker daemon as a service" on the
-  market: `docker` on the laptop talks to a cloud engine (Docker's infrastructure, not the user's Google
-  project), pay-as-you-go by size (from about $0.07 per hour for 1 vCPU/2 GB to about $1.12 for 16
-  vCPU/32 GB on Docker's page), and it needs a Docker Business subscription and Docker Desktop. It does
-  not fit kunj: a session is ephemeral, and once idle past the timeout (5 minutes per the newest
-  write-ups) the containers, images and volumes are deleted, which destroys kunj's labels-as-state,
-  home volumes and snapshots; one session per user; and whether `--cap-add`, `--network container:` and
-  `commit` are allowed there is undocumented. It also runs in a US East region outside the user's cloud
-  account. Good for offloading one build; wrong for containers that live for the life of a branch.
-
-So on Google Cloud, "Docker" means a VM with a daemon on it, and the choice is only which OS image
-(Ubuntu for Sysbox and `kunj serve` as a plain process; COS if an auto-updating appliance matters more
-than Docker-in-Docker).
-
-## On demand: suspend when idle, wake from the laptop
-
-The VM should cost nothing while no agent works, without the user remembering to stop it.
-
-**Suspend, not stop.** Compute Engine can suspend an instance (memory written to persistent storage,
-no vCPU or memory charge while suspended; the saved memory is billed as standard persistent disk, a few
-dollars a month for 64 GB). Resume takes seconds and brings back everything as it was: running
-containers, the agents' tmux sessions, a Claude run mid-task. A stop would lose the tmux sessions and
-needs a boot plus `docker start` on the way back. Limits: at most 208 GB of memory, no GPUs, the
-guest must support it (Ubuntu does), 60 days at most before Google turns it into a stopped instance
-(harmless). A Spot VM can be suspended but a preemption during the suspend wins; stop is the fallback.
-
-**Idle is decided on the VM, by what the agents do, not by whether a laptop is connected.** The
-workspace app holds a `kunj events` WebSocket open all day and `ct list` polls, so connections are
-the wrong signal. The right one is the agent state `kunj serve` already serves: idle = for N minutes
-no exec with a TTY has been open and no main container's agent is `running` (`waiting` for input and
-stopped containers count as idle; the tmux session survives the suspend anyway). Two ways to get it:
-
-1. **Today, no kunj change:** a systemd timer on the VM, every minute, runs `docker ps` for
-   `kunj.role=main` and the `STATUS_SCRIPT` check for agent states (or, cruder, `docker stats` CPU
-   below a threshold for N minutes) and, when idle, `gcloud compute instances suspend $(hostname)`.
-   The VM's service account needs only a custom role with `compute.instances.suspend` and
-   `compute.instances.get`, bound with an IAM condition to that one instance; nothing else.
-2. **Proposed kunj feature:** `kunj serve --idle-after <minutes> --idle-command '<cmd>'`. The server
-   counts open TTY execs and polls agent states (one `STATUS_SCRIPT` exec per running main, as `kunj
-   events` does), runs the command once when idle, and logs it. One place, exact, testable with the
-   fake backend.
-
-**Wake from the laptop.** The user should never run `gcloud compute instances resume` by hand.
-
-1. **Today, no kunj change:** make the ssh ProxyCommand a script: if the instance is not `RUNNING`,
-   `gcloud compute instances resume` (or `start` when it is `TERMINATED`), wait for `RUNNING`, then
-   `exec gcloud compute start-iap-tunnel … --listen-on-stdin`. `tunnel.ts` waits up to 120 s for the
-   forward, which covers a resume (seconds) and a boot (under a minute). Downside: every `ct list`,
-   `worktree list --containers` and `kunj events` start-up wakes the VM, so a workspace app left open
-   in the morning wakes it at once; acceptable for one person, wrong for a fleet.
-2. **Proposed kunj feature:** a `wake` command on the remote entry (`kunj remote add gce --ssh kunj-gce
-   --wake 'gcloud compute instances resume … --zone …'`). Listings and `kunj events` never wake:
-   a tunnel that fails to come up is reported as `sleeping` in `ct list --json`'s `backend` (and
-   the app shows the environment asleep, with a Wake action). Commands that act (`start`, `shell`,
-   `agent`, `attach`, `exec`, `forward`, `file write`) run the wake command once, then retry;
-   `--no-wake` opts out. `kunj remote add gce --gce <instance> --zone <zone>` would write the ssh
-   config stanza, the entry and the wake command together.
-
-**Backstop:** an instance schedule that stops the VM at night whatever the timer says, and a budget
-alert on the project. Together: resume on the first `kunj ct start` of the day in a few seconds,
-suspend after 30 idle minutes, pay for agent hours plus disk.
-
-## One shared VM or many small ones?
-
-Shared, until a reason not to appears. The comparison in kunj's terms:
-
-| | One shared VM (e.g. e2-highmem-8) | One small VM per branch (e.g. e2-standard-2 each) |
-| --- | --- | --- |
-| Fits today's kunj | Yes: one daemon, labels as state, one `kunj serve`, one remote entry | No: kunj has no VM-per-branch backend; it needs the multi-remote fleet plus an orchestrator that creates and deletes VMs and remote entries |
-| Blueprint snapshots | Built once per hash, every new branch starts from it in seconds | Built on every VM: each new branch pays the tools + `setup` run (minutes) or needs snapshots pushed to Artifact Registry (new work) |
-| Image layer cache, `kunj-sandbox` build | Once | Per VM |
-| Idle branches | Stopped containers, free | A stopped VM each, with its disk (a few dollars a month each) |
-| Cost with several agents active at once | Fixed: about $0.36 per hour whatever the branch count, while running | Linear: about $0.07 per hour per active branch; cheaper below about five concurrent, dearer above |
-| Isolation between branches | Shared kernel; an escape reaches sibling branches (not the laptop) | VM boundary per branch |
-| Noisy neighbours | Several npm installs contend for CPU and memory; an OOM can hit another branch's agent | None |
-| On demand | One suspend/resume | One per branch; resume latency on each first command |
-| Scaling | One box; beyond it, several shared VMs through the multi-remote spec | Natural |
-
-### Revised 2026-11-16: an instance per session at 8 GB
-
-Sized per session, the small VMs are small: one agent plus one service container fits an
-e2-standard-2 (2 vCPU, 8 GB, about $0.067 per hour); a light repository with no services fits an
-e2-medium (4 GB, about $0.034 per hour); Docker-in-Docker or a big monorepo wants an e2-standard-4
-(16 GB). 4 GB is tight once `tsc` or parallel Jest workers run next to the agent (each a gigabyte or
-more), so 8 GB is the default size.
-
-That changes the cost column: three sessions active at once cost about $0.20 per hour against the
-shared box's $0.36, and the break-even is about five concurrent 8 GB sessions. Over a month of three
-sessions, six hours a day, both land near $50 (shared: the VM for the hours it runs plus one disk;
-per-session: session-hours plus one small disk per branch, about $2 a month each for 20 GB, so
-branches must be deleted when merged or the disks add up).
-
-What per-session instances buy: a kernel per agent (an escape reaches that branch only), no
-contention between builds, and VMs sized to the work. What they cost: a first command that resumes or
-boots a VM instead of finding a warm container, and the orchestration below.
-
-**What kunj would need for an instance per session** (a project, not a recipe):
-
-- A **Compute Engine provider** above the backends: `kunj ct start` for a branch with no VM creates
-  one named like its container (`kunj-<repo>-<branch>-<hash>`), with GCE labels `kunj.repo`,
-  `kunj.branch`, `kunj.version` as the state (the same rule as Docker labels); `ct list` is one
-  `instances list` by label plus a `kunj serve` listing per running VM (suspended ones are reported
-  from the GCE state without waking them); `ct stop` suspends, `ct remove` deletes the VM and its
-  disk, `ct prune` deletes VMs of branches gone from origin. Each VM is reached as a dynamic `--ssh`
-  remote through IAP (instance name, zone), so no `remotes.json` entries are kept per branch.
-- A **golden image**: the shared-VM recipe (Ubuntu, Docker, Sysbox, `kunj serve`, the `kunj-sandbox`
-  and helper images, the repository's blueprint snapshot pre-pulled) baked into a custom Compute
-  Engine image with `gcloud compute images create`, rebuilt when the blueprint hash changes. New VMs
-  then boot ready in under a minute. Without it every VM would build the sandbox image and the
-  blueprint snapshot itself (minutes). An alternative is pushing snapshots to Artifact Registry and
-  pulling on first start; the golden image is simpler and also caches the base images.
-- Per-VM on-demand as described above (suspend on idle, wake on an acting command), already per
-  session by construction.
-
-**Verdict, revised:** the shared VM is still step one, because it is the same recipe and takes a
-day, and it validates `kunj serve` over IAP. An instance per session is the target design when
-isolation between branches matters or more than a handful of agents run: the shared recipe becomes
-the golden image, and the Compute Engine provider instantiates it per branch.
-
-## Caching across per-session instances
-
-One shared daemon shares its image layers and blueprint snapshot for free; separate VMs do not. A
-shared filesystem is the obvious fix and the wrong one in most cases:
-
-- **`/var/lib/docker` cannot be shared.** overlay2 needs a local filesystem and one daemon per data
-  root; two daemons on one directory corrupt it. Images, layers and snapshots are shared by a
-  **registry or a golden image**, never by a mount.
-- **Filestore** (managed NFS) starts at 1 TiB and about $200 a month, more than all the VMs together.
-  A small NFS VM is cheaper but is one more machine to run, and kunj's server only accepts named
-  volumes (the `Guard`), so NFS would have to arrive as a `local`-driver volume with NFS options, a
-  small backend change. pnpm's store needs hardlinks on the same filesystem as `node_modules`, so it
-  gains nothing from NFS; npm's cache tolerates it; `.git` objects should never be on it.
-
-What to share instead, cheapest first:
+No shared filesystem: Docker's data root cannot be shared (overlay2, one daemon per data root) and
+Filestore starts near $200 a month. Instead:
 
 | Need | Share it as |
 | --- | --- |
-| Base images (`kunj-sandbox`, helper, Postgres, Redis) and the blueprint snapshot | The golden Compute Engine image (pre-pulled), rebuilt when the blueprint hash changes; or Artifact Registry in the same region (no egress charge) with `ensureSnapshot()` pulling `kunj-blueprint-<repo>:<hash>` before building |
-| npm, pip, Go, Maven downloads | **Artifact Registry remote repositories**: pull-through caches for npmjs, PyPI, Maven Central and Docker Hub, one hostname (`<region>-npm.pkg.dev`) that the firewall allowlist admits, no shared mount, no locking. The snapshot's `setup` sets the registry in the sandbox |
-| Warm `node_modules`, built artefacts | Already in the blueprint snapshot's `/workspace` (`setup` runs `npm install`); per-session VMs get it from the golden image |
-| A seeded database | Per branch, not shared: a service volume seeded in the golden image's **data disk snapshot** (a new VM's disk is created from the snapshot, restore is lazy, so Postgres starts on a seeded data directory in seconds); or one small Cloud SQL instance with a `TEMPLATE` database and `CREATE DATABASE <branch> TEMPLATE seed` per branch, reached through an allowlisted address |
-| Agent state (`~/.claude`, work logs) | Stays on the laptop, as now |
+| `kunj-sandbox`, helper and service images, the blueprint snapshot, a warm `/workspace` | The golden image (`kunj machine image build`), rebuilt when the blueprint hash changes; Artifact Registry in the same region as the pull-on-first-start fallback |
+| npm, pip, Go, Maven, apt, Docker Hub downloads | Artifact Registry **remote repositories** (pull-through caches), one hostname such as `<region>-npm.pkg.dev` in the firewall allowlist, set as the registry in the sandbox |
+| Anything a repository wants every branch to find at a path (a pulled database dump, a package store, fixtures) | The generic cache volume of cloud-machines.md (`container.caches`, `KUNJ_CACHE_DIR`), carried by the golden image's disk; a nightly image build keeps it current |
+| A seeded database per branch | The repository's own script against the cache volume (restore from the cached dump when given its path; a deliberate run without it pulls afresh and rewrites the dump), or one small Cloud SQL instance with `CREATE DATABASE <branch> TEMPLATE main` |
 
-**The concrete case: `npm run pull-main-db`.** The repository's script pulls a dump of the main
-database and restores it. It has `--cached <path>`: given a path, it restores from the tar there and
-only a deliberate run without it pulls afresh and rewrites the tar. So the shared cache is one file at
-a path every container can see, and the design is:
-
-- **A cache volume per repository** (proposed kunj feature, generic: kunj knows nothing about databases
-  or any repository's scripts; `pull-main-db` is only the example that motivated it). `container.caches`
-  (or blueprint `caches`) names mounts such as `{ "name": "main-db", "path": "/cache" }`. kunj creates one named
-  volume `kunj-<repo>-cache-<name>` per daemon, labelled `kunj.repo` and `kunj.role=cache`, and mounts
-  it into every branch container of that repository at the path, with `KUNJ_CACHE_DIR` in the
-  container's env. It is a named volume, so `kunj serve`'s `Guard` accepts it; it is never in a
-  snapshot (volumes are not committed), `ct remove` leaves it, and `ct prune` removes it only with
-  `--force`. Services do not get it.
-- What goes into the volume is the repository's business, in its own blueprint `setup` or `maintain`.
-  This repository would run `npm run pull-main-db --cached $KUNJ_CACHE_DIR/main-db.tar` there; another
-  might keep a pnpm store, a Bazel cache or downloaded fixtures. For the database case: the first branch on a box pulls and writes the tar, every later branch
-  restores from it in the time a local restore takes. A fresh pull is on demand, by running the script
-  without `--cached`, and the rewritten tar is what the next branch gets.
-- **Across per-session VMs** the volume lives in `/var/lib/docker/volumes`, so the golden image's
-  data disk carries it: a nightly job runs the fresh pull once and re-snapshots, and every new VM
-  starts with the current tar already in its cache volume. A bucket copy (`gsutil cp` from the VM
-  side, with the VM's service account) is the fallback when a VM is older than the snapshot. Nothing
-  inside a container needs cloud credentials, which the firewall blocks anyway.
-- The pull itself reaches the main database's host, which must be in `container.network.allow`
-  (or the pull runs in `setup` with the allowlist already set); that is the repository's existing
-  concern, unchanged.
-
-A writable shared volume means the last fresh pull wins for everyone on that box, which is the
-intended behaviour of a cache; if two branches pull at once the script's own write should be a
-temp-file-and-rename, which is the repository's to check.
-
-A shared database *instance* across branches is usually wrong anyway: branches carry different
-migrations. A template database or a seeded disk snapshot gives each branch its own copy at the cost
-of a `CREATE DATABASE`, which is what the shared daemon's per-branch service volumes give today.
-
-Two kunj details the Cloud SQL route would need: the firewall rejects private ranges before it
-consults the allowlist, so an allowlisted private address (a Cloud SQL private IP) needs the allow
-rule moved ahead of the private-range reject, and `container.network.allow` would have to accept an
-IP as well as a domain.
-
-## Google Cloud, AWS or Azure?
-
-The design (small VMs per session, suspended when idle, reached without a public IP, built from a
-golden image, caches shared through a registry, a database per branch from a snapshot) is portable: only
-the provider layer is cloud-specific. What differs:
-
-| | Google Cloud | AWS | Azure |
-| --- | --- | --- | --- |
-| Private tunnel, no public IP | IAP TCP forwarding: free, IAM-gated, a plain ssh `ProxyCommand` | SSM Session Manager port forwarding (`AWS-StartSSHSession` as `ProxyCommand`) or EC2 Instance Connect Endpoint: free, needs the SSM agent and an instance role | Bastion Developer SKU is free but has no CLI tunnel per the docs; Standard is about $140 a month; otherwise Tailscale |
-| Suspend with memory kept | Suspend: no compute charge, up to 208 GB, 60 days, any E2/N2 shape | Hibernate: under 150 GiB, encrypted EBS root, supported families (Graviton only on AL2023), 60 days | Hibernation: Dasv5/Dsv5/Easv5 families up to 64 GB, Ubuntu 22.04, not Spot, not Trusted Launch on Linux |
-| 2 vCPU, 8 GB on demand | e2-standard-2 about $0.067 | t3.large about $0.083 (burst credits, which builds exhaust); t4g.large (arm64) about $0.067 | B2ms about $0.083 (burst); D2as_v5 about $0.086 |
-| Pull-through caches | Artifact Registry remote repositories: npm, PyPI, Maven, apt, Docker Hub in one service | CodeArtifact (npm, PyPI, Maven, NuGet) plus ECR pull-through (Docker Hub, ghcr) | Azure Artifacts lives in Azure DevOps; ACR caches Docker Hub |
-| Golden image | Custom image | AMI (encrypted for hibernate) | Compute Gallery image |
-| Egress without a public IP | Cloud NAT about $32 a month plus per GB | NAT Gateway about $32 a month plus per GB; or a public IPv4 at about $3.60 a month per VM | NAT Gateway about $32 a month; or a public IP at about $3.60 |
-| Claude from the VM without an API key | Vertex AI with the VM's service account (Claude Code supports Vertex) | Bedrock with the instance role (Claude Code supports Bedrock; kunj's own AI features already target Bedrock) | No equivalent kunj or Claude Code path today |
-
-**Verdict:** Google Cloud fits the design best: the free IAP tunnel is the simplest to wire into
-`kunj remote add --ssh`, suspend/resume has the fewest conditions, Artifact Registry covers every
-cache in one service, and the cheapest x86 8 GB shape is there. **AWS is a close second and wins when
-the organisation already lives there**, above all for Bedrock through the instance role, with SSM as
-the free tunnel; t4g (arm64) matches GCE's price if the sandbox and helper images are built
-multi-arch (Sysbox supports arm64). **Azure is third**: hibernation has the most conditions, the free
-Bastion tier does not tunnel from the CLI, and the caches are split across two products.
-
-For kunj that means a `Provider` interface (create, suspend, resume, delete, list by label, tunnel
-command, image) with a Compute Engine implementation first and an EC2 one when someone needs it; the
-containers, `kunj serve` and the laptop side are the same on all three.
-
-## Isolation on the VM
-
-Branch containers on the VM run under `runc` with capabilities dropped as locally; the helper keeps the
-egress rules. gVisor (`runsc`) as the runtime for the main container would be a stronger wall, but the
-helper would then run in gVisor's netstack too (same network namespace), where ipset does not exist
-and iptables is partial, so the firewall cannot load. Do not offer it. The isolation story on Google
-Cloud is therefore: the agent is confined to a VM that holds only kunj's Docker, no credentials
-(service account without roles, no gcloud login), no other workload, behind IAP; an escape from a
-container reaches that VM and the other branches on it, and nothing else. For an agent that must not
-see other branches at all, give it its own VM (option A twice) rather than a sandboxed runtime.
+Cloud SQL would need two kunj changes: the firewall must consult the allowlist before it rejects
+private ranges, and `container.network.allow` must take an IP as well as a domain. Anything that reads a
+bucket runs on the machine side with its service account, never inside a container.
 
 ## Cost sketch
 
-Approximate list prices from third-party pricing pages (us-central1, late 2026); check Google's pricing
-pages before quoting them.
+Per-second billing, approximate list prices, us-central1:
 
 | Item | Price |
 | --- | --- |
-| e2-standard-4 (4 vCPU, 16 GB), on demand | about $0.13 per hour, about $98 a month always on |
-| e2-standard-4, Spot | about $0.08 per hour |
-| n2d-standard-4 (faster, AMD) | about $0.17 per hour |
-| 64 GB of memory: e2-highmem-8 (8 vCPU) about $0.36 per hour (about $264 a month always on, Spot about $0.22); e2-standard-16 (16 vCPU) about $0.54; n2d-highmem-8 about $0.46; n2-highmem-8 about $0.52 | computed from Google's per-vCPU and per-GB rates for us-central1, cross-checked against the e2-standard-4 figure |
-| pd-balanced disk | about $0.10 per GB-month (200 GB: about $20 a month, also while the VM is stopped) |
-| Cloud NAT gateway | hourly fee plus per-GB processed; small for one VM |
-| Cloud Workstations | $0.05 per vCPU-hour management fee while running, plus $0.20 per hour per cluster, plus VM and disk |
+| e2-standard-2 (the default `medium`) | about $0.067 per hour while running |
+| e2-medium (`small`) / e2-standard-4 (`large`) | about $0.034 / $0.134 per hour |
+| Suspended machine | its disk (about $3 a month for 30 GB) plus the saved memory |
+| Cloud NAT | about $32 a month for the project plus per GB |
+| Golden image storage | about $0.05 per GB-month |
 
-A VM used 40 hours a week and stopped otherwise costs roughly a quarter of the always-on figure plus
-the disk, which is why idle stop and wake matter more than the machine type.
+Three sessions active at once cost about $0.20 per hour; a month of three sessions, six hours a day,
+lands near $50 including disks and NAT.
 
-## What kunj would need
+## Why Google Cloud first
 
-Nothing to use option A today. Two small additions would make it comfortable:
-
-- **`container.caches`**: a named cache volume per repository mounted into every branch container
-  (`KUNJ_CACHE_DIR`), as described under "Caching across per-session instances"; useful on one shared
-  VM and on the laptop too, not only in the cloud.
-- **`kunj serve --idle-after <minutes> --idle-command <cmd>`** and a **`wake` command on remote entries**,
-  as described under "On demand" above (suspend when no agent runs and no TTY is open; listings
-  report `sleeping`, acting commands wake).
-- **Docs:** a docs-site page with the recipe (VM, Docker, Sysbox, systemd unit, Cloud NAT, IAP rule,
-  ssh config, `kunj remote add`, idle stop), and the remote-containers spec's "SSH to a real second
-  machine" item closed by it.
-
-## Open questions
-
-- Which GCE machine family is best for several concurrent Claude agents (CPU-light, memory- and
-  IO-heavy npm installs)? Start with e2-standard-4 and a pd-balanced data disk; measure.
-- Does `kunj serve` need anything for a client whose SSH tunnel goes through IAP (slower connect, about
-  a second)? `LOOKUP_TIMEOUT_MS` in the multi-remote spec is 5 s; probably fine.
-- Cloud Workstations: whether Google documents Docker-in-workstation as supported, and whether the
-  daemon's data root can be placed on the persistent home disk. Needs the live docs.
+The provider is pluggable, and the design runs the same on AWS (EC2 hibernate, SSM port forwarding,
+Bedrock through the instance role) or a plain SSH fleet. Google Cloud goes first because the IAP tunnel
+is free and IAM-gated without sshd, suspend has the fewest conditions, Artifact Registry covers every
+pull-through cache in one service, and the x86 8 GB shape is the cheapest. AWS is the natural second
+provider when an organisation already lives there, above all for Bedrock, which kunj's own AI features
+target.
 
 ## Sources
 
 Google Cloud documentation as indexed (the docs host was not reachable from the writing session):
 [gcloud compute start-iap-tunnel](https://docs.cloud.google.com/sdk/gcloud/reference/compute/start-iap-tunnel),
 [IAP TCP forwarding](https://docs.cloud.google.com/iap/docs/tcp-by-host),
-[gcloud workstations start-tcp-tunnel](https://docs.cloud.google.com/sdk/gcloud/reference/workstations/start-tcp-tunnel),
-[Cloud Workstations SSH support](https://docs.cloud.google.com/workstations/docs/ssh-support),
-[Cloud Workstations pricing](https://cloud.google.com/workstations/pricing),
-[Create a workstation configuration](https://docs.cloud.google.com/workstations/docs/create-configuration),
-[GKE Autopilot security measures](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-security),
-[Cloud Run execution environments](https://docs.cloud.google.com/run/docs/about-execution-environments),
+[Suspend or resume an instance](https://docs.cloud.google.com/compute/docs/instances/suspend-resume-instance),
 [Container-Optimized OS disks and file system](https://docs.cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem),
-[Idle VM recommendations](https://docs.cloud.google.com/compute/docs/instances/idle-vm-recommendations-overview),
-[Suspend or resume an instance](https://docs.cloud.google.com/compute/docs/instances/suspend-resume-instance).
-Other clouds: [EC2 hibernation prerequisites](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/hibernating-prerequisites.html),
-[SSH through Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started-enable-ssh-connections.html),
-[Azure Bastion SKU comparison](https://learn.microsoft.com/en-us/azure/bastion/bastion-sku-comparison),
-[Azure VM hibernation](https://learn.microsoft.com/azure/virtual-machines/hibernate-resume).
+[Compute Engine pricing](https://cloud.google.com/compute/all-pricing),
+[Spot VM pricing](https://cloud.google.com/spot-vms/pricing).
 Projects: [Sysbox](https://github.com/nestybox/sysbox) and its
 [distro compatibility](https://github.com/nestybox/sysbox/blob/master/docs/distro-compat.md),
-[Docker Enhanced Container Isolation](https://docs.docker.com/desktop/enterprise/hardened-desktop/enhanced-container-isolation/),
-[gVisor compatibility](https://gvisor.dev/docs/user_guide/compatibility/) and
-[networking](https://gvisor.dev/docs/user_guide/networking).
-Third-party: [Cloud Workstations container breakout write-up](https://hackingthe.cloud/gcp/exploitation/gcp-cloud-workstations-container-breakout/),
-[e2-standard-4 pricing](https://www.economize.cloud/resources/gcp/pricing/compute-engine/e2-standard-4/),
-[n2d-standard-4 pricing](https://www.economize.cloud/resources/gcp/pricing/compute-engine/n2d-standard-4/),
-[persistent disk pricing](https://gcloud-compute.com/pd-balanced.html),
-[instance schedules](https://oneuptime.com/blog/post/2026-02-17-how-to-configure-compute-engine-instance-scheduling-to-automatically-stop-vms-on-weekends/view),
-[Docker Offload](https://www.docker.com/products/docker-offload/) and [About Docker Offload](https://docs.docker.com/offload/about.md),
-[Container-Optimized OS overview](https://docs.cloud.google.com/container-optimized-os/docs/concepts/features-and-benefits).
+[gVisor compatibility](https://gvisor.dev/docs/user_guide/compatibility/).
+Third-party pricing: [e2-standard-4](https://www.economize.cloud/resources/gcp/pricing/compute-engine/e2-standard-4/),
+[persistent disk](https://gcloud-compute.com/pd-balanced.html).
+Other clouds, for the later providers: [EC2 hibernation prerequisites](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/hibernating-prerequisites.html),
+[SSH through Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started-enable-ssh-connections.html).
