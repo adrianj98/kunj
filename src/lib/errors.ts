@@ -27,6 +27,7 @@ const EXPECTED_NAMES = new Set([
   'BaseBranchError',
   'StartError',
   'ContainerError',
+  'MachineError',
   'AgentError',
   'EventsError',
   'SecretError',

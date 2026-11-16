@@ -31,6 +31,7 @@ export { SecretCommand } from './secret';
 export { RunCommand } from './run';
 export { ServeCommand } from './serve';
 export { RemoteCommand } from './remote';
+export { MachineCommand } from './machine';
 export { InstallCommand } from './install';
 export { UICommand } from '../ui';
 
@@ -69,6 +70,7 @@ import { SecretCommand } from './secret';
 import { RunCommand } from './run';
 import { ServeCommand } from './serve';
 import { RemoteCommand } from './remote';
+import { MachineCommand } from './machine';
 import { InstallCommand } from './install';
 import { UICommand } from '../ui';
 
@@ -111,6 +113,7 @@ export function getAllCommands(): BaseCommand[] {
     new RunCommand(),
     new ServeCommand(),
     new RemoteCommand(),
+    new MachineCommand(),
     new InstallCommand(),
     new UICommand(),
   ];

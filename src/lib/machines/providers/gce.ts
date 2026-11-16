@@ -172,10 +172,13 @@ export class GceProvider implements MachineProvider {
   /** Runs gcloud; a failure becomes provider-failed (or provider-cli-missing for a missing login). */
   private async gcloud(args: string[], what: string): Promise<string> {
     const r = await this.run('gcloud', [...args, '--quiet']);
-    if (r.code === 0) return r.stdout;
-    const line = firstErrorLine(r.stderr);
-    if (/do not currently have an active account|gcloud auth login|Reauthentication required/i.test(r.stderr)) {
-      throw new MachineError(`gcloud is not logged in (${line}). Run gcloud auth login, then try again.`, 'provider-cli-missing');
+    // A list whose requests failed (bad credentials, no access to the project) still exits 0 with []
+    // and only a warning: taken as a failure, or every machine would look gone
+    const partial = /Some requests did not succeed/i.test(r.stderr);
+    if (r.code === 0 && !partial) return r.stdout;
+    const line = partial ? (r.stderr.split('\n').find(l => /^\s*-\s/.test(l)) ?? '').replace(/^\s*-\s*/, '').trim() : firstErrorLine(r.stderr);
+    if (/do not currently have an active account|gcloud auth login|Reauthentication required|invalid authentication credentials/i.test(r.stderr)) {
+      throw new MachineError(`gcloud is not logged in or its credentials are not accepted (${line}). Run gcloud auth login, then try again.`, 'provider-cli-missing');
     }
     throw new MachineError(`gcloud could not ${what}: ${line || `exit ${r.code}`}`, 'provider-failed');
   }

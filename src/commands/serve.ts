@@ -2,7 +2,9 @@
 // on this machine (docs/specs/remote-containers.md). Loopback by default; a token on every request.
 //
 //   kunj serve [--listen 127.0.0.1:7433] [--allow-privileged] [--allow-runtime sysbox-runc] [--verbose]
-//   kunj serve token [--rotate]
+//   kunj serve --machines [--idle-exit <minutes>]      the coordinator (docs/specs/cloud-machines.md)
+//   kunj serve --allow-pairing [--pair-window <min>]    a machine's first boot: one coordinator pairs
+//   kunj serve token [--rotate] | token add <client> [--rotate] | token list | token remove <client>
 //
 // On the fast path (src/commands/fast.ts): keep top-level imports light.
 
@@ -25,13 +27,21 @@ interface ServeOptions {
   verbose?: boolean;
   rotate?: boolean;
   context?: string;
+  machines?: boolean;
+  idleExit?: string;
+  allowPairing?: boolean;
+  pairWindow?: string;
 }
 
 export interface ServeCommandDeps {
   /** The backend to serve (default: LocalDockerBackend on --context / container.dockerContext) */
   backend?: (context: string | undefined) => Promise<ContainerBackend>;
-  /** Where the token lives (default ~/.kunj/serve/token) */
+  /** Where the token lives (default ~/.kunj/serve/token, or ~/.kunj/coordinator/token with --machines) */
   tokenFile?: string;
+  /** The coordinator's directory (default ~/.kunj/coordinator) */
+  coordinatorDir?: string;
+  /** The provider a coordinator uses (default: machine.provider from the config) */
+  provider?: (name: string, config: Record<string, unknown>) => Promise<import('../lib/machines/provider').MachineProvider>;
   /** Called once listening; `stop` ends the server (tests; the default waits for SIGINT/SIGTERM) */
   onListening?: (address: { host: string; port: number }, stop: () => void) => void;
   stderr?: (line: string) => void;
@@ -86,7 +96,7 @@ export class ServeCommand extends BaseCommand {
     super({
       name: 'serve',
       description: 'Serve this machine\'s Docker to kunj on other machines (remote containers)',
-      arguments: '[action]',
+      arguments: '[action] [sub] [client]',
       options: [
         { flags: '--listen <host:port>', description: `Address to listen on (default 127.0.0.1:${DEFAULT_SERVE_PORT}); a non-loopback address needs --allow-remote-listen` },
         { flags: '--allow-remote-listen', description: 'Listen on a non-loopback address (plain HTTP on your network: prefer an SSH tunnel or a TLS proxy)' },
@@ -94,12 +104,23 @@ export class ServeCommand extends BaseCommand {
         { flags: '--allow-runtime <names>', description: 'Let clients use these --runtime values, e.g. sysbox-runc (comma-separated or repeated)' },
         { flags: '--context <name>', description: 'Docker context to serve (default: container.dockerContext)' },
         { flags: '--verbose', description: 'Log every request (method, route, status, duration); refusals are always logged' },
-        { flags: '--rotate', description: '[token] Replace the token; every client must be given the new one' },
+        { flags: '--rotate', description: '[token] Replace the token (or, with token add, that client\'s); every client using it must be given the new one' },
+        { flags: '--machines', description: 'Coordinate cloud machines (machine.provider): one machine per branch session, reached through this server; token commands then act on the coordinator\'s tokens' },
+        { flags: '--idle-exit <minutes>', description: 'Exit after this many minutes without a request (how kunj runs a local coordinator)' },
+        { flags: '--allow-pairing', description: 'With no token yet, let one coordinator pair: POST /v1/pair hands out the token once (a machine\'s first boot)' },
+        { flags: '--pair-window <minutes>', description: 'How long after start pairing stays open (default 10)' },
       ],
       helpText: [
         'Actions:',
         '  (default)        run the server until Ctrl-C; prints the token the first time',
         '  token            print the token (kunj remote add <name> … needs it on the laptop)',
+        '  token add <name> a token for one more client, shown once (--rotate replaces it)',
+        '  token list       the named clients, never their tokens',
+        '  token remove <name>',
+        '',
+        'With --machines this server is the coordinator of cloud machines (machine.provider, machine.<provider>):',
+        'clients ask it for a branch\'s machine and it alone talks to the cloud. On a laptop, kunj starts one on its',
+        'own when a kunj machine command needs it (docs/specs/cloud-machines.md).',
         '',
         'The server listens on this machine\'s loopback. From the laptop, reach it through an SSH tunnel kunj',
         'opens (kunj remote add box --ssh user@box) or a URL you have put behind TLS (--url https://…).',
@@ -109,26 +130,69 @@ export class ServeCommand extends BaseCommand {
     });
   }
 
-  private tokenFile(): string {
-    return this.deps.tokenFile ?? path.join(getGlobalKunjDir(), 'serve', 'token');
+  private machinesPaths() {
+    // required lazily: the plain server must not load the machine modules
+    const { coordinatorDir, coordinatorPaths } = require('../lib/machines/config') as typeof import('../lib/machines/config');
+    return coordinatorPaths(this.deps.coordinatorDir ?? coordinatorDir());
   }
 
-  async execute(action?: any, options?: any): Promise<void> {
-    // Commander passes (action, options, command); without the positional the options shift left
-    const args: unknown[] = [action, options];
+  private tokenFile(machines?: boolean): string {
+    if (this.deps.tokenFile) return this.deps.tokenFile;
+    return machines ? this.machinesPaths().token : path.join(getGlobalKunjDir(), 'serve', 'token');
+  }
+
+  private clientsFile(machines?: boolean): string {
+    return path.join(path.dirname(this.tokenFile(machines)), 'tokens.json');
+  }
+
+  async execute(action?: any, sub?: any, client?: any, options?: any): Promise<void> {
+    // Commander passes (action, sub, client, options, command); with fewer positionals the options shift left
+    const args: unknown[] = [action, sub, client, options];
     const optIndex = args.findIndex(a => a !== undefined && a !== null && typeof a === 'object');
     const opts = (optIndex === -1 ? {} : args[optIndex]) as ServeOptions;
-    const verb = typeof action === 'string' ? action : 'run';
+    const positionals = (optIndex === -1 ? args : args.slice(0, optIndex)).filter((a): a is string => typeof a === 'string');
+    const verb = positionals[0] ?? 'run';
     if (opts.json) this.jsonMode = true;
 
-    const { loadOrCreateToken, rotateToken } = await import('../lib/serve/token');
+    const { loadOrCreateToken, rotateToken, addClient, listClients, removeClient } = await import('../lib/serve/token');
     if (verb === 'token') {
-      const token = opts.rotate ? rotateToken(this.tokenFile()) : loadOrCreateToken(this.tokenFile()).token;
-      if (this.jsonMode) this.outputJSON({ token, file: this.tokenFile(), rotated: !!opts.rotate });
+      const tokenSub = positionals[1];
+      const name = positionals[2];
+      const clientsFile = this.clientsFile(opts.machines);
+      if (tokenSub === 'add' || tokenSub === 'remove') {
+        if (!name) throw new ContainerError(`Name the client: kunj serve token ${tokenSub} <name>${opts.machines ? ' --machines' : ''}.`);
+        if (tokenSub === 'add') {
+          let token: string;
+          try {
+            token = addClient(clientsFile, name, { rotate: !!opts.rotate });
+          } catch (err) {
+            throw new ContainerError((err as Error).message);
+          }
+          if (this.jsonMode) this.outputJSON({ client: name, token, file: clientsFile, rotated: !!opts.rotate });
+          else console.log(token);
+          return;
+        }
+        const removed = removeClient(clientsFile, name);
+        if (this.jsonMode) this.outputJSON({ client: name, removed });
+        else console.log(removed ? `Removed client ${name}; its token no longer works.` : `No client named ${name}.`);
+        return;
+      }
+      if (tokenSub === 'list') {
+        const clients = listClients(clientsFile);
+        if (this.jsonMode) this.outputJSON({ clients, file: clientsFile });
+        else if (clients.length === 0) console.log(chalk.gray(`No named clients (only the token in ${this.tokenFile(opts.machines)}).`));
+        else for (const c of clients) console.log(`${c.name}  ${chalk.gray(c.createdAt)}`);
+        return;
+      }
+      if (tokenSub !== undefined) throw new ContainerError(`Unknown token action '${tokenSub}'. Use kunj serve token [add|list|remove].`);
+      const file = this.tokenFile(opts.machines);
+      const token = opts.rotate ? rotateToken(file) : loadOrCreateToken(file).token;
+      if (this.jsonMode) this.outputJSON({ token, file, rotated: !!opts.rotate });
       else console.log(token);
       return;
     }
     if (verb !== 'run') throw new ContainerError(`Unknown serve action '${verb}'. Run kunj serve to start the server, or kunj serve token to print the token.`);
+    if (opts.machines && opts.allowPairing) throw new ContainerError('--machines and --allow-pairing do not go together: a coordinator pairs with machines, it is never paired itself.');
 
     const listen = parseListen(opts.listen);
     // Commander keeps only the last of a repeated option, so every occurrence is read from argv
@@ -152,20 +216,76 @@ export class ServeCommand extends BaseCommand {
       () => stderr(chalk.gray('Waiting for Docker to answer (docker info)… not listening yet. If this stays, Docker is busy or stuck: try docker info yourself.')),
       this.deps.slowDockerMs ?? 5000,
     );
-    // fails early, with docker's own message, when the daemon is down
-    const engine = await backend.info().finally(() => clearTimeout(waiting));
+    // fails early, with docker's own message, when the daemon is down; a coordinator needs no Docker
+    const engine = opts.machines
+      ? await backend.info().catch(() => null).finally(() => clearTimeout(waiting))
+      : await backend.info().finally(() => clearTimeout(waiting));
 
-    const { token, created } = loadOrCreateToken(this.tokenFile());
+    const { fileAuthenticator } = await import('../lib/serve/token');
+    const tokenFile = this.tokenFile(opts.machines);
+    // A machine's first boot: no token until a coordinator pairs
+    const fs = await import('fs');
+    const pairing = !!opts.allowPairing && !fs.existsSync(tokenFile);
+    const { token, created } = pairing ? { token: '', created: false } : loadOrCreateToken(tokenFile);
     const { createServeServer } = await import('../lib/serve/server');
     const stamp = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    let extend: Parameters<typeof createServeServer>[0]['extend'];
+    let providerName = '';
+    if (opts.machines) {
+      const { machineSettings } = await import('../lib/machines/config');
+      const settings = machineSettings(config);
+      providerName = settings.provider;
+      if (!providerName) throw new ContainerError('kunj serve --machines needs machine.provider (for example: kunj config --set machine.provider=gce --global, then machine.gce).');
+      const provider = await (this.deps.provider ?? (async (name, cfg) => (await import('../lib/machines/providers')).createProvider(name, cfg)))(providerName, settings.providerConfig);
+      const { Coordinator, fileTokenStore } = await import('../lib/machines/coordinator');
+      const { machineRoutes } = await import('../lib/serve/machines');
+      const coordinator = new Coordinator({
+        provider,
+        network: settings.network,
+        tokens: fileTokenStore(this.machinesPaths().machineTokens, provider.name),
+        version: getVersion(),
+        defaults: settings.defaults,
+        log: line => stderr(`${stamp()} ${line}`),
+      });
+      extend = machineRoutes(coordinator);
+    }
+
+    const idleMs = opts.idleExit !== undefined ? Number(opts.idleExit) * 60_000 : 0;
+    if (opts.idleExit !== undefined && !(idleMs > 0)) throw new ContainerError(`--idle-exit ${opts.idleExit}: give a number of minutes above 0.`);
+    let idleTimer: NodeJS.Timeout | undefined;
+    let stopServer: (() => void) | undefined;
+    const touch = () => {
+      if (!idleMs) return;
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        stderr(`${stamp()} no request for ${opts.idleExit} min: exiting`);
+        stopServer?.();
+      }, idleMs);
+      idleTimer.unref?.();
+    };
+
+    const pairWindowMs = (opts.pairWindow !== undefined ? Number(opts.pairWindow) : 10) * 60_000;
+    if (!(pairWindowMs > 0)) throw new ContainerError(`--pair-window ${opts.pairWindow}: give a number of minutes above 0.`);
     const server = createServeServer({
       backend,
-      token,
+      authenticate: pairing ? () => null : fileAuthenticator(tokenFile, this.clientsFile(opts.machines)),
+      pairing: pairing
+        ? {
+            until: Date.now() + pairWindowMs,
+            onPaired: t => {
+              fs.mkdirSync(path.dirname(tokenFile), { recursive: true, mode: 0o700 });
+              fs.writeFileSync(tokenFile, t + '\n', { mode: 0o600 });
+            },
+          }
+        : undefined,
+      extend,
       version: getVersion(),
       allowPrivileged: !!opts.allowPrivileged,
       allowRuntimes,
       log: line => {
-        if (opts.verbose || /^(refused|unauthorized)/.test(line)) stderr(`${stamp()} ${line}`);
+        if (/^(GET|POST|DELETE|PUT) /.test(line)) touch();
+        if (opts.verbose || /^(refused|unauthorized|paired)/.test(line)) stderr(`${stamp()} ${line}`);
       },
     });
     const address = await server.listen(listen.host, listen.port).catch((err: NodeJS.ErrnoException) => {
@@ -175,12 +295,21 @@ export class ServeCommand extends BaseCommand {
       throw err;
     });
 
-    if (created) {
-      stderr(chalk.yellow('New token (shown once; kunj serve token prints it again):'));
+    if (created && !opts.idleExit) {
+      stderr(chalk.yellow(`New token (shown once; kunj serve token${opts.machines ? ' --machines' : ''} prints it again):`));
       stderr(`  ${token}`);
       stderr(chalk.gray(`On the laptop: kunj remote add <name> --ssh <user>@<this host> --port ${address.port}  (or --url https://…), then paste it`));
     }
-    stderr(`kunj serve ${getVersion()} listening on ${address.address}:${address.port}  (Docker ${engine.serverVersion}, ${engine.operatingSystem})`);
+    const docker = engine ? `Docker ${engine.serverVersion}, ${engine.operatingSystem}` : 'no Docker here';
+    stderr(`kunj serve ${getVersion()} listening on ${address.address}:${address.port}  (${opts.machines ? `coordinator for ${providerName}; ` : ''}${docker})`);
+    if (pairing) stderr(chalk.yellow(`waiting for a coordinator to pair (POST /v1/pair) for ${Math.round(pairWindowMs / 60000)} min`));
+    let recordFile: string | undefined;
+    if (opts.machines) {
+      const { writeRecord } = await import('../lib/machines/local-coordinator');
+      recordFile = this.machinesPaths().record;
+      writeRecord(recordFile, { pid: process.pid, port: address.port, version: getVersion(), startedAt: new Date().toISOString() });
+    }
+    touch();
     if (opts.allowPrivileged) stderr(chalk.yellow('privileged containers allowed'));
     if (allowRuntimes.length) stderr(chalk.yellow(`runtimes allowed: ${allowRuntimes.join(', ')}`));
 
@@ -189,13 +318,16 @@ export class ServeCommand extends BaseCommand {
       const stop = () => {
         if (stopped) return;
         stopped = true;
+        if (idleTimer) clearTimeout(idleTimer);
         server.close().then(resolve, resolve);
       };
+      stopServer = stop;
       if (this.deps.onListening) this.deps.onListening({ host: address.address, port: address.port }, stop);
       else {
         process.on('SIGINT', stop);
         process.on('SIGTERM', stop);
       }
     });
+    if (recordFile) (await import('../lib/machines/local-coordinator')).removeRecord(recordFile, process.pid);
   }
 }

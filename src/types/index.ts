@@ -83,6 +83,21 @@ export interface KunjConfig {
     // Host MCP servers bridged into the container; v1: only "chrome" (src/lib/container/mcpbridge.ts)
     mcp?: Record<string, unknown>;
   };
+  // Cloud machines (docs/specs/cloud-machines.md), read where the coordinator runs
+  machine?: {
+    provider?: string;
+    network?: 'tunnel' | 'private';
+    size?: string;
+    diskGb?: number;
+    spot?: boolean;
+    selfSuspend?: boolean;
+    idleMinutes?: number;
+    bootTimeoutMs?: number;
+    pairWindowMinutes?: number;
+    coordinatorIdleMinutes?: number;
+    // machine.<provider>: that provider's own block (machine.gce: src/lib/machines/providers/gce.ts)
+    [provider: string]: unknown;
+  };
   // Commands run by kunj hooks, keyed by hook name (see src/lib/hook-defs.ts)
   hooks?: Partial<Record<HookName, string | string[]>>;
   jira?: {

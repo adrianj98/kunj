@@ -1,0 +1,111 @@
+// Cloud machine settings (docs/specs/cloud-machines.md). They are read where the coordinator runs:
+// the laptop for a local coordinator (auto-started by kunj), or the coordinator VM. A client of a
+// cloud coordinator needs only container.remote.
+
+import { registerSettings } from '../lib/settings-registry';
+
+const positive = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+
+export function registerMachineSettings(): void {
+  registerSettings([
+    {
+      key: 'machine.provider',
+      description: 'The cloud that runs one machine per branch session (gce); empty: no machines',
+      type: 'string',
+      defaultValue: '',
+      category: 'machine',
+      detailedDescription:
+        'Set on the machine that runs the coordinator (kunj serve --machines). On a laptop, kunj then starts a local ' +
+        'coordinator on its own when a kunj machine command needs one. Each provider reads machine.<provider>.*.',
+      examples: ['gce'],
+      relatedSettings: ['machine.gce'],
+    },
+    {
+      key: 'machine.network',
+      description: 'How the coordinator reaches machines: tunnel (a provider tunnel per machine, from a laptop) or private (their internal address, from a coordinator VM in the same network)',
+      type: 'enum',
+      options: ['tunnel', 'private'],
+      defaultValue: 'tunnel',
+      category: 'machine',
+    },
+    {
+      key: 'machine.size',
+      description: 'Size of a new machine: small (4 GB), medium (8 GB), large (16 GB), or a provider shape such as n2d-highmem-8',
+      type: 'string',
+      defaultValue: 'medium',
+      category: 'machine',
+      examples: ['medium', 'large', 'e2-highmem-4'],
+    },
+    {
+      key: 'machine.diskGb',
+      description: 'Boot and Docker disk of a new machine, in GB (billed while the machine sleeps too)',
+      type: 'number',
+      defaultValue: 30,
+      category: 'machine',
+      validate: positive,
+    },
+    {
+      key: 'machine.spot',
+      description: 'Create spot machines: much cheaper, but the cloud may stop one at any time',
+      type: 'boolean',
+      defaultValue: false,
+      category: 'machine',
+    },
+    {
+      key: 'machine.selfSuspend',
+      description: "Give machines a credential that can only suspend themselves, so they sleep when the laptop running the coordinator is shut",
+      type: 'boolean',
+      defaultValue: true,
+      category: 'machine',
+      relatedSettings: ['machine.gce'],
+    },
+    {
+      key: 'machine.idleMinutes',
+      description: 'Suspend a machine after this many minutes with no agent running and no terminal open',
+      type: 'number',
+      defaultValue: 30,
+      category: 'machine',
+      validate: positive,
+    },
+    {
+      key: 'machine.bootTimeoutMs',
+      description: 'How long to wait for a new or waking machine to answer',
+      type: 'number',
+      defaultValue: 300000,
+      category: 'machine',
+      validate: positive,
+    },
+    {
+      key: 'machine.pairWindowMinutes',
+      description: "How long after boot a machine's kunj serve accepts pairing with a coordinator",
+      type: 'number',
+      defaultValue: 10,
+      category: 'machine',
+      validate: positive,
+    },
+    {
+      key: 'machine.coordinatorIdleMinutes',
+      description: 'An auto-started local coordinator exits after this many minutes without a request',
+      type: 'number',
+      defaultValue: 60,
+      category: 'machine',
+      validate: positive,
+    },
+    {
+      key: 'machine.gce',
+      description: 'Google Compute Engine provider: { project, zone, network?, subnet?, serviceAccount?, machineTypes?, baseImage? }',
+      type: 'object',
+      defaultValue: {},
+      category: 'machine',
+      detailedDescription:
+        'project and zone are required. Machines get no external IP (give the network a Cloud NAT for egress) and the ' +
+        'network tag kunj-machine; a firewall rule must let IAP (35.235.240.0/20) reach port 7433 on that tag. ' +
+        'serviceAccount is used only with machine.selfSuspend and should hold nothing but compute.instances.suspend ' +
+        'and compute.instances.get on the machines. machineTypes overrides { small, medium, large } ' +
+        '(default e2-medium, e2-standard-2, e2-standard-4); baseImage is <project>/<image family> ' +
+        '(default ubuntu-os-cloud/ubuntu-2404-lts-amd64). Notes: docs/specs/google-cloud-containers.md.',
+      examples: ['{"project": "my-project", "zone": "us-central1-a"}'],
+      validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
+    },
+  ]);
+}

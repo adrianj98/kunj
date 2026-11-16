@@ -219,6 +219,64 @@ export interface RemotePingJson {
   ms: number;
 }
 
+// ---- kunj machine --json (docs/specs/cloud-machines.md) --------------------------------------
+
+/** One cloud machine as the coordinator reports it. */
+export interface MachineJson {
+  name: string;
+  state: 'provisioning' | 'running' | 'suspending' | 'suspended' | 'stopping' | 'stopped' | 'unknown';
+  repo: string;
+  branch: string;
+  /** The provider's shape (e2-standard-2…) */
+  size: string;
+  zone?: string;
+  createdAt: string;
+  /** The coordinator client that created it */
+  owner?: string;
+  /** The golden image it booted from */
+  image?: string;
+  /** kunj version that created it */
+  version?: string;
+  /** Whether the coordinator holds its kunj serve token */
+  paired: boolean;
+}
+
+/** `kunj machine list --json`; `repo` is absent with --all */
+export interface MachineListJson {
+  /** 'local' or the remote's name */
+  coordinator: string;
+  repo?: string;
+  machines: MachineJson[];
+}
+
+/** `kunj machine status|create|suspend|resume|stop|start --json` */
+export interface MachineJsonResult {
+  coordinator: string;
+  machine: MachineJson;
+  created: boolean;
+  woke: boolean;
+}
+
+/** `kunj machine providers --json` */
+export interface MachineProvidersJson {
+  coordinator: string;
+  provider: string;
+  features: { suspend: boolean; spot: boolean; images: boolean; diskSnapshots: boolean; selfSuspend: boolean };
+  sizes: Array<{ name: 'small' | 'medium' | 'large'; shape: string; vcpus: number; memoryGb: number }>;
+  network: 'private' | 'tunnel';
+}
+
+/** `kunj machine coordinator [status|stop] --json` (the local coordinator) */
+export interface CoordinatorStatusJson {
+  running: boolean;
+  stopped?: boolean;
+  pid?: number;
+  port?: number;
+  version?: string;
+  startedAt?: string;
+  log?: string;
+}
+
 // ---- kunj ct file --json ---------------------------------------------------------------------
 
 /** `kunj ct file read [branch] <path> --json` */

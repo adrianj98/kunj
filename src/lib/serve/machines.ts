@@ -2,27 +2,14 @@
 // (docs/specs/cloud-machines.md, "The coordinator"). Clients never talk to the cloud; they ask here.
 // The proxy to a machine's own serve (/v1/machines/<name>/…) is phase 2.
 
+import type { MachineJson } from '../json-types';
 import { Coordinator } from '../machines/coordinator';
 import { Labels, Machine, MachineError, MachineErrorCode } from '../machines/provider';
 import { readJsonBody } from './http';
 import { MachineRouteErrorCode, ServeError, parseLabelQuery } from './protocol';
 import { ServeExtension } from './server';
 
-/** A machine as the routes and `kunj machine --json` give it. */
-export interface MachineJson {
-  name: string;
-  state: Machine['state'];
-  repo: string;
-  branch: string;
-  size: string;
-  zone?: string;
-  createdAt: string;
-  owner?: string;
-  image?: string;
-  version?: string;
-  /** Whether the coordinator holds the machine's serve token */
-  paired: boolean;
-}
+export type { MachineJson };
 
 export function machineJson(m: Machine, paired: boolean): MachineJson {
   const l = m.labels;

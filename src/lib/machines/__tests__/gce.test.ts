@@ -208,6 +208,15 @@ describe('GceProvider argv', () => {
     const p = new GceProvider(CFG, { run: gcloud.runner });
     gcloud.failNext = { code: 1, stdout: '', stderr: 'ERROR: (gcloud.compute.instances.list) You do not currently have an active account selected.\nPlease run: gcloud auth login' };
     await expect(p.list({})).rejects.toMatchObject({ code: 'provider-cli-missing' });
+    // gcloud exits 0 with [] when its requests failed; that must not read as "no machines"
+    gcloud.failNext = {
+      code: 0,
+      stdout: '[]',
+      stderr: 'WARNING: Some requests did not succeed.\n - Request had invalid authentication credentials. Expected OAuth 2 access token.\n',
+    };
+    await expect(p.list({})).rejects.toMatchObject({ code: 'provider-cli-missing', message: expect.stringContaining('invalid authentication credentials') });
+    gcloud.failNext = { code: 0, stdout: '[]', stderr: 'WARNING: Some requests did not succeed.\n - Required compute.instances.list permission for projects/my-proj-123\n' };
+    await expect(p.list({})).rejects.toMatchObject({ code: 'provider-failed', message: expect.stringContaining('compute.instances.list permission') });
     gcloud.failNext = { code: 1, stdout: '', stderr: 'ERROR: (gcloud.compute.instances.list) Quota exceeded' };
     await expect(p.list({})).rejects.toMatchObject({ code: 'provider-failed', message: expect.stringContaining('Quota exceeded') });
   });
