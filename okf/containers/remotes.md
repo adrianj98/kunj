@@ -61,6 +61,10 @@ the pty exists. Before this a terminal sometimes stayed 80x24 (1 in 10 on a load
 When the exec is unknown at the end (Docker restarted, the container stopped) `wait()` rejects with
 `The terminal ended because the container stopped or Docker restarted…`, not the daemon's exec id.
 
+A closed remote terminal is not hung up in the container: closing the hijacked connection leaves the
+exec's process running (measured on Docker 29.7.2), and `wait()` polls 30 s before it rejects. Open; see
+docs/specs/remote-containers.md.
+
 # Starting the server
 
 `kunj serve` calls `backend.info()` (`docker info`) before it listens, so a daemon that is down fails

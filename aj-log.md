@@ -1774,8 +1774,14 @@ Found while getting an agent running in an alertd-core container through the loc
   resume that brought the container up. Why: alertd-core's Pulsar service has no health check; its
   JVM could not get a 2 GB heap in the starved Docker VM and exited 20 s after it was started, and
   the start still printed `services db, pulsar` with no warning.
-- Not fixed, recorded in docs/specs/README.md: after a remote terminal's client and server were
-  gone, its `tmux attach` client was still attached in the container. The check I wrote for it
-  could not run because Docker hung again.
+- Not fixed, recorded in docs/specs/README.md and corrected in the spec: a closed remote terminal
+  is not hung up in the container. Measured once Docker answered again: after `close()` on a TTY
+  exec, `sleep` and a `cat` reading the tty were still running, and `wait()` rejected after 31 s.
+  The spec had said closing the socket hangs the pty up. Why not fixed here: ending the process
+  safely means killing exactly that one and never the tmux server the agent lives in, which needs
+  a design, and the goal of this work (agents running through a remote) does not depend on it.
+- Merged to main as 86a0fcc. The full `npm test` run on this overloaded Mac had timeouts in eight
+  suites; run one at a time all pass except one test in src/commands/__tests__/worktree-shell.test.ts,
+  which reads the real environment and fails only inside a kunj agent session (`KUNJ_AGENT_*` set).
 - alertd-core itself was not changed: no config edits, nothing pushed, the branch exists only in the
   container.

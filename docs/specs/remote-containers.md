@@ -179,7 +179,8 @@ A client that leaves mid-exec: stdin is destroyed (a command reading it, like th
 forward, sees EOF and ends) and the exec's `AbortSignal` (`ExecIO.signal`) kills the server's
 `docker exec` client. Docker cannot kill an exec's process (neither the CLI nor the Engine API can),
 so a command that ignores stdin, like a `sleep`, runs on in the container, exactly as it does after a
-local `kunj ct exec` is killed; TTY sessions end, since closing the pty hangs them up. A client gone
+local `kunj ct exec` is killed. TTY sessions were meant to end, since closing the pty would hang them up,
+but they do not (see the known gap under the TTY channel below). A client gone
 before the request was checked starts nothing. A `logs --follow` carries
 `LogOptions.signal` the same way. For a TTY exec the exit frame waits until the pty's stream has
 drained into the socket (`finish` of the frame writer, 2 s at most), so a burst of output just before
@@ -206,8 +207,11 @@ drained into the socket (`finish` of the frame writer, 2 s at most), so a burst 
   landed while the exec was being created (the request and the first resize are two frames). When the
   exec is gone at the end (the daemon restarted, the container stopped) the client is told that, not
   `No such exec instance: <id>`. Closing
-  the WebSocket closes the hijacked socket, which hangs up the pty (SIGHUP to the process group, as a
-  dropped SSH session would). This is `execTty()` in docker.ts, a second way of talking to Docker that
+  the WebSocket closes the hijacked socket. **Known gap (measured 2026-11-16, Docker 29.7.2):** that does
+  not hang up the pty. The daemon keeps the exec's process running (`sleep`, and `cat` reading the tty,
+  were both still there after `close()`), so a closed remote shell or `tmux attach` client stays in the
+  container, and `wait()` polls the exec for its 30 s before rejecting. Ending it needs a kill of exactly
+  that process, never the tmux server an agent lives in; not designed yet. This is `execTty()` in docker.ts, a second way of talking to Docker that
   stays inside the one module allowed to. Non-TTY execs keep spawning `docker exec`. The env a TTY exec
   carries is what `interactive()` sets today (`TERM`, `COLORTERM`, `LANG`), not secrets; the server
   refuses other names on a TTY exec.
