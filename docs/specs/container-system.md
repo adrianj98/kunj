@@ -29,7 +29,7 @@ the host).*
 | Workspace IDE (phase 3) | CLI contract shipped; app proposed | [workspace-ide.md](workspace-ide.md) |
 | Containers in the VS Code extension and the macOS app | In progress | [containers-in-apps.md](containers-in-apps.md) |
 | Remote Docker host (`kunj serve`, `RemoteKunjBackend`) | Shipped | [remote-containers.md](remote-containers.md) |
-| Cloud machines: a VM per branch session from a pluggable `MachineProvider` (Google Cloud first) | Spec written | [cloud-machines.md](cloud-machines.md), [google-cloud-containers.md](google-cloud-containers.md) |
+| Cloud machines: a VM per branch session behind a coordinator (`kunj serve --machines`) from a pluggable `MachineProvider` (Google Cloud first) | Spec written | [cloud-machines.md](cloud-machines.md), [google-cloud-containers.md](google-cloud-containers.md) |
 | Secret manager (`kunj secret`, `kunj run`, delivery to containers and worktrees) | Shipped | [Secrets](#secrets) below |
 
 ## Rules every part follows
@@ -266,10 +266,11 @@ exec WebSocket, and editor attach goes through Remote-SSH (`features.editorAttac
 TLS and multi-user get their own spec.
 
 **Cloud machines:** [cloud-machines.md](cloud-machines.md). On top of `kunj serve`, one small VM per branch
-session, created on the first `ct start`, suspended by itself when its agent goes quiet, resumed by the next
-acting command, deleted with the branch, through a pluggable `MachineProvider` whose first implementation is
-Google Cloud ([google-cloud-containers.md](google-cloud-containers.md)). Cloud labels are the only machine state;
-a golden image keyed by the blueprint hash carries the snapshot and a generic cache volume (`container.caches`).
+session, created on the first `ct start`, suspended when its agent goes quiet, resumed by the next acting
+command, deleted with the branch, behind a coordinator (`kunj serve --machines`, auto-started on the laptop or
+always-on on a tiny VM for several clients) that alone drives a pluggable `MachineProvider`, Google Cloud first
+([google-cloud-containers.md](google-cloud-containers.md)). Cloud labels are the only machine state; a golden
+image keyed by the blueprint hash carries the snapshot and a generic cache volume (`container.caches`).
 
 ## Decisions
 

@@ -15,18 +15,20 @@ Notes for the first [machine provider](/containers/cloud-machines.md) (docs/spec
 small/medium/large (8 GB default), no external IP, Cloud NAT egress, a service account allowed only to
 suspend itself.
 
-# Tunnel
+# Reaching machines
 
-`gcloud compute start-iap-tunnel <name> 7433 --local-host-port=127.0.0.1:<port>` is the provider's tunnel
-argv. IAP reaches the machine's internal address, so serve listens there (`--allow-remote-listen`) behind a
-VPC rule admitting only `35.235.240.0/20` to the port; no sshd or OS Login. The tunnel is IAM-authenticated,
-which makes one-time token pairing safe. By hand (phase 0), an ssh `ProxyCommand` of
+A cloud coordinator in the same VPC uses the machine's internal address; a local coordinator uses
+`gcloud compute start-iap-tunnel <name> 7433 --local-host-port=127.0.0.1:<port>` per machine. Serve listens on
+the internal address (`--allow-remote-listen`) behind a VPC rule admitting the coordinator's tag and
+`35.235.240.0/20`; no sshd or OS Login. Both paths are access-controlled, which makes token pairing safe. A cloud
+coordinator is an e2-micro (about $7 a month or free tier) with the provider's permissions and nothing else. By hand (phase 0), an ssh `ProxyCommand` of
 `start-iap-tunnel %h 22 --listen-on-stdin` works with today's `kunj remote add --ssh`.
 
 # On demand
 
 Suspend keeps memory (no compute charge, saved memory billed as standard disk, up to 208 GB, 60 days); the
-machine suspends itself from `kunj serve --idle-after`, the laptop resumes it through the provider.
+coordinator's idle loop suspends and the next acting command resumes; with a local coordinator the machine also
+self-suspends as a fallback (`machine.selfSuspend`, a one-permission service account).
 
 # Caching
 

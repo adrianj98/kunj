@@ -53,19 +53,32 @@ From the shipped container code, not a wish list:
 - **Network:** no external IP. Egress through a Cloud NAT gateway on the subnet (about $32 a month
   plus per GB, shared by every machine; documented, not created by kunj). Inbound only through
   Identity-Aware Proxy TCP forwarding (below).
-- **Service account:** a dedicated one with no project roles, bound by IAM condition to
-  `compute.instances.suspend` and `compute.instances.get` on the machine itself, so the idle timer can
-  suspend it and nothing else.
+- **Service account:** a dedicated one with no project roles; with `machine.selfSuspend`, bound by IAM
+  condition to `compute.instances.suspend` and `compute.instances.get` on the machine itself, so the
+  fallback idle timer can suspend it and nothing else.
 
-## Reaching it: IAP TCP forwarding
+## Reaching machines
 
-`gcloud compute start-iap-tunnel <name> 7433 --local-host-port=127.0.0.1:<port> --zone … --project …`
-is the provider's tunnel argv. IAP connects to the machine's **internal address**, not its loopback,
-so `kunj serve` on a GCE machine listens on the internal address (`--listen <ip>:7433
---allow-remote-listen`, the unit reads the address from the metadata server at boot) and a VPC firewall
-rule admits `35.235.240.0/20` to port 7433 only. The user needs `roles/iap.tunnelResourceAccessor`.
-No sshd, no OS Login, no SSH keys on the machine. The tunnel is IAM-authenticated, which is what makes
-the one-time token pairing of cloud-machines.md safe (`features.authenticatedTunnel`).
+The coordinator of cloud-machines.md reaches a machine's `kunj serve` one of two ways, both set by
+`machine.network`:
+
+- **`private`** (a cloud coordinator in the same VPC): `address()` is the machine's internal IP and port
+  7433. The machine's serve listens on its internal address (`--listen <ip>:7433 --allow-remote-listen`,
+  the unit reads the address from the metadata server at boot) behind a VPC firewall rule that admits the
+  coordinator's network tag and IAP's `35.235.240.0/20` to that port only.
+- **`tunnel`** (a local coordinator on the laptop): `tunnel()` is
+  `gcloud compute start-iap-tunnel <name> 7433 --local-host-port=127.0.0.1:<port> --zone … --project …`,
+  one per machine, IAM-authenticated (`roles/iap.tunnelResourceAccessor`), using the laptop's own `gcloud`
+  login.
+
+No sshd, no OS Login, no SSH keys on any machine. Both paths are access-controlled, which is what makes
+the one-time token pairing safe.
+
+**A cloud coordinator** is an e2-micro (about $7 a month, free tier in some US regions) in the same VPC,
+with a service account holding the instance, image and disk permissions the provider uses and nothing
+else. Clients reach it like any remote: an IAP tunnel to its port (an ssh `ProxyCommand` alias for
+`kunj remote add --ssh`, or `--url http://127.0.0.1:<port>` with a tunnel kept open), a tailnet address
+with `--allow-insecure-http`, or the user's own TLS front.
 
 For phase 0 by hand, before the provider exists: an `~/.ssh/config` entry whose `ProxyCommand` is
 `gcloud compute start-iap-tunnel %h 22 --listen-on-stdin …` and `kunj remote add gce --ssh <alias>`
@@ -77,10 +90,13 @@ Compute Engine **suspend** writes the memory to persistent storage: no vCPU or m
 suspended, the saved memory billed as standard persistent disk (a few dollars a month for 8 GB), resume
 in seconds with running containers and the agents' tmux sessions intact. Limits: at most 208 GB of
 memory, no GPUs, a guest that supports it (Ubuntu does), 60 days before Google turns it into a stopped
-instance (then `start` instead of `resume`; harmless). The machine suspends itself from
-`kunj serve --idle-after` through the idle command `gcloud compute instances suspend $(hostname)
---zone …`, and the laptop resumes it with `gcloud compute instances resume` from the provider. An
-instance schedule that stops everything at night and a budget alert are the backstops.
+instance (then `start` instead of `resume`; harmless). The coordinator's idle loop suspends a machine
+through `gcloud compute instances suspend` and resumes it with `resume` on the next acting command. With
+a local coordinator (`machine.selfSuspend`), the machine also carries the fallback: a service account
+allowed only `compute.instances.suspend` and `compute.instances.get` on itself by IAM condition, and
+`kunj serve --idle-after` on the machine running `gcloud compute instances suspend $(hostname)`, so the
+machine sleeps even when the laptop is shut. An instance schedule that stops everything at night and a
+budget alert are the backstops.
 
 ## Caching across machines
 
@@ -109,6 +125,7 @@ Per-second billing, approximate list prices, us-central1:
 | Suspended machine | its disk (about $3 a month for 30 GB) plus the saved memory |
 | Cloud NAT | about $32 a month for the project plus per GB |
 | Golden image storage | about $0.05 per GB-month |
+| Cloud coordinator (optional, e2-micro) | about $7 a month, or free tier; a local coordinator costs nothing |
 
 Three sessions active at once cost about $0.20 per hour; a month of three sessions, six hours a day,
 lands near $50 including disks and NAT.

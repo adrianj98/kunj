@@ -1,5 +1,11 @@
 # Directory Update Log
 
+## 2026-11-16 (coordinator)
+* `containers/cloud-machines.md`, `containers/google-cloud.md`: the design now has a coordinator,
+  `kunj serve --machines`, auto-started on the laptop or always-on on a tiny VM, which alone drives the
+  provider and proxies to each machine's serve; several clients connect with a token each; the idle loop
+  moves to the coordinator with machine self-suspend as the local fallback.
+
 ## 2026-11-16 (cloud machines follow-ups)
 * `containers/cloud-machines.md`: the blueprint snapshot, golden image and registry copy share one hash; the
   machine suspends itself. CLAUDE.md and docs/specs/container-system.md (status table, roadmap, decisions) now

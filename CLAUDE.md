@@ -473,11 +473,14 @@ remote, in parallel: `remote` on each container, `backends` with who answered, a
 runs the container suites over the wire (`testBackend()` in remote-harness.ts; `itLocal` for the few that
 compare stream objects); `remote.docker.test.ts` needs a real daemon.
 Designed, not built: **cloud machines** (docs/specs/cloud-machines.md), a small VM per branch session running
-Docker and `kunj serve`, created, suspended, resumed and deleted through a pluggable `MachineProvider`
-(src/lib/machines/, Google Cloud first; notes in docs/specs/google-cloud-containers.md). Cloud labels are the only
-machine state, listings never wake a machine, acting commands do, the machine suspends itself from
-`kunj serve --idle-after`, the serve token is paired once over the provider's authenticated tunnel, and a golden
-image keyed by the blueprint hash carries the snapshot and the generic `container.caches` volume.
+Docker and `kunj serve`, behind a **coordinator**: `kunj serve --machines`, auto-started on the laptop by kunj when a
+command needs it or run always-on on a tiny cloud VM so several clients connect with a token each. The coordinator
+alone talks to the cloud through a pluggable `MachineProvider` (src/lib/machines/, Google Cloud first; notes in
+docs/specs/google-cloud-containers.md) and proxies `/v1/machines/<name>/…` to each machine's serve. Cloud labels are
+the only machine state, listings never wake a machine, acting commands do, the coordinator's idle loop suspends
+from agent state (machine self-suspend as the fallback for a local coordinator), machine tokens are paired once
+over an access-controlled path, and a golden image keyed by the blueprint hash carries the snapshot and the generic
+`container.caches` volume.
 
 ## Repository Registry & macOS App
 
