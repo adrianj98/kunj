@@ -332,6 +332,12 @@ provider poll. Errors: `machine-provider` (none configured or unknown), `machine
 - **2026-11-16** Listings never wake a machine; acting commands do, unless `--no-wake`.
 - **2026-11-16** Idle is decided on the machine from agent state, not from laptop connections, so an
   open workspace app does not keep a machine awake.
+- **2026-11-16** The machine suspends itself. `kunj serve --idle-after` runs the provider's idle command on
+  the machine, with a credential that can do only that (GCE: a service account allowed
+  `compute.instances.suspend` on itself). Rejected: the laptop or a scheduler suspending it from outside,
+  because the laptop may be closed and a scheduler cannot see agent state. External control still exists
+  for the user's hand (`kunj ct stop`, `kunj machine suspend`) and as a backstop (an instance schedule at
+  night); a provider that cannot self-suspend (the SSH fleet) makes the idle command a no-op.
 
 ## Testing
 
