@@ -44,6 +44,15 @@ All three forms use the existing `kunj remote add`:
    `--url http://127.0.0.1:7433` (loopback http is accepted by `checkRemoteUrl()`).
 3. Tailscale on the VM: `kunj serve --listen <tailnet-ip>:7433 --allow-remote-listen` and `--url … --allow-insecure-http`.
 
+# On demand
+
+Suspend (not stop) when idle, decided on the VM by agent state (no running agent, no open TTY exec for N
+minutes), resume from the laptop: today by an ssh ProxyCommand script that resumes the instance before
+opening the IAP tunnel (wakes on listings too), proposed as `kunj serve --idle-after` and a `wake` command on
+the remote entry that only acting commands run while listings report `sleeping`. One shared VM over a VM
+per branch: snapshots and image caches are per daemon, idle branches are free as stopped containers, and
+per-branch VMs would need an orchestrator; several shared VMs (multi-remote spec) come before that.
+
 # Cost and idle stop
 
 A stopped VM costs only its disk, so an instance schedule or an idle power-off matters more than the

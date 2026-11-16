@@ -14,7 +14,7 @@ anything is built.
 | --- | --- |
 | Research and recommendation | Written 2026-11-16 |
 | Recipe tried on a real Compute Engine VM | Not started (waiting on you: a project and a VM) |
-| `kunj serve --idle-stop`, `kunj remote add --gce` (below, "What kunj would need") | Not started; optional |
+| `kunj serve --idle-after`, remote `wake`, `kunj remote add --gce` (below, "On demand" and "What kunj would need") | Not started; optional |
 | User docs page (docs-site: Containers › On a cloud VM) | Not started |
 
 ## What the containers need from a host
@@ -215,6 +215,76 @@ So on Google Cloud, "Docker" means a VM with a daemon on it, and the choice is o
 (Ubuntu for Sysbox and `kunj serve` as a plain process; COS if an auto-updating appliance matters more
 than Docker-in-Docker).
 
+## On demand: suspend when idle, wake from the laptop
+
+The VM should cost nothing while no agent works, without the user remembering to stop it.
+
+**Suspend, not stop.** Compute Engine can suspend an instance (memory written to persistent storage,
+no vCPU or memory charge while suspended; the saved memory is billed as standard persistent disk, a few
+dollars a month for 64 GB). Resume takes seconds and brings back everything as it was: running
+containers, the agents' tmux sessions, a Claude run mid-task. A stop would lose the tmux sessions and
+needs a boot plus `docker start` on the way back. Limits: at most 208 GB of memory, no GPUs, the
+guest must support it (Ubuntu does), 60 days at most before Google turns it into a stopped instance
+(harmless). A Spot VM can be suspended but a preemption during the suspend wins; stop is the fallback.
+
+**Idle is decided on the VM, by what the agents do, not by whether a laptop is connected.** The
+workspace app holds a `kunj events` WebSocket open all day and `ct list` polls, so connections are
+the wrong signal. The right one is the agent state `kunj serve` already serves: idle = for N minutes
+no exec with a TTY has been open and no main container's agent is `running` (`waiting` for input and
+stopped containers count as idle; the tmux session survives the suspend anyway). Two ways to get it:
+
+1. **Today, no kunj change:** a systemd timer on the VM, every minute, runs `docker ps` for
+   `kunj.role=main` and the `STATUS_SCRIPT` check for agent states (or, cruder, `docker stats` CPU
+   below a threshold for N minutes) and, when idle, `gcloud compute instances suspend $(hostname)`.
+   The VM's service account needs only a custom role with `compute.instances.suspend` and
+   `compute.instances.get`, bound with an IAM condition to that one instance; nothing else.
+2. **Proposed kunj feature:** `kunj serve --idle-after <minutes> --idle-command '<cmd>'`. The server
+   counts open TTY execs and polls agent states (one `STATUS_SCRIPT` exec per running main, as `kunj
+   events` does), runs the command once when idle, and logs it. One place, exact, testable with the
+   fake backend.
+
+**Wake from the laptop.** The user should never run `gcloud compute instances resume` by hand.
+
+1. **Today, no kunj change:** make the ssh ProxyCommand a script: if the instance is not `RUNNING`,
+   `gcloud compute instances resume` (or `start` when it is `TERMINATED`), wait for `RUNNING`, then
+   `exec gcloud compute start-iap-tunnel … --listen-on-stdin`. `tunnel.ts` waits up to 120 s for the
+   forward, which covers a resume (seconds) and a boot (under a minute). Downside: every `ct list`,
+   `worktree list --containers` and `kunj events` start-up wakes the VM, so a workspace app left open
+   in the morning wakes it at once; acceptable for one person, wrong for a fleet.
+2. **Proposed kunj feature:** a `wake` command on the remote entry (`kunj remote add gce --ssh kunj-gce
+   --wake 'gcloud compute instances resume … --zone …'`). Listings and `kunj events` never wake:
+   a tunnel that fails to come up is reported as `sleeping` in `ct list --json`'s `backend` (and
+   the app shows the environment asleep, with a Wake action). Commands that act (`start`, `shell`,
+   `agent`, `attach`, `exec`, `forward`, `file write`) run the wake command once, then retry;
+   `--no-wake` opts out. `kunj remote add gce --gce <instance> --zone <zone>` would write the ssh
+   config stanza, the entry and the wake command together.
+
+**Backstop:** an instance schedule that stops the VM at night whatever the timer says, and a budget
+alert on the project. Together: resume on the first `kunj ct start` of the day in a few seconds,
+suspend after 30 idle minutes, pay for agent hours plus disk.
+
+## One shared VM or many small ones?
+
+Shared, until a reason not to appears. The comparison in kunj's terms:
+
+| | One shared VM (e.g. e2-highmem-8) | One small VM per branch (e.g. e2-standard-2 each) |
+| --- | --- | --- |
+| Fits today's kunj | Yes: one daemon, labels as state, one `kunj serve`, one remote entry | No: kunj has no VM-per-branch backend; it needs the multi-remote fleet plus an orchestrator that creates and deletes VMs and remote entries |
+| Blueprint snapshots | Built once per hash, every new branch starts from it in seconds | Built on every VM: each new branch pays the tools + `setup` run (minutes) or needs snapshots pushed to Artifact Registry (new work) |
+| Image layer cache, `kunj-sandbox` build | Once | Per VM |
+| Idle branches | Stopped containers, free | A stopped VM each, with its disk (a few dollars a month each) |
+| Cost with several agents active at once | Fixed: about $0.36 per hour whatever the branch count, while running | Linear: about $0.07 per hour per active branch; cheaper below about five concurrent, dearer above |
+| Isolation between branches | Shared kernel; an escape reaches sibling branches (not the laptop) | VM boundary per branch |
+| Noisy neighbours | Several npm installs contend for CPU and memory; an OOM can hit another branch's agent | None |
+| On demand | One suspend/resume | One per branch; resume latency on each first command |
+| Scaling | One box; beyond it, several shared VMs through the multi-remote spec | Natural |
+
+The engineering gap is the decider: a shared VM is a recipe, per-branch VMs are a project. The cases
+that would justify per-branch VMs are agents on repositories that must not see each other's work or
+secrets, or more concurrent agents than one 64 GB box carries. Both are served first by **a few shared
+VMs** (one per repository or trust level, which the [multi-remote spec](multi-remote-containers.md)
+already describes and which needs no orchestrator), and only then by a VM per branch.
+
 ## Isolation on the VM
 
 Branch containers on the VM run under `runc` with capabilities dropped as locally; the helper keeps the
@@ -248,15 +318,9 @@ the disk, which is why idle stop and wake matter more than the machine type.
 
 Nothing to use option A today. Two small additions would make it comfortable:
 
-- **`kunj serve --idle-stop <minutes> [--idle-command <cmd>]`:** when no client has connected for the
-  period and no main container is running, run the command (default `sudo systemctl poweroff` on
-  Linux). The server already sees every connection; the running-container check is one `list` by
-  `kunj.role=main`. A running agent inside a container counts as busy even with no laptop attached.
-- **Wake on demand:** a remote entry with a `wake` command (`gcloud compute instances start <instance>
-  --zone <zone>`) that `RemoteKunjBackend` runs once when the tunnel fails to come up, then retries;
-  `kunj ct start` and the workspace app's row then bring a stopped VM back instead of reporting
-  `remote-unreachable`. A `kunj remote add gce --gce <instance> --zone <zone>` shorthand could write the
-  `--ssh` entry, the ssh config stanza and the wake command in one go.
+- **`kunj serve --idle-after <minutes> --idle-command <cmd>`** and a **`wake` command on remote entries**,
+  as described under "On demand" above (suspend when no agent runs and no TTY is open; listings
+  report `sleeping`, acting commands wake).
 - **Docs:** a docs-site page with the recipe (VM, Docker, Sysbox, systemd unit, Cloud NAT, IAP rule,
   ssh config, `kunj remote add`, idle stop), and the remote-containers spec's "SSH to a real second
   machine" item closed by it.
@@ -282,7 +346,8 @@ Google Cloud documentation as indexed (the docs host was not reachable from the 
 [GKE Autopilot security measures](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-security),
 [Cloud Run execution environments](https://docs.cloud.google.com/run/docs/about-execution-environments),
 [Container-Optimized OS disks and file system](https://docs.cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem),
-[Idle VM recommendations](https://docs.cloud.google.com/compute/docs/instances/idle-vm-recommendations-overview).
+[Idle VM recommendations](https://docs.cloud.google.com/compute/docs/instances/idle-vm-recommendations-overview),
+[Suspend or resume an instance](https://docs.cloud.google.com/compute/docs/instances/suspend-resume-instance).
 Projects: [Sysbox](https://github.com/nestybox/sysbox) and its
 [distro compatibility](https://github.com/nestybox/sysbox/blob/master/docs/distro-compat.md),
 [Docker Enhanced Container Isolation](https://docs.docker.com/desktop/enterprise/hardened-desktop/enhanced-container-isolation/),
