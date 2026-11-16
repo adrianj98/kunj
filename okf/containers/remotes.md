@@ -54,8 +54,8 @@ it never ends the server.
 # Listing the fleet
 
 Without `--remote` or `--context`, `collectList()` (src/commands/container.ts) asks this machine's
-Docker and every remote in `~/.kunj/remotes.json` in parallel. A remote has 5 s to open and 8 s to
-list; one that does not is in `backends` with `available: false`. Each container on a remote carries
+Docker and every remote in `~/.kunj/remotes.json` in parallel. A remote has 5 s to open and 8 s in
+all (`fleetTimeouts`); one that does not is in `backends` with `available: false`. Each container on a remote carries
 `remote`. A container id is listed once (a remote may be a `kunj serve` on this same Docker). Branch
 commands do not look across the fleet yet: they use `--remote`, else `container.remote`, else this
 machine. Spec: docs/specs/multi-remote-containers.md.

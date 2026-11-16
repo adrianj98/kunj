@@ -32,9 +32,11 @@ remote in `~/.kunj/remotes.json`. Its **default** backend is the one `selectBack
 asked: a remote is cheap to remove (`kunj remote remove`) and that keeps "where is it" free of state.
 
 As built, the listing does this itself in `collectList()` (src/commands/container.ts): this machine's
-Docker is given the time it takes, as before, and each remote is raced against `FLEET_OPEN_TIMEOUT_MS`
-(5 s to open: an SSH tunnel, `/v1/info`) and `FLEET_LIST_TIMEOUT_MS` (8 s to list, under
-`worktree list --containers`' own 10 s). A separate `fleet()` module comes with `locate()`. The plan was:
+Docker is given the time it takes, as before, and each remote has `fleetTimeouts`: `openMs` (5 s to open:
+an SSH tunnel, `/v1/info`) inside `memberMs` (8 s for the open and the listing together, under
+`worktree list --containers`' own 10 s, or one slow remote would empty the whole listing). A remote that
+opens after its time is closed again (its tunnel), and a `remotes.json` that cannot be read lists this
+machine alone with a warning on stderr. A separate `fleet()` module comes with `locate()`. The plan was:
 `fleet()` (src/lib/container/fleet.ts) opens every member in parallel, each raced against
 `LOOKUP_TIMEOUT_MS` (5 s; an SSH tunnel that has not come up by then counts as unreachable), and returns
 `{ name, selection | error }` per member. Tunnels opened for one command are closed by

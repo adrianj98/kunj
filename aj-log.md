@@ -1815,3 +1815,9 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - Earlier in the session, at the user's request: removed the two test containers, the test server
   on 7434 and the `rc` remote, rebuilt the main checkout and restarted the user's `kunj serve` on
   7433 in its own shell tab.
+- After the adversarial review of the fleet listing, three fixes in src/commands/container.ts, each
+  with a test: a remote's open and listing share one 8 s budget (`fleetTimeouts`; they were 5 s plus
+  8 s, over the worktree listing's 10 s, which would have emptied the app's container rows); a
+  `remotes.json` that cannot be read lists this machine alone with a warning (it would have failed
+  a plain local listing); a remote that opens after its time is closed again (`closeSelection()`),
+  and a failure is explained with the default backend, not whichever opened last.

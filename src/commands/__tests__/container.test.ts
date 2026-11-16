@@ -175,7 +175,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Command } from 'commander';
-import { ContainerCommand, agentCommandLine } from '../container';
+import { ContainerCommand, agentCommandLine, fleetTimeouts } from '../container';
+import { readRemotes } from '../../lib/remotes';
 import { CONTAINER_AGENT_STATE_FILE, inDirectory, withAgentHooks } from '../../lib/agent-session';
 
 // The agent command as ct agent runs it: the state file in the env and the Claude Code hooks appended
@@ -1647,6 +1648,53 @@ describe('ContainerCommand', () => {
           expect(jsonError().message).toContain('list failed');
         } finally {
           backend.failOn = undefined;
+        }
+      });
+
+      it('a remote that takes longer than its whole budget is left out, and this Mac is still listed', async () => {
+        backend.existing = [mainContainer('on-mac', { id: 'cid-mac' })];
+        h.fake.existing = [mainContainer('on-box', { id: 'cid-box' })];
+        (lifecycle.containerStatus as jest.Mock).mockResolvedValue(status);
+        const list = h.fake.list.bind(h.fake);
+        h.fake.list = async filter => {
+          await new Promise(r => setTimeout(r, 400));
+          return list(filter);
+        };
+        const before = { ...fleetTimeouts };
+        fleetTimeouts.memberMs = 150;
+        try {
+          const started = Date.now();
+          await new ContainerCommand().execute('list', { json: true });
+          expect(Date.now() - started).toBeLessThan(380);
+          const json = JSON.parse(stdout.join(''));
+          expect(json.containers.map((c: { branch: string }) => c.branch)).toEqual(['on-mac']);
+          expect(json.backends[1]).toMatchObject({ remote: 'box', available: false, message: expect.stringMatching(/did not answer within/) });
+        } finally {
+          Object.assign(fleetTimeouts, before);
+          await new Promise(r => setTimeout(r, 450));
+        }
+      });
+
+      it('the open and the listing share one budget, under the worktree listing\'s own 10 s', () => {
+        expect(fleetTimeouts.openMs).toBeLessThanOrEqual(fleetTimeouts.memberMs);
+        expect(fleetTimeouts.memberMs).toBeLessThan(10_000);
+      });
+
+      it('an unreadable remotes.json lists this Mac and says so, as before the fleet', async () => {
+        backend.existing = [mainContainer('on-mac', { id: 'cid-mac' })];
+        (lifecycle.containerStatus as jest.Mock).mockResolvedValue(status);
+        (readRemotes as jest.Mock).mockImplementationOnce(() => {
+          throw new ContainerError('~/.kunj/remotes.json is not valid JSON', 'bad-remote');
+        });
+        const err = jest.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          await new ContainerCommand().execute('list', { json: true });
+          const json = JSON.parse(stdout.join(''));
+          expect(json.containers.map((c: { branch: string }) => c.branch)).toEqual(['on-mac']);
+          expect(json.backends).toHaveLength(1);
+          expect(err.mock.calls.map(c => String(c[0])).join('\n')).toMatch(/remotes\.json is not valid JSON/);
+        } finally {
+          err.mockRestore();
         }
       });
 

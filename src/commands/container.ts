@@ -143,10 +143,13 @@ interface ListPart {
   helpers: Map<string, ContainerInfo>;
 }
 
-/** A remote that has not opened (SSH tunnel, /v1/info) by then counts as not answering in a fleet listing */
-const FLEET_OPEN_TIMEOUT_MS = 5_000;
-/** ...nor one that has not listed by then; under `kunj worktree list --containers`' own 10 s */
-const FLEET_LIST_TIMEOUT_MS = 8_000;
+/**
+ * A fleet listing's patience with one remote: `openMs` to open (an SSH tunnel, /v1/info), and
+ * `memberMs` for the open and the listing together. The whole budget stays under
+ * `kunj worktree list --containers`' own 10 s, or one slow remote would take every row with it.
+ * An object so tests can shorten it.
+ */
+export const fleetTimeouts = { openMs: 5_000, memberMs: 8_000 };
 
 function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout;
@@ -296,6 +299,14 @@ export class ContainerCommand extends BaseCommand {
     const open = [...this.selections.values()];
     this.selections.clear();
     await Promise.all(open.map(s => s.close().catch(() => undefined)));
+  }
+
+  /** Close one selection (a fleet member that opened after its time was up). */
+  private async closeSelection(key: string): Promise<void> {
+    const selection = this.selections.get(key);
+    if (!selection) return;
+    this.selections.delete(key);
+    await selection.close().catch(() => undefined);
   }
 
   // "docker ps failed: …" says little when the daemon is down; `docker info` says that clearly.
@@ -1301,26 +1312,47 @@ export class ContainerCommand extends BaseCommand {
     }
 
     const defaultRemote = remoteNameOf({}, config);
+    // A remotes.json that cannot be read must not take this machine's listing with it
+    let remoteNames: string[] = [];
+    try {
+      remoteNames = Object.keys(readRemotes()).sort();
+    } catch (error) {
+      console.error(chalk.yellow(`Remotes not listed: ${describeError(error).message}`));
+    }
     // This Mac first, then the remotes by name: the order of `backends` and of the rows
-    const members: Array<string | undefined> = [undefined, ...Object.keys(readRemotes()).sort()];
+    const members: Array<string | undefined> = [undefined, ...remoteNames];
     const asked = await Promise.all(
-      members.map(async name => {
+      members.map(async (name): Promise<{ name: string | undefined; ctx?: Context; part?: ListPart; error?: unknown }> => {
+        let ctx: Context | undefined;
         try {
-          // This Mac's Docker is given the time it takes, as before; a remote that does not open or
-          // answer in time is left out rather than holding the whole listing
           const opening = this.context({ ...options, remote: name ?? 'local' }, config);
-          const ctx = name ? await within(opening, FLEET_OPEN_TIMEOUT_MS, `remote ${name} did not answer within ${FLEET_OPEN_TIMEOUT_MS / 1000}s`) : await opening;
-          const listing = this.collectFrom(ctx, options);
-          const part = name ? await within(listing, FLEET_LIST_TIMEOUT_MS, `remote ${name} did not list its containers within ${FLEET_LIST_TIMEOUT_MS / 1000}s`) : await listing;
-          return { name, ctx, part };
+          // This Mac's Docker is given the time it takes, as before
+          if (!name) {
+            ctx = await opening;
+            return { name, ctx, part: await this.collectFrom(ctx, options) };
+          }
+          // A remote that does not open or answer in time is left out rather than holding the listing
+          const started = Date.now();
+          const late = `remote ${name} did not answer within`;
+          try {
+            ctx = await within(opening, fleetTimeouts.openMs, `${late} ${fleetTimeouts.openMs / 1000}s`);
+          } catch (error) {
+            // It may still open (an SSH tunnel coming up): close that one when it does
+            void opening.then(() => this.closeSelection(`remote:${name}`)).catch(() => undefined);
+            throw error;
+          }
+          const left = Math.max(1, fleetTimeouts.memberMs - (Date.now() - started));
+          return { name, ctx, part: await within(this.collectFrom(ctx, options), left, `${late} ${fleetTimeouts.memberMs / 1000}s`) };
         } catch (error) {
-          return { name, error };
+          return { name, ctx, error };
         }
       }),
     );
-    const answered = asked.filter((m): m is { name: string | undefined; ctx: Context; part: ListPart } => 'part' in m);
     const byDefault = asked.find(m => m.name === defaultRemote) ?? asked[0];
-    if (answered.length === 0) throw (byDefault as { error: unknown }).error;
+    // Parallel opens each set this.backend: the one a failure is explained with is the default's
+    if (byDefault.ctx) this.backend = byDefault.ctx.backend;
+    const answered = asked.filter((m): m is { name: string | undefined; ctx: Context; part: ListPart } => m.part !== undefined);
+    if (answered.length === 0) throw byDefault.error;
 
     // A remote may be a kunj serve on this same Docker (or two names for one box): its containers
     // are the ones already listed, so each container id is listed once, under the first member
@@ -1347,8 +1379,8 @@ export class ContainerCommand extends BaseCommand {
       }
     }
     const backends: NonNullable<ContainerListJson['backends']> = asked.map(m =>
-      'part' in m
-        ? { ...describe(m.ctx as Context), available: true }
+      m.part && m.ctx
+        ? { ...describe(m.ctx), available: true }
         : {
             kind: m.name ? ('remote' as const) : ('docker' as const),
             context: (!m.name && (options.context || config.container?.dockerContext)) || 'default',
