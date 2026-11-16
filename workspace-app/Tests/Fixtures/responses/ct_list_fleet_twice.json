@@ -1,0 +1,95 @@
+{
+  "repo": "alertd-core",
+  "backend": {
+    "kind": "docker",
+    "context": "default"
+  },
+  "backends": [
+    {
+      "kind": "docker",
+      "context": "default",
+      "available": true
+    },
+    {
+      "kind": "remote",
+      "remote": "box",
+      "context": "default",
+      "available": true
+    },
+    {
+      "kind": "remote",
+      "remote": "gone",
+      "context": "default",
+      "available": false,
+      "message": "remote gone did not answer within 5s"
+    }
+  ],
+  "orphans": [],
+  "containers": [
+    {
+      "branch": "on-mac",
+      "name": "kunj-app-c1",
+      "id": "c1",
+      "state": "running",
+      "image": "i",
+      "createdAt": "2026-10-23T21:12:40Z",
+      "firewall": "default",
+      "status": "ok",
+      "ports": [],
+      "agent": {
+        "running": false,
+        "state": null
+      },
+      "workspace": {
+        "head": null,
+        "ahead": 0,
+        "dirty": false
+      },
+      "services": []
+    },
+    {
+      "branch": "on-box",
+      "name": "kunj-app-c2",
+      "id": "c2",
+      "state": "running",
+      "image": "i",
+      "createdAt": "2026-10-23T21:12:40Z",
+      "firewall": "default",
+      "status": "ok",
+      "ports": [],
+      "agent": {
+        "running": false,
+        "state": null
+      },
+      "workspace": {
+        "head": null,
+        "ahead": 0,
+        "dirty": false
+      },
+      "services": [],
+      "remote": "box"
+    },
+    {
+      "branch": "on-mac",
+      "name": "kunj-app-c9",
+      "id": "c9",
+      "state": "exited",
+      "image": "i",
+      "createdAt": "2026-10-23T21:12:40Z",
+      "firewall": "default",
+      "status": "stopped",
+      "ports": [],
+      "agent": {
+        "running": false,
+        "state": null
+      },
+      "workspace": {
+        "head": null,
+        "ahead": 0,
+        "dirty": false
+      },
+      "services": [],
+      "remote": "box"
+    }
+  ]
+}

@@ -62,6 +62,18 @@ about +30 MB and +0.4 s to first coloured code; `monaco.editor.defineTheme` is n
 Actions are planned in `ActionSpec.swift` as `terminal` (an action tab running `kunj <args>`), `run`
 (`--json`), `external`, `local` or `disabled(reason:)`, so an unavailable action shows why.
 
+# Remotes
+
+`kunj ct list --json` lists a repository's containers on this Mac and on every `kunj remote`; each
+container on a remote has `remote`, and `backends` says who was asked and who answered.
+`mergeEnvironments()` puts the remote on `Environment.remote` and the backends on `RepoEnvironments`.
+`Environment.remoteArguments` (`--remote <name>`, or `--remote local`) is appended to every `kunj ct`
+the app runs for a container: `ActionSpec` (start, stop, remove, rebuild), `TerminalSpec` (shell, agent
+and their `--kill`), `FileAccess` (file read and write) and `GitRunner` (`ct exec`, before the `--`).
+New session's "Run on" popup is `runOnChoices()`: this Mac and each remote, the default backend
+preselected, one that did not answer listed but not selectable; no popup when no remote is registered.
+A branch with a container on two backends shows one row (ids are repo, kind, branch).
+
 # Behaviour
 
 * Terminal and agent tabs reattach to kunj's tmux sessions, so agents survive an app relaunch. Hidden

@@ -91,6 +91,66 @@ private func responses(_ files: [String: String]) throws -> URL {
         #expect(s.success)
     }
 
+    /// `kunj ct list --json` of a fleet: this Mac, a remote that answered and one that did not.
+    @Test func containersSayWhichRemoteTheyAreOn() throws {
+        let fleet: ContainerListJson = try fixture("ct_list_fleet.json")
+        let r = mergeEnvironments(repo: alertd, worktrees: nil, containers: .success(fleet))
+        #expect(r.backend == .docker)
+        #expect(r.environments.map(\.branch) == ["on-box", "on-mac"])
+        let onBox = try #require(r.environments.first)
+        let onMac = try #require(r.environments.last)
+        #expect(onBox.remote == "box")
+        #expect(onMac.remote == nil)
+        #expect(onBox.remoteArguments == ["--remote", "box"])
+        #expect(onMac.remoteArguments == ["--remote", "local"])
+        #expect(onBox.metaLine == ["alertd-core / on-box", "container on box"])
+        #expect(onMac.metaLine == ["alertd-core / on-mac", "container"])
+        #expect(sidebarFolder(onBox) == "box")
+        #expect(sidebarFolder(onMac) == nil)
+        #expect(r.backends.map(\.remote) == [nil, "box", "gone"])
+        #expect(r.defaultRemote == nil)
+    }
+
+    @Test func oneRowPerBranchWhenItIsOnTwoBackends() throws {
+        let twice: ContainerListJson = try fixture("ct_list_fleet_twice.json")
+        let r = mergeEnvironments(repo: alertd, worktrees: nil, containers: .success(twice))
+        #expect(r.environments.map(\.branch) == ["on-box", "on-mac"])
+        #expect(r.environments.last?.remote == nil)
+        #expect(r.environments.last?.state == .running)
+    }
+
+    @Test func runOnChoicesForTheSheet() throws {
+        let listing: ContainerListJson = try fixture("ct_list_fleet.json")
+        let fleet = mergeEnvironments(repo: alertd, worktrees: nil, containers: .success(listing))
+        let (choices, selected) = runOnChoices(fleet)
+        #expect(choices == [
+            RunOnChoice(title: "This Mac", remote: "local", available: true),
+            RunOnChoice(title: "box", remote: "box", available: true),
+            RunOnChoice(title: "gone (not answering)", remote: "gone", available: false),
+        ])
+        #expect(selected == 0)
+
+        // The repository's default backend is preselected
+        var onBox = fleet
+        onBox.defaultRemote = "box"
+        #expect(runOnChoices(onBox).selected == 1)
+        // unless it does not answer: then the first that does
+        var onGone = fleet
+        onGone.defaultRemote = "gone"
+        #expect(runOnChoices(onGone).selected == 0)
+        var macDown = fleet
+        macDown.backends[0].available = false
+        #expect(runOnChoices(macDown).selected == 1)
+        #expect(runOnChoices(macDown).choices[0].title == "This Mac (not answering)")
+
+        // No remote registered, or an older kunj: no popup
+        let alone: ContainerListJson = try fixture("ct_list.json")
+        #expect(runOnChoices(mergeEnvironments(repo: alertd, worktrees: nil, containers: .success(alone))).choices.isEmpty)
+        var onlyMac = fleet
+        onlyMac.backends = [ContainerListJson.BackendInfo(kind: "docker", remote: nil, available: true)]
+        #expect(runOnChoices(onlyMac).choices.isEmpty)
+    }
+
     @Test func mergeWorktreesAndContainers() throws {
         let wt: WorktreeListJson = try fixture("worktree_list.json")
         let ct: ContainerListJson = try fixture("ct_list.json")

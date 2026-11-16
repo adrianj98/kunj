@@ -134,7 +134,10 @@ inside containers within about ten seconds.
   greyed out when there is none.
 - **New session** (⌘N) asks for a repository, a branch name, a base and whether you want a worktree
   or a container, and can start an agent in it straight away. It runs `kunj worktree add -c` or
-  `kunj ct start -c` in a tab and selects the new environment once it is ready.
+  `kunj ct start -c` in a tab and selects the new environment once it is ready. When you have added
+  remotes (`kunj remote add`), choosing Container shows **Run on**: This Mac or one of them. A
+  container on a remote names it in its row and header, and its tabs, actions and files go to that
+  machine; opening it in an editor is not available there.
 - **Clone from GitHub…** (⌥⌘N) lists the repositories your `gh` login can clone, newest push first,
   with a filter box. The ones you already have are greyed at the bottom. **Clone** runs
   `kunj repos clone` (see [Clone from GitHub](../worktrees/macos-app/#clone-from-github)) and the

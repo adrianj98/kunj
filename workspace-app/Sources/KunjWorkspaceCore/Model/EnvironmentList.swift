@@ -11,12 +11,45 @@ public struct RepoEnvironments: Equatable, Sendable {
     public var repo: RepoRef
     public var backend: BackendState
     public var environments: [Environment]
+    /// Where a new container can run: this Mac and each registered remote, as the last `ct list`
+    /// reported them. Empty when the listing failed or kunj lists one backend only.
+    public var backends: [ContainerListJson.BackendInfo]
+    /// The repository's default backend when it is a remote (`container.remote`); nil for this Mac
+    public var defaultRemote: String?
 
-    public init(repo: RepoRef, backend: BackendState, environments: [Environment]) {
+    public init(repo: RepoRef, backend: BackendState, environments: [Environment],
+                backends: [ContainerListJson.BackendInfo] = [], defaultRemote: String? = nil) {
         self.repo = repo
         self.backend = backend
         self.environments = environments
+        self.backends = backends
+        self.defaultRemote = defaultRemote
     }
+}
+
+/// One entry of the New session sheet's "Run on" popup.
+public struct RunOnChoice: Equatable, Sendable {
+    /// "This Mac" or the remote's name, with "(not answering)" when it did not answer the listing
+    public var title: String
+    /// What `--remote` gets: `local` or the remote's name
+    public var remote: String
+    public var available: Bool
+}
+
+/// The "Run on" popup for a repository: this Mac first, then its remotes, and the index to
+/// preselect (the default backend when it answers, else the first that does). Empty when no remote
+/// is registered, so the sheet shows no popup and `kunj ct start` picks the backend as before.
+public func runOnChoices(_ group: RepoEnvironments) -> (choices: [RunOnChoice], selected: Int) {
+    guard group.backends.contains(where: { $0.remote != nil }) else { return ([], 0) }
+    let choices = group.backends.map { b in
+        let name = b.remote ?? "This Mac"
+        return RunOnChoice(title: b.available ? name : "\(name) (not answering)",
+                           remote: b.remote ?? localRemote, available: b.available)
+    }
+    let wanted = group.defaultRemote ?? localRemote
+    let selected = choices.firstIndex { $0.remote == wanted && $0.available }
+        ?? choices.firstIndex { $0.available } ?? 0
+    return (choices, selected)
 }
 
 private func byBranch(_ a: Environment, _ b: Environment) -> Bool {
@@ -51,13 +84,25 @@ public func mergeEnvironments(
 
     var backend = BackendState.docker
     var boxes: [Environment] = []
+    var backends: [ContainerListJson.BackendInfo] = []
+    var defaultRemote: String?
     switch containers {
     case .failure(let error):
         backend = .unavailable(error.message)
     case .success(let list):
-        boxes = list.containers.map { c in
+        backends = list.backends ?? []
+        defaultRemote = list.backend.remote
+        // No backend answered for containers: none can be made, as when Docker is stopped
+        if !backends.isEmpty, !backends.contains(where: \.available) {
+            backend = .unavailable(backends.compactMap(\.message).first ?? "No container backend answered")
+        }
+        var seen = Set<String>()
+        boxes = list.containers.compactMap { c -> Environment? in
+            // One row per branch: the same branch on a second backend would share this row's id,
+            // its tabs and its saved layout, so only the first listed is shown
+            guard seen.insert(c.branch).inserted else { return nil }
             let running = c.state == "running"
-            return Environment(
+            var env = Environment(
                 id: environmentId(repo: repo.name, kind: .container, branch: c.branch), kind: .container,
                 repo: repo, branch: c.branch, path: nil, containerName: c.name,
                 state: running ? .running : .stopped,
@@ -67,9 +112,12 @@ public func mergeEnvironments(
                 ports: c.ports.map { PortInfo(container: $0.container, host: $0.host, kind: $0.kind, service: $0.service) },
                 services: c.services, createdAt: parseDate(c.createdAt), exists: true, isMain: false,
                 agentSessions: running ? c.agent.sessions : nil)
+            env.remote = c.remote
+            return env
         }.sorted(by: byBranch)
     }
-    return RepoEnvironments(repo: repo, backend: backend, environments: trees + boxes)
+    return RepoEnvironments(repo: repo, backend: backend, environments: trees + boxes,
+                            backends: backends, defaultRemote: defaultRemote)
 }
 
 func asCLIError(_ error: Error) -> KunjCLIError {

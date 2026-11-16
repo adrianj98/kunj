@@ -28,6 +28,8 @@ private func terminal(_ args: [String], cwd: String? = nil) -> ActionPlan {
 public func actionPlan(_ action: EnvAction, env: Environment, worktreeOfSameBranch: Environment?) -> ActionPlan {
     let branch = env.branch
     let isContainer = env.kind == .container
+    // Where the container is, so kunj acts on that backend without looking for it
+    let on = env.remoteArguments
     let containerOnly = ActionPlan.disabled(reason: "Only for a container")
     let worktreeOnly = ActionPlan.disabled(reason: "Only for a worktree")
     let missing = ActionPlan.disabled(reason: "The worktree directory is missing")
@@ -36,21 +38,24 @@ public func actionPlan(_ action: EnvAction, env: Environment, worktreeOfSameBran
     case .ctStart:
         guard isContainer else { return containerOnly }
         if env.state == .running { return .disabled(reason: "The container is running") }
-        return terminal(["ct", "start", branch])
+        return terminal(["ct", "start", branch] + on)
     case .ctStop:
         guard isContainer else { return containerOnly }
         if env.state != .running { return .disabled(reason: "The container is stopped") }
-        return .run(args: ["ct", "stop", branch])
+        return .run(args: ["ct", "stop", branch] + on)
     case .ctRemove(let force):
         guard isContainer else { return containerOnly }
-        return terminal(["ct", "remove", branch] + (force ? ["--force"] : []))
+        return terminal(["ct", "remove", branch] + (force ? ["--force"] : []) + on)
     case .ctRebuild:
         guard isContainer else { return containerOnly }
-        return terminal(["ct", "start", branch, "--rebuild"])
+        return terminal(["ct", "start", branch, "--rebuild"] + on)
     case .ctOpen:
         // `ct open` resumes a stopped container itself.
         guard isContainer else { return containerOnly }
-        return .run(args: ["ct", "open", branch])
+        if let remote = env.remote {
+            return .disabled(reason: "An editor cannot attach to a container on \(remote); use a shell tab")
+        }
+        return .run(args: ["ct", "open", branch] + on)
     case .worktreeOpen:
         guard !isContainer, let path = env.path else { return worktreeOnly }
         guard env.exists else { return missing }
@@ -96,13 +101,18 @@ public struct NewSessionRequest: Equatable, Sendable {
     public var base: String?
     public var kind: EnvironmentKind
     public var startAgent: Bool
+    /// A container's backend from the sheet's "Run on" popup: `local` or a remote's name. nil (no
+    /// popup, or a worktree) leaves the choice to kunj: `container.remote`, else this Mac.
+    public var remote: String?
 
-    public init(repo: RepoRef, branch: String, base: String?, kind: EnvironmentKind, startAgent: Bool) {
+    public init(repo: RepoRef, branch: String, base: String?, kind: EnvironmentKind, startAgent: Bool,
+                remote: String? = nil) {
         self.repo = repo
         self.branch = branch
         self.base = base
         self.kind = kind
         self.startAgent = startAgent
+        self.remote = remote
     }
 }
 
@@ -114,7 +124,7 @@ public func newSessionPlan(_ r: NewSessionRequest) -> ActionPlan {
     let extra = base.isEmpty ? [] : ["--base", base]
     switch r.kind {
     case .worktree: return terminal(["worktree", "add", r.branch, "-c"] + extra)
-    case .container: return terminal(["ct", "start", r.branch, "-c"] + extra)
+    case .container: return terminal(["ct", "start", r.branch, "-c"] + extra + (r.remote.map { ["--remote", $0] } ?? []))
     }
 }
 

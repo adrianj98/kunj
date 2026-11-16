@@ -94,16 +94,16 @@ import Testing
         let calls = try String(contentsOf: callLog, encoding: .utf8).split(separator: "\n").map {
             String($0.split(separator: "\t", maxSplits: 1)[1])
         }
-        #expect(calls == ["ct file read feature/x src/a.ts --json", "ct file write feature/x src/a.ts --json"])
+        #expect(calls == ["ct file read feature/x src/a.ts --remote local --json", "ct file write feature/x src/a.ts --remote local --json"])
         await #expect(throws: FileAccessError.badPath) { _ = try await files.read(env: env, path: "../x") }
     }
 
     @Test func containerErrorsMapToFileAccessErrors() async throws {
         let dir = try tempDirectory()
         try #"{"error":{"code":"not-found","message":"No such file: /workspace/gone.ts"}}"#
-            .write(to: dir.appendingPathComponent("ct_file_read_feature-x_gone.ts.json"), atomically: true, encoding: .utf8)
+            .write(to: dir.appendingPathComponent("ct_file_read_feature-x_gone.ts_remote_local.json"), atomically: true, encoding: .utf8)
         try #"{"error":{"code":"bad-path","message":"outside /workspace"}}"#
-            .write(to: dir.appendingPathComponent("ct_file_read_feature-x_link.json"), atomically: true, encoding: .utf8)
+            .write(to: dir.appendingPathComponent("ct_file_read_feature-x_link_remote_local.json"), atomically: true, encoding: .utf8)
         let files = FileAccess(cli: fakeKunjCLI(environment: ["FAKE_KUNJ_RESPONSES": dir.path]))
         let env = diffTestEnvironment(kind: .container, branch: "feature/x", path: dir.path)
         await #expect(throws: FileAccessError.notFound) { _ = try await files.read(env: env, path: "gone.ts") }

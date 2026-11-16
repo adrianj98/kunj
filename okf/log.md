@@ -105,3 +105,4 @@
 - Remote terminals: first size set by `ConsoleSize`, a retried first resize and a late `resize` frame applied once the pty exists (was sometimes 80x24); a lost exec says the container stopped or Docker restarted. Page updated: containers/remotes.md.
 - Services: `warnStoppedServices()` warns at the end of a start or resume about a service that is not running. Page updated: containers/services.md.
 - Remote terminals: recorded the known gap that a closed remote terminal's process stays in the container. Page updated: containers/remotes.md.
+- `kunj ct list` lists the fleet (this machine and every remote): `remote` per container, `backends`. Workspace app: "Run on" in New session, `Environment.remoteArguments` on every container command. Pages updated: containers/remotes.md, apps/workspace-app.md.

@@ -10,9 +10,11 @@ Mac's Docker or any remote in `~/.kunj/remotes.json`, picked when the container 
 | Part | State |
 | --- | --- |
 | Spec | Written 2026-10-25 |
-| CLI: the fleet, `ct list` across backends, branch lookup, `ambiguous-remote` | Not started |
-| `kunj events` and `worktree list --containers` across backends | Not started |
-| Workspace app: remote picker in New session, remote on rows, actions pass `--remote` | Not started |
+| CLI: `ct list` across the fleet (`remote` per container, `backends`), `worktree list --containers` passes `backends` on | Shipped 2026-11-16 (`collectList()` in src/commands/container.ts) |
+| CLI: branch lookup (`locate()`), `ambiguous-remote`, `remote-unreachable` on start | Not started: a `kunj ct <verb> <branch>` typed without `--remote` still uses the default backend only |
+| `kunj events` across backends | Not started: the app hears about a non-default remote's containers on its next refresh, not from an event |
+| Workspace app: "Run on" in New session, remote on rows, every container command passes `--remote` | Shipped 2026-11-16 |
+| Workspace app: grey the rows of a remote that does not answer (kept from the last listing) | Not started: they leave the list until it answers |
 
 ## Decisions
 
@@ -29,6 +31,10 @@ remote in `~/.kunj/remotes.json`. Its **default** backend is the one `selectBack
 `--remote`, else `container.remote`, else this Mac. Registered remotes that no repository uses are still
 asked: a remote is cheap to remove (`kunj remote remove`) and that keeps "where is it" free of state.
 
+As built, the listing does this itself in `collectList()` (src/commands/container.ts): this machine's
+Docker is given the time it takes, as before, and each remote is raced against `FLEET_OPEN_TIMEOUT_MS`
+(5 s to open: an SSH tunnel, `/v1/info`) and `FLEET_LIST_TIMEOUT_MS` (8 s to list, under
+`worktree list --containers`' own 10 s). A separate `fleet()` module comes with `locate()`. The plan was:
 `fleet()` (src/lib/container/fleet.ts) opens every member in parallel, each raced against
 `LOOKUP_TIMEOUT_MS` (5 s; an SSH tunnel that has not come up by then counts as unreachable), and returns
 `{ name, selection | error }` per member. Tunnels opened for one command are closed by
@@ -53,6 +59,13 @@ Text output gains a REMOTE column when any member is a remote; an unreachable on
 
 `orphans`, `secretsChanged` and the snapshot staleness check are per member, as each machine has its own
 objects. The same branch on two members is listed twice (one row each).
+
+**One daemon, several names (added 2026-11-16).** A remote may be a `kunj serve` on this same Docker
+(a local test server), and two remote names may point at one box. Their listings are the same
+containers, so a container **id** is listed once, under the first member that has it (this machine,
+then remotes by name); orphans are deduplicated the same way. When no member answers, the default
+backend's error is thrown, as a single-backend listing always did. The text listing marks a remote's
+rows `[on <name>]` (no REMOTE column) and prints one line per member that did not answer.
 
 ## Branch commands
 
@@ -91,14 +104,26 @@ retried every 10 s like the local daemon is today. `container` events carry `rem
 
 ## Workspace app
 
-- **New session:** under Container, a "Run on" popup: "This Mac" and each name from
-  `kunj remote list --json`, preselected to the default backend from the repository's
-  `ct list --json` (`backend.remote`). It passes `--remote <name>` (or `--remote local`) to
-  `kunj ct start -c`. Container stays disabled only when no member of the fleet answers.
-- **Rows:** a container on a remote shows the remote's name in its meta line. A remote that does not
-  answer greys its rows (kept from the last listing) instead of dropping them.
-- **Actions and tabs:** every `kunj ct …` the app runs for a container (shell and agent tabs, start,
-  stop, remove, file read and write) passes `--remote <row.remote ?? local>`, so it never locates.
+- **New session:** under Container, a "Run on" popup: "This Mac" and each remote, preselected to the
+  default backend from the repository's `ct list --json` (`backend.remote`) when it answers, else the
+  first that does. The names come from that listing's `backends` (as built: no `kunj remote list`
+  call, and it knows who answers), so a remote that did not answer is listed "(not answering)" and
+  cannot be picked. The popup shows only for a container and only when a remote is registered. It
+  passes `--remote <name>` (or `--remote local`) to `kunj ct start -c`; with no popup nothing is
+  passed. Container stays disabled only when no member of the fleet answers. `runOnChoices()` in
+  `EnvironmentList.swift`.
+- **Rows:** a container on a remote shows the remote's name after its icon in the sidebar row and
+  `container on <name>` in the header's meta line. A remote that does not answer greys its rows
+  (kept from the last listing) instead of dropping them: **not built**, the rows leave the list.
+- **One row per branch (as built):** an environment's id, tabs and saved layout are keyed by
+  repository, kind and branch, so a branch with a container on two backends shows the first listed
+  only. The CLI lists both.
+- `ct open` is disabled for a container on a remote, with the reason (the CLI refuses it too).
+- **Actions and tabs:** every `kunj ct …` the app runs for a container (shell and agent tabs and
+  their `--kill`, start, stop, remove, rebuild, file read and write, `ct exec` for the Changes column
+  and the file list) passes `--remote <row.remote ?? local>` (`Environment.remoteArguments`), so it
+  never locates. `ct prune`, `kunj search --in containers` and `kunj sessions --containers` are not
+  per container and still use the default backend.
 - `MIN_KUNJ_VERSION` does not change: `--remote local` exists since remote containers shipped, and the
   new JSON fields are optional.
 

@@ -51,6 +51,9 @@ public struct RepoRef: Equatable, Hashable, Sendable {
     }
 }
 
+/// The `--remote` value that means this Mac's Docker, whatever `container.remote` says.
+public let localRemote = "local"
+
 /// `"<repo>|<kind>|<branch>"`: a worktree and a container on one branch are two environments, and
 /// a branch may contain `/`, so the branch is last and the id is never split on it.
 public func environmentId(repo: String, kind: EnvironmentKind, branch: String) -> String {
@@ -62,6 +65,8 @@ public func environmentId(repo: String, kind: EnvironmentKind, branch: String) -
 /// path, or a folder named like the branch (the same letters and digits, any case), which says
 /// nothing the branch does not.
 public func sidebarFolder(_ env: Environment) -> String? {
+    // A container on a remote names the remote there: which machine it is on is what its row adds
+    if env.kind == .container { return env.remote }
     guard env.kind == .worktree, let path = env.path else { return nil }
     let name = URL(fileURLWithPath: path).lastPathComponent
     guard !name.isEmpty, name != "/", alphanumerics(name) != alphanumerics(env.branch) else { return nil }
@@ -109,6 +114,15 @@ public struct Environment: Equatable, Identifiable, Sendable {
     public var createdAt: Date?
     public var exists: Bool
     public var isMain: Bool
+    /// The `kunj serve` remote a container is on (a name from `kunj remote add`); nil on this Mac's
+    /// Docker and for a worktree
+    public var remote: String? = nil
+
+    /// What every `kunj ct …` for this container carries so kunj never has to look for it:
+    /// `--remote <name>`, or `--remote local` on this Mac. Empty for a worktree.
+    public var remoteArguments: [String] {
+        kind == .container ? ["--remote", remote ?? localRemote] : []
+    }
 
     public init(id: String, kind: EnvironmentKind, repo: RepoRef, branch: String, path: String?,
                 containerName: String?, state: EnvState, agent: AgentActivity, agentSession: String?,
@@ -172,7 +186,7 @@ public struct Environment: Equatable, Identifiable, Sendable {
 
     /// The header's mono meta line: `repo / branch`, kind, ahead/behind, PR, ports (empty parts left out).
     public var metaLine: [String] {
-        var parts = ["\(repo.name) / \(branch)", kind.rawValue]
+        var parts = ["\(repo.name) / \(branch)", remote.map { "\(kind.rawValue) on \($0)" } ?? kind.rawValue]
         var counts: [String] = []
         if let ahead, ahead > 0 { counts.append("↑\(ahead)") }
         if let behind, behind > 0 { counts.append("↓\(behind)") }

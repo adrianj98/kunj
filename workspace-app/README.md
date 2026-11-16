@@ -79,6 +79,7 @@ Launch arguments (after the executable):
 | --- | --- |
 | `--demo` | Shows the mockup's environments, tabs and diff (`Demo/`) instead of kunj's, in the warm theme with the Changes column open; nothing is read from or written to `workspace.json` |
 | `--screenshot <png>` | Renders the window after its first layout (waiting for Monaco's page, at most 8 s), writes the PNG (sRGB, 2x) and quits. Compare a `--demo` render with `docs/workspace-app/design/mockups/warm.png` |
+| `--new-session <worktree\|container>` | Opens the New session sheet on that kind; with `--screenshot` the PNG is of the sheet. With `--demo`, alertd-core has this Mac and two remotes (one not answering), so `container` shows the "Run on" popup. |
 | `--theme warm\|light\|graphite` (or `-theme`) | The theme for this run, not saved |
 | `--changes` / `--no-changes` | The Changes column open or closed for this run, not saved |
 | `--files` / `--no-files` | The Files column open or closed for this run, not saved (`--demo` leaves it closed unless `--files`) |
