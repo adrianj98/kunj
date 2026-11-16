@@ -82,6 +82,14 @@ never confused with it (see [naming and labels](/containers/naming-and-labels.md
 Created services are in the start's rollback list. With no Docker-in-Docker and no services, a start
 prints `composeHint()` when the tree has a compose file (see [Docker-in-Docker](/containers/docker-in-docker.md)).
 
+# Stopped after start
+
+A service without a health check is only started, so one that exits a moment later (a JVM that cannot
+get its heap) used to be listed as started. `warnStoppedServices()` (services.ts) makes one listing once
+the branch container is up, at the end of a new start and of a resume that brought the container up,
+and warns `Service <name> is not running (<state>); see kunj ct logs <branch> <name>`. A failed listing
+says nothing: the start has already succeeded.
+
 # Commands
 
 | Command | Effect |

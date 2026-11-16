@@ -35,6 +35,8 @@ export interface ServeCommandDeps {
   /** Called once listening; `stop` ends the server (tests; the default waits for SIGINT/SIGTERM) */
   onListening?: (address: { host: string; port: number }, stop: () => void) => void;
   stderr?: (line: string) => void;
+  /** How long Docker may take to answer before the "Waiting for Docker" line (default 5000; tests) */
+  slowDockerMs?: number;
 }
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost|::1|\[::1\])$/;
@@ -144,7 +146,14 @@ export class ServeCommand extends BaseCommand {
     const config = await loadResolvedConfig(process.cwd()).catch(() => ({}) as Awaited<ReturnType<typeof loadResolvedConfig>>);
     const dockerContext = opts.context || config.container?.dockerContext || undefined;
     const backend = await (this.deps.backend ?? (async ctx => new (await import('../lib/container/docker')).LocalDockerBackend({ context: ctx })))(dockerContext);
-    const engine = await backend.info(); // fails early, with docker's own message, when the daemon is down
+    // A busy Docker Desktop answers after tens of seconds, or never: without this line the command
+    // sits silent with nothing listening, which reads as a hang in kunj
+    const waiting = setTimeout(
+      () => stderr(chalk.gray('Waiting for Docker to answer (docker info)… not listening yet. If this stays, Docker is busy or stuck: try docker info yourself.')),
+      this.deps.slowDockerMs ?? 5000,
+    );
+    // fails early, with docker's own message, when the daemon is down
+    const engine = await backend.info().finally(() => clearTimeout(waiting));
 
     const { token, created } = loadOrCreateToken(this.tokenFile());
     const { createServeServer } = await import('../lib/serve/server');

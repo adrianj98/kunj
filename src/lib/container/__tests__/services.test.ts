@@ -21,8 +21,7 @@ import {
   servicesFromCompose,
   splitWords,
   startServices,
-  waitHealthy,
-} from '../services';
+  waitHealthy, warnStoppedServices } from '../services';
 import { parseBlueprint } from '../blueprint';
 
 // Fixture repositories and subprocesses: slow when the machine is busy
@@ -342,6 +341,26 @@ describe('startServices', () => {
     expect(warnings).toEqual(['Service db did not pass its health check within 0.06s; continuing']);
     // The start goes on
     expect(b.callsOf('run')).toHaveLength(2);
+  });
+
+  it('warnStoppedServices names each service that is not running at the end of a start, with where its logs are', async () => {
+    const b = testBackend();
+    b.existing = [svcInfo('db'), svcInfo('pulsar', { state: 'exited' }), svcInfo('cache', { state: 'created' })];
+    const warnings: string[] = [];
+    await warnStoppedServices(b, names, { repoId: REPO, branch: BRANCH }, m => warnings.push(m));
+    expect(warnings).toEqual([
+      `Service cache is not running (created); see kunj ct logs ${BRANCH} cache`,
+      `Service pulsar is not running (exited); see kunj ct logs ${BRANCH} pulsar`,
+    ]);
+    expect(b.methods()).toEqual(['list']);
+
+    // All up: nothing said. A listing that fails is not worth failing a finished start
+    const ok = testBackend();
+    ok.existing = [svcInfo('db')];
+    await warnStoppedServices(ok, names, { repoId: REPO, branch: BRANCH }, m => warnings.push(m));
+    ok.failOn = 'list';
+    await warnStoppedServices(ok, names, { repoId: REPO, branch: BRANCH }, m => warnings.push(m));
+    expect(warnings).toHaveLength(2);
   });
 
   it('a service that is not running is a warning, not a wait', async () => {

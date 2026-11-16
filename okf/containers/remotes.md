@@ -50,3 +50,20 @@ the server's `frameWriter`. A stream's chunk has no size limit (a tar stream yie
 once), and both ends refuse a frame over their 16 MB `maxPayload`. `attachWebSockets` listens for
 `error` on every socket, so a refused frame or a reset connection ends that one stream and is logged;
 it never ends the server.
+
+# Terminal size and a lost terminal
+
+A TTY exec (`shell`, `attach`, `agent`) goes through `execTty()` in docker.ts. The pty's first size is
+set by `ConsoleSize` in the create call and by a resize after the start, retried up to
+`FIRST_RESIZE_TRIES` (5) times while the daemon refuses it. In `serveExec` (streams.ts) the request and
+the first `resize` are two frames: a resize that lands while the exec is being created is applied once
+the pty exists. Before this a terminal sometimes stayed 80x24 (1 in 10 on a loaded Docker Desktop).
+When the exec is unknown at the end (Docker restarted, the container stopped) `wait()` rejects with
+`The terminal ended because the container stopped or Docker restarted…`, not the daemon's exec id.
+
+# Starting the server
+
+`kunj serve` calls `backend.info()` (`docker info`) before it listens, so a daemon that is down fails
+early. A busy Docker Desktop can take tens of seconds or never answer: after `slowDockerMs` (5 s,
+`ServeCommandDeps`) the command prints one `Waiting for Docker to answer…` line on stderr, and clears
+the timer when `info()` settles. Nothing listens until then.

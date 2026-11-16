@@ -195,17 +195,20 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
 
   if (request.tty) {
     if (!opts.backend.execTty) throw new ServeError(400, 'bad-request', 'this server cannot run a TTY exec');
+    const asked = { cols: size?.cols ?? 80, rows: size?.rows ?? 24 };
     tty = await opts.backend.execTty(id, request.cmd, {
       user: request.user,
       workdir: request.workdir,
       env: request.env,
-      cols: size?.cols ?? 80,
-      rows: size?.rows ?? 24,
+      ...asked,
     });
     if (closed) {
       tty.close();
       return;
     }
+    // A resize frame that landed while the exec was being created found no pty to resize: apply it
+    // now, or the terminal keeps the size the call was made with (80x24 when none had arrived yet)
+    if (size && (size.cols !== asked.cols || size.rows !== asked.rows)) tty.resize(size.cols, size.rows).catch(() => undefined);
     stdin.pipe(tty.stdin);
     // pipe() ends `stdout` when the pty's stream ends, after every queued byte was sent; the exit
     // frame waits for that, else a burst of output before `exit` would be cut (a pty stream that

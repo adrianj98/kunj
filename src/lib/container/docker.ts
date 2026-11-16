@@ -231,6 +231,9 @@ export function parseEngineEndpoint(hostUrl: string): EngineEndpoint {
   );
 }
 
+/** How often execTty asks for the terminal's first size before it gives up (20, 40, 80, 160 ms apart) */
+const FIRST_RESIZE_TRIES = 5;
+
 export class LocalDockerBackend implements ContainerBackend {
   readonly features = { localPorts: true, editorAttach: true, dockerInDocker: ['sysbox', 'privileged'] as Array<'sysbox' | 'privileged'> };
   private readonly context?: string;
@@ -585,6 +588,8 @@ export class LocalDockerBackend implements ContainerBackend {
       AttachStdout: true,
       AttachStderr: true,
       Tty: true,
+      // The pty starts at the client's size (API 1.42+; an older daemon ignores the field)
+      ConsoleSize: [opts.rows, opts.cols],
       Cmd: cmd,
       ...(opts.user ? { User: opts.user } : {}),
       ...(opts.workdir ? { WorkingDir: opts.workdir } : {}),
@@ -635,7 +640,11 @@ export class LocalDockerBackend implements ContainerBackend {
           reject(new ContainerError('docker exec failed: the process did not report its exit code'));
         } catch (err) {
           if (closed) resolve(129);
-          else reject(err);
+          // The daemon no longer knows the exec (it restarted, or the container went away), or is not
+          // there at all: its own message is an exec id, which tells the user nothing
+          else if (/No such exec instance|No such container|ECONNREFUSED|ECONNRESET|ENOENT|EPIPE/.test((err as Error).message)) {
+            reject(new ContainerError('The terminal ended because the container stopped or Docker restarted. Start it again with kunj ct start, then reattach.'));
+          } else reject(err);
         }
       };
       socket.on('end', finish);
@@ -645,7 +654,16 @@ export class LocalDockerBackend implements ContainerBackend {
       socket.on('error', err => (closed ? undefined : reject(new ContainerError(`docker exec failed: ${err.message}`))));
     });
     exit.catch(() => undefined);
-    await this.engineCall('POST', `/exec/${execId}/resize?h=${opts.rows}&w=${opts.cols}`).catch(() => undefined);
+    // The daemon refuses a resize until the exec's pty exists, which on a busy daemon is a moment after
+    // the hijack: one ignored failure left the terminal at 80x24. The docker CLI retries for the same reason.
+    for (let attempt = 0; attempt < FIRST_RESIZE_TRIES; attempt++) {
+      const ok = await this.engineCall('POST', `/exec/${execId}/resize?h=${opts.rows}&w=${opts.cols}`).then(
+        () => true,
+        () => false,
+      );
+      if (ok || closed || finishing) break;
+      if (attempt < FIRST_RESIZE_TRIES - 1) await new Promise(r => setTimeout(r, 20 * 2 ** attempt));
+    }
 
     return {
       stdin: socket,

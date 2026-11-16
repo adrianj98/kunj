@@ -387,6 +387,23 @@ export function serviceRemoval(found: ContainerInfo[], keepVolumes: boolean): { 
 // ---------------------------------------------------------------------------------------------
 // Start
 
+/**
+ * Says which services are not running once the branch container is up. A service without a health
+ * check is only started, so one that dies a moment later (a JVM that cannot get its heap) would
+ * otherwise be listed as started. One listing; a failed listing says nothing.
+ */
+export async function warnStoppedServices(backend: ContainerBackend, names: ContainerNames, owner: ServiceOwner, warn: (msg: string) => void): Promise<void> {
+  let states: ServiceState[];
+  try {
+    states = await serviceStates(backend, names, owner);
+  } catch {
+    return;
+  }
+  for (const s of states) {
+    if (s.state !== 'running') warn(`Service ${s.name} is not running (${s.state}); see kunj ct logs ${owner.branch} ${s.name}`);
+  }
+}
+
 export interface ServiceStartOptions {
   warn: (msg: string) => void;
   timeoutMs?: number;
