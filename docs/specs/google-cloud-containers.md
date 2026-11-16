@@ -236,6 +236,7 @@ pages before quoting them.
 | e2-standard-4 (4 vCPU, 16 GB), on demand | about $0.13 per hour, about $98 a month always on |
 | e2-standard-4, Spot | about $0.08 per hour |
 | n2d-standard-4 (faster, AMD) | about $0.17 per hour |
+| 64 GB of memory: e2-highmem-8 (8 vCPU) about $0.36 per hour (about $264 a month always on, Spot about $0.22); e2-standard-16 (16 vCPU) about $0.54; n2d-highmem-8 about $0.46; n2-highmem-8 about $0.52 | computed from Google's per-vCPU and per-GB rates for us-central1, cross-checked against the e2-standard-4 figure |
 | pd-balanced disk | about $0.10 per GB-month (200 GB: about $20 a month, also while the VM is stopped) |
 | Cloud NAT gateway | hourly fee plus per-GB processed; small for one VM |
 | Cloud Workstations | $0.05 per vCPU-hour management fee while running, plus $0.20 per hour per cluster, plus VM and disk |
