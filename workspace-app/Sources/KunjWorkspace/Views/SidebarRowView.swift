@@ -59,14 +59,15 @@ final class SidebarRowView: NSView {
             theme.color(\.raised, alpha: 0.5).setFill(); box.fill()
         }
 
-        let padH = 1 + DesignTokens.Layout.sidebarRowPaddingH
+        // CGFloat, not the token's Double: mixed arithmetic is ambiguous to older Swift compilers
+        let padH: CGFloat = 1 + DesignTokens.Layout.sidebarRowPaddingH
         let line1: CGFloat = 17, line2: CGFloat = 37
         theme.dotColor(environment.dot).setFill()
         NSBezierPath(ovalIn: NSRect(x: padH, y: line1 - 3.5, width: 7, height: 7)).fill()
 
-        let textX = padH + 15
+        let textX: CGFloat = padH + 15
         let timeFont = Theme.mono(DesignTokens.TypeScale.caption)
-        var timeWidth = draw(time, font: timeFont, color: theme.color(\.muted), rightEdge: bounds.maxX - padH, midY: line1)
+        var timeWidth: CGFloat = draw(time, font: timeFont, color: theme.color(\.muted), rightEdge: bounds.maxX - padH, midY: line1)
         if environment.pullRequest?.state == "merged" {
             let size: CGFloat = 12
             // A typed constant: older Swift compilers find `- (… ? 6 : 0) -` ambiguous
@@ -75,9 +76,11 @@ final class SidebarRowView: NSView {
             Icon.merged.draw(in: NSRect(x: x, y: line1 - size / 2, width: size, height: size), color: Self.mergedColor)
             timeWidth += size + gap
         }
+        let branchRight: CGFloat = bounds.maxX - padH - timeWidth
+        let branchWidth: CGFloat = branchRight - 8 - textX
         draw(environment.branch, font: Theme.sans(DesignTokens.TypeScale.body, weight: .medium),
              color: theme.color(selected ? \.text : \.text2),
-             in: textX, width: bounds.maxX - padH - timeWidth - 8 - textX, midY: line1)
+             in: textX, width: branchWidth, midY: line1)
 
         let lineColor = theme.color(selected ? \.text2 : \.muted)
         let caption = DesignTokens.TypeScale.caption
