@@ -25,11 +25,19 @@ the new piece is the provider.
 | `kunj ct` | select-backend.ts | With `machine.provider` set, the branch's machine is resolved and a `RemoteKunjBackend` opened over its tunnel; container lifecycle unchanged |
 | `kunj machine` | src/commands/machine.ts | list/status/suspend/resume/stop/start/delete/prune/image/providers |
 
+# Blueprint to image
+
+One hash, three layers: the blueprint snapshot `kunj-blueprint-<repo>:<hash>` (a Docker image per daemon, shipped
+today), the golden machine image labelled `kunj.blueprint=<hash>` that carries it (built by `kunj machine image
+build` from a builder machine), and an optional registry copy (`machine.registry`) an older machine pulls instead of
+rebuilding. A new machine starts a branch by copying `/workspace` from the snapshot, as a second branch does locally.
+
 # Rules
 
 Cloud labels (`kunj.repo`, `kunj.branch`, `kunj.version`, `kunj.role=machine`) are the only machine state;
 machines are named like their container. Listings never wake a machine, acting commands do (`--no-wake`).
-Idle is decided on the machine from agent state (`kunj serve --idle-after`). The serve token is paired once
+Idle is decided on the machine from agent state and the machine suspends itself (`kunj serve --idle-after` runs
+the provider's idle command under a credential that can do only that); the laptop resumes it. The serve token is paired once
 after boot over an authenticated tunnel (`POST /v1/pair`), never written to metadata. No secrets reach the
 provider. A golden image (`kunj machine image build`) carries Docker, Sysbox, kunj, the images, the blueprint
 snapshot and the generic cache volume (`container.caches`, `KUNJ_CACHE_DIR`).

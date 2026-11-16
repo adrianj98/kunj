@@ -1,5 +1,10 @@
 # Directory Update Log
 
+## 2026-11-16 (cloud machines follow-ups)
+* `containers/cloud-machines.md`: the blueprint snapshot, golden image and registry copy share one hash; the
+  machine suspends itself. CLAUDE.md and docs/specs/container-system.md (status table, roadmap, decisions) now
+  point at the design.
+
 ## 2026-11-16 (cloud machines design)
 * **New page**: `containers/cloud-machines.md` for docs/specs/cloud-machines.md: a VM per session from a
   pluggable `MachineProvider`, Google Cloud first. `containers/google-cloud.md` trimmed to the provider

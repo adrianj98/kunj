@@ -28,7 +28,8 @@ the host).*
 | Host MCP bridge (a browser on the Mac for the agent) | Shipped | [container-phase-2.md](container-phase-2.md) |
 | Workspace IDE (phase 3) | CLI contract shipped; app proposed | [workspace-ide.md](workspace-ide.md) |
 | Containers in the VS Code extension and the macOS app | In progress | [containers-in-apps.md](containers-in-apps.md) |
-| Remote Docker host (`kunj serve`, `RemoteKunjBackend`) | Spec written | [remote-containers.md](remote-containers.md) |
+| Remote Docker host (`kunj serve`, `RemoteKunjBackend`) | Shipped | [remote-containers.md](remote-containers.md) |
+| Cloud machines: a VM per branch session from a pluggable `MachineProvider` (Google Cloud first) | Spec written | [cloud-machines.md](cloud-machines.md), [google-cloud-containers.md](google-cloud-containers.md) |
 | Secret manager (`kunj secret`, `kunj run`, delivery to containers and worktrees) | Shipped | [Secrets](#secrets) below |
 
 ## Rules every part follows
@@ -264,12 +265,21 @@ origin is the only git channel, it needs no new git or file transfer design: `fo
 exec WebSocket, and editor attach goes through Remote-SSH (`features.editorAttach` false until then).
 TLS and multi-user get their own spec.
 
+**Cloud machines:** [cloud-machines.md](cloud-machines.md). On top of `kunj serve`, one small VM per branch
+session, created on the first `ct start`, suspended by itself when its agent goes quiet, resumed by the next
+acting command, deleted with the branch, through a pluggable `MachineProvider` whose first implementation is
+Google Cloud ([google-cloud-containers.md](google-cloud-containers.md)). Cloud labels are the only machine state;
+a golden image keyed by the blueprint hash carries the snapshot and a generic cache volume (`container.caches`).
+
 ## Decisions
 
 - **2026-10-21** Containers are independent of worktrees: a branch may have either, both or neither.
 - **2026-10-21** The remote backend is a later addition, not a redesign: no shared filesystem assumed.
 - **2026-10-23** Phase order: phase 2 (services, editor, auto forward, prune, Docker-in-Docker, MCP
   bridge) before the workspace IDE; `forward --auto` moved from the UI phase into phase 2.
+- **2026-11-16** Cloud: a small VM per session rather than one shared VM, Kubernetes or a managed runtime
+  (the firewall needs the host kernel's netfilter, snapshots need `commit`), behind a pluggable provider so no
+  cloud is baked in ([cloud-machines.md](cloud-machines.md)).
 - **2026-10-23** Secrets: a local encrypted vault in `~/.kunj` (AES-256-GCM, key in the OS keychain),
   explicit targets per secret, delivery by env or rendered file, `.env` import. No SOPS or committed
   secret files (some repos cannot hold them); no team sharing or external vaults in v1.

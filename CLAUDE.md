@@ -472,6 +472,12 @@ remote, in parallel: `remote` on each container, `backends` with who answered, a
 `collectList()`, docs/specs/multi-remote-containers.md; branch commands still use the default backend only); detached forwarders and bridges get `--remote`. Tests: `npm run test:remote`
 runs the container suites over the wire (`testBackend()` in remote-harness.ts; `itLocal` for the few that
 compare stream objects); `remote.docker.test.ts` needs a real daemon.
+Designed, not built: **cloud machines** (docs/specs/cloud-machines.md), a small VM per branch session running
+Docker and `kunj serve`, created, suspended, resumed and deleted through a pluggable `MachineProvider`
+(src/lib/machines/, Google Cloud first; notes in docs/specs/google-cloud-containers.md). Cloud labels are the only
+machine state, listings never wake a machine, acting commands do, the machine suspends itself from
+`kunj serve --idle-after`, the serve token is paired once over the provider's authenticated tunnel, and a golden
+image keyed by the blueprint hash carries the snapshot and the generic `container.caches` volume.
 
 ## Repository Registry & macOS App
 
