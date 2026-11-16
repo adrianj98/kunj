@@ -201,6 +201,59 @@ describe('RemoteKunjBackend: streams', () => {
   });
 
   describe('TTY tail', () => {
+    it('applies a resize that arrives while the exec is being created, once the pty exists', async () => {
+      // The pty is created with the size known when the call was made; a resize frame that lands
+      // during the call used to be stored and never applied, leaving the terminal at the old size
+      const original = h.fake.execTty.bind(h.fake);
+      let release!: () => void;
+      const gate = new Promise<void>(r => (release = r));
+      let creating!: () => void;
+      const called = new Promise<void>(r => (creating = r));
+      h.fake.execTty = async (id, cmd, opts) => {
+        creating();
+        await gate;
+        return original(id, cmd, opts);
+      };
+      const url = `ws://127.0.0.1:${h.port}/v1/containers/kunj-r-b-1/exec`;
+      const ws = new WebSocket(url, { headers: { authorization: `Bearer ${HARNESS_TOKEN}` } });
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', () => resolve());
+        ws.once('error', reject);
+      });
+      ws.send(JSON.stringify({ cmd: ['sh'], tty: true, stdin: true }));
+      await called;
+      ws.send(JSON.stringify({ resize: { cols: 170, rows: 45 } }));
+      await new Promise(r => setTimeout(r, 50));
+      release();
+      await new Promise(r => setTimeout(r, 100));
+      const session = h.fake.ttySessions[0];
+      expect(session.opts).toMatchObject({ cols: 80, rows: 24 });
+      expect(session.resizes).toEqual([{ cols: 170, rows: 45 }]);
+      ws.close();
+      await new Promise(r => setTimeout(r, 50));
+    });
+
+    it('ends at the size the client sent with the request, by the create or by one resize, never both', async () => {
+      // The request and the first resize are two frames: which the server sees first when it creates
+      // the pty is a race, and either way the pty must end at the client's size
+      const url = `ws://127.0.0.1:${h.port}/v1/containers/kunj-r-b-1/exec`;
+      const ws = new WebSocket(url, { headers: { authorization: `Bearer ${HARNESS_TOKEN}` } });
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', () => resolve());
+        ws.once('error', reject);
+      });
+      ws.send(JSON.stringify({ cmd: ['sh'], tty: true, stdin: true }));
+      ws.send(JSON.stringify({ resize: { cols: 120, rows: 40 } }));
+      for (let i = 0; i < 100 && !h.fake.ttySessions.length; i++) await new Promise(r => setTimeout(r, 20));
+      await new Promise(r => setTimeout(r, 100));
+      const session = h.fake.ttySessions[0];
+      const created = { cols: session.opts.cols, rows: session.opts.rows };
+      expect(session.resizes.at(-1) ?? created).toEqual({ cols: 120, rows: 40 });
+      expect(session.resizes).toEqual(created.cols === 120 ? [] : [{ cols: 120, rows: 40 }]);
+      ws.close();
+      await new Promise(r => setTimeout(r, 50));
+    });
+
     it('survives pty output that keeps coming after the drain wait ends (no write after end)', async () => {
       // A pty whose stream never ends and that writes after the exit: the server must detach it
       h.fake.execTty = async () => {

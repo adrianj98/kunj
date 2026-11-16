@@ -199,7 +199,13 @@ drained into the socket (`finish` of the frame writer, 2 s at most), so a burst 
   dependency, so a TTY exec goes through the **Docker Engine API** on the daemon socket (the socket from
   `docker context inspect`): `POST /containers/:id/exec` with `Tty`, `AttachStdin/Stdout/Stderr`, `User`,
   `WorkingDir`, `Env`; `POST /exec/:id/start` on a hijacked connection, whose raw bytes are the pty;
-  `POST /exec/:id/resize?h=&w=` for each `resize` frame; `GET /exec/:id/json` for the exit code (polled up to 30 s after the connection ends). Closing
+  `POST /exec/:id/resize?h=&w=` for each `resize` frame; `GET /exec/:id/json` for the exit code (polled up to 30 s after the connection ends).
+  The first size is set three ways, because each alone was seen to leave a terminal at 80x24: `ConsoleSize`
+  in the create call, a resize after the start that is retried while the daemon refuses it (5 tries, as the
+  docker CLI does), and, in `serveExec`, the newest `resize` frame applied once the pty exists when it
+  landed while the exec was being created (the request and the first resize are two frames). When the
+  exec is gone at the end (the daemon restarted, the container stopped) the client is told that, not
+  `No such exec instance: <id>`. Closing
   the WebSocket closes the hijacked socket, which hangs up the pty (SIGHUP to the process group, as a
   dropped SSH session would). This is `execTty()` in docker.ts, a second way of talking to Docker that
   stays inside the one module allowed to. Non-TTY execs keep spawning `docker exec`. The env a TTY exec
@@ -320,6 +326,9 @@ v1; if a listing turns out slow, the first batch is a `GET /v1/containers?label=
 - Secrets: in transit inside the SSH tunnel or the user's TLS; at rest only in the env temp file during
   `docker run` and in the container's process environment, as today. The server never logs a request
   body or an exec's bytes. `--verbose` logs routes, ids and durations.
+- Startup: the server asks `docker info` before it listens (a daemon that is down fails early with
+  Docker's message). When that takes over 5 s it prints one `Waiting for Docker to answer…` line, so a
+  busy or stuck Docker Desktop does not look like a hung `kunj serve`.
 - A container on the box can reach what the box's firewall helper allows, which is the box's network,
   not the laptop's. `container.network.allow` is evaluated in the helper on the box as today; `forward`
   and the MCP bridge reach the laptop only through connections the laptop opens.

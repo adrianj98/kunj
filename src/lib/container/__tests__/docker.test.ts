@@ -541,12 +541,18 @@ describe('docker backend', () => {
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
     const hijacked = new Set<import('stream').Duplex>();
     let exitCode = 0;
+    /** How many resize calls the daemon still refuses (an exec that has not started its pty yet) */
+    let resizeRefusals = 0;
+    /** The daemon forgot the exec: it restarted, or the container went away */
+    let execGone = false;
 
     beforeEach(async () => {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-engine-'));
       sock = path.join(dir, 'docker.sock');
       calls.length = 0;
       exitCode = 0;
+      resizeRefusals = 0;
+      execGone = false;
       server = http.createServer((req, res) => {
         const chunks: Buffer[] = [];
         req.on('data', d => chunks.push(d));
@@ -559,8 +565,17 @@ describe('docker backend', () => {
             return res.end(JSON.stringify({ message: 'No such container: missing' }));
           }
           if (req.url?.startsWith('/exec/e1/resize')) {
+            if (resizeRefusals > 0) {
+              resizeRefusals--;
+              res.writeHead(500, { 'content-type': 'application/json' });
+              return res.end(JSON.stringify({ message: 'cannot resize a stopped container: unknown' }));
+            }
             res.writeHead(201);
             return res.end();
+          }
+          if (req.url === '/exec/e1/json' && execGone) {
+            res.writeHead(404, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify({ message: 'No such exec instance: e1' }));
           }
           if (req.url === '/exec/e1/json') return res.end(JSON.stringify({ Running: false, ExitCode: exitCode }));
           res.writeHead(500);
@@ -598,7 +613,7 @@ describe('docker backend', () => {
       const backend = new LocalDockerBackend({ context: 'box' });
       const session = await backend.execTty('kunj-x', ['sh', '-l'], { user: 'dev', workdir: '/workspace', env: { TERM: 'xterm' }, cols: 100, rows: 30 });
       expect(argvOf(0)).toEqual(['--context', 'box', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']);
-      expect(calls[0]).toEqual({ method: 'POST', url: '/containers/kunj-x/exec', body: { AttachStdin: true, AttachStdout: true, AttachStderr: true, Tty: true, Cmd: ['sh', '-l'], User: 'dev', WorkingDir: '/workspace', Env: ['TERM=xterm'] } });
+      expect(calls[0]).toEqual({ method: 'POST', url: '/containers/kunj-x/exec', body: { AttachStdin: true, AttachStdout: true, AttachStderr: true, Tty: true, ConsoleSize: [30, 100], Cmd: ['sh', '-l'], User: 'dev', WorkingDir: '/workspace', Env: ['TERM=xterm'] } });
       expect(calls[1]).toEqual({ method: 'POST', url: '/exec/e1/start' });
       expect(calls[2]).toEqual({ method: 'POST', url: '/exec/e1/resize?h=30&w=100', body: undefined });
       const out: Buffer[] = [];
@@ -612,6 +627,40 @@ describe('docker backend', () => {
       expect(await session.wait()).toBe(3);
       expect(Buffer.concat(out).toString()).toBe('LS\rbye\r\n');
       expect(calls.at(-1)).toEqual({ method: 'GET', url: '/exec/e1/json', body: undefined });
+    });
+
+    it('asks for the first size again while the daemon refuses it, so a busy daemon does not leave the pty at 80x24', async () => {
+      results.push({ stdout: `unix://${sock}\n` });
+      resizeRefusals = 3;
+      const session = await new LocalDockerBackend().execTty('kunj-x', ['sh'], { cols: 180, rows: 50 });
+      const resizes = calls.filter(c => c.url.startsWith('/exec/e1/resize'));
+      expect(resizes.map(c => c.url)).toEqual(Array(4).fill('/exec/e1/resize?h=50&w=180'));
+      expect(resizeRefusals).toBe(0);
+      session.close();
+      await session.wait();
+    });
+
+    it('gives up on the first size after a few tries and still returns the session', async () => {
+      results.push({ stdout: `unix://${sock}\n` });
+      resizeRefusals = 1000;
+      const session = await new LocalDockerBackend().execTty('kunj-x', ['sh'], { cols: 180, rows: 50 });
+      expect(calls.filter(c => c.url.startsWith('/exec/e1/resize'))).toHaveLength(5);
+      session.close();
+      await session.wait();
+    });
+
+    it('says the container stopped or Docker restarted when the exec is gone at the end, not the exec id', async () => {
+      results.push({ stdout: `unix://${sock}\n` });
+      const session = await new LocalDockerBackend().execTty('kunj-x', ['sh'], { cols: 80, rows: 24 });
+      execGone = true;
+      for (const s of hijacked) s.destroy(); // the daemon went away under the terminal
+      const err = await session.wait().then(
+        () => undefined,
+        e => e as Error,
+      );
+      expect(err?.message).toMatch(/container stopped or Docker restarted/);
+      expect(err?.message).toMatch(/kunj ct start/);
+      expect(err?.message).not.toMatch(/e1/);
     });
 
     it('passes the daemon error on when the container is missing', async () => {

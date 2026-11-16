@@ -142,6 +142,24 @@ describe('kunj serve', () => {
     expect(fs.existsSync(tokenFile)).toBe(false);
   });
 
+  it('says it is waiting for Docker when the daemon is slow to answer, and not when it is quick', async () => {
+    const info = fake.info.bind(fake);
+    fake.info = async () => {
+      await new Promise(r => setTimeout(r, 80));
+      return info();
+    };
+    const slow = new ServeCommand({ backend: async () => fake, tokenFile, onListening: (_a, stop) => stop(), stderr: l => stderr.push(l), slowDockerMs: 10 });
+    await slow.execute({ listen: '127.0.0.1:0' });
+    const lines = stderr.filter(l => /Waiting for Docker/.test(l));
+    expect(lines).toHaveLength(1);
+    expect(stderr.findIndex(l => /Waiting for Docker/.test(l))).toBeLessThan(stderr.findIndex(l => /listening on/.test(l)));
+
+    stderr.length = 0;
+    fake.info = info;
+    await command((_a, stop) => stop()).execute({ listen: '127.0.0.1:0' });
+    expect(stderr.join('\n')).not.toContain('Waiting for Docker');
+  });
+
   it('token prints it, --rotate replaces it, --json wraps it', async () => {
     const cmd = command(() => {});
     await cmd.execute('token', {});

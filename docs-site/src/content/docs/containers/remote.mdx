@@ -125,3 +125,7 @@ kunj remote remove <name>
 
 `--verbose` on the server logs every request (method, route, status, duration); refusals and bad
 tokens are always logged, never a token or a request body.
+
+The server asks Docker for its version before it starts listening. If Docker is slow to answer you
+see `Waiting for Docker to answer (docker info)…` after five seconds, and nothing is listening until
+it does: check `docker info` on that machine.

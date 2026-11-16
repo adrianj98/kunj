@@ -13,7 +13,7 @@ import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devco
 import { Blueprint, ResolvedBlueprint, SANDBOX_IMAGE_KEYWORD, SEED_DIR, computeBlueprintHash, resolveBlueprint } from './blueprint';
 import { Preset, orderTools, resolvePresets } from './presets';
 import { FoundSnapshot, findSnapshot, maintain, provisionNew } from './provision';
-import { ComposeSource, ServiceOwner, ServiceSpec, findServices, resolveServices, resumeServices, serviceNames, serviceRemoval, servicesOf, startServices, stopServices } from './services';
+import { ComposeSource, ServiceOwner, ServiceSpec, findServices, resolveServices, resumeServices, serviceNames, serviceRemoval, servicesOf, startServices, stopServices, warnStoppedServices } from './services';
 import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
 import {
   CLAUDE_AUTH_KEYS,
@@ -1061,6 +1061,8 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
 
     // 11. Devcontainer commands
     await step('docker', () => postCommands(backend, id, user, source.spec, options));
+    // A service that died since it was started (seed and setup took a while) is said, not listed as up
+    if (services.length) await warnStoppedServices(backend, names, { repoId: repo.id, branch: labelBranch }, warn);
 
     return {
       names,
@@ -1286,6 +1288,7 @@ async function resume(
       };
     }
     await step('docker', () => postCommands(backend, main.id, user, recorded, options));
+    if (serviceList.length) await warnStoppedServices(backend, names, { repoId: repo.id, branch: labelBranch }, warn);
     return result;
   } catch (err) {
     // Never left running without its firewall: a container that was already running is stopped too
