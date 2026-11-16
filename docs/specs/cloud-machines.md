@@ -80,6 +80,33 @@ Layers, bottom up:
    the MCP bridge changes: they already program against `ContainerBackend`.
 6. **`kunj machine`** (src/commands/machine.ts): direct management, on the fast path with lazy imports.
 
+## Who calls what
+
+Two control paths, never mixed:
+
+| Concern | Who | How | Credential |
+| --- | --- | --- | --- |
+| Machines: find, create, wake, suspend by hand, delete, prune, images | **kunj on the laptop**, through the provider | The cloud's CLI with the user's login (`gcloud`, later `aws`) | The user's cloud IAM |
+| Containers: start, exec, agent, snapshots, services, forward, files | **`kunj serve` on the machine**, through the tunnel | The remote-containers protocol, unchanged | The paired serve token |
+| Idle: suspend when no agent works | **`kunj serve` on the machine**, calling the provider's idle command locally | `gcloud compute instances suspend $(hostname)` | The machine's own service account, allowed only that |
+
+So the laptop calls the provider directly, and `kunj serve` never creates, deletes or lists machines.
+Three reasons:
+
+- **A machine cannot create itself.** Before the first `ct start` there is no serve to ask; and a
+  suspended machine's serve is not running, so only the laptop can wake it.
+- **Serve stays the thin Docker proxy it is.** One token, one job, no cloud credentials on the box
+  beyond the self-suspend permission. A serve that could create and delete machines would hold a cloud
+  credential worth every machine in the project.
+- **No always-on control plane.** The alternative, one coordinator machine running a "machine serve"
+  that the laptop asks to manage the others, costs a VM that never sleeps (about $30 a month), is a
+  second credential holder to secure, and buys nothing a laptop-side provider call does not. It can be
+  added later as just another provider implementation (`CoordinatorProvider` talking to that box)
+  without touching anything above the interface.
+
+The one piece of machine-side logic is the idle loop, and it is deliberately the smallest possible:
+serve already knows the agent states, and the command it runs can do one thing to one machine.
+
 ## The provider interface
 
 ```ts
