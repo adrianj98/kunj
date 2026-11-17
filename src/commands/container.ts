@@ -170,7 +170,7 @@ interface ListPart {
  * `kunj worktree list --containers`' own 10 s, or one slow remote would take every row with it.
  * An object so tests can shorten it.
  */
-export const fleetTimeouts = { openMs: 5_000, memberMs: 8_000, /** One machine of a coordinator: less than a member's, so a silent machine is a row and the rest are listed */ machineMs: 5_000 };
+export const fleetTimeouts = { openMs: 5_000, memberMs: 9_500, /** One machine of a coordinator: less than a member's, so a silent machine is a row and the rest are listed */ machineMs: 8_000 };
 
 /** How long this computer's Docker gets to say whether a branch has a container here, before a cloud machine is looked for */
 const LOCAL_DOCKER_ASK_MS = 4_000;

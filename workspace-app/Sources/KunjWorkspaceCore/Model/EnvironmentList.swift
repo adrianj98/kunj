@@ -122,7 +122,9 @@ public func mergeEnvironments(
             guard seen.insert(m.branch).inserted else { continue }
             var env = Environment(
                 id: environmentId(repo: repo.name, kind: .container, branch: m.branch), kind: .container,
-                repo: repo, branch: m.branch, path: nil, containerName: nil, state: .stopped, agent: .none,
+                // Awake but its containers were not listed (slow to answer, or none yet): it can still
+                // be used, so it is not shown as stopped, which would disable Shell and Agent
+                repo: repo, branch: m.branch, path: nil, containerName: nil, state: m.state == "running" ? .running : .stopped, agent: .none,
                 agentSession: nil, dirty: nil, changedFiles: nil, ahead: nil, behind: nil, upstream: nil,
                 pullRequest: nil, ports: [], services: [], createdAt: nil, exists: true, isMain: false)
             env.remote = m.remote

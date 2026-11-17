@@ -106,6 +106,13 @@ private func responses(_ files: [String: String]) throws -> URL {
         #expect(asleep.metaLine == ["alertd-core / asleep", "container on machines", "machine suspended"])
         #expect(awake.machine?.asleep == false)
         #expect(awake.metaLine.contains("machine e2-standard-2"))
+        // a machine that is awake but whose containers were not listed in time stays usable
+        var slow = listing
+        slow.containers = []
+        let stillUp = mergeEnvironments(repo: alertd, worktrees: nil, containers: .success(slow)).environments
+        #expect(stillUp.map(\.branch) == ["asleep", "awake"])
+        #expect(stillUp.last?.state == .running)
+        #expect(stillUp.first?.state == .stopped)
         // an older kunj lists no machines: nothing changes
         var old = listing
         old.machines = nil
