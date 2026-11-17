@@ -1912,3 +1912,4 @@ The user asked to be able to choose a remote in the app when remotes are availab
   spell starts when it is ready. Bootstrap: the idle flags are used only when the kunj on the machine knows
   `--idle-suspend`. Why: found on `kunj-dev`: with `machine.idleMinutes` 1 a booting machine was suspended, and a
   machine from an older golden image could not start `kunj serve` with the new flag.
+- Workspace app: machine rows and `machine` event refresh (KunjJSON, Environment, EnvironmentList, StatusBarView, EventStream); `worktree list --containers` passes `machines` on. Why: spec phase 4 ("workspace app rows and a Wake action").

@@ -607,6 +607,13 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   `idleTick()` treats it as busy, and its quiet spell starts when it is ready (found on `kunj-dev` with
   `machine.idleMinutes` 1: a booting machine was suspended before it had paired).
 
+- **Workspace app.** `mergeEnvironments()` reads `machine` on a container and `machines` from
+  `kunj ct list --json`: a machine with no container row (asleep, not answering) is a stopped
+  container environment on its coordinator's remote, with `Environment.machine` (`MachineInfo`), so the
+  existing Start action (`kunj ct start <branch> --remote <coordinator>`) is the Wake action. The meta
+  line and status bar say `machine suspended`, or `machine <size>` when awake. A `machine` event
+  refreshes the listing like a container event. `kunj worktree list --containers` carries `machines` too.
+
 Not yet: machines in `kunj ct prune`, the image in `kunj ct blueprint status`.
 
 ## Golden image as built (2026-11-16)

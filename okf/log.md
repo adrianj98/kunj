@@ -149,3 +149,4 @@
 - Machine-side idle timer (`kunj serve --idle-suspend`, `selfSuspendScript()`, passive requests). Page updated: containers/cloud-machines.md.
 - `Ec2Provider` (AWS) behind the `MachineProvider` seam, `machine.ec2`. Page updated: containers/cloud-machines.md.
 - Coordinator idle loop skips machines being created or woken; bootstrap checks the installed kunj for `--idle-suspend`. Page updated: none.
+- Workspace app lists cloud machines (`Environment.machine`, a sleeping machine as a stopped container row). Page updated: containers/cloud-machines.md.

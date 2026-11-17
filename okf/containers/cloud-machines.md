@@ -101,3 +101,6 @@ coordinator's idle check sends `x-kunj-passive`, so it is not counted as use.
 `Ec2Provider` (src/lib/machines/providers/ec2.ts): `aws` argv, tags as labels (`ec2Value()`), hibernation as
 suspend, AMIs as images, Session Manager as the tunnel, S3 as the cache store. Conformance-tested against a
 simulated `aws` only.
+
+Workspace app: `mergeEnvironments()` (workspace-app/Sources/KunjWorkspaceCore/Model/EnvironmentList.swift) turns
+`ContainerListJson.machines` into stopped container environments with `Environment.machine`; Start wakes the machine.

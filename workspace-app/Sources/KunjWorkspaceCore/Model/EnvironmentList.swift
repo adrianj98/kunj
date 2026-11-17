@@ -113,8 +113,23 @@ public func mergeEnvironments(
                 services: c.services, createdAt: parseDate(c.createdAt), exists: true, isMain: false,
                 agentSessions: running ? c.agent.sessions : nil)
             env.remote = c.remote
+            env.machine = c.machine
             return env
-        }.sorted(by: byBranch)
+        }
+        // A machine with no container row (asleep, or not answering) is still where its branch lives:
+        // shown as a stopped container, so Start wakes it. Never listed twice for one branch.
+        for m in list.machines ?? [] {
+            guard seen.insert(m.branch).inserted else { continue }
+            var env = Environment(
+                id: environmentId(repo: repo.name, kind: .container, branch: m.branch), kind: .container,
+                repo: repo, branch: m.branch, path: nil, containerName: nil, state: .stopped, agent: .none,
+                agentSession: nil, dirty: nil, changedFiles: nil, ahead: nil, behind: nil, upstream: nil,
+                pullRequest: nil, ports: [], services: [], createdAt: nil, exists: true, isMain: false)
+            env.remote = m.remote
+            env.machine = MachineInfo(name: m.name, state: m.state, size: m.size)
+            boxes.append(env)
+        }
+        boxes.sort(by: byBranch)
     }
     return RepoEnvironments(repo: repo, backend: backend, environments: trees + boxes,
                             backends: backends, defaultRemote: defaultRemote)

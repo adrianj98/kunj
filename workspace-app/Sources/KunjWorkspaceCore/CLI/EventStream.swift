@@ -39,6 +39,11 @@ public func parseEventLine(_ line: String) -> KunjEvent? {
     case "container":
         guard let container = object["container"] as? String, let action = object["action"] as? String else { return nil }
         return .container(repoRoot: root, branch: object["branch"] as? String, container: container, action: action)
+    case "machine":
+        // A cloud machine changed state: what the container listing shows for its branch changed too,
+        // so it refreshes the same way a container event does
+        guard let machine = object["machine"] as? String, let state = object["state"] as? String else { return nil }
+        return .container(repoRoot: root, branch: object["branch"] as? String, container: machine, action: "machine-\(state)")
     case "agent":
         guard let session = object["session"] as? String, let running = object["running"] as? Bool else { return nil }
         if running, object["open"] as? String == "app", let worktree = object["worktree"] as? String, !worktree.isEmpty {

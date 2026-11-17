@@ -89,10 +89,12 @@ final class StatusBarView: NSView {
             case .stopped: dot = theme.color(\.idle)
             case .missing: dot = theme.color(\.red)
             }
-            let place = env.containerName ?? (env.path.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? env.branch)
+            let place = env.containerName ?? env.machine?.name ?? (env.path.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? env.branch)
             leftItems.append(dotted(place, dot))
             if env.kind == .container {
-                if env.state == .stopped {
+                if let machine = env.machine, machine.asleep {
+                    leftItems.append(label("machine \(machine.state)"))
+                } else if env.state == .stopped {
                     leftItems.append(label("stopped"))
                 } else if let created = env.createdAt {
                     leftItems.append(label("up \(uptime(since: created))"))

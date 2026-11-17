@@ -535,6 +535,7 @@ the third consumer of the CLI's JSON: one window listing every worktree and bran
 in `kunj repos --json` as environments, with terminals, agent tabs (`kunj agent`/`kunj ct agent`, so they
 reattach to kunj's tmux sessions), a Changes column and editor tabs. It runs `kunj … --json` with `cwd`
 = the repo root and the branch named, refreshes on `kunj events --json` (a child whose stdin it holds),
+shows a cloud machine with no container row (`ContainerListJson.machines`) as a stopped container whose Start wakes it (`Environment.machine`),
 passes `--remote <the container's remote, or local>` on every `kunj ct` it runs for a container
 (`Environment.remoteArguments`; New session's "Run on" popup is `runOnChoices()` over the listing's `backends`),
 never imports kunj, never runs `docker`, and runs `git` only read-only with `GIT_OPTIONAL_LOCKS=0`. Its only

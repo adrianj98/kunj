@@ -144,6 +144,20 @@ public struct ContainerListJson: Decodable, Equatable, Sendable {
     /// Every backend the listing asked (this Mac's Docker, then each `kunj remote`); nil from a kunj
     /// that lists one backend only
     public var backends: [BackendInfo]?
+    /// Cloud machines with no container row: asleep, not answering, or without a container yet
+    /// (nil from a kunj that does not list machines)
+    public var machines: [MachineRow]?
+
+    /// One cloud machine as its coordinator lists it; `remote` is the coordinator.
+    public struct MachineRow: Decodable, Equatable, Sendable {
+        public var name: String
+        /// `running`, `suspended`, `stopped`, `provisioning`, …
+        public var state: String
+        public var branch: String
+        public var size: String
+        public var remote: String
+        public var provider: String?
+    }
 
     public struct Backend: Decodable, Equatable, Sendable {
         public var kind: String
@@ -187,11 +201,29 @@ public struct ContainerJson: Decodable, Equatable, Sendable {
     public var blueprint: Blueprint?
     /// The `kunj serve` remote the container is on; nil on this Mac's Docker
     public var remote: String?
+    /// The cloud machine the container runs on, when its remote coordinates machines
+    public var machine: MachineInfo?
 
     public struct Blueprint: Decodable, Equatable, Sendable {
         public var hash: String
         public var stale: Bool?
     }
+}
+
+/// The cloud machine behind a container row: its name, the cloud's state for it and its size.
+public struct MachineInfo: Decodable, Equatable, Sendable {
+    public var name: String
+    public var state: String
+    public var size: String
+
+    public init(name: String, state: String, size: String) {
+        self.name = name
+        self.state = state
+        self.size = size
+    }
+
+    /// Asleep: its disk (and memory, when suspended) is kept, and starting the branch wakes it.
+    public var asleep: Bool { state == "suspended" || state == "stopped" || state == "suspending" || state == "stopping" }
 }
 
 public struct ContainerPortJson: Decodable, Equatable, Sendable {

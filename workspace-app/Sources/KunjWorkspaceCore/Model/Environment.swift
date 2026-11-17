@@ -117,6 +117,9 @@ public struct Environment: Equatable, Identifiable, Sendable {
     /// The `kunj serve` remote a container is on (a name from `kunj remote add`); nil on this Mac's
     /// Docker and for a worktree
     public var remote: String? = nil
+    /// The cloud machine a container is on (one machine per branch); nil elsewhere. A row whose
+    /// machine is asleep is a stopped container: starting it wakes the machine.
+    public var machine: MachineInfo? = nil
 
     /// What every `kunj ct …` for this container carries so kunj never has to look for it:
     /// `--remote <name>`, or `--remote local` on this Mac. Empty for a worktree.
@@ -187,6 +190,7 @@ public struct Environment: Equatable, Identifiable, Sendable {
     /// The header's mono meta line: `repo / branch`, kind, ahead/behind, PR, ports (empty parts left out).
     public var metaLine: [String] {
         var parts = ["\(repo.name) / \(branch)", remote.map { "\(kind.rawValue) on \($0)" } ?? kind.rawValue]
+        if let machine { parts.append(machine.asleep ? "machine \(machine.state)" : "machine \(machine.size)") }
         var counts: [String] = []
         if let ahead, ahead > 0 { counts.append("↑\(ahead)") }
         if let behind, behind > 0 { counts.append("↓\(behind)") }

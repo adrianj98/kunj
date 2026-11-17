@@ -342,7 +342,7 @@ export class WorktreeCommand extends BaseCommand {
         }, CONTAINER_LIST_TIMEOUT_MS);
       });
       const list = await Promise.race([command.listJson({ status }), timeout]);
-      return { available: true, items: list.containers.map(c => ({ ...c, prLabel: null })), ...(list.backends ? { backends: list.backends } : {}) };
+      return { available: true, items: list.containers.map(c => ({ ...c, prLabel: null })), ...(list.backends ? { backends: list.backends } : {}), ...(list.machines ? { machines: list.machines } : {}) };
     } catch (error) {
       return { available: false, message: error instanceof Error ? error.message : String(error), items: [] };
     } finally {

@@ -91,6 +91,27 @@ private func responses(_ files: [String: String]) throws -> URL {
         #expect(s.success)
     }
 
+    /// Cloud machines: a container on a running machine carries it, and a sleeping machine is a
+    /// stopped container row that Start wakes.
+    @Test func machinesAreRowsEvenAsleep() throws {
+        let listing: ContainerListJson = try fixture("ct_list_machines.json")
+        let r = mergeEnvironments(repo: alertd, worktrees: nil, containers: .success(listing))
+        #expect(r.environments.map(\.branch) == ["asleep", "awake"])
+        let asleep = try #require(r.environments.first)
+        let awake = try #require(r.environments.last)
+        #expect(asleep.state == .stopped)
+        #expect(asleep.kind == .container)
+        #expect(asleep.machine == MachineInfo(name: "kunj-alertd-core-asleep-bbb222", state: "suspended", size: "e2-standard-2"))
+        #expect(asleep.remoteArguments == ["--remote", "machines"])
+        #expect(asleep.metaLine == ["alertd-core / asleep", "container on machines", "machine suspended"])
+        #expect(awake.machine?.asleep == false)
+        #expect(awake.metaLine.contains("machine e2-standard-2"))
+        // an older kunj lists no machines: nothing changes
+        var old = listing
+        old.machines = nil
+        #expect(mergeEnvironments(repo: alertd, worktrees: nil, containers: .success(old)).environments.map(\.branch) == ["awake"])
+    }
+
     /// `kunj ct list --json` of a fleet: this Mac, a remote that answered and one that did not.
     @Test func containersSayWhichRemoteTheyAreOn() throws {
         let fleet: ContainerListJson = try fixture("ct_list_fleet.json")

@@ -27,6 +27,8 @@ func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) async -> Bool {
         #expect(parseEventLine(#"{"type":"git","repo":{"name":"app","root":"/r/app"},"at":"x"}"#)
             == .git(repoRoot: "/r/app"))
         #expect(parseEventLine(#"{"type":"git","at":"x"}"#) == .git(repoRoot: nil))
+        #expect(parseEventLine(#"{"type":"machine","repo":{"name":"app","root":"/r/app"},"branch":"b","machine":"kunj-app-b-1","state":"suspended","at":"x"}"#)
+            == .container(repoRoot: "/r/app", branch: "b", container: "kunj-app-b-1", action: "machine-suspended"))
         #expect(parseEventLine(#"{"type":"sessions","at":"x"}"#) == .registry(kind: "sessions", repoRoot: nil))
         #expect(parseEventLine(#"{"type":"repos","repo":{"name":"a","root":"/a"},"at":"x"}"#)
             == .registry(kind: "repos", repoRoot: "/a"))

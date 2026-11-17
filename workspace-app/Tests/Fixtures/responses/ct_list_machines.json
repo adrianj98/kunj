@@ -1,0 +1,76 @@
+{
+  "repo": "alertd-core",
+  "backend": {
+    "kind": "docker",
+    "context": "default"
+  },
+  "backends": [
+    {
+      "kind": "docker",
+      "context": "default",
+      "available": true
+    },
+    {
+      "kind": "remote",
+      "context": "default",
+      "remote": "machines",
+      "available": true
+    }
+  ],
+  "containers": [
+    {
+      "branch": "awake",
+      "name": "kunj-alertd-core-awake-aaa111",
+      "id": "c1",
+      "state": "running",
+      "image": "i",
+      "createdAt": "2026-10-23T21:12:40Z",
+      "firewall": "default",
+      "status": "ok",
+      "ports": [],
+      "agent": {
+        "running": false,
+        "state": null
+      },
+      "workspace": {
+        "head": null,
+        "ahead": 0,
+        "dirty": false
+      },
+      "services": [],
+      "remote": "machines",
+      "machine": {
+        "provider": "gce",
+        "name": "kunj-alertd-core-awake-aaa111",
+        "state": "running",
+        "size": "e2-standard-2",
+        "owner": "default"
+      }
+    }
+  ],
+  "machines": [
+    {
+      "name": "kunj-alertd-core-asleep-bbb222",
+      "state": "suspended",
+      "repo": "github.com/alertd/alertd-core",
+      "branch": "asleep",
+      "size": "e2-standard-2",
+      "createdAt": "2026-11-16T19:47:25.280-08:00",
+      "paired": true,
+      "remote": "machines",
+      "provider": "gce"
+    },
+    {
+      "name": "kunj-alertd-core-awake-aaa111",
+      "state": "running",
+      "repo": "github.com/alertd/alertd-core",
+      "branch": "awake",
+      "size": "e2-standard-2",
+      "createdAt": "2026-11-16T19:47:25.280-08:00",
+      "paired": true,
+      "remote": "machines",
+      "provider": "gce"
+    }
+  ],
+  "orphans": []
+}
