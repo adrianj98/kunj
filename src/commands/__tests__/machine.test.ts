@@ -204,6 +204,31 @@ describe('kunj machine', () => {
     expect([...provider.machines.values()].map(m => m.labels['kunj.branch'])).toEqual(['here']);
   });
 
+  it('sets a project up: a dry run by default, then everything missing, then the settings', async () => {
+    const have = new Set<string>();
+    const run = async (_cmd: string, args: string[]) => {
+      const line = args.join(' ');
+      if (line.startsWith('services list')) return { code: 0, stdout: have.has('apis') ? JSON.stringify([{ config: { name: 'compute.googleapis.com' } }, { config: { name: 'iap.googleapis.com' } }]) : '[]', stderr: '' };
+      if (line.startsWith('services enable')) have.add('apis');
+      if (/ list | get-iam-policy /.test(` ${line} `)) return { code: 0, stdout: '[]', stderr: '' };
+      if (line.includes(' describe ')) return { code: 1, stdout: '', stderr: 'NOT_FOUND' };
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    const saved: Record<string, unknown> = {};
+    const deps = { run, setConfig: async (k: string, v: unknown) => void (saved[k] = v) };
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    await cmd(deps).execute('setup', { json: true, project: 'my-proj-123', cache: false });
+    const dry = json();
+    expect(dry).toMatchObject({ provider: 'gce', dryRun: true, success: true, config: {} });
+    expect(dry.steps.map((s: any) => s.state)).toEqual(['planned', 'planned', 'planned', 'planned', 'planned']);
+    expect(saved).toEqual({});
+
+    await cmd(deps).execute('setup', { json: true, project: 'my-proj-123', cache: false, yes: true });
+    const done = json();
+    expect(done.steps.map((s: any) => s.state)).toEqual(['created', 'created', 'created', 'created', 'created']);
+    expect(saved).toMatchObject({ 'machine.provider': 'gce', 'machine.gce': { project: 'my-proj-123', zone: 'us-central1-a' } });
+  });
+
   it('lists in text, says when there is nothing, and shows the provider', async () => {
     await cmd().execute('list', {});
     expect(stdout.pop()).toMatch(/No machines for app/);

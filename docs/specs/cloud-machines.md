@@ -633,6 +633,21 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
 `kunj ct prune` does not prune machines; with `machine.provider` set it ends by naming `kunj machine
 prune`. Not yet: the image in `kunj ct blueprint status`.
 
+### Setup (as built 2026-11-17)
+
+`kunj machine setup [--project] [--zone] [--network] [--no-cache] [--dry-run] [--yes]`
+(src/lib/machines/setup/gce.ts, `gceSetup()`): the project preparation as steps that each know whether
+they are already done, so the command is safe to repeat and recognises a project set up by hand. Steps:
+the two APIs, a NAT on the network in the zone's region (any existing one counts), a firewall rule that
+lets the IAP range reach port 7433 on the `kunj-machine` tag (found by what it allows, not by name), the
+`kunj-machine` service account, the `kunjSelfSuspend` role and its binding, and the cache bucket
+`<project>-kunj-cache` with the account as object admin. Missing steps are listed with their cost and
+made after a confirmation (`--yes`; a dry run without a terminal or with `--json`, `MachineSetupJson`);
+a failed step stops the rest. Then `machine.provider`, `machine.gce` (existing keys kept) and
+`machine.cache` are written to the global config through `kunj config --set-json`. The project
+defaults to `machine.gce.project`, else gcloud's. Google Cloud only; `Ec2Provider` has no setup yet.
+Run on `kunj-dev`: everything found, nothing created.
+
 ## Golden image as built (2026-11-16)
 
 Simpler than the design above, and enough to take the install out of every new machine:

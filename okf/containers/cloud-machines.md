@@ -104,3 +104,9 @@ simulated `aws` only.
 
 Workspace app: `mergeEnvironments()` (workspace-app/Sources/KunjWorkspaceCore/Model/EnvironmentList.swift) turns
 `ContainerListJson.machines` into stopped container environments with `Environment.machine`; Start wakes the machine.
+
+# Setup
+
+`kunj machine setup` runs `gceSetup()` (src/lib/machines/setup/gce.ts): steps with `exists()` and `apply()` for the
+APIs, NAT, firewall rule, service account, self-suspend role and cache bucket; then it writes `machine.provider`,
+`machine.gce` and `machine.cache`. Existing resources are found, also ones made by hand under other names.

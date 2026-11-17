@@ -31,40 +31,47 @@ that alone talks to the cloud and to the machines. It runs in one of two places:
 
 <Steps>
 
-1. **Install and log in to `gcloud`** on the machine that will run the coordinator (your laptop, to
-   start with):
+1. **Log in to `gcloud`** on your computer:
 
    ```bash
    gcloud auth login
    ```
 
-2. **Prepare the project once.** Machines get no external IP, so the network needs a Cloud NAT for
-   their outbound traffic, and a firewall rule that lets Identity-Aware Proxy reach `kunj serve` on
-   machines tagged `kunj-machine`:
+2. **Let kunj prepare the project:**
 
    ```bash
-   gcloud compute firewall-rules create kunj-serve-from-iap --network default \
-     --allow tcp:7433 --source-ranges 35.235.240.0/20 --target-tags kunj-machine
+   kunj machine setup --project my-project
    ```
 
-   Your account needs `roles/iap.tunnelResourceAccessor` and permission to create instances.
+   It checks what the project already has, lists what is missing with its cost, and asks before it
+   creates anything. Run it again any time: what exists is left alone, so a project you set up by hand
+   is recognised.
 
-3. **Tell kunj which project and zone:**
+3. **Start a branch on its own machine:**
 
    ```bash
-   kunj config --set machine.provider=gce --global
-   kunj config --set-json 'machine.gce={"project":"my-project","zone":"us-central1-a"}' --global
+   kunj ct start my-branch --remote machines
    ```
-
-4. **Check it:**
-
-   ```bash
-   kunj machine providers
-   ```
-
-   This starts the local coordinator and prints the sizes it will use.
 
 </Steps>
+
+You do not add a remote or start a server. `machines` is a built-in name: kunj starts its own
+coordinator on your computer when a command needs it, and stops it when nothing uses it.
+
+What setup makes, when it is missing:
+
+| What | Why | Cost |
+| --- | --- | --- |
+| Compute Engine and Identity-Aware Proxy turned on | To create machines and reach them | None |
+| A NAT in the region | Machines have no public address | About $32 a month |
+| A firewall rule for port 7433 from Google's tunnel | So only you reach kunj on a machine | None |
+| A service account `kunj-machine` | What machines run as | None |
+| Permission to suspend itself | A machine can sleep when your computer is closed | None |
+| A bucket `<project>-kunj-cache` | [Caches shared between machines](#share-caches-between-machines) | About 2 cents per GB a month |
+
+`--zone` picks where machines run (default `us-central1-a`), `--no-cache` skips the bucket, and
+`--dry-run` only shows the list. Your account needs to be an owner of the project, or hold
+`roles/iap.tunnelResourceAccessor` and the rights to create these things.
 
 ## What a new machine installs
 

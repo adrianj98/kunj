@@ -164,7 +164,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj search <pattern> [paths…] [--in worktrees,branches,containers,commits,logs] [--all] [-i] [-F] [-w] [-b <branches>] [--current]` - Search every worktree (uncommitted work included) with `git grep`, and on request branches without a worktree, running branch containers, commit messages and work logs; `SearchJson` (src/lib/search.ts, docs/specs/search.md). On the fast path; the container module is loaded only for `--in containers`
 - `kunj lsp [list|run <language>] [--branch b]` - Language servers for the workspace app's editor: `list --json` (`LspListJson`: configured servers from `lsp.servers.<lang>` over the defaults typescript/swift/go/cpp, installed or not, restart class, lifecycle settings `lsp.*`), `run` starts one in the worktree with stdio passed through and its `cachePaths` added to info/exclude; codes `lsp-missing`, `lsp-unknown` (src/lib/lsp.ts, docs/specs/language-servers.md). On the fast path
 - `kunj events [--json] [--repo <path>...]` - Stream changes to worktrees, containers and agents as NDJSON (see Events below)
-- `kunj machine [list|status|create|suspend|resume|stop|start|delete|prune|image|providers|coordinator] [branch] [--remote <coordinator>]` - Cloud machines, one per branch session, through a coordinator (local, auto-started, or a remote `kunj serve --machines`); `MachineListJson`, `MachineJsonResult`, codes `machine-*`, `provider-cli-missing`, `coordinator-*` (see Cloud machines under Remote Containers)
+- `kunj machine [setup|list|status|create|suspend|resume|stop|start|delete|prune|image|providers|coordinator] [branch] [--remote <coordinator>]` - Cloud machines, one per branch session, through a coordinator (local, auto-started, or a remote `kunj serve --machines`); `MachineListJson`, `MachineJsonResult`, codes `machine-*`, `provider-cli-missing`, `coordinator-*` (see Cloud machines under Remote Containers)
 - `kunj install [vscode|macos|workspace|all]` - Download the VS Code extension / macOS app / Workspace app from the GitHub release and install them (also offered at the end of `kunj setup`); `kunj install skill` copies the packaged Claude Code skills (`skills/handoff`) to `~/.claude/skills/` (src/lib/skills.ts)
 
 ## New Branches
@@ -501,6 +501,7 @@ machine is awake). `kunj machine image build` bakes a golden image: a builder ma
 blueprint snapshot (`ct blueprint snapshot --machine`), `Coordinator.bake()` stops it and images its disk (role label
 `machine-image`), older images go, the builder is deleted; `create()` boots the repository's newest image, and the bootstrap
 deletes a baked-in serve token on a machine whose name differs from `/etc/kunj-machine`, so it pairs anew.
+`kunj machine setup` prepares a Google Cloud project in idempotent steps (src/lib/machines/setup/gce.ts) and writes the settings.
 `kunj ct list` lists a coordinator's machines without waking one (`collectMember()`: containers of running machines carry `machine`, the
 rest are `machines` rows); the machine hooks `pre/post-machine-create|delete` (`branch`, `machine`, `provider`) run on the client.
 `Coordinator.idleTick()` suspends a machine after `machine.idleMinutes` with no proxied request, open

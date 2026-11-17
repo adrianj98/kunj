@@ -152,3 +152,4 @@
 - Workspace app lists cloud machines (`Environment.machine`, a sleeping machine as a stopped container row). Page updated: containers/cloud-machines.md.
 - Review fixes: EC2 filters as one JSON array, per-machine listing time limit, in-flight requests count for the idle timer, `ct stop` on a sleeping machine is a no-op. Page updated: none.
 - Listings no longer count as use of a cloud machine (`x-kunj-passive` through the proxy). Page updated: none.
+- `kunj machine setup`: Google Cloud project preparation in one command. Page updated: containers/cloud-machines.md.

@@ -859,6 +859,26 @@
         "default": null
       },
       {
+        "flags": "--project <id>",
+        "description": "[setup] The cloud project (default: the one in machine.gce, else gcloud's)",
+        "default": null
+      },
+      {
+        "flags": "--zone <zone>",
+        "description": "[setup] Where machines run (default: the one in machine.gce, else us-central1-a)",
+        "default": null
+      },
+      {
+        "flags": "--network <name>",
+        "description": "[setup] The VPC network (default: default)",
+        "default": null
+      },
+      {
+        "flags": "--no-cache",
+        "description": "[setup] Do not make a cache bucket",
+        "default": null
+      },
+      {
         "flags": "--force",
         "description": "[prune] Also delete machines that are asleep or hold work origin does not have",
         "default": null
@@ -884,7 +904,7 @@
         "default": null
       }
     ],
-    "helpText": "Actions:\n  list (default)              this repository's machines, any state\n  status [branch]             the branch's machine (the current branch by default)\n  create [branch]             make the branch's machine and wait until its kunj serve answers\n  suspend|resume|stop|start [branch]\n  delete [branch]             delete the machine and its disks (the branch is on origin)\n  prune                       delete machines whose branch is gone from origin, and ones left without a container\n  image [list]                this repository's golden images; new machines boot the newest\n  image build                 bake one: a builder machine installs everything and builds the blueprint\n                              snapshot, its disk becomes the image, older images are deleted\n  image delete <name>\n  providers                   the coordinator's provider, its sizes and features\n  coordinator [status|stop]   the local coordinator kunj started on this machine\n\nMachines are created by a coordinator, kunj serve --machines: the remote that --remote or container.remote\nnames, or a local one kunj starts on its own when machine.provider is set here (machine.gce for Google Cloud).\nDesign: docs/specs/cloud-machines.md."
+    "helpText": "Actions:\n  setup                       prepare a cloud project for machines: shows what is missing and what it costs, then makes it\n  list (default)              this repository's machines, any state\n  status [branch]             the branch's machine (the current branch by default)\n  create [branch]             make the branch's machine and wait until its kunj serve answers\n  suspend|resume|stop|start [branch]\n  delete [branch]             delete the machine and its disks (the branch is on origin)\n  prune                       delete machines whose branch is gone from origin, and ones left without a container\n  image [list]                this repository's golden images; new machines boot the newest\n  image build                 bake one: a builder machine installs everything and builds the blueprint\n                              snapshot, its disk becomes the image, older images are deleted\n  image delete <name>\n  providers                   the coordinator's provider, its sizes and features\n  coordinator [status|stop]   the local coordinator kunj started on this machine\n\nMachines are created by a coordinator, kunj serve --machines: the remote that --remote or container.remote\nnames, or a local one kunj starts on its own when machine.provider is set here (machine.gce for Google Cloud).\nDesign: docs/specs/cloud-machines.md."
   },
   {
     "name": "pr",

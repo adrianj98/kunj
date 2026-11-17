@@ -18,7 +18,7 @@ import { BaseCommand } from '../lib/command';
 import { loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import type { CoordinatorAccess, ResolveOptions } from '../lib/machines/local-coordinator';
-import type { MachinePruneJson } from '../lib/json-types';
+import type { MachinePruneJson, MachineSetupJson } from '../lib/json-types';
 import type { MachineJson, MachineListJson, MachineJsonResult, MachineProvidersJson, CoordinatorStatusJson, MachineImageListJson, MachineImageBuildJson } from '../lib/json-types';
 import { IMAGE_BUILD_BRANCH, MachineError, machineName } from '../lib/machines/provider';
 import type { KunjConfig } from '../types';
@@ -36,6 +36,12 @@ interface MachineOptions {
   hooks?: boolean;
   force?: boolean;
   dryRun?: boolean;
+  project?: string;
+  zone?: string;
+  network?: string;
+  provider?: string;
+  /** --no-cache */
+  cache?: boolean;
 }
 
 export interface MachineCommandDeps {
@@ -56,9 +62,13 @@ export interface MachineCommandDeps {
   snapshot?: (remote: string, branch: string) => Promise<number | { code: number; hash?: string }>;
   /** ~/.kunj/coordinator (tests) */
   coordinatorDir?: string;
+  /** [setup] How the cloud CLI runs (tests) */
+  run?: import('../lib/machines/cli').CliRunner;
+  /** [setup] Writes one global setting (default: this kunj's `config --set-json … --global`) */
+  setConfig?: (key: string, value: unknown) => Promise<void>;
 }
 
-const ACTIONS = ['list', 'status', 'create', 'suspend', 'resume', 'stop', 'start', 'delete', 'prune', 'image', 'providers', 'coordinator'];
+const ACTIONS = ['setup', 'list', 'status', 'create', 'suspend', 'resume', 'stop', 'start', 'delete', 'prune', 'image', 'providers', 'coordinator'];
 
 const STATE_COLOR: Record<string, (s: string) => string> = {
   running: chalk.green,
@@ -86,6 +96,10 @@ export class MachineCommand extends BaseCommand {
         { flags: '--size <size>', description: '[create] small, medium, large or a provider shape (default machine.size)' },
         { flags: '-y, --yes', description: '[delete] Do not ask' },
         { flags: '--keep-disks', description: '[delete] Keep the machine\'s disks' },
+        { flags: '--project <id>', description: '[setup] The cloud project (default: the one in machine.gce, else gcloud\'s)' },
+        { flags: '--zone <zone>', description: '[setup] Where machines run (default: the one in machine.gce, else us-central1-a)' },
+        { flags: '--network <name>', description: '[setup] The VPC network (default: default)' },
+        { flags: '--no-cache', description: '[setup] Do not make a cache bucket' },
         { flags: '--force', description: '[prune] Also delete machines that are asleep or hold work origin does not have' },
         { flags: '--dry-run', description: '[prune] Only show what would be deleted' },
         { flags: '--no-hooks', description: '[create, delete] Skip the machine hooks' },
@@ -93,6 +107,7 @@ export class MachineCommand extends BaseCommand {
       ],
       helpText: [
         'Actions:',
+        '  setup                       prepare a cloud project for machines: shows what is missing and what it costs, then makes it',
         '  list (default)              this repository\'s machines, any state',
         '  status [branch]             the branch\'s machine (the current branch by default)',
         '  create [branch]             make the branch\'s machine and wait until its kunj serve answers',
@@ -125,6 +140,82 @@ export class MachineCommand extends BaseCommand {
     const current = await (this.deps.branch ?? getCurrentBranch)().catch(() => '');
     if (!current) throw new MachineError('No branch given, and this checkout is not on a branch. Name it: kunj machine <action> <branch>.', 'machine-not-found');
     return current;
+  }
+
+  /**
+   * `kunj machine setup`: everything a cloud project needs before its first machine. Each step says
+   * whether it is already there; what is missing is listed with its cost and made after a yes.
+   */
+  private async setup(opts: MachineOptions, config: KunjConfig): Promise<void> {
+    const provider = opts.provider || (typeof config.machine?.provider === 'string' && config.machine.provider) || 'gce';
+    if (provider !== 'gce') throw new MachineError(`kunj machine setup knows Google Cloud (gce) only; ${provider} is set up by hand (see the docs).`, 'machine-provider');
+    const { execRunner } = await import('../lib/machines/cli');
+    const run = this.deps.run ?? execRunner;
+    const existing = (config.machine?.gce && typeof config.machine.gce === 'object' ? config.machine.gce : {}) as Record<string, unknown>;
+    let project = opts.project || (typeof existing.project === 'string' ? existing.project : '');
+    if (!project) {
+      const r = await run('gcloud', ['config', 'get-value', 'project', '--quiet']);
+      project = r.code === 0 ? r.stdout.trim() : '';
+      if (!project || project === '(unset)') throw new MachineError('Which project? Give it: kunj machine setup --project <id> (gcloud projects list shows yours; gcloud auth login first if it shows none).', 'bad-machine-config');
+    }
+    const zone = opts.zone || (typeof existing.zone === 'string' ? existing.zone : '') || 'us-central1-a';
+    const { gceSetup } = await import('../lib/machines/setup/gce');
+    const plan = gceSetup({ project, zone, network: opts.network, cache: opts.cache !== false, existing }, run);
+
+    const say = (line: string) => (this.jsonMode ? console.error(line) : console.log(line));
+    say(chalk.blue(`Checking ${plan.target}…`));
+    const states: Array<{ title: string; cost?: string; state: 'present' | 'planned' | 'created' | 'failed'; message?: string }> = [];
+    for (const step of plan.steps) {
+      const present = await step.exists();
+      states.push({ title: step.title, ...(step.cost ? { cost: step.cost } : {}), state: present ? 'present' : 'planned' });
+      say(present ? chalk.gray(`  ✓ ${step.title}`) : `  + ${step.title}${step.cost ? chalk.yellow(`  (${step.cost})`) : ''}`);
+    }
+    const missing = states.filter(s => s.state === 'planned').length;
+    const dryRun = !!opts.dryRun || (missing > 0 && !opts.yes && (this.jsonMode || !process.stdin.isTTY));
+    let apply = !dryRun;
+    if (apply && missing > 0 && !opts.yes) {
+      apply = await this.confirm(`Create the ${missing} thing${missing === 1 ? '' : 's'} marked + in ${project}?`);
+      if (!apply) say(chalk.gray('Nothing created.'));
+    }
+    if (apply) {
+      for (let i = 0; i < plan.steps.length; i++) {
+        if (states[i].state !== 'planned') continue;
+        try {
+          await plan.steps[i].apply();
+          states[i].state = 'created';
+          say(chalk.green(`  ✓ created: ${plan.steps[i].title}`));
+        } catch (err) {
+          states[i].state = 'failed';
+          states[i].message = (err as Error).message;
+          say(chalk.red(`  ✗ ${plan.steps[i].title}: ${(err as Error).message}`));
+          break; // later steps build on earlier ones
+        }
+      }
+    }
+    const failed = states.some(s => s.state === 'failed');
+    const done = apply && !failed;
+    if (done) {
+      const set = this.deps.setConfig ?? ((key: string, value: unknown) => this.setGlobal(key, value));
+      for (const [key, value] of Object.entries(plan.config)) await set(key, value);
+    }
+    if (this.jsonMode) {
+      this.outputJSON({ provider: plan.provider, target: plan.target, dryRun: !apply, success: !failed, steps: states, config: done ? plan.config : {} } satisfies MachineSetupJson);
+    } else if (done) {
+      console.log(chalk.green('✓ Ready.') + ' Start a branch on its own machine:');
+      console.log('  kunj ct start <branch> --remote machines');
+      console.log(chalk.gray('  kunj machine image build bakes an image so new machines start in about 2 minutes instead of 10.'));
+    } else if (!apply && missing > 0 && dryRun) {
+      console.log(chalk.gray('Nothing created. Run kunj machine setup in a terminal, or with --yes.'));
+    }
+    if (failed) process.exitCode = 1;
+  }
+
+  /** One global setting, written by this kunj's own `config --set-json`, so it is checked like any other. */
+  private async setGlobal(key: string, value: unknown): Promise<void> {
+    const { execFile } = await import('child_process');
+    await new Promise<void>((resolve, reject) =>
+      execFile(process.execPath, [process.argv[1], 'config', '--set-json', `${key}=${JSON.stringify(value)}`, '--global'], (err, _out, errOut) =>
+        err ? reject(new MachineError(`could not save ${key}: ${String(errOut).trim() || err.message}`, 'bad-machine-config')) : resolve()));
   }
 
   /** The branch's container on a running machine and what the remove guard finds in it, through the coordinator. */
@@ -164,6 +255,7 @@ export class MachineCommand extends BaseCommand {
     if (verb === 'coordinator') return this.coordinatorAction(target ?? 'status');
 
     const config = await loadResolvedConfig(process.cwd());
+    if (verb === 'setup') return this.setup(opts, config);
     const resolve = this.deps.coordinator ?? (await import('../lib/machines/local-coordinator')).resolveCoordinator;
     const access = await resolve({ remote: opts.remote, config });
     try {

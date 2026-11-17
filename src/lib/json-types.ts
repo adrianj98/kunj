@@ -283,6 +283,19 @@ export interface MachineListJson {
   machines: MachineJson[];
 }
 
+/** `kunj machine setup --json` */
+export interface MachineSetupJson {
+  provider: string;
+  /** e.g. "project my-project, zone us-central1-a" */
+  target: string;
+  /** Nothing was created (missing things are `planned`) */
+  dryRun: boolean;
+  success: boolean;
+  steps: Array<{ title: string; cost?: string; state: 'present' | 'planned' | 'created' | 'failed'; message?: string }>;
+  /** The global settings written (empty unless everything is in place) */
+  config: Record<string, unknown>;
+}
+
 /** `kunj machine prune --json` */
 export interface MachinePruneJson {
   coordinator: string;
