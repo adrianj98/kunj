@@ -11,6 +11,9 @@
 // readable by every project viewer, and nothing secret is ever put there.
 
 import { createHash } from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { CliRunner, execRunner, firstErrorLine } from '../cli';
 import {
   Labels,
@@ -266,7 +269,17 @@ export class GceProvider implements MachineProvider {
     if (spec.selfSuspend && this.cfg.serviceAccount) args.push('--service-account', this.cfg.serviceAccount, '--scopes', 'cloud-platform');
     else args.push('--no-service-account', '--no-scopes');
     if (spec.spot) args.push('--provisioning-model', 'SPOT', '--instance-termination-action', 'STOP');
-    const r = await this.run('gcloud', [...args, '--quiet']);
+    // The startup script goes by file: it is far too long and too full of delimiters for --metadata
+    let scriptDir: string | undefined;
+    if (spec.startupScript) {
+      scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-startup-'));
+      const file = path.join(scriptDir, 'startup.sh');
+      fs.writeFileSync(file, spec.startupScript, { mode: 0o600 });
+      args.push('--metadata-from-file', `startup-script=${file}`);
+    }
+    const r = await this.run('gcloud', [...args, '--quiet']).finally(() => {
+      if (scriptDir) fs.rmSync(scriptDir, { recursive: true, force: true });
+    });
     if (r.code !== 0) {
       if (/already exists/i.test(r.stderr)) throw new MachineError(`A machine named ${spec.name} already exists.`, 'machine-exists');
       throw new MachineError(`gcloud could not create ${spec.name}: ${firstErrorLine(r.stderr)}`, 'machine-create-failed');

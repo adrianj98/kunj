@@ -3,6 +3,7 @@
 // answers. Cloud-agnostic: everything about the cloud goes through the MachineProvider. Runs inside
 // `kunj serve --machines`, on a laptop or a coordinator VM.
 
+import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
@@ -81,12 +82,17 @@ export interface ServeReply {
 }
 
 /** One HTTP call to a machine's serve; connection failures reject (the caller retries). */
-export type ServeCaller = (baseUrl: string, method: string, route: string, token?: string) => Promise<ServeReply>;
+export type ServeCaller = (baseUrl: string, method: string, route: string, token?: string, body?: unknown) => Promise<ServeReply>;
 
-export const httpCaller: ServeCaller = (baseUrl, method, route, token) =>
+export const httpCaller: ServeCaller = (baseUrl, method, route, token, body) =>
   new Promise((resolve, reject) => {
     const target = new URL(route, baseUrl);
     const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+    const data = body === undefined ? undefined : JSON.stringify(body);
+    if (data !== undefined) {
+      headers['content-type'] = 'application/json';
+      headers['content-length'] = String(Buffer.byteLength(data));
+    }
     const req = http.request(target, { method, headers, timeout: 10_000 }, res => {
       const chunks: Buffer[] = [];
       res.on('data', (d: Buffer) => chunks.push(d));
@@ -104,7 +110,7 @@ export const httpCaller: ServeCaller = (baseUrl, method, route, token) =>
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
     req.on('error', reject);
-    req.end();
+    req.end(data);
   });
 
 // ---- the coordinator ---------------------------------------------------------------------------
@@ -115,6 +121,8 @@ export interface MachineDefaults {
   spot: boolean;
   selfSuspend: boolean;
   bootTimeoutMs: number;
+  /** A machine image to boot ('' = the provider's stock image) */
+  image?: string;
 }
 
 export interface CoordinatorOptions {
@@ -125,6 +133,8 @@ export interface CoordinatorOptions {
   version: string;
   defaults: MachineDefaults;
   servePort?: number;
+  /** The script a new machine runs at boot to install and start kunj serve (bootstrap.ts) */
+  startupScript?: string;
   /** Test seams */
   call?: ServeCaller;
   openTunnel?: TunnelOpener;
@@ -238,11 +248,11 @@ export class Coordinator {
     const name = machineName(req.repoName, req.repo, req.branch);
     const labels = machineLabels(req.repo, req.branch, {
       [MACHINE_LABEL.version]: this.opts.version,
-      [MACHINE_LABEL.image]: '',
+      [MACHINE_LABEL.image]: d.image ?? '',
       [MACHINE_LABEL.owner]: req.owner ?? '',
     });
     this.log(`creating machine ${name} for ${req.branch}`);
-    let machine = await this.provider.create({ name, labels, size: req.size || d.size, image: '', diskGb: d.diskGb, spot: d.spot, selfSuspend: d.selfSuspend });
+    let machine = await this.provider.create({ name, labels, size: req.size || d.size, image: d.image ?? '', diskGb: d.diskGb, spot: d.spot, selfSuspend: d.selfSuspend, startupScript: this.opts.startupScript });
     // A token left from an earlier machine of the same name would never match the new one. Only
     // after the create succeeded: a create refused with machine-exists (another coordinator made
     // it meanwhile) must leave that live machine's token alone
@@ -324,8 +334,10 @@ export class Coordinator {
     const endpoint = await this.endpoint(machine);
     try {
       const deadline = this.now() + this.opts.defaults.bootTimeoutMs;
+      // One nonce for every try: the machine answers a repeat from the same caller with the same token
+      const nonce = randomBytes(24).toString('base64url');
       for (;;) {
-        const reply = await this.call(endpoint.baseUrl, 'POST', '/v1/pair').catch(() => null);
+        const reply = await this.call(endpoint.baseUrl, 'POST', '/v1/pair', undefined, { nonce }).catch(() => null);
         if (reply?.status === 200 && typeof reply.body?.token === 'string') {
           this.opts.tokens.set(machine.name, reply.body.token);
           this.log(`paired with ${machine.name}`);

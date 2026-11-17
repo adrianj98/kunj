@@ -15,6 +15,10 @@ export interface MachineSettings {
   idleMinutes: number;
   pairWindowMinutes: number;
   coordinatorIdleMinutes: number;
+  /** What a new machine installs as kunj ('' = this version from npm, or main from GitHub for a dev build) */
+  kunjPackage: string;
+  /** Give new machines the startup script (false: the image already runs kunj serve) */
+  bootstrap: boolean;
 }
 
 const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback);
@@ -33,7 +37,10 @@ export function machineSettings(config: KunjConfig): MachineSettings {
       spot: m.spot === true,
       selfSuspend: m.selfSuspend !== false,
       bootTimeoutMs: num(m.bootTimeoutMs, 300000),
+      image: typeof m.image === 'string' ? m.image : '',
     },
+    kunjPackage: typeof m.kunjPackage === 'string' ? m.kunjPackage : '',
+    bootstrap: m.bootstrap !== false,
     idleMinutes: num(m.idleMinutes, 30),
     pairWindowMinutes: num(m.pairWindowMinutes, 10),
     coordinatorIdleMinutes: num(m.coordinatorIdleMinutes, 60),

@@ -64,6 +64,8 @@ export interface MachineSpec {
   zone?: string;
   /** Provider-visible, never a secret */
   metadata?: Record<string, string>;
+  /** Run as root at every boot (cloud-init style); provider-visible, never a secret */
+  startupScript?: string;
 }
 
 export interface MachineImage {

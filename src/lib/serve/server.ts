@@ -101,6 +101,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
 
   const base: Authenticator = opts.authenticate ?? (opts.token ? singleTokenAuthenticator(opts.token) : () => null);
   let pairedToken: string | undefined;
+  let pairedNonce = '';
   const authenticate: Authenticator = given => (pairedToken && tokenMatches(given, pairedToken) ? 'paired' : base(given));
 
   let context: Promise<string> | undefined;
@@ -266,17 +267,28 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     const finish = (status: number) => log(`${req.method} ${url.pathname} ${status} ${Date.now() - started}ms${client ? ` (${client})` : ''}`);
     res.on('finish', () => finish(res.statusCode));
     if (req.method === 'POST' && url.pathname === '/v1/pair') {
-      req.resume();
-      if (!opts.pairing || pairedToken || Date.now() >= opts.pairing.until) {
+      // The caller's nonce makes pairing repeatable for that caller only: a reply lost on the way
+      // (a dropped tunnel) must not leave the machine paired with a token nobody stored
+      let nonce = '';
+      try {
+        const body = await readJsonBody(req);
+        if (typeof body?.nonce === 'string' && body.nonce.length >= 16 && body.nonce.length <= 128) nonce = body.nonce;
+      } catch (err) {
+        return sendError(res, err);
+      }
+      const open = !!opts.pairing && Date.now() < opts.pairing.until;
+      if (open && pairedToken && pairedNonce && tokenMatches(nonce, pairedNonce)) return send(res, 200, { token: pairedToken });
+      if (!open || pairedToken) {
         return sendError(res, new ServeError(403, 'pairing-closed', 'pairing is closed on this server'));
       }
       const token = newToken();
       try {
-        opts.pairing.onPaired(token);
+        opts.pairing!.onPaired(token);
       } catch (err) {
         return sendError(res, err);
       }
       pairedToken = token;
+      pairedNonce = nonce;
       log(`paired with ${req.socket.remoteAddress ?? '?'}`);
       return send(res, 200, { token });
     }

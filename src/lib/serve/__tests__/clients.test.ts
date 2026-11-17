@@ -112,6 +112,30 @@ describe('pairing a machine', () => {
     expect(again).toEqual({ status: 403, body: { error: { code: 'pairing-closed', message: 'pairing is closed on this server' } } });
   });
 
+  it('answers a repeat from the same caller with the same token (a lost reply), and nobody else', async () => {
+    const stored: string[] = [];
+    server = createServeServer({ backend: new FakeBackend(), version: '1', pairing: { until: Date.now() + 60_000, onPaired: t => stored.push(t) } });
+    const { port } = await server.listen('127.0.0.1', 0);
+    const pair = (nonce?: string) =>
+      new Promise<{ status: number; body: any }>((resolve, reject) => {
+        const data = nonce === undefined ? '' : JSON.stringify({ nonce });
+        const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/v1/pair', headers: data ? { 'content-type': 'application/json' } : {} }, res => {
+          const chunks: Buffer[] = [];
+          res.on('data', d => chunks.push(d));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(Buffer.concat(chunks).toString()) }));
+        });
+        req.on('error', reject);
+        req.end(data);
+      });
+    const first = await pair('nonce-aaaaaaaaaaaaaaaaaaaa');
+    expect(first.status).toBe(200);
+    expect(await pair('nonce-aaaaaaaaaaaaaaaaaaaa')).toEqual(first);
+    expect((await pair('nonce-bbbbbbbbbbbbbbbbbbbb')).status).toBe(403);
+    expect((await pair()).status).toBe(403);
+    expect((await pair('short')).status).toBe(403);
+    expect(stored).toEqual([first.body.token]);
+  });
+
   it('refuses pairing after the window and on a server that never offered it', async () => {
     server = createServeServer({ backend: new FakeBackend(), version: '1', pairing: { until: Date.now() - 1, onPaired: () => {} } });
     const { port } = await server.listen('127.0.0.1', 0);

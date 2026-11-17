@@ -142,6 +142,46 @@ describe('Coordinator', () => {
     expect(tokens.all.get(name)).toBe('token-of-the-live-machine');
   });
 
+  it('survives a lost pairing reply: the retry carries the same nonce and gets the same token', async () => {
+    const { provider, serves, tokens, coordinator } = setup();
+    const nonces: string[] = [];
+    const real = serves.caller;
+    const granted = new Map<string, string>();
+    let dropped = false;
+    serves.caller = async (baseUrl, method, route, token, body) => {
+      if (route !== '/v1/pair') return real(baseUrl, method, route, token, body);
+      const nonce = (body as { nonce: string }).nonce;
+      nonces.push(nonce);
+      const host = new URL(baseUrl).hostname;
+      const s = serves.serves.get(host)!;
+      if (!granted.has(nonce)) {
+        if (s.token) return { status: 403, body: {} };
+        s.token = `tok-${host}`;
+        granted.set(nonce, s.token);
+      }
+      if (!dropped) {
+        dropped = true;
+        throw new Error('ECONNRESET');
+      }
+      return { status: 200, body: { token: granted.get(nonce) } };
+    };
+    const c = new Coordinator({ ...(coordinator as any).opts, call: (...a: Parameters<typeof serves.caller>) => serves.caller(...a) });
+    const r = await c.locate({ repo: REPO, repoName: 'app', branch: 'lossy', create: true });
+    expect(nonces).toHaveLength(2);
+    expect(nonces[0]).toBe(nonces[1]);
+    expect(nonces[0].length).toBeGreaterThanOrEqual(16);
+    expect(tokens.all.get(r.machine.name)).toBe(`tok-${r.machine.addresses.internal}`);
+    void provider;
+  });
+
+  it('gives a new machine the startup script and the configured image', async () => {
+    const { provider, coordinator } = setup();
+    const c = new Coordinator({ ...(coordinator as any).opts, startupScript: '#!/bin/bash\n', defaults: { ...(coordinator as any).opts.defaults, image: 'kunj-img-1' } });
+    const r = await c.locate({ repo: REPO, repoName: 'app', branch: 'img', create: true });
+    expect(provider.specs.get(r.machine.name)).toMatchObject({ startupScript: '#!/bin/bash\n', image: 'kunj-img-1' });
+    expect(r.machine.labels['kunj.image']).toBe('kunj-img-1');
+  });
+
   it('times out on a machine that never answers', async () => {
     const { provider, coordinator } = setup();
     // created, but its serve never comes up

@@ -95,6 +95,9 @@ export interface KunjConfig {
     bootTimeoutMs?: number;
     pairWindowMinutes?: number;
     coordinatorIdleMinutes?: number;
+    image?: string;
+    kunjPackage?: string;
+    bootstrap?: boolean;
     // machine.<provider>: that provider's own block (machine.gce: src/lib/machines/providers/gce.ts)
     [provider: string]: unknown;
   };

@@ -240,8 +240,14 @@ export class ServeCommand extends BaseCommand {
       const provider = await (this.deps.provider ?? (async (name, cfg) => (await import('../lib/machines/providers')).createProvider(name, cfg)))(providerName, settings.providerConfig);
       const { Coordinator, fileTokenStore } = await import('../lib/machines/coordinator');
       const { machineRoutes } = await import('../lib/serve/machines');
+      const { bootstrapScript, defaultKunjPackage } = await import('../lib/machines/bootstrap');
+      const { MACHINE_SERVE_PORT } = await import('../lib/machines/coordinator');
+      const startupScript = settings.bootstrap
+        ? bootstrapScript({ kunjPackage: settings.kunjPackage || defaultKunjPackage(getVersion()), port: MACHINE_SERVE_PORT, pairWindowMinutes: settings.pairWindowMinutes })
+        : undefined;
       const coordinator = new Coordinator({
         provider,
+        startupScript,
         network: settings.network,
         tokens: fileTokenStore(this.machinesPaths().machineTokens, provider.name),
         version: getVersion(),
