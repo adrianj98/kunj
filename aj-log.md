@@ -1843,3 +1843,4 @@ The user asked to be able to choose a remote in the app when remotes are availab
   machine with a token nobody stored.
 - Not done: the real `kunj machine create` on `kunj-dev`. The permission check refused changing the global
   config and creating a second billed VM without being asked; left in the tracker under Waiting on you.
+- Second review round: the bootstrap fetched a GitHub ref with `git clone --branch`, which fails for a commit; now `git fetch` + checkout, checked against GitHub for a branch and a commit. Why: `machine.kunjPackage` accepts a commit, and a failed clone left the machine unable to ever pair.

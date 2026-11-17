@@ -57,8 +57,11 @@ if [ "$(cat /etc/kunj-package 2>/dev/null || true)" != "$KUNJ_PACKAGE" ] || ! co
       repo="\${spec%%#*}"
       ref="\${spec#*#}"
       rm -rf /opt/kunj-src
-      git clone --depth 1 --branch "$ref" "https://github.com/$repo.git" /opt/kunj-src
+      # fetch, not clone --branch: the ref may be a branch, a tag or a commit
+      git init -q /opt/kunj-src
       cd /opt/kunj-src
+      git fetch -q --depth 1 "https://github.com/$repo.git" "$ref"
+      git checkout -q FETCH_HEAD
       npm ci --no-audit --no-fund
       npm run build
       tarball="$(npm pack --silent | tail -1)"

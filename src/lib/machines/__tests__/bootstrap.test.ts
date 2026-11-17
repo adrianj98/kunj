@@ -21,6 +21,9 @@ describe('bootstrapScript', () => {
     expect(script).toContain('serve --listen $IP:$PORT --allow-remote-listen --allow-pairing --pair-window $PAIR_WINDOW');
     expect(script).toContain('User=kunj');
     expect(script).not.toMatch(/token/i);
+    // a ref may be a commit: fetched and checked out, never `clone --branch`
+    expect(script).toContain('git fetch -q --depth 1 "https://github.com/$repo.git" "$ref"');
+    expect(script).not.toContain('--branch');
   });
 
   it('refuses a package that is not an npm version of kunj or a GitHub ref', () => {
