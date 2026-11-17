@@ -7,6 +7,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutError } from './backend';
+import { cacheEnv, cacheLabels, parseCaches } from './caches';
 import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch, optionsLabel } from './names';
 import { ImageSource, credentialHelperSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
 import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devcontainer';
@@ -811,6 +812,8 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   const labelBranch = options.namesFor ?? branch;
   const names = containerNames(repo.name, repo.id, labelBranch);
   const vars = variables(options);
+  // Checked before anything is created
+  const caches = parseCaches(cfg?.caches, repo);
 
   const engine = await step('docker', () => backend.info());
 
@@ -942,6 +945,20 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       await step('docker', () => backend.createVolume(v.name, objLabels));
       created.volumes.push(v.name);
     }
+    // The repository's caches: one volume per daemon, shared by every branch, so never in the
+    // rollback list (another start may be using one this start created) and no branch label
+    for (const c of caches) {
+      if (!(await step('docker', () => backend.volumeExists(c.volume)))) {
+        await step('docker', async () => {
+          try {
+            await backend.createVolume(c.volume, cacheLabels(repo.id, c.name, options.kunjVersion));
+          } catch (err) {
+            if (!/already exists/i.test(message(err))) throw err; // two starts at once
+          }
+        });
+      }
+      volumes.push({ name: c.volume, path: c.path });
+    }
 
     // Services before the branch container, so they are up (and healthy) before seed and setup.
     // --rebuild recreates them on their kept volumes, as it does the branch container.
@@ -990,6 +1007,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
         KUNJ_CONTAINER: '1',
         KUNJ_BRANCH: branch,
         KUNJ_REPO: repo.name,
+        ...cacheEnv(caches),
         ...(dind === 'off' ? {} : { KUNJ_DIND: dind }),
       },
       network: names.network,
@@ -1025,6 +1043,10 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
 
     // dockerd only now that the firewall is up, and before setup so setup can use it
     if (dind !== 'off') await startDockerd(backend, id, warn);
+    // A new volume's mount point is root-owned; the cache is the user's to fill
+    if (caches.length && user) {
+      await step('docker', () => backend.exec(id, ['chown', user, ...caches.map(c => c.path)], { user: 'root' })).catch(err => warn(`could not hand the cache to ${user}: ${message(err)}`));
+    }
 
     // 8. Nothing runs in the container before this point. Seed, once the firewall is in place
     const seededBefore = await step('docker', () => hasSeedMarker(backend, id));

@@ -30,7 +30,8 @@ the **provider** it drives.
 | Proxy | src/lib/serve/proxy.ts | `/v1/machines/<name>/serve/v1/<route>` to that machine's serve: http piped with the machine's token in place of the client's, upgrades as raw bytes; `Coordinator.proxyTarget()` shares one endpoint per machine, closes it a minute after the last use, answers `machine-asleep` |
 | `kunj ct` on machines | src/lib/container/select-backend.ts, src/commands/container.ts | A remote reporting `machines` (or `--remote machines`, the local coordinator) is a coordinator: `intentOf()` gives the command's branch and whether it creates (`start`), wakes (acting commands) or never wakes (`stop`); the backend is a `RemoteKunjBackend` with `basePath` |
 | Idle loop | `Coordinator.idleTick()`, src/lib/machines/idle.ts | Every minute: suspend after `machine.idleMinutes` with no proxied request, open stream or agent in the `running` state |
-| Not yet | — | Machines in `ct list` and `kunj events`, machine prune, hooks, the machine-side self-suspend timer, golden images, `container.caches` |
+| Not yet | — | Machines in `ct list` and `kunj events`, machine prune, hooks, the machine-side self-suspend timer, `container.caches`, `image-stale` |
+| Golden image | src/commands/machine.ts, `Coordinator.bake()/images()/imageFor()` | `kunj machine image build`: a builder machine (reserved branch `kunj..image-build`, stock image) builds the blueprint snapshot (`ct blueprint snapshot --machine`), its stopped disk becomes `…-img-<time>` (labels `kunj.repo`, `kunj.role=machine-image`, `kunj.version`), older images of the repo are deleted, the builder is deleted. New machines boot the repo's newest image (`kunj.image` label); the bootstrap deletes the baked-in serve token when `/etc/kunj-machine` names another host, so the machine pairs anew |
 
 # Blueprint to image
 

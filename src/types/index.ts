@@ -75,6 +75,8 @@ export interface KunjConfig {
     forward?: { auto?: boolean; ignore?: Array<number | string> | number | string };
     // `kunj container prune` removes stopped containers created longer ago (0/unset = off)
     pruneAfterDays?: number;
+    // Cache volumes shared by every branch container of the repository: [{ name, path }] (src/lib/container/caches.ts)
+    caches?: unknown;
     // Sidecar services by name (validated by parseServices in src/lib/container/services.ts)
     services?: Record<string, unknown>;
     // Docker inside the branch container (src/lib/container/dind.ts); privileged needs allowPrivileged

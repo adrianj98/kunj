@@ -59,6 +59,26 @@ describe('the local coordinator', () => {
     expect((await second.client.list()).length).toBe(0);
   });
 
+  it('starts one coordinator when two commands ask at once, and takes over a dead start\'s lock', async () => {
+    const started: string[][] = [];
+    const start = (argv: string[]) => {
+      started.push(argv);
+      void startCoordinator(dir).then(s => servers.push(s));
+    };
+    const [a, b] = await Promise.all([ensureLocalCoordinator(CONFIG, { dir, start }), ensureLocalCoordinator(CONFIG, { dir, start })]);
+    expect(started).toHaveLength(1);
+    expect(a.client.opts.baseUrl).toBe(b.client.opts.baseUrl);
+    expect(fs.existsSync(path.join(dir, 'start.lock'))).toBe(false);
+
+    // a lock left by a start that died long ago does not block the next start
+    for (const s of servers.splice(0)) await s.close();
+    fs.rmSync(path.join(dir, 'coordinator.json'), { force: true });
+    fs.writeFileSync(path.join(dir, 'start.lock'), '1');
+    fs.utimesSync(path.join(dir, 'start.lock'), new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+    await ensureLocalCoordinator(CONFIG, { dir, start, waitMs: 5000 });
+    expect(started).toHaveLength(2);
+  });
+
   it('says so, with the log, when the coordinator does not come up', async () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'serve.log'), 'Error: machine.gce.project is not set\n');

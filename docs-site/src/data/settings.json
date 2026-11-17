@@ -1544,6 +1544,20 @@
     "sensitive": false
   },
   {
+    "key": "container.caches",
+    "type": "array",
+    "category": "container",
+    "default": [],
+    "description": "Cache volumes shared by every branch container of the repository",
+    "detailedDescription": "A list of { name, path }. Each is one Docker volume per repository and Docker host, mounted at path in every branch container (new containers only) and in the blueprint snapshot build, and kept by kunj ct remove and prune. The container gets KUNJ_CACHE_DIR (the first cache's path) and KUNJ_CACHE_<NAME>. kunj puts nothing there: the repository's own scripts keep what is expensive to fetch again, such as a database dump. Every branch can write to it, so do not trust its contents more than you trust the branches.",
+    "options": null,
+    "examples": [
+      "[{\"name\": \"db\", \"path\": \"/cache/db\"}]"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "container.mcp",
     "type": "object",
     "category": "container",

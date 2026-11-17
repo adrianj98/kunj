@@ -1,3 +1,4 @@
+import { cacheVolumeName } from '../caches';
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -475,6 +476,35 @@ describe('startContainer', () => {
     ];
     await startContainer(b, options({ hostEnv: {}, tokenLookup: tokens }));
     expect(tokens.gh).not.toHaveBeenCalled();
+  });
+
+  it('mounts the repository caches, hands them to the user, and never rolls one back', async () => {
+    const config = { container: { caches: [{ name: 'db', path: '/cache/db' }] } } as KunjConfig;
+    const volume = cacheVolumeName(REPO.name, REPO.id, 'db');
+    const b = backend();
+    await startContainer(b, options({ config }));
+    const [main] = runSpecs(b);
+    expect(main.volumes).toContainEqual({ name: volume, path: '/cache/db' });
+    expect(main.env).toMatchObject({ KUNJ_CACHE_DIR: '/cache/db', KUNJ_CACHE_DB: '/cache/db' });
+    const made = b.callsOf('createVolume').find(a => a[0] === volume)!;
+    expect(made[1]).toMatchObject({ 'kunj.repo': REPO.id, 'kunj.role': 'cache', 'kunj.cache': 'db' });
+    expect(made[1]).not.toHaveProperty('kunj.branch');
+    expect(execCmds(b)).toContain('chown dev /cache/db');
+    // after the firewall is up, like every exec
+    expect(b.methods().indexOf('exec')).toBeGreaterThan(b.methods().lastIndexOf('run'));
+
+    const failing = backend();
+    const real = failing.exec.bind(failing);
+    failing.exec = async (id: string, cmd: string[], io?: ExecIO) => {
+      const r = await real(id, cmd, io);
+      return cmd[0] === 'sh' && cmd[1] === '-c' && cmd[2].startsWith('set -e') ? { exitCode: 1, stdout: '' } : r;
+    };
+    await expect(startContainer(failing, options({ config }))).rejects.toMatchObject({ code: 'seed' });
+    expect((failing.callsOf('remove')[0][0] as { volumes: string[] }).volumes).toEqual([names.workspaceVolume, names.homeVolume]);
+
+    const bad = backend();
+    await expect(startContainer(bad, options({ config: { container: { caches: [{ name: 'db', path: '/workspace' }] } } as KunjConfig }))).rejects.toMatchObject({ code: 'bad-config' });
+    expect(bad.methods()).toEqual([]);
   });
 
   it('rolls back everything created when seed fails', async () => {

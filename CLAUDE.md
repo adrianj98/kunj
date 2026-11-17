@@ -163,7 +163,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj search <pattern> [paths…] [--in worktrees,branches,containers,commits,logs] [--all] [-i] [-F] [-w] [-b <branches>] [--current]` - Search every worktree (uncommitted work included) with `git grep`, and on request branches without a worktree, running branch containers, commit messages and work logs; `SearchJson` (src/lib/search.ts, docs/specs/search.md). On the fast path; the container module is loaded only for `--in containers`
 - `kunj lsp [list|run <language>] [--branch b]` - Language servers for the workspace app's editor: `list --json` (`LspListJson`: configured servers from `lsp.servers.<lang>` over the defaults typescript/swift/go/cpp, installed or not, restart class, lifecycle settings `lsp.*`), `run` starts one in the worktree with stdio passed through and its `cachePaths` added to info/exclude; codes `lsp-missing`, `lsp-unknown` (src/lib/lsp.ts, docs/specs/language-servers.md). On the fast path
 - `kunj events [--json] [--repo <path>...]` - Stream changes to worktrees, containers and agents as NDJSON (see Events below)
-- `kunj machine [list|status|create|suspend|resume|stop|start|delete|providers|coordinator] [branch] [--remote <coordinator>]` - Cloud machines, one per branch session, through a coordinator (local, auto-started, or a remote `kunj serve --machines`); `MachineListJson`, `MachineJsonResult`, codes `machine-*`, `provider-cli-missing`, `coordinator-*` (see Cloud machines under Remote Containers)
+- `kunj machine [list|status|create|suspend|resume|stop|start|delete|image|providers|coordinator] [branch] [--remote <coordinator>]` - Cloud machines, one per branch session, through a coordinator (local, auto-started, or a remote `kunj serve --machines`); `MachineListJson`, `MachineJsonResult`, codes `machine-*`, `provider-cli-missing`, `coordinator-*` (see Cloud machines under Remote Containers)
 - `kunj install [vscode|macos|workspace|all]` - Download the VS Code extension / macOS app / Workspace app from the GitHub release and install them (also offered at the end of `kunj setup`); `kunj install skill` copies the packaged Claude Code skills (`skills/handoff`) to `~/.claude/skills/` (src/lib/skills.ts)
 
 ## New Branches
@@ -357,6 +357,11 @@ argument that takes a host path; bump the pin only after re-reading the new vers
 `~/.claude.json`; agent spawns a detached `kunj ct mcp`, registered in `~/.kunj/container-bridges.json`
 (`pidRegistry`, shared with the forward registry).
 
+**Caches:** `container.caches` (`[{ name, path }]`, caches.ts) are volumes per repository and daemon
+(`kunj-<repo>-cache-<name>-<hash>`, `kunj.role=cache`, no branch label so prune never sees them), mounted in every new
+branch container and in the snapshot build with `KUNJ_CACHE_DIR`/`KUNJ_CACHE_<NAME>`, chowned after READY, never in
+a rollback or a `ct remove`. kunj puts nothing in them; never add repository-specific knowledge here.
+
 **Services:** `services.ts` parses and validates services (blueprint `services`, `container.services`, the
 devcontainer's compose file read through `backend.composeConfig()`, i.e. `docker compose config
 --no-interpolate` on stdin in an empty project directory; first source wins by name), orders them by
@@ -487,7 +492,11 @@ as raw bytes, one shared endpoint per machine), and `selectBackend()` roots a `R
 locating the command's branch machine: `ContainerCommand.intentOf()` says which commands create (`start`), wake (acting
 ones) or never wake (`stop`, listings). `--remote machines` is this machine's own coordinator, which kunj starts on loopback
 when `machine.provider` is set (src/lib/machines/local-coordinator.ts, `--idle-exit`, never while a proxy is open or a
-machine is awake). `Coordinator.idleTick()` suspends a machine after `machine.idleMinutes` with no proxied request, open
+machine is awake). `kunj machine image build` bakes a golden image: a builder machine on the reserved branch `kunj..image-build` (always from the stock image) builds the
+blueprint snapshot (`ct blueprint snapshot --machine`), `Coordinator.bake()` stops it and images its disk (role label
+`machine-image`), older images go, the builder is deleted; `create()` boots the repository's newest image, and the bootstrap
+deletes a baked-in serve token on a machine whose name differs from `/etc/kunj-machine`, so it pairs anew.
+`Coordinator.idleTick()` suspends a machine after `machine.idleMinutes` with no proxied request, open
 stream or running agent (src/lib/machines/idle.ts). `kunj serve` takes named client tokens (`token add|list|remove`).
 Tests: `FakeProvider`, a conformance suite every provider runs, and proxy.test.ts (a coordinator serve in front of a
 machine serve, in process).

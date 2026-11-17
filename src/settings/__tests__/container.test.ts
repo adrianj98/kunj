@@ -16,6 +16,7 @@ describe('container settings', () => {
       memory: '',
       publish: [],
       services: {},
+      caches: [],
       useGhToken: true,
       forward: { auto: true, ignore: [] },
       pruneAfterDays: 0,

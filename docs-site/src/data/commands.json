@@ -384,6 +384,11 @@
         "default": null
       },
       {
+        "flags": "--machine <branch>",
+        "description": "[blueprint snapshot] On cloud machines: build on this branch's machine (default: the current branch's)",
+        "default": null
+      },
+      {
         "flags": "--remote <name>",
         "description": "Run on this kunj serve remote (kunj remote add; default: container.remote); \"local\" forces this machine's Docker, \"machines\" uses this machine's cloud machine coordinator (machine.provider)",
         "default": null
@@ -813,9 +818,9 @@
   },
   {
     "name": "machine",
-    "usage": "machine [action] [branch]",
+    "usage": "machine [action] [branch] [name]",
     "description": "Cloud machines that run branch containers, one per branch session",
-    "arguments": "[action] [branch]",
+    "arguments": "[action] [branch] [name]",
     "aliases": [],
     "options": [
       {
@@ -844,12 +849,17 @@
         "default": null
       },
       {
+        "flags": "--no-snapshot",
+        "description": "[image build] Do not build the blueprint snapshot into the image",
+        "default": null
+      },
+      {
         "flags": "--json",
         "description": "Output result as JSON",
         "default": null
       }
     ],
-    "helpText": "Actions:\n  list (default)              this repository's machines, any state\n  status [branch]             the branch's machine (the current branch by default)\n  create [branch]             make the branch's machine and wait until its kunj serve answers\n  suspend|resume|stop|start [branch]\n  delete [branch]             delete the machine and its disks (the branch is on origin)\n  providers                   the coordinator's provider, its sizes and features\n  coordinator [status|stop]   the local coordinator kunj started on this machine\n\nMachines are created by a coordinator, kunj serve --machines: the remote that --remote or container.remote\nnames, or a local one kunj starts on its own when machine.provider is set here (machine.gce for Google Cloud).\nDesign: docs/specs/cloud-machines.md."
+    "helpText": "Actions:\n  list (default)              this repository's machines, any state\n  status [branch]             the branch's machine (the current branch by default)\n  create [branch]             make the branch's machine and wait until its kunj serve answers\n  suspend|resume|stop|start [branch]\n  delete [branch]             delete the machine and its disks (the branch is on origin)\n  image [list]                this repository's golden images; new machines boot the newest\n  image build                 bake one: a builder machine installs everything and builds the blueprint\n                              snapshot, its disk becomes the image, older images are deleted\n  image delete <name>\n  providers                   the coordinator's provider, its sizes and features\n  coordinator [status|stop]   the local coordinator kunj started on this machine\n\nMachines are created by a coordinator, kunj serve --machines: the remote that --remote or container.remote\nnames, or a local one kunj starts on its own when machine.provider is set here (machine.gce for Google Cloud).\nDesign: docs/specs/cloud-machines.md."
   },
   {
     "name": "pr",

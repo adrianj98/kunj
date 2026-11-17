@@ -1868,3 +1868,16 @@ The user asked to be able to choose a remote in the app when remotes are availab
   `machine.idleMinutes` 2 the local coordinator's idle loop suspended the machine 3 minutes after the
   last command (log line "suspending idle machine"). Setting restored to the default.
 - Why: these three were only unit-tested; the spec status row now says what was seen.
+
+## 2026-11-16: golden machine image, cache volume, coordinator start lock
+
+- `kunj machine image build|list|delete` (src/commands/machine.ts, `Coordinator.bake()/images()/imageFor()/deleteImage()`,
+  routes in src/lib/serve/machines.ts, `MachineImage*Json`). Why: a new machine spent about 4 minutes installing
+  Docker, Node and kunj and 6 more building images and the snapshot; an image holds all of it.
+- Bootstrap deletes a baked-in serve token when `/etc/kunj-machine` names another host. Why: a machine from an image
+  would otherwise keep the builder's token and refuse to pair.
+- `ct blueprint snapshot --machine <branch>` and a machine intent for `blueprint snapshot`. Why: the image build
+  needs the snapshot built on the builder machine, not on the current branch's.
+- `container.caches` (src/lib/container/caches.ts, lifecycle.ts, setting, `bad-config`). Why: the user wants a shared,
+  generic cache (their example: a database pull with `--cached <path>`) with nothing repository-specific in kunj.
+- Start lock in `ensureLocalCoordinator`. Why: two commands at once each started a coordinator (review follow-up).

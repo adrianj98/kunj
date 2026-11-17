@@ -172,6 +172,21 @@ export function registerContainerSettings(): void {
       validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
     },
     {
+      key: 'container.caches',
+      description: 'Cache volumes shared by every branch container of the repository',
+      type: 'array',
+      defaultValue: [],
+      category: 'container',
+      detailedDescription:
+        'A list of { name, path }. Each is one Docker volume per repository and Docker host, mounted at path in every branch ' +
+        'container (new containers only) and in the blueprint snapshot build, and kept by kunj ct remove and prune. The ' +
+        "container gets KUNJ_CACHE_DIR (the first cache's path) and KUNJ_CACHE_<NAME>. kunj puts nothing there: the " +
+        "repository's own scripts keep what is expensive to fetch again, such as a database dump. Every branch can write " +
+        'to it, so do not trust its contents more than you trust the branches.',
+      examples: ['[{"name": "db", "path": "/cache/db"}]'],
+      validate: (value: unknown) => Array.isArray(value),
+    },
+    {
       key: 'container.mcp',
       description: 'MCP servers on this machine bridged into the container for its Claude Code; only "chrome" (a browser) for now',
       type: 'object',

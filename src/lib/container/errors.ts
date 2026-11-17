@@ -25,6 +25,8 @@ export type ContainerErrorCode =
   | 'bad-path'
   | 'not-found'
   | 'write-failed'
+  // a setting kunj cannot use as written (container.caches)
+  | 'bad-config'
   // remotes (docs/specs/remote-containers.md)
   | 'bad-remote'
   | 'remote-unknown'

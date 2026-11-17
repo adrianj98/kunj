@@ -74,6 +74,19 @@ a few minutes; the log is `/var/log/kunj-bootstrap.log` on the machine. `machine
 kunj it installs (`kunj@1.4.0`, or `github:owner/repo#ref` to build a branch), and `machine.image` names
 an image of your own that already has everything, which starts in seconds.
 
+## Bake an image so new machines start fast
+
+```bash
+kunj machine image build
+```
+
+This makes a temporary builder machine, installs everything on it, builds your blueprint's snapshot
+there, saves its disk as a machine image and deletes the builder. Every new machine of the repository
+then boots from the newest image, so nothing is installed or built again. Bake a new one after you
+change the blueprint. `kunj machine image` lists the images and `kunj machine image delete <name>`
+removes one; a new bake deletes the older ones itself. `--no-snapshot` bakes an image without the
+blueprint snapshot.
+
 ## Run a branch on its machine
 
 Name the coordinator with `--remote`: `machines` is the one kunj starts on this machine.

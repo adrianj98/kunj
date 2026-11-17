@@ -112,13 +112,54 @@ export async function ensureLocalCoordinator(config: KunjConfig, deps: LocalCoor
   const running = await tryRecord();
   if (running) return { client: running, name: 'local', kind: 'local', close: async () => {} };
 
-  const argv = [...kunjArgv(), 'serve', '--machines', '--listen', '127.0.0.1:0', '--idle-exit', String(settings.coordinatorIdleMinutes)];
-  (deps.start ?? detachedStart)(argv, paths.log);
-  const deadline = Date.now() + (deps.waitMs ?? 20_000);
+  // Two commands at once must not start two coordinators (two idle loops, two sets of tunnels):
+  // whoever creates the lock file starts one, the other waits for its record. A lock older than
+  // the wait is from a start that died, and is taken over.
+  const waitMs = deps.waitMs ?? 20_000;
+  const lock = path.join(path.dirname(paths.record), 'start.lock');
+  const takeLock = (): boolean => {
+    fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 });
+        return true;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        let age = Infinity;
+        try {
+          age = Date.now() - fs.statSync(lock).mtimeMs;
+        } catch {
+          // gone meanwhile: try again
+        }
+        if (age <= waitMs) return false;
+        fs.rmSync(lock, { force: true });
+      }
+    }
+    return false;
+  };
+  const mine = takeLock();
+  const unlock = () => {
+    if (mine) fs.rmSync(lock, { force: true });
+  };
+  if (mine) {
+    const argv = [...kunjArgv(), 'serve', '--machines', '--listen', '127.0.0.1:0', '--idle-exit', String(settings.coordinatorIdleMinutes)];
+    try {
+      (deps.start ?? detachedStart)(argv, paths.log);
+    } catch (err) {
+      unlock();
+      throw err;
+    }
+  }
+  // The one that waits gives the starter its whole wait, and a little more
+  const deadline = Date.now() + waitMs + (mine ? 0 : 2000);
   for (;;) {
     const client = await tryRecord();
-    if (client) return { client, name: 'local', kind: 'local', close: async () => {} };
+    if (client) {
+      unlock();
+      return { client, name: 'local', kind: 'local', close: async () => {} };
+    }
     if (Date.now() >= deadline) {
+      unlock();
       const tail = lastLines(paths.log, 5);
       throw new MachineError(`The local coordinator (kunj serve --machines) did not start.${tail ? `\n${tail}` : ''}\nIts log is ${paths.log}.`, 'coordinator-start-failed');
     }

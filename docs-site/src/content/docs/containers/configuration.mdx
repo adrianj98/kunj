@@ -222,6 +222,24 @@ One Claude Code session at a time can use each bridged server.
 `container.dockerContext` makes every docker call use that context, for example to run containers in
 Colima while Docker Desktop stays your default; `--context` overrides it for one command.
 
+## A cache shared by every branch
+
+Some things are slow to fetch and the same for every branch: a database dump, a package store. Give the
+repository a cache and every branch container finds it at the same path:
+
+```bash
+kunj config --set-json 'container.caches=[{"name":"db","path":"/cache/db"}]'
+```
+
+Each cache is one Docker volume for the repository. New containers mount it at `path` and get
+`KUNJ_CACHE_DIR` (the first cache) and `KUNJ_CACHE_<NAME>` in their environment. kunj puts nothing in
+it; your own scripts decide what to keep there. For example a blueprint's `setup` can run
+`npm run pull-db -- --cached "$KUNJ_CACHE_DIR/db.tar"`, so the dump is downloaded once and reused by
+every later container. `kunj ct remove` and `kunj ct prune` leave caches alone. Every branch can write
+to a cache, so treat what is in it like code from any branch.
+
+A container that already exists gets a new cache after `kunj ct start --rebuild`.
+
 ## Pruning old containers
 
 [`kunj ct prune`](../commands/#prune) always removes the containers of branches deleted on origin. To

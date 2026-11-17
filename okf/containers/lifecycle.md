@@ -104,6 +104,14 @@ line, then `pre-container-delete`, removal with `force: true`, `post-container-d
 
 # Citations
 
+# Repository caches
+
+`container.caches` (`[{ name, path }]`, src/lib/container/caches.ts): one volume per repository and daemon,
+`kunj-<repo>-cache-<name>-<hash>`, labels `kunj.repo`, `kunj.role=cache`, `kunj.cache`, no branch label. Mounted in
+every new branch container and in the snapshot build, env `KUNJ_CACHE_DIR` and `KUNJ_CACHE_<NAME>`, chowned to the
+sandbox user after READY, never rolled back, never removed by `ct remove` or prune. Validation errors are
+`bad-config` before anything is created. On cloud machines the golden image's disk carries the filled volume.
+
 [1] [src/lib/container/lifecycle.ts](/src/lib/container/lifecycle.ts)
 [2] [src/lib/container/env.ts](/src/lib/container/env.ts)
 [3] [src/lib/container/errors.ts](/src/lib/container/errors.ts)

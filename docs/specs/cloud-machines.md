@@ -20,7 +20,7 @@ led here is [google-cloud-containers.md](google-cloud-containers.md).
 | Bootstrap script, `machine.image`/`kunjPackage`/`bootstrap`, nonce pairing | Shipped 2026-11-16 (883805e, f3e7e3b, and the tunnel retry in the commit after). Run on `kunj-dev`: `kunj machine create` from stock Ubuntu to a paired machine in 234 s (the script itself 3 min 19 s); suspend 156 s, resume to an answering serve 23 s |
 | Phase 1: `MachineProvider`, `FakeProvider`, `GceProvider`; `kunj serve --machines` (routes, per-client tokens, pairing); local auto-start; `kunj machine` | Shipped 2026-11-16 (924d4ae, 8423238, a2856bc); unit-tested, and the local coordinator smoke-tested against the real `gcloud` without a project login. No machine has been created on a real project yet |
 | Phase 2: containers through the coordinator (`/v1/machines/<name>/serve/…` proxy), `kunj ct` on machines, wake on act, idle loop | Shipped 2026-11-16 (2ce7433). Run on `kunj-dev` with the local coordinator: `kunj ct start --remote machines` woke the suspended machine and created the container in 363 s (images and snapshot built on the machine); `ct exec` 3 s; `ct exec` on a suspended machine woke it and ran in 20 s; `ct stop` did not wake it. Left: machines in `ct list` and `kunj events`, machine prune, the delete on `ct remove`, hooks. Also run 2026-11-16: `ct shell --session` (tmux session `sh-t1` on the machine, woke it in 33 s) and `ct agent` (Claude Code started in the container; its first try, soon after the wake, could not reach Anthropic for 10 s, the second did) through the proxy, and the idle loop with `machine.idleMinutes` 2 suspended the machine by itself 3 minutes after the last use |
-| Phase 3: golden image build, `container.caches`, registry copy | Not started |
+| Phase 3: golden image build, `container.caches`, registry copy | Golden image shipped 2026-11-16 (`kunj machine image build|list|delete`, new machines boot the newest). <!-- real-run-status -->Left: `container.caches`, the blueprint hash on the image and `image-stale`, registry copy |
 | Phase 4: a second provider (EC2) to prove the seam; workspace app rows and Wake | Not started |
 
 ## Goals and non-goals
@@ -374,6 +374,19 @@ committed), kept by `ct remove`, removed by `ct prune` only with `--force`. Serv
 a repository puts there is its blueprint's business, for example a pulled database dump its own script
 restores from when given the path.
 
+**As built (2026-11-16)**, src/lib/container/caches.ts and `startContainer`: the volume is
+`kunj-<repo>-cache-<name>-<hash of the repo id>`, labelled `kunj.repo`, `kunj.role=cache`,
+`kunj.cache=<name>` and no branch, so prune's orphan search never sees it and `ct remove` never names it
+(nothing in kunj deletes one yet, not even `prune --force`: `docker volume rm` does). It is mounted in
+every **new** branch container (an existing one keeps its mounts until `--rebuild`) and in the blueprint
+snapshot build, so `setup` can fill it; the snapshot image itself holds none of it. On cloud machines the
+snapshot is built on the image builder, whose disk becomes the golden image, so a cache `setup` filled
+there is on every new machine. After READY the mount points are chowned to the sandbox user. Names are
+`[a-z0-9-]`, paths absolute, without `..`, `:` or `,`, and never the workspace or a system directory
+(`bad-config`, checked before anything is created). A cache volume is not in a failed start's rollback:
+another start may be using it. Every branch can write to it, so its contents are only as trusted as the
+branches.
+
 ## `kunj machine`
 
 | Command | Does |
@@ -471,7 +484,25 @@ port and exits). `machine.bootTimeoutMs` defaults to 10 minutes.
 
 Not yet: machines in `ct list`/`kunj events`/the apps, machine prune and the delete on `ct remove`, the
 machine hooks, the self-suspend timer on the machine (so with a local coordinator a machine sleeps only
-while that coordinator runs, which `--idle-exit` now waits for), golden image build, the cache volume.
+while that coordinator runs, which `--idle-exit` now waits for), the cache volume.
+
+## Golden image as built (2026-11-16)
+
+Simpler than the design above, and enough to take the install out of every new machine:
+
+| Piece | How it is built |
+| --- | --- |
+| `kunj machine image build [--no-snapshot] [--size s]` | src/commands/machine.ts. (1) `locate` with `create` for the reserved branch `kunj..image-build` (`IMAGE_BUILD_BRANCH`; `..` cannot be in a real branch name), which gives a builder machine from the provider's **stock** image, never from an older golden image. (2) Unless `--no-snapshot`, it runs this kunj's own `ct blueprint snapshot --remote <coordinator> --machine kunj..image-build` as a child (output on stderr), which builds `kunj-sandbox`, `kunj-nethelper` and the blueprint snapshot in the builder's Docker. (3) `POST /v1/machines/<builder>/image`. (4) The builder is deleted, also when a step failed. A failed snapshot makes no image |
+| `Coordinator.bake()` | Stops the machine, waits for `stopped`, `provider.images.createFrom()` as `<machine name without hash>-img-<UTC yyyymmddhhmmss>` with labels `kunj.repo`, `kunj.role=machine-image`, `kunj.version` (and `kunj.blueprint` when the client sends a hash; the command does not yet), then deletes the repository's older images |
+| Booting from it | `Coordinator.create()` picks `machine.image` when set, else the repository's newest golden image, else the stock image; the name is in the machine's `kunj.image` label. A failed image listing means the stock image, not a failed create |
+| Pairing from an image | The image holds the builder's serve token. The bootstrap script writes the machine's hostname to `/etc/kunj-machine`; on a machine with another name it stops the unit and deletes `~kunj/.kunj/serve/token` before starting serve, so the new machine pairs like a first boot. The rest of the script finds everything installed and only rewrites the unit |
+| `kunj machine image [list]`, `image delete <name>` | `GET /v1/machines/images?repo=`, `DELETE /v1/machines/images/<name>` (only images with kunj's role label) |
+| `ct blueprint snapshot --machine <branch>` | On a coordinator a snapshot is built on one machine: the current branch's, or `--machine`'s (created when missing) |
+
+Not yet: the `kunj.blueprint` hash on the image and the `image-stale` warning, Sysbox in the image,
+`machine.registry`, images in `kunj ct blueprint status`, a size other than the default for the builder's disk.
+
+<!-- real-run -->
 
 ## Decisions
 
