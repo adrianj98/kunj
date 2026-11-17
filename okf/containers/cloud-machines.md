@@ -110,3 +110,9 @@ Workspace app: `mergeEnvironments()` (workspace-app/Sources/KunjWorkspaceCore/Mo
 `kunj machine setup` runs `gceSetup()` (src/lib/machines/setup/gce.ts): steps with `exists()` and `apply()` for the
 APIs, NAT, firewall rule, service account, self-suspend role and cache bucket; then it writes `machine.provider`,
 `machine.gce` and `machine.cache`. Existing resources are found, also ones made by hand under other names.
+
+# Resources
+
+`kunj resources --json` (`collectResources()` in src/lib/resources.ts) lists everything kunj manages across this
+computer's Docker, remotes and coordinators, read-only and with a time limit per place. The workspace app shows it in
+Window ▸ Resources (`ResourcesWindow`, rows from `resourceRows()` in KunjWorkspaceCore).

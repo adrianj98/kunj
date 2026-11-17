@@ -661,6 +661,19 @@ a failed step stops the rest. Then `machine.provider`, `machine.gce` (existing k
 defaults to `machine.gce.project`, else gcloud's. Google Cloud only; `Ec2Provider` has no setup yet.
 Run on `kunj-dev`: everything found, nothing created.
 
+### Resources (as built 2026-11-17)
+
+`kunj resources [--json]` (src/lib/resources.ts, `ResourcesJson`): one read-only list of everything
+kunj manages. Places are asked in parallel, each with 8 s: this computer's Docker and every plain
+remote (containers, volumes, networks and `kunj-*` images, only objects with a `kunj.repo` label),
+and every coordinator (its machines in any state, golden images of all repositories, the cache
+store, and for each machine that is awake what its Docker holds, asked passively). A place that does
+not answer is `available: false`; a sleeping machine is listed and never woken. The workspace app's
+Window ▸ Resources (⌥⌘R, `ResourcesWindow`) shows it as sections (cloud machines, containers,
+services, firewall helpers, volumes, networks, images, machine images, cache stores) with repository,
+branch, state, what it is, size and where; `--resources --screenshot` renders it. No actions yet:
+it shows, it does not delete.
+
 ## Golden image as built (2026-11-16)
 
 Simpler than the design above, and enough to take the install out of every new machine:

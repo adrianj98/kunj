@@ -1082,6 +1082,21 @@
     "helpText": "Actions:\n  list (default)   Known repositories, most recently used first\n  add [path]       Add the repository containing path (default: current directory)\n  remove <path>    Hide a repository; it stays hidden until added again\n  prune            Forget repositories whose directory no longer exists\n  github           GitHub repositories you can clone (via gh), marking those already here\n  clone <repo>     Clone owner/name (or a URL) into repos.cloneDir and add it\n\nRepositories are recorded as kunj runs in them, in ~/.kunj/repos.json"
   },
   {
+    "name": "resources",
+    "usage": "resources",
+    "description": "Everything kunj manages: containers, cloud machines, images, volumes and networks, wherever they are",
+    "arguments": null,
+    "aliases": [],
+    "options": [
+      {
+        "flags": "--json",
+        "description": "Output result as JSON",
+        "default": null
+      }
+    ],
+    "helpText": "Looks on this computer's Docker, on every remote (kunj remote list) and in the cloud of every coordinator.\nIt changes nothing and wakes no machine; a place that does not answer is listed as such."
+  },
+  {
     "name": "run",
     "usage": "run <command...>",
     "description": "Run a command with the host secrets in its environment",

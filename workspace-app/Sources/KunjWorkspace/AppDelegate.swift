@@ -29,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Header buttons, the overflow menu, port links and New session.
     private let runner = ActionRunner()
     private var settings: SettingsWindow?
+    private var resources: ResourcesWindow?
+    /// `--resources`: open the Resources window after discovery (with --screenshot, the PNG is of it)
+    private let resourcesArgument: Bool
     private var sessionsWindow: SessionsWindow?
     /// The sidebar rows' CPU and memory: `kunj sessions list --json` (host sessions only, so no
     /// container exec) when the mouse enters the sidebar and every 5 s while it stays there.
@@ -79,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             newSessionArgument = nil
         }
+        resourcesArgument = arguments.contains("--resources")
         demo = arguments.contains("--demo")
         demoLoading = arguments.contains("--loading")
         super.init()
@@ -176,6 +180,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         log("settings screenshot written to \(screenshotPath)")
                     } else {
                         log("settings screenshot failed")
+                    }
+                    NSApp.terminate(nil)
+                    return
+                }
+                if self?.resourcesArgument == true {
+                    self?.showResources(nil)
+                    for _ in 0..<400 where self?.resources?.isSettled != true {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    if let data = self?.resources?.snapshotPNG() {
+                        FileManager.default.createFile(atPath: screenshotPath, contents: data)
+                        log("resources screenshot written to \(screenshotPath)")
+                    } else {
+                        log("resources screenshot failed")
                     }
                     NSApp.terminate(nil)
                     return
@@ -603,6 +622,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         UserDefaults.standard.set(on, forKey: key)
         NotificationCenter.default.post(name: .viewPreferenceChanged, object: key)
+    }
+
+    /// Window ▸ Resources (⌥⌘R): everything kunj manages, listed anew each time it is opened.
+    @objc func showResources(_ sender: Any?) {
+        if resources == nil { resources = ResourcesWindow() }
+        resources?.cli = kunj
+        resources?.showWindow(nil)
+        resources?.window?.makeKeyAndOrderFront(nil)
+        resources?.refresh(nil)
     }
 
     @objc func showSettings(_ sender: Any?) {
@@ -1191,6 +1219,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Sessions", action: #selector(showSessions(_:)), keyEquivalent: "S").target = self
+        let resourcesItem = menu.addItem(withTitle: "Resources", action: #selector(showResources(_:)), keyEquivalent: "r")
+        resourcesItem.keyEquivalentModifierMask = [.command, .option]
+        resourcesItem.target = self
         NSApp.windowsMenu = menu
         return menu
     }

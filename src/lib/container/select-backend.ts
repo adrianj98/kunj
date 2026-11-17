@@ -30,6 +30,10 @@ export interface BackendSelection {
     provider: string;
     list(filter: Record<string, string>): Promise<import('../json-types').MachineJson[]>;
     backendFor(machine: string): Promise<ContainerBackend>;
+    /** Golden images: a repository's, or every one with '' */
+    images(repo: string): Promise<import('../json-types').MachineImageJson[]>;
+    /** Where the coordinator keeps caches (machine.cache), e.g. gs://bucket */
+    cacheStore(): Promise<string | undefined>;
   };
   machine?: { name: string; provider: string; /** Made by this command */ created: boolean; /** The repository's golden images, newest first */ images(): Promise<import('../json-types').MachineImageJson[]>; delete(): Promise<void>; suspend(): Promise<void>; /** The coordinator's cache store, when it has one */ cacheSync(): Promise<import('../machines/provider').CacheSync | undefined> };
 }
@@ -111,6 +115,8 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
         coordinator = {
           provider: backend.machines.provider,
           list: filter => client.list(filter),
+          images: repo => client.images(repo),
+          cacheStore: async () => (await client.providers()).cache?.display,
           backendFor: async machineName => {
             // passive: looking at a machine's containers is not using the machine (its idle timers ignore it)
             const b = new RemoteKunjBackend({ baseUrl, token, name: `${name}/${machineName}`, basePath: `/v1/machines/${machineName}/serve`, passive: true });

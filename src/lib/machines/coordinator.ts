@@ -283,7 +283,8 @@ export class Coordinator {
   /** The repository's golden images, newest first. */
   async images(repo: string): Promise<MachineImage[]> {
     if (!this.provider.features.images) return [];
-    const found = await this.provider.images.list({ [MACHINE_LABEL.repo]: repo, [MACHINE_LABEL.role]: IMAGE_ROLE });
+    // No repository: every golden image this coordinator's cloud holds (kunj resources)
+    const found = await this.provider.images.list({ ...(repo ? { [MACHINE_LABEL.repo]: repo } : {}), [MACHINE_LABEL.role]: IMAGE_ROLE });
     return found.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.name.localeCompare(a.name));
   }
 

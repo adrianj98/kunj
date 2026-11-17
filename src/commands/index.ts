@@ -71,6 +71,7 @@ import { RunCommand } from './run';
 import { ServeCommand } from './serve';
 import { RemoteCommand } from './remote';
 import { MachineCommand } from './machine';
+import { ResourcesCommand } from './resources';
 import { InstallCommand } from './install';
 import { UICommand } from '../ui';
 
@@ -114,6 +115,7 @@ export function getAllCommands(): BaseCommand[] {
     new ServeCommand(),
     new RemoteCommand(),
     new MachineCommand(),
+    new ResourcesCommand(),
     new InstallCommand(),
     new UICommand(),
   ];

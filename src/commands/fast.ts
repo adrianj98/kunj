@@ -23,6 +23,7 @@ const FAST_COMMANDS: Record<string, () => Promise<BaseCommand>> = {
   serve: async () => new (await import('./serve')).ServeCommand(),
   remote: async () => new (await import('./remote')).RemoteCommand(),
   machine: async () => new (await import('./machine')).MachineCommand(),
+  resources: async () => new (await import('./resources')).ResourcesCommand(),
   search: async () => new (await import('./search')).SearchCommand(),
   sessions: async () => new (await import('./sessions')).SessionsCommand(),
   lsp: async () => new (await import('./lsp')).LspCommand(),

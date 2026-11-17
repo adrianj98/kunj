@@ -283,6 +283,35 @@ export interface MachineListJson {
   machines: MachineJson[];
 }
 
+/**
+ * `kunj resources --json`: everything kunj manages, wherever it is. `places` are where it looked
+ * (this computer's Docker, each remote, each coordinator's cloud); one that did not answer has
+ * `available: false` and its resources are missing, not gone.
+ */
+export interface ResourcesJson {
+  places: Array<{ name: string; kind: 'docker' | 'remote' | 'cloud'; available: boolean; message?: string; provider?: string }>;
+  resources: ResourceJson[];
+}
+
+export interface ResourceJson {
+  /** container: a branch's container; helper: its firewall sidecar; service: a sidecar service */
+  kind: 'container' | 'helper' | 'service' | 'volume' | 'network' | 'image' | 'machine' | 'machine-image' | 'cache-store';
+  name: string;
+  /** The place it is in: "This Mac", a remote's name, or a coordinator's */
+  place: string;
+  /** The cloud machine it is on, for what lives on one */
+  machine?: string;
+  /** The repository id (kunj.repo), when it belongs to one */
+  repo?: string;
+  branch?: string;
+  /** running, exited, suspended… (containers and machines) */
+  state?: string;
+  /** What it is, in a few words: an image tag, a machine shape, "cache db", "snapshot" */
+  detail?: string;
+  sizeBytes?: number;
+  createdAt?: string;
+}
+
 /** `kunj machine setup --json` */
 export interface MachineSetupJson {
   provider: string;
