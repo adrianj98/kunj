@@ -199,6 +199,9 @@ gcloud iam roles create kunjSelfSuspend --project my-project --permissions compu
 gcloud projects add-iam-policy-binding my-project --member serviceAccount:kunj-machine@my-project.iam.gserviceaccount.com --role projects/my-project/roles/kunjSelfSuspend
 ```
 
+A branch that runs on a machine is found without `--remote`: when the branch has no container on
+your computer but has a machine, `kunj ct shell my-branch` goes to the machine and says so.
+
 ## Stop for the day
 
 `kunj ct stop` stops the container and puts its machine to sleep. You pay only for its disk while it

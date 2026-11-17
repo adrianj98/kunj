@@ -609,6 +609,12 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   the fallback for a local coordinator whose laptop is shut; the coordinator's loop stays primary.
   The bootstrap passes the flags only when the kunj on the machine knows `--idle-suspend` (a golden
   image baked earlier holds an older kunj, whose serve would not start with them: found on `kunj-dev`).
+- **A branch command finds its machine.** With no `--remote`, no `container.remote` and no container
+  for the branch on this computer's Docker, `ContainerCommand.context()` asks the local coordinator
+  whether the branch has a machine (`findBranchMachine()`, a `locate` that neither wakes nor creates)
+  and, when it has, runs as `--remote machines`, saying so. Found by the user: `kunj ct shell <branch>`
+  after starting the branch on a machine from the app said "No container". Costs one coordinator
+  question only when the local container is missing; no unit test yet (run on `kunj-dev`).
 - **Looking is not using.** A listing reaches a machine through the proxy marked `x-kunj-passive`
   (`selectBackend({ listing })`'s `backendFor`): the coordinator's proxy resolver takes it without
   counting it (`proxyTarget(name, use = false)`), and the machine's own timer ignores it. Found on

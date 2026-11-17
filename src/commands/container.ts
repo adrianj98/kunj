@@ -455,6 +455,15 @@ export class ContainerCommand extends BaseCommand {
     // Credentials in the remote URL stay on the host (seed.ts strips them too)
     const originUrl = stripUserinfo(getOriginUrl() || '');
     const repo = { root, name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root), originUrl };
+    // No remote named or configured, and the branch has no container on this computer: when it has a
+    // cloud machine, that is where it runs, and the command goes there without being told
+    if (!remoteNameOf(options, config) && options.remote === undefined && !options.context && !extra.listing && this.machineIntent) {
+      const found = await this.findBranchMachine(config, repo, this.machineIntent.branch).catch(() => undefined);
+      if (found) {
+        options.remote = LOCAL_MACHINES;
+        this.progress(chalk.gray(`${found} runs on a cloud machine (--remote machines)`));
+      }
+    }
     const remote = remoteNameOf(options, config);
     // For a remote that coordinates cloud machines: this command's branch (the current one by default)
     const intent = remote ? this.machineIntent : undefined;
@@ -503,6 +512,34 @@ export class ContainerCommand extends BaseCommand {
       return false; // a listing that failed is no reason to worry anyone
     }
   }
+
+  /**
+   * The branch (named, else the current one) when it has no container on this computer's Docker but
+   * does have a cloud machine with this computer's coordinator. Asked only when machine.provider is
+   * set; the machine is not woken by the question.
+   */
+  private async findBranchMachine(config: KunjConfig, repo: Context['repo'], named: string | undefined): Promise<string | undefined> {
+    if (typeof config.machine?.provider !== 'string' || !config.machine.provider) return undefined;
+    const branch = named || (await getCurrentBranch().catch(() => ''));
+    if (!branch) return undefined;
+    const local = new LocalDockerBackend({ context: config.container?.dockerContext || undefined });
+    const here = await local.inspectLabels(containerNames(repo.name, repo.id, branch).container).catch(() => null);
+    if (here) return undefined;
+    const lookup = this.machineLookup ?? (async (r: Context['repo'], b: string) => {
+      const { ensureLocalCoordinator } = await import('../lib/machines/local-coordinator');
+      const access = await ensureLocalCoordinator(config);
+      try {
+        await access.client.locate({ repo: r.id, repoName: r.name, branch: b, wake: false, create: false });
+        return true;
+      } finally {
+        await access.close();
+      }
+    });
+    return (await lookup(repo, branch)) ? branch : undefined;
+  }
+
+  /** Test seam: whether a branch has a cloud machine */
+  machineLookup?: (repo: Context['repo'], branch: string) => Promise<boolean>;
 
   /** A machine hook, on this computer; a failing post-* hook is a warning, a failing pre-* one throws. */
   private async machineHook(name: 'pre-machine-create' | 'post-machine-create' | 'pre-machine-delete' | 'post-machine-delete', branch: string, machine: string, provider: string, config: KunjConfig, options: ContainerOptions): Promise<void> {
