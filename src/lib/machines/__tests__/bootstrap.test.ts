@@ -7,6 +7,32 @@ import { GceProvider } from '../providers/gce';
 import { machineLabels } from '../provider';
 
 describe('bootstrapScript', () => {
+  it('installs the provider\'s self-suspend script and gives serve the idle flags, only when asked', () => {
+    const provider = new GceProvider({ project: 'my-proj-123', zone: 'us-central1-a' });
+    const suspend = provider.selfSuspendScript();
+    const script = bootstrapScript({ kunjPackage: 'kunj@1.4.0', port: 7433, pairWindowMinutes: 10, selfSuspend: { script: suspend, minutes: 45 } });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-bs-'));
+    try {
+      fs.writeFileSync(path.join(dir, 's.sh'), script);
+      execFileSync('bash', ['-n', path.join(dir, 's.sh')]);
+      fs.writeFileSync(path.join(dir, 'suspend.sh'), suspend);
+      execFileSync('sh', ['-n', path.join(dir, 'suspend.sh')]);
+      // the token is cut out of the metadata server's JSON by the script's own sed
+      const sed = /sed -n '([^']+)'/.exec(suspend)![1];
+      expect(execFileSync('sed', ['-n', sed], { input: '{"access_token":"ya29.abc-DEF_1","expires_in":3599,"token_type":"Bearer"}' }).toString().trim()).toBe('ya29.abc-DEF_1');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    expect(script).toContain(`<<'KUNJ_SELF_SUSPEND_EOF'\n${suspend}KUNJ_SELF_SUSPEND_EOF`);
+    expect(script).toContain("IDLE_FLAGS='--idle-suspend 45 --idle-command /usr/local/bin/kunj-self-suspend'");
+    expect(script).toContain('--pair-window $PAIR_WINDOW $IDLE_FLAGS');
+    expect(suspend).toContain('https://compute.googleapis.com/compute/v1/$ZONE/instances/$NAME/suspend');
+
+    const without = bootstrapScript({ kunjPackage: 'kunj@1.4.0', port: 7433, pairWindowMinutes: 10 });
+    expect(without).toContain("IDLE_FLAGS=''");
+    expect(without).toContain('rm -f /usr/local/bin/kunj-self-suspend');
+  });
+
   it('is valid bash that installs the package and starts kunj serve with pairing on the internal address', () => {
     const script = bootstrapScript({ kunjPackage: 'kunj@1.4.0', port: 7433, pairWindowMinutes: 10 });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-bs-'));

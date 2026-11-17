@@ -31,6 +31,8 @@ interface ServeOptions {
   idleExit?: string;
   allowPairing?: boolean;
   pairWindow?: string;
+  idleSuspend?: string;
+  idleCommand?: string;
 }
 
 export interface ServeCommandDeps {
@@ -106,6 +108,8 @@ export class ServeCommand extends BaseCommand {
         { flags: '--verbose', description: 'Log every request (method, route, status, duration); refusals are always logged' },
         { flags: '--rotate', description: '[token] Replace the token (or, with token add, that client\'s); every client using it must be given the new one' },
         { flags: '--machines', description: 'Coordinate cloud machines (machine.provider): one machine per branch session, reached through this server; token commands then act on the coordinator\'s tokens' },
+        { flags: '--idle-suspend <minutes>', description: 'On a cloud machine: run --idle-command after this many minutes with no request, no open terminal and no agent working' },
+        { flags: '--idle-command <path>', description: 'The program --idle-suspend runs to put this machine to sleep (written by the machine bootstrap)' },
         { flags: '--idle-exit <minutes>', description: 'Exit after this many minutes without a request (how kunj runs a local coordinator)' },
         { flags: '--allow-pairing', description: 'With no token yet, let one coordinator pair: POST /v1/pair hands out the token once (a machine\'s first boot)' },
         { flags: '--pair-window <minutes>', description: 'How long after start pairing stays open (default 10)' },
@@ -244,7 +248,12 @@ export class ServeCommand extends BaseCommand {
       const { bootstrapScript, defaultKunjPackage } = await import('../lib/machines/bootstrap');
       const { MACHINE_SERVE_PORT } = await import('../lib/machines/coordinator');
       const startupScript = settings.bootstrap
-        ? bootstrapScript({ kunjPackage: settings.kunjPackage || defaultKunjPackage(getVersion()), port: MACHINE_SERVE_PORT, pairWindowMinutes: settings.pairWindowMinutes })
+        ? bootstrapScript({ kunjPackage: settings.kunjPackage || defaultKunjPackage(getVersion()), port: MACHINE_SERVE_PORT, pairWindowMinutes: settings.pairWindowMinutes,
+            // The fallback behind this coordinator's own idle loop, so it waits a little longer
+            ...(settings.defaults.selfSuspend && provider.features.selfSuspend && provider.selfSuspendScript
+              ? { selfSuspend: { script: provider.selfSuspendScript(), minutes: settings.idleMinutes + 15 } }
+              : {}),
+          })
         : undefined;
       const cacheConfig = cacheStoreConfig(settings.cache);
       if (cacheConfig && !provider.cacheSync) throw new ContainerError(`machine.cache is set, but the ${provider.name} provider has no cache store. Unset it with kunj config --unset machine.cache --global.`);
@@ -261,6 +270,29 @@ export class ServeCommand extends BaseCommand {
       });
       extend = machineRoutes(coordinator);
       machines = { coordinator, idleMs: settings.idleMinutes * 60_000 };
+    }
+
+    // A cloud machine's own idle timer (docs/specs/cloud-machines.md): the fallback when no coordinator
+    // is there to put it to sleep. Use is any request that is not the coordinator's idle question, an
+    // open terminal or log stream, or an agent working in a container here.
+    let openStreams = 0;
+    let selfSuspend: import('../lib/machines/self-suspend').IdleWatch | undefined;
+    if (opts.idleSuspend !== undefined) {
+      const minutes = Number(opts.idleSuspend);
+      if (!(minutes > 0)) throw new ContainerError(`--idle-suspend ${opts.idleSuspend}: give a number of minutes above 0.`);
+      const command = opts.idleCommand;
+      if (!command || !path.isAbsolute(command)) throw new ContainerError('--idle-suspend needs --idle-command <absolute path>: the program that suspends this machine.');
+      const { idleWatch } = await import('../lib/machines/self-suspend');
+      const { localAgentBusy } = await import('../lib/machines/idle');
+      const { execFile } = await import('child_process');
+      selfSuspend = idleWatch({
+        idleMs: minutes * 60_000,
+        busy: async () => openStreams > 0 || (await localAgentBusy(backend)),
+        fire: () =>
+          new Promise<void>((resolve, reject) =>
+            execFile(command, [], { timeout: 60_000 }, (err, _out, errOut) => (err ? reject(new Error(String(errOut).trim().split('\n').pop() || err.message)) : resolve()))),
+        log: line => stderr(`${stamp()} ${line}`),
+      });
     }
 
     const idleMs = opts.idleExit !== undefined ? Number(opts.idleExit) * 60_000 : 0;
@@ -301,8 +333,15 @@ export class ServeCommand extends BaseCommand {
       version: getVersion(),
       allowPrivileged: !!opts.allowPrivileged,
       allowRuntimes,
+      onStream: open => {
+        openStreams += open ? 1 : -1;
+        selfSuspend?.touch();
+      },
       log: line => {
-        if (/^(GET|POST|DELETE|PUT) /.test(line)) touch();
+        if (/^(GET|POST|DELETE|PUT) /.test(line) && !/ passive$/.test(line) && !/^GET \/v1\/info /.test(line)) selfSuspend?.touch();
+        // Looking is not using: a listing of the machines (kunj events asks every 30 s) or /v1/info must
+        // not keep an auto-started coordinator from its idle exit
+        if (/^(GET|POST|DELETE|PUT) /.test(line) && !/^GET \/v1\/(machines|info) /.test(line)) touch();
         if (opts.verbose || /^(refused|unauthorized|paired)/.test(line)) stderr(`${stamp()} ${line}`);
       },
     });

@@ -48,6 +48,12 @@ export interface WatchEventsOptions {
   now?: () => Date;
   /** The repository's id as container labels carry it (kunj.repo) */
   repoId?: (repo: KnownRepoInfo) => Promise<string>;
+  /**
+   * The cloud machines a running coordinator knows (null: no coordinator runs, so nothing is asked and
+   * nothing is concluded). Polled every machinePollMs: one listing of the cloud, which wakes no machine.
+   */
+  machines?: () => Promise<Array<{ name: string; repo: string; branch: string; state: string }> | null>;
+  machinePollMs?: number;
   /** Called once the watches, the repo ids and the first tmux and status polls are in place (not waiting for Docker) */
   onReady?: () => void;
 }
@@ -289,6 +295,34 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
       // its containers are reported with repo null
     }
   }));
+  // Cloud machines: a state change is an event; the first listing only primes, and a listing that
+  // failed (or no coordinator) is skipped, never read as every machine going away
+  if (options.machines) {
+    const listMachines = options.machines;
+    const states = new Map<string, { state: string; repo: string; branch: string }>();
+    let primed = false;
+    const machineEvent = (name: string, m: { state: string; repo: string; branch: string }, state: string) =>
+      emit({ type: 'machine', repo: byId.get(m.repo) ?? null, branch: m.branch, machine: name, state: state as Extract<EventJson, { type: 'machine' }>['state'], at: at() });
+    const pollMachines = every(options.machinePollMs ?? 30000, async () => {
+      const listed = await untilAbort(listMachines(), signal);
+      if (!listed) return;
+      const seen = new Set<string>();
+      for (const m of listed) {
+        seen.add(m.name);
+        const before = states.get(m.name);
+        states.set(m.name, { state: m.state, repo: m.repo, branch: m.branch });
+        if (primed && before?.state !== m.state) machineEvent(m.name, m, m.state);
+      }
+      for (const [name, m] of states) {
+        if (seen.has(name)) continue;
+        states.delete(name);
+        if (primed) machineEvent(name, m, 'deleted');
+      }
+      primed = true;
+    });
+    void pollMachines();
+  }
+
   // A backend no repository named still streams (its events carry repo null), as before
   if (backend && !groups.has(backend) && !options.backendFor) groups.set(backend, new Set());
 

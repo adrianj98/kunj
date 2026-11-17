@@ -421,6 +421,8 @@ export type EventJson = { at: string } & (
       /** `app` when `kunj agent start --open-in-app` started it: the workspace app opens and focuses it */
       open?: 'app' }
   | { type: 'backend'; status: 'available' | 'unavailable'; message?: string }
+  /** A cloud machine appeared, changed state or went away (`state: 'deleted'`), as its coordinator lists it */
+  | { type: 'machine'; repo: { name: string; root: string } | null; branch: string; machine: string; state: MachineJson['state'] | 'deleted' }
 );
 
 /** `kunj secret list --json`: names, scope, targets and delivery of the stored secrets; never a value. */

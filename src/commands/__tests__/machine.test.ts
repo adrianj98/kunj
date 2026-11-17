@@ -104,11 +104,12 @@ describe('kunj machine', () => {
     expect(json()).toEqual({ coordinator: 'local', repo: REPO.id, images: [] });
 
     const snapshots: string[] = [];
-    const snapshot = async (remote: string, branch: string) => (snapshots.push(`${remote} ${branch}`), 0);
+    const snapshot = async (remote: string, branch: string) => (snapshots.push(`${remote} ${branch}`), { code: 0, hash: 'abc123def456' });
     await cmd({ snapshot }).execute('image', 'build', { json: true });
     const built = json();
     expect(snapshots).toEqual(['machines kunj..image-build']);
-    expect(built).toMatchObject({ coordinator: 'local', snapshot: true, image: { repo: REPO.id, version: '1.2.3' } });
+    // the image says which blueprint its snapshot is for
+    expect(built).toMatchObject({ coordinator: 'local', snapshot: true, image: { repo: REPO.id, version: '1.2.3', blueprint: 'abc123def456' } });
     expect(built.image.name).toMatch(/^kunj-app-.*-img-[0-9]{14}$/);
     // the builder started from the stock image, was stopped before the bake and is gone
     const builderSpec = provider.callsOf('create')[0].args[0] as { image: string; name: string };

@@ -212,7 +212,20 @@ machine. `features`: all true.
 `Ec2Provider` (phase 4): `aws ec2 run-instances|describe-instances|stop-instances --hibernate|
 start-instances|terminate-instances`, tags instead of labels, hibernation instead of suspend (an encrypted
 root volume and a supported family are the image recipe's job), private IPs for `address()` and SSM port
-forwarding for `tunnel()`. A third, `SshFleetProvider`, has no API: a list of boxes in the coordinator's
+forwarding for `tunnel()`. **As built (2026-11-17), `Ec2Provider`** (src/lib/machines/providers/ec2.ts, `machine.provider=ec2`,
+`machine.ec2 = { region, subnet, securityGroups, instanceProfile?, instanceTypes?, baseImage?, profile? }`):
+a machine's name is its `Name` tag and each kunj label its own tag (a value with a character tags do
+not allow is stored as `b64.<base64url>`, so filters stay exact); `Machine.id` carries the instance id.
+Create is `run-instances` with no public address, an encrypted gp3 root volume, hibernation configured,
+IMDSv2 only with one hop (two when the cache store needs the credential in the sync container), the
+stock Ubuntu through an SSM public parameter, and the instance profile only for the cache store.
+Suspend is `stop-instances --hibernate`, told from a plain stop by the state reason; images are AMIs
+(`create-image`, waited for; deregistered with their snapshots); the tunnel is Session Manager port
+forwarding; the cache store is S3 through the instance profile. `features.selfSuspend` is false (a
+machine would need the aws CLI and a permission on itself). It passes the conformance suite against a
+simulated `aws`; **it has not run on a real AWS account.**
+
+A third, `SshFleetProvider`, has no API: a list of boxes in the coordinator's
 config, `list` by a label file kunj keeps on each box, no create/delete, suspend a no-op, `ssh -N -L` as
 the tunnel. It costs little and proves that nothing above the interface assumes a cloud.
 
@@ -566,7 +579,30 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   reason, unless `--force`. Dry run without `--yes` when there is no terminal or with `--json`
   (`MachinePruneJson`); the machine delete hooks run. `kunj ct prune` does not include machines yet.
 
-Not yet: `kind: 'machine'` in `kunj events`, machines in `kunj ct prune`.
+- **`kunj events`** emits `{ type: 'machine', repo, branch, machine, state }` (`state: 'deleted'` when
+  one goes away). It is a poll, not a stream from the coordinator: every 30 s the local coordinator is
+  asked for its machines (one cloud listing, no machine woken), and only when one already runs here
+  (its record file), so watching never starts a coordinator. `GET /v1/machines` and `/v1/info` no
+  longer reset `--idle-exit`, so the poll does not keep one alive either. The first listing primes;
+  a failed listing or no coordinator concludes nothing. Containers on machines are not in the container
+  event stream yet (a refresh on the `machine` event lists them).
+- **`image-stale`.** `kunj machine image build` reads the blueprint hash from the snapshot it built
+  (`ct blueprint snapshot --json` in the child) and labels the image `kunj.blueprint`. `kunj ct start`
+  that made a machine compares the newest image's hash with the blueprint's and warns `image-stale`
+  (`imageStale: true` in `--json`) when they differ: the start still works, it built the snapshot itself.
+
+- **Machine-side idle timer.** With `machine.selfSuspend` (default true) and a provider that can
+  (`features.selfSuspend`, `selfSuspendScript()`), the bootstrap writes the provider's script to
+  `/usr/local/bin/kunj-self-suspend` and starts serve with `--idle-suspend <machine.idleMinutes + 15>
+  --idle-command <that script>`. `idleWatch()` (src/lib/machines/self-suspend.ts) looks once a minute:
+  use is any request (not `/v1/info`, not one marked `x-kunj-passive`, which the coordinator's idle
+  question now sends), an open exec or logs stream, or an agent in the `running` state; a clock jump
+  (the machine slept) restarts the spell. GCE's script asks the Compute API to suspend the instance
+  with the instance's own service account, so `machine.gce.serviceAccount` needs
+  `compute.instances.suspend`; without it the script fails and is logged, nothing else changes. It is
+  the fallback for a local coordinator whose laptop is shut; the coordinator's loop stays primary.
+
+Not yet: machines in `kunj ct prune`, the image in `kunj ct blueprint status`.
 
 ## Golden image as built (2026-11-16)
 
@@ -581,7 +617,7 @@ Simpler than the design above, and enough to take the install out of every new m
 | `kunj machine image [list]`, `image delete <name>` | `GET /v1/machines/images?repo=`, `DELETE /v1/machines/images/<name>` (only images with kunj's role label) |
 | `ct blueprint snapshot --machine <branch>` | On a coordinator a snapshot is built on one machine: the current branch's, or `--machine`'s (created when missing) |
 
-Not yet: the `kunj.blueprint` hash on the image and the `image-stale` warning, Sysbox in the image,
+Since added: the `kunj.blueprint` hash on the image and the `image-stale` warning (below). Not yet: Sysbox in the image,
 `machine.registry`, images in `kunj ct blueprint status`, a size other than the default for the builder's disk.
 
 Run on `kunj-dev` (2026-11-16, e2-standard-2): `kunj machine image build` took 470 s (builder up and

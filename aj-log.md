@@ -1905,3 +1905,6 @@ The user asked to be able to choose a remote in the app when remotes are availab
   user's `ct list` took 30 s while the old `gce` remote's VM was suspended.
 - `kunj ct stop` suspends the machine (not waited for; `--keep-awake`), `--no-wake`, `Coordinator.wake()` waits out `suspending`/`stopping`. Why: spec phase 2 ("Stop and remove", "Wake"); the first real stop waited 2 minutes for the cloud.
 - `kunj machine prune` with a pure planner (`planMachinePrune`). Why: spec "Prune"; a machine without its branch or container only costs money. Decided not to wake sleeping machines for the check.
+- `kunj events` machine events (poll of a running local coordinator; passive listings do not reset `--idle-exit`); image build labels the image with the blueprint hash; `ct start` warns `image-stale`. Why: spec phases 2 and 3.
+- Machine-side self-suspend: `idleWatch()`, `kunj serve --idle-suspend/--idle-command`, `GceProvider.selfSuspendScript()`, bootstrap installs it, `x-kunj-passive` on the coordinator's idle check. Why: spec phase 3; a machine must not bill all night when the laptop running the coordinator is closed.
+- `Ec2Provider` and the `machine.ec2` setting; `Machine.id`. Why: spec phase 4, and the user asked for a pluggable provider ("not just google cloud"). Not run on real AWS: no account in this session.

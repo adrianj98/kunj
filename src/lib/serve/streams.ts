@@ -26,6 +26,9 @@ import { bearerOf } from './http';
 import { Authenticator } from './token';
 import { ProxyResolver, proxyRoute, proxyUpgrade, refuseUpgrade } from './proxy';
 
+/** Sent by a caller that only looks (the coordinator's idle check): its requests are not use of the machine */
+export const PASSIVE_HEADER = 'x-kunj-passive';
+
 export interface StreamOptions {
   backend: ContainerBackend;
   guard: Guard;
@@ -35,6 +38,8 @@ export interface StreamOptions {
   logUnauthorized?: (what: string, address: string | undefined) => void;
   /** The coordinator's machine proxy, when this server has one */
   proxy?: () => ProxyResolver | undefined;
+  /** An exec or logs stream opened (true) or closed (false); never for an event stream or a passive caller */
+  onStream?: (open: boolean) => void;
 }
 
 /** A Writable that sends each chunk as a frame and completes the write when the socket took it. */
@@ -331,7 +336,13 @@ export function attachWebSockets(server: http.Server, opts: StreamOptions): { cl
       // A frame over maxPayload, a bad frame or a reset socket is an 'error' on this socket, and an
       // 'error' nobody listens for ends the process: it concerns one client, whose 'close' follows
       ws.on('error', err => opts.log(`WS ${url.pathname} socket error: ${err.message}`));
-      const done = (status: string) => opts.log(`WS ${url.pathname} ${status} ${Date.now() - started}ms`);
+      // Use, for a machine's own idle timer: a terminal or a log follower, not a watcher or the coordinator's idle question
+      const counts = route.kind !== 'events' && !req.headers[PASSIVE_HEADER];
+      if (counts) opts.onStream?.(true);
+      const done = (status: string) => {
+        if (counts) opts.onStream?.(false);
+        opts.log(`WS ${url.pathname} ${status} ${Date.now() - started}ms`);
+      };
       const run =
         route.kind === 'exec' ? serveExec(ws, route.id, opts)
         : route.kind === 'logs' ? serveLogs(ws, route.id, url, opts)

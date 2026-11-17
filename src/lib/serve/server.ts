@@ -11,7 +11,7 @@ import { Guard, GuardFlags, GuardLookup, backendLookup } from './guard';
 import { EngineJson, ErrorBody, InfoJson, PROTOCOL_VERSION, ServeError, parseLabelQuery } from './protocol';
 import { bearerOf, readJsonBody } from './http';
 import { ProxyResolver, proxyHttp, proxyRoute } from './proxy';
-import { StreamOptions, attachWebSockets, serveBuild, serveCopyIn } from './streams';
+import { PASSIVE_HEADER, StreamOptions, attachWebSockets, serveBuild, serveCopyIn } from './streams';
 import { Authenticator, newToken, singleTokenAuthenticator, tokenMatches } from './token';
 
 export interface ServeOptions {
@@ -34,6 +34,8 @@ export interface ServeOptions {
   allowRuntimes?: string[];
   /** One line per request (method, route, status, ms) and per refusal; never a body or a token. */
   log?: (line: string) => void;
+  /** An exec or logs stream opened or closed (a machine's idle timer counts them) */
+  onStream?: (open: boolean) => void;
   /** How the guard reads labels (default: the backend); tests look the fake up directly */
   guardLookup?: GuardLookup;
 }
@@ -234,7 +236,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     unauthorizedAt.set(addr, now);
     log(`${what} from ${addr}`);
   };
-  const streamOpts: StreamOptions = { backend, guard, authenticate, log, logUnauthorized, proxy: () => proxyResolver };
+  const streamOpts: StreamOptions = { backend, guard, authenticate, log, logUnauthorized, proxy: () => proxyResolver, onStream: opts.onStream };
   route('POST', '/v1/containers/:id/copy', (req, p, url) => serveCopyIn(req, p.id, url, streamOpts));
   route('POST', '/v1/images/:tag/build', (req, p) => serveBuild(req, p.tag, streamOpts));
 
@@ -268,7 +270,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     const started = Date.now();
     const url = new URL(req.url ?? '/', 'http://kunj.invalid');
     let client = '';
-    const finish = (status: number) => log(`${req.method} ${url.pathname} ${status} ${Date.now() - started}ms${client ? ` (${client})` : ''}`);
+    const finish = (status: number) => log(`${req.method} ${url.pathname} ${status} ${Date.now() - started}ms${client ? ` (${client})` : ''}${req.headers[PASSIVE_HEADER] ? ' passive' : ''}`);
     res.on('finish', () => finish(res.statusCode));
     if (req.method === 'POST' && url.pathname === '/v1/pair') {
       // The caller's nonce makes pairing repeatable for that caller only: a reply lost on the way

@@ -17,8 +17,8 @@ export function registerMachineSettings(): void {
       detailedDescription:
         'Set on the machine that runs the coordinator (kunj serve --machines). On a laptop, kunj then starts a local ' +
         'coordinator on its own when a kunj machine command needs one. Each provider reads machine.<provider>.*.',
-      examples: ['gce'],
-      relatedSettings: ['machine.gce'],
+      examples: ['gce', 'ec2'],
+      relatedSettings: ['machine.gce', 'machine.ec2'],
     },
     {
       key: 'machine.network',
@@ -129,6 +129,22 @@ export function registerMachineSettings(): void {
         'must be set, with Storage Object Admin on that bucket.',
       examples: ['{"bucket": "my-kunj-cache"}', '{"bucket": "my-kunj-cache", "prefix": "team-a"}', '{"store": "none"}'],
       relatedSettings: ['container.caches', 'machine.gce'],
+      validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
+    },
+    {
+      key: 'machine.ec2',
+      description: 'Amazon EC2 provider: { region, subnet, securityGroups, instanceProfile?, instanceTypes?, baseImage?, profile? }',
+      type: 'object',
+      defaultValue: {},
+      category: 'machine',
+      detailedDescription:
+        'region, subnet (a private one with a NAT for egress) and securityGroups are required. Suspend is hibernation, so ' +
+        'machines get an encrypted root volume and one of the instance types that can hibernate (default t3.medium, ' +
+        't3.large, t3.xlarge; instanceTypes overrides). The coordinator reaches a machine through Session Manager port ' +
+        'forwarding (the session-manager-plugin where the coordinator runs, and SSM in instanceProfile) or its private address ' +
+        'with machine.network=private. instanceProfile is also what machine.cache uses to reach the S3 bucket. baseImage is an ' +
+        'AMI id or an SSM public parameter (default Ubuntu 24.04). Not run on a real account yet: tested against a simulated aws.',
+      examples: ['{"region": "us-east-1", "subnet": "subnet-0abc1234", "securityGroups": ["sg-0abc1234"]}'],
       validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
     },
     {

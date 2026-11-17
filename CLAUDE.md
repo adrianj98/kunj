@@ -486,7 +486,7 @@ compare stream objects); `remote.docker.test.ts` needs a real daemon.
 **Cloud machines** (docs/specs/cloud-machines.md; phases 0–2 built and run on a real Google Cloud project): a small VM
 per branch session running Docker and `kunj serve`, behind a **coordinator**, `kunj serve --machines`
 (src/lib/serve/machines.ts over `Coordinator` in src/lib/machines/coordinator.ts), which alone talks to the cloud through a
-pluggable `MachineProvider` (src/lib/machines/provider.ts; providers by name in providers/index.ts, `gce.ts` first; only a
+pluggable `MachineProvider` (src/lib/machines/provider.ts; providers by name in providers/index.ts: `gce.ts`, and `ec2.ts`, which is conformance-tested against a simulated `aws` only; only a
 provider module spawns its cloud CLI, argv only). Cloud labels are the only machine state (GCE keeps the exact ones in
 instance metadata `kunj-labels`). A new machine runs the startup script of src/lib/machines/bootstrap.ts (Docker, Node,
 `machine.kunjPackage`, the `kunj-serve` unit with `--allow-pairing`); the coordinator pairs once (`POST /v1/pair` with a
@@ -504,7 +504,8 @@ deletes a baked-in serve token on a machine whose name differs from `/etc/kunj-m
 `kunj ct list` lists a coordinator's machines without waking one (`collectMember()`: containers of running machines carry `machine`, the
 rest are `machines` rows); the machine hooks `pre/post-machine-create|delete` (`branch`, `machine`, `provider`) run on the client.
 `Coordinator.idleTick()` suspends a machine after `machine.idleMinutes` with no proxied request, open
-stream or running agent (src/lib/machines/idle.ts). `kunj serve` takes named client tokens (`token add|list|remove`).
+stream or running agent (src/lib/machines/idle.ts); the machine's own serve does the same 15 minutes later (`--idle-suspend`,
+self-suspend.ts, the provider's `selfSuspendScript()`), for when no coordinator runs. The coordinator's question is sent `x-kunj-passive`. `kunj serve` takes named client tokens (`token add|list|remove`).
 Tests: `FakeProvider`, a conformance suite every provider runs, and proxy.test.ts (a coordinator serve in front of a
 machine serve, in process).
 
@@ -557,7 +558,7 @@ workspace-app/README.md. The release's `workspace-app` job attaches `Kunj-worksp
 then `git` (`fs.watch` of each repo's git common dir top level, plus `refs/` and `worktrees/`
 recursively, started when they appear; never the whole common dir recursively, because worktrees
 live in `.git/kunj/worktrees` with their node_modules; filtered by `gitPathMatters()`),
-`sessions`/`forwards`/`repos` (the registry files in `~/.kunj`), `agent` (a poll of `kunj-` tmux
+`sessions`/`forwards`/`repos` (the registry files in `~/.kunj`), `machine` (a 30 s poll of a local coordinator that already runs, never starting one), `agent` (a poll of `kunj-` tmux
 sessions, 5 s; a failed listing is skipped, not read as every agent ending) and `container`
 (`ContainerBackend.events()`, filtered on `kunj.repo`; exec/attach/copy actions are dropped because
 `kunj ct list` execs and would trigger its own refresh). The watches cannot see a file edited in a

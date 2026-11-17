@@ -53,7 +53,7 @@ export interface MachineCommandDeps {
    * Builds the blueprint snapshot on the builder machine (default: this kunj's
    * `ct blueprint snapshot --remote <remote> --machine <builder branch>`); resolves to its exit code
    */
-  snapshot?: (remote: string, branch: string) => Promise<number>;
+  snapshot?: (remote: string, branch: string) => Promise<number | { code: number; hash?: string }>;
   /** ~/.kunj/coordinator (tests) */
   coordinatorDir?: string;
 }
@@ -294,13 +294,29 @@ export class MachineCommand extends BaseCommand {
   }
 
   /** Runs this kunj's own `ct blueprint snapshot` against the builder machine, its output on stderr. */
-  private async buildSnapshot(remote: string, branch: string): Promise<number> {
-    if (this.deps.snapshot) return this.deps.snapshot(remote, branch);
+  /** Builds the snapshot on the builder; `hash` is the blueprint hash it was built for (the image's kunj.blueprint label). */
+  private async buildSnapshot(remote: string, branch: string): Promise<{ code: number; hash?: string }> {
+    if (this.deps.snapshot) {
+      const r = await this.deps.snapshot(remote, branch);
+      return typeof r === 'number' ? { code: r } : r;
+    }
     const { spawn } = await import('child_process');
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [process.argv[1], 'ct', 'blueprint', 'snapshot', '--remote', remote, '--machine', branch], { stdio: ['ignore', 2, 2] });
+      // --json: progress goes to stderr (shown), the result to stdout (read for the hash)
+      const child = spawn(process.execPath, [process.argv[1], 'ct', 'blueprint', 'snapshot', '--remote', remote, '--machine', branch, '--json'], { stdio: ['ignore', 'pipe', 2] });
+      const out: Buffer[] = [];
+      child.stdout!.on('data', (d: Buffer) => out.push(d));
       child.on('error', reject);
-      child.on('exit', code => resolve(code ?? 1));
+      child.on('exit', code => {
+        let hash: string | undefined;
+        try {
+          const parsed = JSON.parse(Buffer.concat(out).toString());
+          if (typeof parsed?.hash === 'string' && /^[0-9a-f]{1,64}$/.test(parsed.hash)) hash = parsed.hash;
+        } catch {
+          // no result: the exit code says why
+        }
+        resolve({ code: code ?? 1, ...(hash ? { hash } : {}) });
+      });
     });
   }
 
@@ -356,17 +372,20 @@ export class MachineCommand extends BaseCommand {
     let machine: MachineJson | undefined;
     let image;
     const withSnapshot = opts.snapshot !== false;
+    let blueprint: string | undefined;
     try {
       ({ machine } = await client.locate(builder));
       if (withSnapshot) {
         say(`Building the blueprint snapshot on ${machine.name}…`);
-        const code = await this.buildSnapshot(access.kind === 'local' ? 'machines' : access.name, IMAGE_BUILD_BRANCH);
+        const built = await this.buildSnapshot(access.kind === 'local' ? 'machines' : access.name, IMAGE_BUILD_BRANCH);
+        const code = built.code;
+        blueprint = built.hash;
         if (code !== 0) {
           throw new MachineError(`The blueprint snapshot failed on the builder (exit ${code}), so no image was made. Fix it, or bake without one: kunj machine image build --no-snapshot.`, 'machine-create-failed');
         }
       }
       say('Stopping the builder and baking its disk into an image…');
-      image = await client.bake(machine.name);
+      image = await client.bake(machine.name, blueprint ? { blueprint } : {});
     } finally {
       // The builder is only ever a means: never left running, whatever failed
       process.removeListener('SIGINT', onSignal);

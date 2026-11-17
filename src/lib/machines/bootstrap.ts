@@ -18,6 +18,8 @@ export interface BootstrapOptions {
   kunjPackage: string;
   port: number;
   pairWindowMinutes: number;
+  /** The machine-side idle timer: the provider's suspend script and the quiet minutes before it runs */
+  selfSuspend?: { script: string; minutes: number };
 }
 
 export function bootstrapScript(opts: BootstrapOptions): string {
@@ -26,6 +28,13 @@ export function bootstrapScript(opts: BootstrapOptions): string {
   }
   if (!Number.isInteger(opts.port) || opts.port < 1 || opts.port > 65535) throw new MachineError(`Bad serve port ${opts.port}.`, 'bad-machine-config');
   const window = Math.max(1, Math.round(opts.pairWindowMinutes));
+  const self = opts.selfSuspend;
+  if (self && (self.script.includes('KUNJ_SELF_SUSPEND_EOF') || !(self.minutes > 0))) throw new MachineError('Bad self-suspend settings.', 'bad-machine-config');
+  const idleMinutes = self ? Math.round(self.minutes) : 0;
+  // Quoted heredoc: the script lands byte for byte
+  const selfSuspend = self
+    ? `cat > /usr/local/bin/kunj-self-suspend <<'KUNJ_SELF_SUSPEND_EOF'\n${self.script.replace(/\n?$/, '\n')}KUNJ_SELF_SUSPEND_EOF\nchmod 755 /usr/local/bin/kunj-self-suspend\nIDLE_FLAGS='--idle-suspend ${idleMinutes} --idle-command /usr/local/bin/kunj-self-suspend'`
+    : `rm -f /usr/local/bin/kunj-self-suspend\nIDLE_FLAGS=''`;
   // Every value above is checked against a pattern without quotes or spaces, so single quotes hold it
   return `#!/bin/bash
 # Written by kunj (src/lib/machines/bootstrap.ts). Log: /var/log/kunj-bootstrap.log
@@ -85,6 +94,8 @@ if [ "$(cat /etc/kunj-machine 2>/dev/null || true)" != "$ME" ]; then
   echo "$ME" > /etc/kunj-machine
 fi
 
+${selfSuspend}
+
 IP="$(hostname -I | awk '{print $1}')"
 cat > /etc/systemd/system/kunj-serve.service <<UNIT
 [Unit]
@@ -97,7 +108,7 @@ User=kunj
 Group=docker
 Environment=HOME=/home/kunj
 WorkingDirectory=/home/kunj
-ExecStart=$(command -v kunj) serve --listen $IP:$PORT --allow-remote-listen --allow-pairing --pair-window $PAIR_WINDOW
+ExecStart=$(command -v kunj) serve --listen $IP:$PORT --allow-remote-listen --allow-pairing --pair-window $PAIR_WINDOW $IDLE_FLAGS
 Restart=on-failure
 RestartSec=3
 

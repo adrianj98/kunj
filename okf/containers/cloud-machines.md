@@ -30,7 +30,7 @@ the **provider** it drives.
 | Proxy | src/lib/serve/proxy.ts | `/v1/machines/<name>/serve/v1/<route>` to that machine's serve: http piped with the machine's token in place of the client's, upgrades as raw bytes; `Coordinator.proxyTarget()` shares one endpoint per machine, closes it a minute after the last use, answers `machine-asleep` |
 | `kunj ct` on machines | src/lib/container/select-backend.ts, src/commands/container.ts | A remote reporting `machines` (or `--remote machines`, the local coordinator) is a coordinator: `intentOf()` gives the command's branch and whether it creates (`start`), wakes (acting commands) or never wakes (`stop`); the backend is a `RemoteKunjBackend` with `basePath` |
 | Idle loop | `Coordinator.idleTick()`, src/lib/machines/idle.ts | Every minute: suspend after `machine.idleMinutes` with no proxied request, open stream or agent in the `running` state |
-| Not yet | — | Machines in `kunj events` and `ct prune`, the machine-side self-suspend timer, `image-stale` |
+| Not yet | — | Machines in `ct prune`, registry copy, `Ec2Provider` on a real account |
 | Remove | src/commands/container.ts `remove`, `BackendSelection.machine` | `ct remove` deletes the machine once the container is gone; `--keep-volumes` keeps it; a failed delete is a warning |
 | Golden image | src/commands/machine.ts, `Coordinator.bake()/images()/imageFor()` | `kunj machine image build`: a builder machine (reserved branch `kunj..image-build`, stock image) builds the blueprint snapshot (`ct blueprint snapshot --machine`), its stopped disk becomes `…-img-<time>` (labels `kunj.repo`, `kunj.role=machine-image`, `kunj.version`), older images of the repo are deleted, the builder is deleted. New machines boot the repo's newest image (`kunj.image` label); the bootstrap deletes the baked-in serve token when `/etc/kunj-machine` names another host, so the machine pairs anew |
 
@@ -89,3 +89,15 @@ run on the client, from `selectBackend()`'s `machineHooks`, `ct remove` and `kun
 `kunj machine prune` plans with `planMachinePrune()` (src/lib/machines/prune.ts): branch gone from origin, no
 container after 10 minutes, image builder after 2 hours; a running machine is inspected through the proxy with the
 remove guard, a sleeping one is kept unless `--force`.
+
+`kunj events` emits `type: 'machine'` from a 30 s poll (`WatchEventsOptions.machines`, src/lib/events.ts) of a local
+coordinator that already runs; it never starts one. Golden images are labelled `kunj.blueprint`, and `ct start`
+warns `image-stale` when a machine it made booted an image of another hash.
+
+Machine-side idle timer: `kunj serve --idle-suspend <min> --idle-command <script>` on the machine (`idleWatch()` in
+src/lib/machines/self-suspend.ts), installed by the bootstrap from `MachineProvider.selfSuspendScript()`. The
+coordinator's idle check sends `x-kunj-passive`, so it is not counted as use.
+
+`Ec2Provider` (src/lib/machines/providers/ec2.ts): `aws` argv, tags as labels (`ec2Value()`), hibernation as
+suspend, AMIs as images, Session Manager as the tunnel, S3 as the cache store. Conformance-tested against a
+simulated `aws` only.

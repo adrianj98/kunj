@@ -141,6 +141,31 @@ describe('gitPathMatters', () => {
 describe('watchEvents', () => {
   const headFile = () => path.join(repo.gitCommonDir, 'HEAD');
 
+  it('reports a cloud machine that changes state, appears or goes away, and nothing when no coordinator runs', async () => {
+    let listed: Array<{ name: string; repo: string; branch: string; state: string }> | null = [
+      { name: 'kunj-app-a-111111', repo: 'github.com/acme/app', branch: 'a', state: 'running' },
+      { name: 'kunj-other-b-222222', repo: 'github.com/acme/other', branch: 'b', state: 'suspended' },
+    ];
+    start({ machines: async () => listed, machinePollMs: 30 });
+    await settle(120);
+    const machineEvents = () => events.filter(e => e.type === 'machine').map(e => ({ ...e, at: '' }));
+    expect(machineEvents()).toEqual([]); // the first listing only primes
+
+    listed = null; // the coordinator went away: nothing is concluded
+    await settle(120);
+    expect(machineEvents()).toEqual([]);
+
+    listed = [
+      { name: 'kunj-app-a-111111', repo: 'github.com/acme/app', branch: 'a', state: 'suspended' },
+      { name: 'kunj-app-c-333333', repo: 'github.com/acme/app', branch: 'c', state: 'provisioning' },
+    ];
+    await settle(150);
+    const byName = (n: string) => machineEvents().filter(e => (e as any).machine === n);
+    expect(byName('kunj-app-a-111111')).toEqual([{ type: 'machine', repo: { name: repo.name, root: repo.root }, branch: 'a', machine: 'kunj-app-a-111111', state: 'suspended', at: '' }]);
+    expect(byName('kunj-app-c-333333')).toEqual([expect.objectContaining({ state: 'provisioning', branch: 'c' })]);
+    expect(byName('kunj-other-b-222222')).toEqual([{ type: 'machine', repo: null, branch: 'b', machine: 'kunj-other-b-222222', state: 'deleted', at: '' }]);
+  });
+
   it('two HEAD writes within the debounce yield one git event with the repo', async () => {
     start({ debounceMs: 1000 });
     await prime('git', () => fs.writeFileSync(headFile(), 'ref: refs/heads/main\n'), 1500);

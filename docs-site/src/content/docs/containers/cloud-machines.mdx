@@ -161,6 +161,37 @@ A machine goes to sleep by itself after `machine.idleMinutes` (30) with no comma
 and no agent working. Its memory is kept, so the container, its tmux sessions and a waiting agent are
 there when it wakes.
 
+## On AWS
+
+kunj can run the machines on Amazon EC2 instead. Set the provider and its settings where the
+coordinator runs:
+
+```bash
+kunj config --set machine.provider=ec2 --global
+kunj config --set-json 'machine.ec2={"region":"us-east-1","subnet":"subnet-0abc1234","securityGroups":["sg-0abc1234"]}' --global
+```
+
+The subnet must be private with a NAT gateway. To reach machines from your computer, install the
+AWS Session Manager plugin and add `"instanceProfile"` with a role that allows Session Manager. Sleep
+uses EC2 hibernation. The cache store is an S3 bucket.
+
+:::caution
+The AWS provider passes kunj's provider tests against a simulated `aws` command. It has not been run
+on a real AWS account yet.
+:::
+
+## Machines sleep on their own
+
+A machine goes to sleep after 30 minutes with no agent working and no terminal open
+(`machine.idleMinutes`). The coordinator does this while it runs. If your computer is closed, the
+machine does it itself 15 minutes later. For that, its service account needs permission to suspend
+instances:
+
+```bash
+gcloud iam roles create kunjSelfSuspend --project my-project --permissions compute.instances.suspend,compute.instances.get
+gcloud projects add-iam-policy-binding my-project --member serviceAccount:kunj-machine@my-project.iam.gserviceaccount.com --role projects/my-project/roles/kunjSelfSuspend
+```
+
 ## Stop for the day
 
 `kunj ct stop` stops the container and puts its machine to sleep. You pay only for its disk while it

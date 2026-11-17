@@ -145,3 +145,6 @@
 - Cloud machines in `kunj ct list` (`machine` per container, `machines` for the rest), machine hooks, fleet listing tunnel time limit. Page updated: containers/cloud-machines.md.
 - `kunj ct stop` suspends the branch's cloud machine (`?wait=0`), `--keep-awake`, `--no-wake`. Page updated: none (spec).
 - `kunj machine prune` (src/lib/machines/prune.ts): gone branches, machines without a container, stale builders; sleeping machines are never woken. Page updated: containers/cloud-machines.md.
+- `kunj events`: `type: 'machine'`; golden image `kunj.blueprint` label and the `image-stale` warning. Page updated: containers/cloud-machines.md.
+- Machine-side idle timer (`kunj serve --idle-suspend`, `selfSuspendScript()`, passive requests). Page updated: containers/cloud-machines.md.
+- `Ec2Provider` (AWS) behind the `MachineProvider` seam, `machine.ec2`. Page updated: containers/cloud-machines.md.

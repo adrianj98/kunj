@@ -15,6 +15,7 @@ export type ProviderFactory = (config: Record<string, unknown>, deps: ProviderDe
 
 const FACTORIES = new Map<string, ProviderFactory>([
   ['gce', async (config, deps) => new (await import('./gce')).GceProvider(config, deps)],
+  ['ec2', async (config, deps) => new (await import('./ec2')).Ec2Provider(config, deps)],
 ]);
 
 export function registerProvider(name: string, factory: ProviderFactory): void {

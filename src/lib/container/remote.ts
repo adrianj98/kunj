@@ -46,6 +46,8 @@ export interface RemoteOptions {
   name?: string;
   /** A path put before every route: `/v1/machines/<name>/serve` reaches a machine through its coordinator */
   basePath?: string;
+  /** Marks every request as only looking (x-kunj-passive): a machine's idle timer does not count it as use */
+  passive?: boolean;
   /** The terminal a TTY exec with 'inherit' streams drives (default: this process's) */
   terminal?: Terminal;
 }
@@ -131,7 +133,7 @@ export class RemoteKunjBackend implements ContainerBackend {
     const target = new URL((this.opts.basePath ?? '') + path, this.url);
     const lib = target.protocol === 'https:' ? https : http;
     return new Promise((resolve, reject) => {
-      const headers: Record<string, string> = { authorization: `Bearer ${this.opts.token}` };
+      const headers: Record<string, string> = { authorization: `Bearer ${this.opts.token}`, ...(this.opts.passive ? { 'x-kunj-passive': '1' } : {}) };
       if (body !== undefined) {
         headers['content-type'] = 'application/json';
         headers['content-length'] = String(Buffer.byteLength(body));
@@ -462,7 +464,7 @@ export class RemoteKunjBackend implements ContainerBackend {
   private socket(path: string): WebSocket {
     const target = new URL((this.opts.basePath ?? '') + path, this.url);
     target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:';
-    return new WebSocket(target, { headers: { authorization: `Bearer ${this.opts.token}` }, maxPayload: 16 * 1024 * 1024 });
+    return new WebSocket(target, { headers: { authorization: `Bearer ${this.opts.token}`, ...(this.opts.passive ? { 'x-kunj-passive': '1' } : {}) }, maxPayload: 16 * 1024 * 1024 });
   }
 
   private wsError(err: Error & { code?: string }): Error {

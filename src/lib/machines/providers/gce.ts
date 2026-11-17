@@ -360,6 +360,22 @@ export class GceProvider implements MachineProvider {
     },
   };
 
+  /** Asks the Compute API to suspend this instance, as the instance's service account (compute.instances.suspend). */
+  selfSuspendScript(): string {
+    return `#!/bin/sh
+# Written by kunj (GceProvider.selfSuspendScript): suspends this machine. Run by kunj serve when idle.
+set -eu
+M=http://metadata.google.internal/computeMetadata/v1
+H='Metadata-Flavor: Google'
+TOKEN="$(curl -sf -H "$H" "$M/instance/service-accounts/default/token" | sed -n 's/.*"access_token" *: *"\\([^"]*\\)".*/\\1/p')"
+ZONE="$(curl -sf -H "$H" "$M/instance/zone")"
+NAME="$(curl -sf -H "$H" "$M/instance/name")"
+[ -n "$TOKEN" ] || { echo 'this machine has no service account, so it cannot suspend itself' >&2; exit 1; }
+curl -sf -o /dev/null -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Length: 0' "https://compute.googleapis.com/compute/v1/$ZONE/instances/$NAME/suspend" \\
+  || { echo 'the Compute API refused the suspend (the service account needs compute.instances.suspend)' >&2; exit 1; }
+`;
+  }
+
   /**
    * A Cloud Storage bucket, reached with the machine's own service account (from the metadata
    * service, which a branch container's firewall blocks: only the sync container sees it).

@@ -31,7 +31,7 @@ export interface BackendSelection {
     list(filter: Record<string, string>): Promise<import('../json-types').MachineJson[]>;
     backendFor(machine: string): Promise<ContainerBackend>;
   };
-  machine?: { name: string; provider: string; delete(): Promise<void>; suspend(): Promise<void>; /** The coordinator's cache store, when it has one */ cacheSync(): Promise<import('../machines/provider').CacheSync | undefined> };
+  machine?: { name: string; provider: string; /** Made by this command */ created: boolean; /** The repository's golden images, newest first */ images(): Promise<import('../json-types').MachineImageJson[]>; delete(): Promise<void>; suspend(): Promise<void>; /** The coordinator's cache store, when it has one */ cacheSync(): Promise<import('../machines/provider').CacheSync | undefined> };
 }
 
 export interface SelectOptions {
@@ -147,6 +147,8 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
       machine = {
         name: located.machine.name,
         provider,
+        created: located.created,
+        images: () => client.images(m.repo),
         delete: () => client.delete(located.machine.name, { disks: true }),
         suspend: async () => void (await client.action(located.machine.name, 'suspend', { wait: false })),
         cacheSync: async () => (await client.providers()).cache,

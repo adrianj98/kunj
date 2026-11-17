@@ -31,6 +31,8 @@ export type MachineState = 'provisioning' | 'running' | 'suspending' | 'suspende
 
 export interface Machine {
   name: string;
+  /** The provider's own id for it, when that is not its name (an EC2 instance id) */
+  id?: string;
   state: MachineState;
   /** Exactly as set at create */
   labels: Labels;
@@ -145,6 +147,11 @@ export interface MachineProvider {
   };
   /** What each size class means on this cloud */
   sizes(): MachineSize[];
+  /**
+   * A shell script a machine runs, as root or its serve user, to suspend itself with its own credential
+   * (features.selfSuspend). No secret in it: the credential comes from the cloud's metadata service.
+   */
+  selfSuspendScript?(): string;
   /** How this cloud's machines sync with a cache store; absent when the provider has none */
   cacheSync?(config: CacheStoreConfig): CacheSync;
 }

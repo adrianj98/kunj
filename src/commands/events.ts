@@ -3,6 +3,7 @@
 // on SIGINT/SIGTERM or when stdin ends (its parent went away).
 // Keep top-level imports light: this command is on the fast path (src/commands/fast.ts).
 
+import * as fs from 'fs';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
 import { getGlobalKunjDir, loadResolvedConfig } from '../lib/config';
@@ -71,6 +72,9 @@ export function formatEvent(e: EventJson): string {
       break;
     case 'agent':
       rest = `${e.session} ${e.running ? 'started' : 'ended'}`;
+      break;
+    case 'machine':
+      rest = `${e.repo?.name ?? '-'} ${e.branch} ${e.state} ${e.machine}`;
       break;
     case 'backend':
       rest = [e.status, e.message].filter(Boolean).join(' ');
@@ -146,6 +150,23 @@ export class EventsCommand extends BaseCommand {
         backendFor: repo => perRepo.get(repo.root) ?? backend,
         onEvent: print,
         onReady,
+        // Only a coordinator that already runs here is asked: watching must not start one, nor keep
+        // one alive for its own sake (a listing does not count as use for --idle-exit's machines check)
+        ...(typeof config.machine?.provider === 'string' && config.machine.provider
+          ? {
+              machines: async () => {
+                const { coordinatorPaths } = await import('../lib/machines/config');
+                const { readRecord } = await import('../lib/machines/local-coordinator');
+                const { MachineClient } = await import('../lib/machines/client');
+                const paths = coordinatorPaths();
+                const record = readRecord(paths.record);
+                if (!record) return null;
+                const token = await fs.promises.readFile(paths.token, 'utf8').then(t => t.trim(), () => '');
+                if (!token) return null;
+                return new MachineClient({ baseUrl: `http://127.0.0.1:${record.port}`, token, name: 'the local coordinator' }).list();
+              },
+            }
+          : {}),
         signal: controller.signal,
       });
     } finally {

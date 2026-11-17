@@ -190,7 +190,8 @@ describe('containers on a machine, through the coordinator', () => {
     await sel.close();
     const name = [...f.provider.machines.keys()][0];
     expect(ran).toEqual([`pre ${name} fake`, `post ${name} fake`]);
-    expect(sel.machine).toMatchObject({ name, provider: 'fake' });
+    expect(sel.machine).toMatchObject({ name, provider: 'fake', created: true });
+    expect(await sel.machine!.images()).toEqual([]);
     // the machine exists now: no hook runs again
     (await hooked(record)).close();
     expect(ran).toHaveLength(2);

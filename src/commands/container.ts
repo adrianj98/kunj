@@ -488,6 +488,22 @@ export class ContainerCommand extends BaseCommand {
     return { config, repo, backend: this.backend, dockerContext: selection.dockerContext, remote: selection.remote, machine: selection.machine, ...(selection.coordinator ? { coordinator: selection.coordinator } : {}), ...(cacheStore ? { cacheStore } : {}) };
   }
 
+  /**
+   * image-stale: a machine this command made booted a golden image baked for another blueprint, so
+   * the start had to build the snapshot the image should have carried. Warned once, at the creation.
+   */
+  private async imageStale(ctx: Context, result: StartResult): Promise<boolean> {
+    if (!ctx.machine?.created || !result.blueprint?.hash) return false;
+    try {
+      const newest = (await ctx.machine.images())[0];
+      if (!newest?.blueprint || newest.blueprint === result.blueprint.hash) return false;
+      this.warn(`image-stale: the machine image ${newest.name} was baked for an older blueprint, so this start built the snapshot itself. kunj machine image build bakes a current one.`);
+      return true;
+    } catch {
+      return false; // a listing that failed is no reason to worry anyone
+    }
+  }
+
   /** A machine hook, on this computer; a failing post-* hook is a warning, a failing pre-* one throws. */
   private async machineHook(name: 'pre-machine-create' | 'post-machine-create' | 'pre-machine-delete' | 'post-machine-delete', branch: string, machine: string, provider: string, config: KunjConfig, options: ContainerOptions): Promise<void> {
     await runActionHook(name, { branch, machine, provider }, { hooks: config.hooks, jsonMode: this.jsonMode, skip: options.hooks === false });
@@ -584,9 +600,10 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     const result = await this.startOrResume(ctx, branch, options);
+    const imageStale = await this.imageStale(ctx, result);
 
     if (this.jsonMode) {
-      this.outputJSON({ ...result, branch });
+      this.outputJSON({ ...result, branch, ...(imageStale ? { imageStale: true } : {}) });
       return;
     }
 

@@ -1264,6 +1264,16 @@
         "default": null
       },
       {
+        "flags": "--idle-suspend <minutes>",
+        "description": "On a cloud machine: run --idle-command after this many minutes with no request, no open terminal and no agent working",
+        "default": null
+      },
+      {
+        "flags": "--idle-command <path>",
+        "description": "The program --idle-suspend runs to put this machine to sleep (written by the machine bootstrap)",
+        "default": null
+      },
+      {
         "flags": "--idle-exit <minutes>",
         "description": "Exit after this many minutes without a request (how kunj runs a local coordinator)",
         "default": null
