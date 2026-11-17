@@ -601,6 +601,11 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   with the instance's own service account, so `machine.gce.serviceAccount` needs
   `compute.instances.suspend`; without it the script fails and is logged, nothing else changes. It is
   the fallback for a local coordinator whose laptop is shut; the coordinator's loop stays primary.
+  The bootstrap passes the flags only when the kunj on the machine knows `--idle-suspend` (a golden
+  image baked earlier holds an older kunj, whose serve would not start with them: found on `kunj-dev`).
+- **A machine being created or woken is never idle.** `Coordinator.locate()` counts it in `starting`,
+  `idleTick()` treats it as busy, and its quiet spell starts when it is ready (found on `kunj-dev` with
+  `machine.idleMinutes` 1: a booting machine was suspended before it had paired).
 
 Not yet: machines in `kunj ct prune`, the image in `kunj ct blueprint status`.
 

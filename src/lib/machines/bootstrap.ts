@@ -33,7 +33,7 @@ export function bootstrapScript(opts: BootstrapOptions): string {
   const idleMinutes = self ? Math.round(self.minutes) : 0;
   // Quoted heredoc: the script lands byte for byte
   const selfSuspend = self
-    ? `cat > /usr/local/bin/kunj-self-suspend <<'KUNJ_SELF_SUSPEND_EOF'\n${self.script.replace(/\n?$/, '\n')}KUNJ_SELF_SUSPEND_EOF\nchmod 755 /usr/local/bin/kunj-self-suspend\nIDLE_FLAGS='--idle-suspend ${idleMinutes} --idle-command /usr/local/bin/kunj-self-suspend'`
+    ? `cat > /usr/local/bin/kunj-self-suspend <<'KUNJ_SELF_SUSPEND_EOF'\n${self.script.replace(/\n?$/, '\n')}KUNJ_SELF_SUSPEND_EOF\nchmod 755 /usr/local/bin/kunj-self-suspend\n# A golden image may hold a kunj from before this flag: serve would not start with it\nif kunj serve --help 2>/dev/null | grep -q -- '--idle-suspend'; then\n  IDLE_FLAGS='--idle-suspend ${idleMinutes} --idle-command /usr/local/bin/kunj-self-suspend'\nelse\n  IDLE_FLAGS=''\n  echo 'this kunj has no --idle-suspend: the machine will not suspend itself (bake a new image)'\nfi`
     : `rm -f /usr/local/bin/kunj-self-suspend\nIDLE_FLAGS=''`;
   // Every value above is checked against a pattern without quotes or spaces, so single quotes hold it
   return `#!/bin/bash

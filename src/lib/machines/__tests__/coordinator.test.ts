@@ -174,6 +174,30 @@ describe('Coordinator', () => {
     void provider;
   });
 
+  it('never suspends a machine that is still being created, however short the idle time', async () => {
+    const { provider, coordinator, serves } = setup();
+    let release!: () => void;
+    const gate = new Promise<void>(r => (release = r));
+    const c = new Coordinator({
+      ...(coordinator as any).opts,
+      call: async (...a: Parameters<typeof serves.caller>) => {
+        await gate; // its serve is not up yet
+        return serves.caller(...a);
+      },
+    });
+    const creating = c.locate({ repo: REPO, repoName: 'app', branch: 'booting', create: true });
+    while (provider.machines.size === 0) await new Promise(r => setTimeout(r, 1));
+    expect(await c.idleTick(1, async () => false)).toEqual([]);
+    expect(await c.idleTick(1, async () => false)).toEqual([]);
+    expect(provider.methods()).not.toContain('suspend');
+    release();
+    const made = await creating;
+    // ready now: the quiet spell starts here, and ends as for any machine
+    expect(await c.idleTick(60_000, async () => false)).toEqual([]);
+    (c as any).lastBusy.set(made.machine.name, -120_000);
+    expect(await c.idleTick(60_000, async () => false)).toEqual([made.machine.name]);
+  });
+
   it('gives a new machine the startup script and the configured image', async () => {
     const { provider, coordinator } = setup();
     const c = new Coordinator({ ...(coordinator as any).opts, startupScript: '#!/bin/bash\n', defaults: { ...(coordinator as any).opts.defaults, image: 'kunj-img-1' } });

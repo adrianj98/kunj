@@ -25,6 +25,8 @@ describe('bootstrapScript', () => {
     }
     expect(script).toContain(`<<'KUNJ_SELF_SUSPEND_EOF'\n${suspend}KUNJ_SELF_SUSPEND_EOF`);
     expect(script).toContain("IDLE_FLAGS='--idle-suspend 45 --idle-command /usr/local/bin/kunj-self-suspend'");
+    // only when the kunj on the machine (an older golden image's) knows the flag
+    expect(script).toContain("if kunj serve --help 2>/dev/null | grep -q -- '--idle-suspend'; then");
     expect(script).toContain('--pair-window $PAIR_WINDOW $IDLE_FLAGS');
     expect(suspend).toContain('https://compute.googleapis.com/compute/v1/$ZONE/instances/$NAME/suspend');
 

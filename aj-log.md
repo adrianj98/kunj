@@ -1908,3 +1908,7 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - `kunj events` machine events (poll of a running local coordinator; passive listings do not reset `--idle-exit`); image build labels the image with the blueprint hash; `ct start` warns `image-stale`. Why: spec phases 2 and 3.
 - Machine-side self-suspend: `idleWatch()`, `kunj serve --idle-suspend/--idle-command`, `GceProvider.selfSuspendScript()`, bootstrap installs it, `x-kunj-passive` on the coordinator's idle check. Why: spec phase 3; a machine must not bill all night when the laptop running the coordinator is closed.
 - `Ec2Provider` and the `machine.ec2` setting; `Machine.id`. Why: spec phase 4, and the user asked for a pluggable provider ("not just google cloud"). Not run on real AWS: no account in this session.
+- Coordinator: the idle loop never suspends a machine a locate is creating or waking (`starting`), and its quiet
+  spell starts when it is ready. Bootstrap: the idle flags are used only when the kunj on the machine knows
+  `--idle-suspend`. Why: found on `kunj-dev`: with `machine.idleMinutes` 1 a booting machine was suspended, and a
+  machine from an older golden image could not start `kunj serve` with the new flag.

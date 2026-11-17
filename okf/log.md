@@ -148,3 +148,4 @@
 - `kunj events`: `type: 'machine'`; golden image `kunj.blueprint` label and the `image-stale` warning. Page updated: containers/cloud-machines.md.
 - Machine-side idle timer (`kunj serve --idle-suspend`, `selfSuspendScript()`, passive requests). Page updated: containers/cloud-machines.md.
 - `Ec2Provider` (AWS) behind the `MachineProvider` seam, `machine.ec2`. Page updated: containers/cloud-machines.md.
+- Coordinator idle loop skips machines being created or woken; bootstrap checks the installed kunj for `--idle-suspend`. Page updated: none.

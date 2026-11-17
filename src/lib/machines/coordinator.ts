@@ -200,6 +200,8 @@ export class Coordinator {
   private readonly lastBusy = new Map<string, number>();
   /** One ensure per branch at a time: two clients starting the same branch get one machine */
   private readonly inFlight = new Map<string, Promise<LocateResult>>();
+  /** Machines a locate is creating or waking right now (by name, counted) */
+  private readonly starting = new Map<string, number>();
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.provider = opts.provider;
@@ -245,8 +247,20 @@ export class Coordinator {
     const key = `${req.repo}\n${req.branch}`;
     const running = this.inFlight.get(key);
     if (running && (req.wake || req.create)) return running;
+    // A machine being created or woken is in use by definition: the idle loop must not put it back to
+    // sleep while it boots, whatever machine.idleMinutes is
+    const name = machineName(req.repoName, req.repo, req.branch);
+    const starting = !!(req.wake || req.create);
+    if (starting) this.starting.set(name, (this.starting.get(name) ?? 0) + 1);
     const work = this.locateNow(req).finally(() => {
       if (this.inFlight.get(key) === work) this.inFlight.delete(key);
+      if (starting) {
+        const left = (this.starting.get(name) ?? 1) - 1;
+        if (left > 0) this.starting.set(name, left);
+        else this.starting.delete(name);
+        // Its quiet spell starts when it is ready, not when it was asked for
+        this.lastBusy.set(name, this.now());
+      }
     });
     if (req.wake || req.create) this.inFlight.set(key, work);
     return work;
@@ -517,7 +531,7 @@ export class Coordinator {
       }
       const now = this.now();
       if (!this.lastBusy.has(machine.name)) this.lastBusy.set(machine.name, now);
-      let busy = (this.inUse.get(machine.name) ?? 0) > 0;
+      let busy = (this.inUse.get(machine.name) ?? 0) > 0 || this.starting.has(machine.name);
       const token = this.opts.tokens.get(machine.name);
       if (!busy && token) {
         try {
