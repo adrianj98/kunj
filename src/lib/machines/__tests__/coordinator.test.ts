@@ -182,6 +182,31 @@ describe('Coordinator', () => {
     expect(r.machine.labels['kunj.image']).toBe('kunj-img-1');
   });
 
+  it('keeps trying when the tunnel cannot come up yet (the port is closed while the machine installs)', async () => {
+    let stored = '';
+    const machineServe = createServeServer({ backend: new FakeBackend(), version: '1', pairing: { until: Date.now() + 60_000, onPaired: t => (stored = t) } });
+    const { port } = await machineServe.listen('127.0.0.1', 0);
+    let opens = 0;
+    try {
+      const { coordinator, tokens } = setup({
+        network: 'tunnel',
+        call: undefined,
+        freePort: async () => port,
+        openTunnel: async () => {
+          if (++opens <= 3) throw new Error('gcloud ended before the tunnel was up');
+          return { close: async () => {} };
+        },
+        sleep: async () => {},
+        now: Date.now,
+      });
+      const r = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'booting', create: true });
+      expect(opens).toBeGreaterThan(3);
+      expect(tokens.all.get(r.machine.name)).toBe(stored);
+    } finally {
+      await machineServe.close();
+    }
+  });
+
   it('times out on a machine that never answers', async () => {
     const { provider, coordinator } = setup();
     // created, but its serve never comes up

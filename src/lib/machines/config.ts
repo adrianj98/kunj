@@ -36,7 +36,7 @@ export function machineSettings(config: KunjConfig): MachineSettings {
       diskGb: num(m.diskGb, 30),
       spot: m.spot === true,
       selfSuspend: m.selfSuspend !== false,
-      bootTimeoutMs: num(m.bootTimeoutMs, 300000),
+      bootTimeoutMs: num(m.bootTimeoutMs, 600000),
       image: typeof m.image === 'string' ? m.image : '',
     },
     kunjPackage: typeof m.kunjPackage === 'string' ? m.kunjPackage : '',

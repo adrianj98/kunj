@@ -69,9 +69,9 @@ export function registerMachineSettings(): void {
     },
     {
       key: 'machine.bootTimeoutMs',
-      description: 'How long to wait for a new or waking machine to answer',
+      description: 'How long to wait for a new or waking machine to answer; a new machine from the stock image spends about 3.5 minutes installing',
       type: 'number',
-      defaultValue: 300000,
+      defaultValue: 600000,
       category: 'machine',
       validate: positive,
     },

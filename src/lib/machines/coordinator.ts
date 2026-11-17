@@ -327,31 +327,52 @@ export class Coordinator {
   }
 
   /**
-   * Gets the machine's serve token with the one-time POST /v1/pair, retrying while the machine boots.
-   * A machine whose pairing already happened elsewhere (or closed) cannot be used: `machine-token`.
+   * Runs `step` against the machine's serve until it gives a result, up to the boot timeout. The
+   * endpoint is opened inside the loop: while a machine boots its port is closed, and a provider
+   * tunnel then fails to come up (gcloud's IAP tunnel tests the port and exits), which is one more
+   * "not yet", not a failure. A tunnel that broke is reopened.
    */
-  private async pair(machine: Machine): Promise<void> {
-    const endpoint = await this.endpoint(machine);
+  private async poll<T>(machine: Machine, step: (baseUrl: string) => Promise<T | undefined>): Promise<T> {
+    const deadline = this.now() + this.opts.defaults.bootTimeoutMs;
+    let endpoint: Endpoint | undefined;
     try {
-      const deadline = this.now() + this.opts.defaults.bootTimeoutMs;
-      // One nonce for every try: the machine answers a repeat from the same caller with the same token
-      const nonce = randomBytes(24).toString('base64url');
       for (;;) {
-        const reply = await this.call(endpoint.baseUrl, 'POST', '/v1/pair', undefined, { nonce }).catch(() => null);
-        if (reply?.status === 200 && typeof reply.body?.token === 'string') {
-          this.opts.tokens.set(machine.name, reply.body.token);
-          this.log(`paired with ${machine.name}`);
-          return;
-        }
-        if (reply?.status === 403) {
-          throw new MachineError(`Machine ${machine.name} no longer accepts pairing and this coordinator has no token for it. Delete it (kunj machine delete) and start the branch again; its work is on origin.`, 'machine-token');
+        try {
+          endpoint ??= await this.endpoint(machine);
+          const result = await step(endpoint.baseUrl);
+          if (result !== undefined) return result;
+        } catch (err) {
+          if (err instanceof MachineError && err.code === 'machine-token') throw err;
+          await endpoint?.release().catch(() => {});
+          endpoint = undefined;
         }
         if (this.now() >= deadline) throw new MachineError(`kunj serve on ${machine.name} did not answer within ${Math.round(this.opts.defaults.bootTimeoutMs / 1000)} s.`, 'machine-timeout');
         await this.sleep(POLL_MS);
       }
     } finally {
-      await endpoint.release();
+      await endpoint?.release().catch(() => {});
     }
+  }
+
+  /**
+   * Gets the machine's serve token with the one-time POST /v1/pair, retrying while the machine boots.
+   * A machine whose pairing already happened elsewhere (or closed) cannot be used: `machine-token`.
+   */
+  private async pair(machine: Machine): Promise<void> {
+    // One nonce for every try: the machine answers a repeat from the same caller with the same token
+    const nonce = randomBytes(24).toString('base64url');
+    await this.poll(machine, async baseUrl => {
+      const reply = await this.call(baseUrl, 'POST', '/v1/pair', undefined, { nonce });
+      if (reply.status === 200 && typeof reply.body?.token === 'string') {
+        this.opts.tokens.set(machine.name, reply.body.token);
+        this.log(`paired with ${machine.name}`);
+        return true;
+      }
+      if (reply.status === 403) {
+        throw new MachineError(`Machine ${machine.name} no longer accepts pairing and this coordinator has no token for it. Delete it (kunj machine delete) and start the branch again; its work is on origin.`, 'machine-token');
+      }
+      return undefined;
+    });
   }
 
   /** Waits until the machine's serve answers GET /v1/info with our token. */
@@ -360,21 +381,14 @@ export class Coordinator {
     if (!token) {
       throw new MachineError(`This coordinator has no token for ${machine.name} (it was paired by another coordinator, or the token file was lost). Delete the machine and start the branch again.`, 'machine-token');
     }
-    const endpoint = await this.endpoint(machine);
-    try {
-      const deadline = this.now() + this.opts.defaults.bootTimeoutMs;
-      for (;;) {
-        const reply = await this.call(endpoint.baseUrl, 'GET', '/v1/info', token).catch(() => null);
-        if (reply?.status === 200) return;
-        if (reply?.status === 401) {
-          this.opts.tokens.delete(machine.name);
-          throw new MachineError(`kunj serve on ${machine.name} refused this coordinator's token. Delete the machine and start the branch again.`, 'machine-token');
-        }
-        if (this.now() >= deadline) throw new MachineError(`kunj serve on ${machine.name} did not answer within ${Math.round(this.opts.defaults.bootTimeoutMs / 1000)} s.`, 'machine-timeout');
-        await this.sleep(POLL_MS);
+    await this.poll(machine, async baseUrl => {
+      const reply = await this.call(baseUrl, 'GET', '/v1/info', token);
+      if (reply.status === 200) return true;
+      if (reply.status === 401) {
+        this.opts.tokens.delete(machine.name);
+        throw new MachineError(`kunj serve on ${machine.name} refused this coordinator's token. Delete the machine and start the branch again.`, 'machine-token');
       }
-    } finally {
-      await endpoint.release();
-    }
+      return undefined;
+    });
   }
 }
