@@ -34,6 +34,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
+| Cloud machines phase 0, which is also the `--ssh` remote against a real second machine (a Linux Docker host): Done 2026-11-16 on project `kunj-dev`, VM `kunj-box` (e2-standard-2, Ubuntu 24.04, kernel 7.0, Docker 29.10, no external IP, Cloud NAT, IAP): `kunj remote ping` 1.4 s through the IAP ssh ProxyCommand; first `ct start` 303 s including the sandbox images and the blueprint snapshot; `ct exec` 3.3 s; metadata server blocked from the container, npm reachable; suspend 60 s, usable 18 s after resume with the container and a running process intact. `shell`/`agent` (interactive) and Sysbox not tried yet | [cloud-machines.md](cloud-machines.md#status), [google-cloud-containers.md](google-cloud-containers.md) | this commit (no code change) |
 | Cloud machines phase 1: `MachineProvider` seam and conformance suite, `GceProvider` (gcloud argv, exact labels in metadata), coordinator (`kunj serve --machines`, `/v1/machines` routes, pairing, named client tokens, `--idle-exit`), local auto-start, `kunj machine` | [cloud-machines.md](cloud-machines.md#as-built-phase-1-2026-11-16) | 924d4ae, 8423238, a2856bc, this commit |
 | Language servers parts 2–4: `kunj lsp`, `LspConnection`/`LspPolicy`/`LspCoordinator`, definition, references, hover, diagnostics, status bar memory, Language Servers menu | [language-servers.md](language-servers.md#as-built-2026-11-04) | 41026cb, this commit |
 | Language servers part 1: the workspace app's Monaco page on monaco-vscode-api 38 (Vite, TextMate, VS Code colour themes, language by file name) | [language-servers.md](language-servers.md#1-editor-on-monaco-vscode-api) | 80e6372 |
@@ -116,9 +117,7 @@ page only says where each thing stands.
 | --- | --- | --- |
 | Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
 | `container.caches`: a generic per-repository cache volume mounted into every branch container (`KUNJ_CACHE_DIR`); what a repository puts there is its own blueprint's business | [cloud-machines.md](cloud-machines.md#the-cache-volume) | Phase 3; works locally and on one shared VM too |
-| Cloud machines phase 0: one Ubuntu VM with the recipe, reached through IAP, `kunj remote add --ssh` | [cloud-machines.md](cloud-machines.md#plan) | Needs a Google Cloud project and a VM (Waiting on you) |
-| Cloud machines phases 2–4: the proxy and `kunj ct` on machines (wake on act, idle loop, self-suspend timer, prune, events); golden image build, `container.caches`, registry copy; `Ec2Provider`, workspace app rows | [cloud-machines.md](cloud-machines.md#plan) | Phase 1 is in; a real machine needs phase 0's project and the phase 3 recipe |
-| Remote containers: try an `--ssh` remote against a real second machine (and a Linux Docker host) | [remote-containers.md](remote-containers.md) | Everything so far ran with `kunj serve` on the same Mac |
+| Cloud machines phases 2–4: the proxy and `kunj ct` on machines (wake on act, idle loop, self-suspend timer, prune, events); golden image build, `container.caches`, registry copy; `Ec2Provider`, workspace app rows | [cloud-machines.md](cloud-machines.md#plan) | Phases 0 and 1 are in; next the machine bootstrap script, then phase 2 |
 | Remote containers: end a remote terminal's process when its client leaves | [remote-containers.md](remote-containers.md) | Confirmed 2026-11-16: closing the hijacked exec connection does not hang up the pty, so a closed remote shell or `tmux attach` client stays in the container and the server polls 30 s. Needs a kill of exactly that process (not the tmux server); not designed |
 | Copy the safe parts of `~/.claude` into containers | [container-system.md](container-system.md#roadmap) | — |
 | `kunj` inside the container | [container-system.md](container-system.md#roadmap) | — |
@@ -134,7 +133,6 @@ page only says where each thing stands.
 | Item | Why |
 | --- | --- |
 | Verify Docker-in-Docker `sysbox` mode on a real daemon | Docker Desktop has no `sysbox-runc`; needs a Linux host or a VM with sysbox. `privileged` was only smoke-tested outside kunj. Phase 0 of [cloud-machines.md](cloud-machines.md) would answer this and the remote `--ssh` item together |
-| A Google Cloud project and a VM for [cloud-machines.md](cloud-machines.md) phase 0 | The design is written; nothing has run on a real VM. Say which project and zone, or run the recipe in google-cloud-containers.md yourself and report |
 | Delete a stray test file: `~/Library/Application Support/Code/User/globalStorage/ms-vscode-remote.remote-containers/imageConfigs/kunj-sandbox%3a1.3.0.json` | Left by an early `kunj ct open` test run before it was made hermetic; the agent was not allowed to delete it |
 | Delete the duplicate outline-only doc <https://claude.ai/artifact/VE9Ltof3P1N62yWZyyExDW> | Created by mistake; it is in a different claude.ai organization than the agent session, so delete it from claude.ai yourself |
 

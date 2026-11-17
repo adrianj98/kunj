@@ -1821,3 +1821,18 @@ The user asked to be able to choose a remote in the app when remotes are availab
   `remotes.json` that cannot be read lists this machine alone with a warning (it would have failed
   a plain local listing); a remote that opens after its time is closed again (`closeSelection()`),
   and a failure is explained with the default backend, not whichever opened last.
+
+## 2026-11-16 Cloud machines phase 0 on Google Cloud
+
+- Created Google Cloud project `kunj-dev` (billing account "Firebase Payment"), enabled Compute and IAP,
+  added router `kunj-router`, NAT `kunj-nat`, firewall rule `kunj-from-iap` and VM `kunj-box`
+  (e2-standard-2, us-central1-a, no external IP, no service account). Why: phase 0 of
+  docs/specs/cloud-machines.md needed one real VM to prove `kunj serve` through IAP.
+- On the VM: Docker, Node 22, kunj from an `npm pack` of this checkout, systemd unit `kunj-serve`.
+  Why: client and server must be the same kunj; a unit survives suspend and reboot.
+- On this Mac: `~/.ssh/google_compute_engine` key (made by gcloud), a `Host kunj-gce` stanza appended to
+  `~/.ssh/config`, remote `gce` in `~/.kunj/remotes.json`. The server token was rotated after setup
+  because the first one was printed in the journal and in the session output.
+- Started `feature/charming-darwin-nmp9sg` in a container on the VM and left it and the VM running for
+  the interactive tests (`ct shell`, `ct agent`).
+- Docs only: phase 0 results in the specs, tracker and okf log. No code changed.

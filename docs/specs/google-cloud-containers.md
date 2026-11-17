@@ -12,7 +12,7 @@ before the provider is built.
 | Part | State |
 | --- | --- |
 | Notes | Written 2026-11-16, trimmed to the decided design |
-| Shared-VM recipe by hand (phase 0 of cloud-machines.md) | Not started: needs a project and a VM (waiting on you) |
+| Shared-VM recipe by hand (phase 0 of cloud-machines.md) | Done 2026-11-16 on project `kunj-dev`, VM `kunj-box` (e2-standard-2, Ubuntu 24.04, kernel 7.0, Docker 29.10, no external IP, Cloud NAT, IAP): `kunj remote ping` 1.4 s through the IAP ssh ProxyCommand; first `ct start` 303 s including the sandbox images and the blueprint snapshot; `ct exec` 3.3 s; metadata server blocked from the container, npm reachable; suspend 60 s, usable 18 s after resume with the container and a running process intact. `shell`/`agent` (interactive) and Sysbox not tried yet |
 | `GceProvider` | Shipped in cloud-machines.md phase 1 (src/lib/machines/providers/gce.ts); not yet run against a real project |
 
 ## What the machine must provide
@@ -56,6 +56,19 @@ From the shipped container code, not a wish list:
 - **Service account:** a dedicated one with no project roles; with `machine.selfSuspend`, bound by IAM
   condition to `compute.instances.suspend` and `compute.instances.get` on the machine itself, so the
   fallback idle timer can suspend it and nothing else.
+
+## Phase 0 as run (2026-11-16)
+
+Project `kunj-dev`, zone us-central1-a. `gcloud services enable compute.googleapis.com iap.googleapis.com`;
+router `kunj-router` and NAT `kunj-nat` on the default network; firewall rule `kunj-from-iap`
+(tcp:22 and tcp:7433 from `35.235.240.0/20` to tag `kunj-machine`); VM `kunj-box` with `--no-address
+--no-service-account --no-scopes`. On it: Docker from get.docker.com, Node 22 from nodesource, kunj from
+an `npm pack` of the checkout (so client and server match), and a systemd unit `kunj-serve.service`
+running `kunj serve` as the login user with group `docker`. On the laptop: an ssh config host `kunj-gce`
+(key `~/.ssh/google_compute_engine`, `HostKeyAlias compute.kunj-box`, ProxyCommand `gcloud compute
+start-iap-tunnel %h 22 --listen-on-stdin`), then `ssh kunj-gce kunj serve token --rotate | kunj remote add
+gce --ssh kunj-gce --token-stdin`, so the token never shows. Ubuntu's image grew its root to the 50 GB
+disk by itself. The first `kunj serve` prints its new token into the journal: rotate it after setup.
 
 ## Things the provider learned from gcloud
 

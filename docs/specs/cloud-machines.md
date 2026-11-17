@@ -16,7 +16,7 @@ led here is [google-cloud-containers.md](google-cloud-containers.md).
 | Part | State |
 | --- | --- |
 | Spec | Written 2026-11-16; coordinator architecture and local auto-start adopted the same day (see Decisions) |
-| Phase 0: one VM by hand with `kunj serve`, reached through an IAP tunnel | Not started (needs a project and a VM: waiting on you) |
+| Phase 0: one VM by hand with `kunj serve`, reached through an IAP tunnel | Done 2026-11-16 on project `kunj-dev`, VM `kunj-box` (e2-standard-2, Ubuntu 24.04, kernel 7.0, Docker 29.10, no external IP, Cloud NAT, IAP): `kunj remote ping` 1.4 s through the IAP ssh ProxyCommand; first `ct start` 303 s including the sandbox images and the blueprint snapshot; `ct exec` 3.3 s; metadata server blocked from the container, npm reachable; suspend 60 s, usable 18 s after resume with the container and a running process intact. `shell`/`agent` (interactive) and Sysbox not tried yet |
 | Phase 1: `MachineProvider`, `FakeProvider`, `GceProvider`; `kunj serve --machines` (routes, per-client tokens, pairing); local auto-start; `kunj machine` | Shipped 2026-11-16 (924d4ae, 8423238, a2856bc); unit-tested, and the local coordinator smoke-tested against the real `gcloud` without a project login. No machine has been created on a real project yet |
 | Phase 2: containers through the coordinator (`/v1/machines/<name>/…` proxy), `kunj ct` on machines, wake on act, idle loop, events | Not started |
 | Phase 3: golden image build, `container.caches`, registry copy | Not started |

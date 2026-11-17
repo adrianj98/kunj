@@ -1,5 +1,9 @@
 # Directory Update Log
 
+## 2026-11-16 (phase 0 run)
+* No page changed in substance: phase 0 of cloud machines ran on a real Google Cloud VM (remote ping, start,
+  exec, firewall, suspend/resume); results are in docs/specs/cloud-machines.md and google-cloud-containers.md.
+
 ## 2026-11-16 (cloud machines phase 1 shipped)
 * `containers/cloud-machines.md` describes the shipped modules (provider seam, GceProvider, Coordinator, machine
   routes, local auto-start, `kunj machine`) and what is not built yet; `containers/remotes.md` gains named client
