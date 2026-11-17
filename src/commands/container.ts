@@ -170,7 +170,7 @@ interface ListPart {
  * `kunj worktree list --containers`' own 10 s, or one slow remote would take every row with it.
  * An object so tests can shorten it.
  */
-export const fleetTimeouts = { openMs: 5_000, memberMs: 8_000 };
+export const fleetTimeouts = { openMs: 5_000, memberMs: 8_000, /** One machine of a coordinator: less than a member's, so a silent machine is a row and the rest are listed */ machineMs: 5_000 };
 
 function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout;
@@ -1547,8 +1547,13 @@ export class ContainerCommand extends BaseCommand {
       listed.map(async m => {
         if (m.state !== 'running' || !m.paired) return row(m);
         try {
-          const backend = await coordinator.backendFor(m.name);
-          const one = await this.collectFrom({ ...ctx, backend, coordinator: undefined }, options);
+          // A serve that accepts and never answers must cost its own row only, not the whole listing
+          const late = `machine ${m.name} did not answer within ${fleetTimeouts.machineMs / 1000}s`;
+          const one = await within(
+            coordinator.backendFor(m.name).then(backend => this.collectFrom({ ...ctx, backend, coordinator: undefined }, options)),
+            fleetTimeouts.machineMs,
+            late,
+          );
           if (one.containers.length === 0) row(m);
           const machine = { provider: coordinator.provider, name: m.name, state: m.state, size: m.size, ...(m.owner ? { owner: m.owner } : {}) };
           one.containers.forEach((c, i) => {
@@ -2193,7 +2198,18 @@ export class ContainerCommand extends BaseCommand {
   // ---------------------------------------------------------------------
 
   private async stop(target: string | undefined, options: ContainerOptions): Promise<void> {
-    const ctx = await this.context(options);
+    let ctx: Context;
+    try {
+      ctx = await this.context(options);
+    } catch (err) {
+      // A cloud machine that already sleeps: its container is stopped with it, so this is done
+      const asleep = err instanceof ContainerError && /^The machine of .* is (suspended|suspending|stopped|stopping)\./.test(err.message);
+      if (!asleep) throw err;
+      const branch = target || (await getCurrentBranch().catch(() => '')) || '';
+      if (this.jsonMode) this.outputJSON({ success: true, branch, alreadyAsleep: true });
+      else console.log(chalk.gray(`The machine of ${branch} is already asleep.`));
+      return;
+    }
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireMain(ctx, branch);
     await stopContainer(ctx.backend, this.names(ctx, branch), this.warn);

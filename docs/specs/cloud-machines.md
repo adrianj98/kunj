@@ -556,6 +556,7 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   owner? }`; `ContainerListJson.machines` is `MachineJson & { remote, provider }`. The image builder is
   never listed. Text: `[machine <size>]` on a container, and a row `machine suspended (kunj ct start
   <branch> wakes it)` for one asleep. On `kunj-dev` the coordinator's part of a listing took 2.7 s.
+  A running machine that does not answer within 5 s (`fleetTimeouts.machineMs`) is a row of its own.
 - **A left-out remote no longer holds the listing.** A fleet member's SSH tunnel gets the listing's own
   time limit, and a timed-out tunnel's pipe is released, so `kunj ct list` with an unreachable `--ssh`
   remote takes 6 s where it took 30 s.
@@ -596,7 +597,8 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   `/usr/local/bin/kunj-self-suspend` and starts serve with `--idle-suspend <machine.idleMinutes + 15>
   --idle-command <that script>`. `idleWatch()` (src/lib/machines/self-suspend.ts) looks once a minute:
   use is any request (not `/v1/info`, not one marked `x-kunj-passive`, which the coordinator's idle
-  question now sends), an open exec or logs stream, or an agent in the `running` state; a clock jump
+  question now sends), a request still in flight (a long image build), an open exec or logs stream, or
+  an agent in the `running` state (asked with a 30 s limit; unanswered is not use); a clock jump
   (the machine slept) restarts the spell. GCE's script asks the Compute API to suspend the instance
   with the instance's own service account, so `machine.gce.serviceAccount` needs
   `compute.instances.suspend`; without it the script fails and is logged, nothing else changes. It is

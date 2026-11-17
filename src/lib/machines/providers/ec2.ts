@@ -121,7 +121,16 @@ interface Ec2Image {
 }
 
 /** Everything but a terminated instance, which EC2 still lists for an hour */
-const LIVE_STATES = 'pending,running,stopping,stopped';
+const LIVE_STATES = ['pending', 'running', 'stopping', 'stopped'];
+
+interface Ec2Filter {
+  Name: string;
+  Values: string[];
+}
+
+/** `--filters` as one JSON array: one argv element, whatever the values hold, and the only form the CLI takes for several JSON filters. */
+const filterArg = (filters: Ec2Filter[]): string => JSON.stringify(filters);
+const tagFilters = (filter: Labels): Ec2Filter[] => Object.keys(filter).sort().map(k => ({ Name: `tag:${k}`, Values: [ec2Value(filter[k])] }));
 
 export class Ec2Provider implements MachineProvider {
   readonly name = 'ec2';
@@ -184,22 +193,22 @@ export class Ec2Provider implements MachineProvider {
     };
   }
 
-  private async describe(filters: string[]): Promise<Machine[]> {
-    const out = await this.aws(['ec2', 'describe-instances', '--filters', `Name=instance-state-name,Values=${LIVE_STATES}`, ...filters], 'list instances');
+  private async describe(filters: Ec2Filter[]): Promise<Machine[]> {
+    const out = await this.aws(['ec2', 'describe-instances', '--filters', filterArg([{ Name: 'instance-state-name', Values: LIVE_STATES }, ...filters])], 'list instances');
     const instances: Ec2Instance[] = (out.Reservations ?? []).flatMap((r: { Instances?: Ec2Instance[] }) => r.Instances ?? []);
     return instances.map(i => this.toMachine(i));
   }
 
   async list(filter: Labels): Promise<Machine[]> {
-    // Each filter is one argv element, so a value with a comma or a space cannot split it: the JSON form
-    const filters = Object.keys(filter).sort().map(k => JSON.stringify({ Name: `tag:${k}`, Values: [ec2Value(filter[k])] }));
-    return (await this.describe(filters)).filter(m => labelsInclude(m.labels, filter));
+    return (await this.describe(tagFilters(filter))).filter(m => labelsInclude(m.labels, filter));
   }
 
   async get(name: string): Promise<Machine | null> {
     if (!NAME.test(name)) return null;
-    const found = await this.describe([JSON.stringify({ Name: 'tag:Name', Values: [name] })]);
-    return found.find(m => m.name === name) ?? null;
+    const found = await this.describe([{ Name: 'tag:Name', Values: [name] }]);
+    // EC2 does not make a Name unique: kunj's own machine first, so a stranger of the same name never hides it
+    const named = found.filter(m => m.name === name);
+    return named.find(isKunjMachine) ?? named[0] ?? null;
   }
 
   private async mustBeOurs(name: string): Promise<Machine & { id: string }> {
@@ -213,7 +222,7 @@ export class Ec2Provider implements MachineProvider {
     if (!image) return AMI.test(this.cfg.baseImage) ? this.cfg.baseImage : `resolve:ssm:${this.cfg.baseImage}`;
     if (AMI.test(image)) return image;
     check(image, NAME, 'image');
-    const out = await this.aws(['ec2', 'describe-images', '--owners', 'self', '--filters', JSON.stringify({ Name: 'name', Values: [image] })], `find image ${image}`);
+    const out = await this.aws(['ec2', 'describe-images', '--owners', 'self', '--filters', filterArg([{ Name: 'name', Values: [image] }])], `find image ${image}`);
     const id = (out.Images as Ec2Image[] | undefined)?.[0]?.ImageId;
     if (!id) throw new MachineError(`No machine image named ${image} in ${this.cfg.region}.`, 'machine-create-failed');
     return id;
@@ -320,8 +329,8 @@ export class Ec2Provider implements MachineProvider {
 
   images = {
     list: async (filter: Labels): Promise<MachineImage[]> => {
-      const filters = Object.keys(filter).sort().map(k => JSON.stringify({ Name: `tag:${k}`, Values: [ec2Value(filter[k])] }));
-      const out = await this.aws(['ec2', 'describe-images', '--owners', 'self', ...(filters.length ? ['--filters', ...filters] : [])], 'list images');
+      const filters = tagFilters(filter);
+      const out = await this.aws(['ec2', 'describe-images', '--owners', 'self', ...(filters.length ? ['--filters', filterArg(filters)] : [])], 'list images');
       return ((out.Images ?? []) as Ec2Image[])
         .map(i => ({ name: i.Name ?? i.ImageId, labels: labelsOf(i.Tags), createdAt: i.CreationDate ?? '' }))
         .filter(i => labelsInclude(i.labels, filter));
@@ -340,7 +349,7 @@ export class Ec2Provider implements MachineProvider {
     },
     delete: async (name: string): Promise<void> => {
       check(name, NAME, 'image name');
-      const out = await this.aws(['ec2', 'describe-images', '--owners', 'self', '--filters', JSON.stringify({ Name: 'name', Values: [name] })], `find image ${name}`);
+      const out = await this.aws(['ec2', 'describe-images', '--owners', 'self', '--filters', filterArg([{ Name: 'name', Values: [name] }])], `find image ${name}`);
       for (const image of (out.Images ?? []) as Ec2Image[]) {
         await this.aws(['ec2', 'deregister-image', '--image-id', image.ImageId], `delete image ${name}`);
         // An AMI's snapshots are billed until they are deleted too

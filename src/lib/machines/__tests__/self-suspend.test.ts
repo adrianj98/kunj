@@ -36,16 +36,22 @@ describe('the machine-side idle timer', () => {
     watch.stop();
   });
 
-  it('never suspends while an agent works, and a busy check that fails counts as busy', async () => {
+  it('never suspends while an agent works; a question that fails or hangs is not proof of use', async () => {
     const { s, watch, pass } = setup(true);
     await pass(90);
     expect(s.fired).toBe(0);
-    const failing = idleWatch({ idleMs: MIN, tickMs: MIN, now: () => s.clock, busy: async () => Promise.reject(new Error('docker down')), fire: async () => void s.fired++, log: () => {} });
-    s.clock += 10 * MIN;
-    await failing.tick();
-    expect(s.fired).toBe(0);
     watch.stop();
-    failing.stop();
+    for (const busy of [async () => Promise.reject(new Error('docker down')), () => new Promise<boolean>(() => {})]) {
+      const fired = { n: 0 };
+      const w = idleWatch({ idleMs: MIN, tickMs: MIN, busyTimeoutMs: 20, now: () => s.clock, busy, fire: async () => void fired.n++, log: () => {} });
+      // one or two unanswered looks are a slow Docker, not an idle machine; the third in a row is
+      for (let look = 1; look <= 3; look++) {
+        s.clock += MIN;
+        await w.tick();
+        expect(fired.n).toBe(look === 3 ? 1 : 0);
+      }
+      w.stop();
+    }
   });
 
   it('does not count the time the machine slept as idle time', async () => {

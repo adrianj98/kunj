@@ -8,6 +8,8 @@ export interface IdleWatchOptions {
   /** How often to look (default one minute) */
   tickMs?: number;
   now?: () => number;
+  /** How long the busy question may take before it counts as unanswered (default 30 s) */
+  busyTimeoutMs?: number;
   /** An agent is working, or a terminal or stream is open: asked only once the quiet spell is long enough */
   busy(): Promise<boolean>;
   /** Suspends the machine; a failure is logged and tried again after another full spell */
@@ -29,6 +31,7 @@ export function idleWatch(opts: IdleWatchOptions): IdleWatch {
   let lastUse = now();
   let lastTick = now();
   let running = false;
+  let unanswered = 0;
   const tick = async (): Promise<void> => {
     if (running) return;
     running = true;
@@ -39,7 +42,20 @@ export function idleWatch(opts: IdleWatchOptions): IdleWatch {
       if (t - lastTick > tickMs * 3) lastUse = t;
       lastTick = t;
       if (t - lastUse < opts.idleMs) return;
-      if (await opts.busy().catch(() => true)) {
+      // A question that fails or hangs (Docker wedged) is not proof of use, as for the coordinator's
+      // loop: suspend keeps memory, and a machine nobody can ask must not bill for ever
+      let timer: NodeJS.Timeout | undefined;
+      const asked = await Promise.race([
+        opts.busy().catch(() => undefined),
+        new Promise<undefined>(resolve => {
+          timer = setTimeout(() => resolve(undefined), opts.busyTimeoutMs ?? 30_000);
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+      // One slow answer is not an idle machine: only a question unanswered three looks in a row is
+      if (asked === undefined && ++unanswered < 3) return;
+      unanswered = 0;
+      if (asked) {
         lastUse = now();
         return;
       }

@@ -1913,3 +1913,8 @@ The user asked to be able to choose a remote in the app when remotes are availab
   `--idle-suspend`. Why: found on `kunj-dev`: with `machine.idleMinutes` 1 a booting machine was suspended, and a
   machine from an older golden image could not start `kunj serve` with the new flag.
 - Workspace app: machine rows and `machine` event refresh (KunjJSON, Environment, EnvironmentList, StatusBarView, EventStream); `worktree list --containers` passes `machines` on. Why: spec phase 4 ("workspace app rows and a Wake action").
+- Review fixes (two adversarial lenses on the listing, prune, idle timer and EC2 work): EC2 `--filters` is one JSON
+  array (the real CLI rejects shorthand mixed with JSON; checked against its parser); `Ec2Provider.get()` prefers
+  kunj's machine among instances of one Name; a machine that does not answer a listing within 5 s is its own row;
+  in-flight requests (a long image build or upload) count as use for the machine's idle timer; the idle timer's busy
+  question has a 30 s limit and an unanswered one is not use; `ct stop` on a machine already asleep succeeds.

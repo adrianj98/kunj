@@ -24,10 +24,19 @@ class FakeAws {
     return out;
   }
 
-  private static matches(o: { Tags?: Array<{ Key: string; Value: string }>; State?: { Name: string }; Name?: string }, filters: string[]): boolean {
-    return filters.every(f => {
-      if (f.startsWith('Name=instance-state-name,Values=')) return f.slice('Name=instance-state-name,Values='.length).split(',').includes(o.State?.Name ?? '');
-      const { Name, Values } = JSON.parse(f) as { Name: string; Values: string[] };
+  /** `--filters` must be exactly one JSON array, as the real CLI needs it */
+  private filters(args: string[]): Array<{ Name: string; Values: string[] }> {
+    const given = this.values(args, '--filters');
+    if (given.length === 0) return [];
+    expect(given).toHaveLength(1);
+    const parsed = JSON.parse(given[0]);
+    expect(Array.isArray(parsed)).toBe(true);
+    return parsed;
+  }
+
+  private static matches(o: { Tags?: Array<{ Key: string; Value: string }>; State?: { Name: string }; Name?: string }, filters: Array<{ Name: string; Values: string[] }>): boolean {
+    return filters.every(({ Name, Values }) => {
+      if (Name === 'instance-state-name') return Values.includes(o.State?.Name ?? '');
       if (Name === 'name') return Values.includes(o.Name ?? '');
       const key = Name.replace(/^tag:/, '');
       return Values.includes(o.Tags?.find(t => t.Key === key)?.Value ?? '\0');
@@ -56,7 +65,7 @@ class FakeAws {
     };
     switch (verb) {
       case 'describe-instances':
-        return FakeAws.ok({ Reservations: [{ Instances: [...this.instances.values()].filter(i => FakeAws.matches(i, this.values(args, '--filters'))) }] });
+        return FakeAws.ok({ Reservations: [{ Instances: [...this.instances.values()].filter(i => FakeAws.matches(i, this.filters(args))) }] });
       case 'run-instances': {
         const id = `i-0000000${++this.seq}abc`;
         const spec = JSON.parse(this.values(args, '--tag-specifications')[0])[0];
@@ -87,7 +96,7 @@ class FakeAws {
       case 'modify-instance-attribute':
         return FakeAws.ok();
       case 'describe-images':
-        return FakeAws.ok({ Images: [...this.images.values()].filter(i => FakeAws.matches(i, this.values(args, '--filters'))) });
+        return FakeAws.ok({ Images: [...this.images.values()].filter(i => FakeAws.matches(i, this.filters(args))) });
       case 'create-image': {
         const ImageId = `ami-0000000${++this.seq}abc`;
         const spec = JSON.parse(this.values(args, '--tag-specifications')[0]);

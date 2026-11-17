@@ -272,6 +272,11 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     let client = '';
     const finish = (status: number) => log(`${req.method} ${url.pathname} ${status} ${Date.now() - started}ms${client ? ` (${client})` : ''}${req.headers[PASSIVE_HEADER] ? ' passive' : ''}`);
     res.on('finish', () => finish(res.statusCode));
+    // In flight is in use (a long image build or upload has no stream): counted like one, for a machine's idle timer
+    if (opts.onStream && !req.headers[PASSIVE_HEADER] && url.pathname !== '/v1/info') {
+      opts.onStream(true);
+      res.once('close', () => opts.onStream?.(false));
+    }
     if (req.method === 'POST' && url.pathname === '/v1/pair') {
       // The caller's nonce makes pairing repeatable for that caller only: a reply lost on the way
       // (a dropped tunnel) must not leave the machine paired with a token nobody stored

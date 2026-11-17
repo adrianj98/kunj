@@ -150,3 +150,4 @@
 - `Ec2Provider` (AWS) behind the `MachineProvider` seam, `machine.ec2`. Page updated: containers/cloud-machines.md.
 - Coordinator idle loop skips machines being created or woken; bootstrap checks the installed kunj for `--idle-suspend`. Page updated: none.
 - Workspace app lists cloud machines (`Environment.machine`, a sleeping machine as a stopped container row). Page updated: containers/cloud-machines.md.
+- Review fixes: EC2 filters as one JSON array, per-machine listing time limit, in-flight requests count for the idle timer, `ct stop` on a sleeping machine is a no-op. Page updated: none.
