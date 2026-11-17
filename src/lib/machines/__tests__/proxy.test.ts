@@ -161,6 +161,16 @@ describe('containers on a machine, through the coordinator', () => {
     await expect(direct.ready()).rejects.toThrow(/suspended/);
   });
 
+  it('hands the command its machine, which it can delete', async () => {
+    const sel = await select(f, { branch: 'gone', wake: true, create: true });
+    const name = [...f.provider.machines.keys()][0];
+    expect(sel.machine?.name).toBe(name);
+    await sel.machine!.delete();
+    await sel.close();
+    expect(f.provider.machines.size).toBe(0);
+    expect(f.tokens.has(name)).toBe(false);
+  });
+
   it('uses this machine\'s own coordinator for --remote machines', async () => {
     const sel = await selectBackend({
       remote: 'machines',

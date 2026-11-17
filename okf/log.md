@@ -139,3 +139,4 @@
 - `kunj ct list` lists the fleet (this machine and every remote): `remote` per container, `backends`. Workspace app: "Run on" in New session, `Environment.remoteArguments` on every container command. Pages updated: containers/remotes.md, apps/workspace-app.md.
 - Cloud machines: golden images (`kunj machine image build|list|delete`, `Coordinator.bake()`, newest image booted, bootstrap token reset), `ct blueprint snapshot --machine`, a start lock for the local coordinator. Page updated: containers/cloud-machines.md.
 - `container.caches`: per-repository cache volumes in every new branch container and the snapshot build (`KUNJ_CACHE_DIR`). Page updated: containers/lifecycle.md.
+- `kunj ct remove` on a cloud machine deletes the machine after the container (`BackendSelection.machine`). Page updated: containers/cloud-machines.md.

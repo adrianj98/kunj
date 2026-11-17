@@ -117,6 +117,8 @@ interface Context {
   dockerContext?: string;
   /** The remote's name when the backend is a kunj serve (docs/specs/remote-containers.md) */
   remote?: string;
+  /** The cloud machine this command's branch runs on, when the remote coordinates machines */
+  machine?: BackendSelection['machine'];
 }
 
 const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'mcp', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file', 'token'];
@@ -443,7 +445,7 @@ export class ContainerCommand extends BaseCommand {
       this.selections.set(key, selection);
     }
     this.backend = selection.backend;
-    return { config, repo, backend: this.backend, dockerContext: selection.dockerContext, remote: selection.remote };
+    return { config, repo, backend: this.backend, dockerContext: selection.dockerContext, remote: selection.remote, machine: selection.machine };
   }
 
   /** The options that make a background kunj use this command's backend */
@@ -2041,11 +2043,23 @@ export class ContainerCommand extends BaseCommand {
     await removeContainer(ctx.backend, names, { ...removeCtx, force: true, keepVolumes: !!options.keepVolumes });
     await runActionHook('post-container-delete', hookValues, hookOptions);
 
+    // A cloud machine holds one branch: with its container gone it is only a bill. Kept volumes
+    // live on its disk, so --keep-volumes keeps the machine (kunj machine delete removes it).
+    let machineDeleted: string | undefined;
+    if (ctx.machine && !options.keepVolumes) {
+      try {
+        await ctx.machine.delete();
+        machineDeleted = ctx.machine.name;
+      } catch (err) {
+        this.warn(`the container is removed, but its machine ${ctx.machine.name} could not be deleted: ${(err as Error).message}. kunj machine delete ${branch} removes it.`);
+      }
+    }
+
     if (this.jsonMode) {
-      this.outputJSON({ success: true, branch, name: names.container, keptVolumes: !!options.keepVolumes });
+      this.outputJSON({ success: true, branch, name: names.container, keptVolumes: !!options.keepVolumes, ...(machineDeleted ? { machine: machineDeleted } : {}) });
       return;
     }
-    console.log(chalk.green(`✓ Removed ${names.container}${options.keepVolumes ? ' (volumes kept)' : ''}`));
+    console.log(chalk.green(`✓ Removed ${names.container}${options.keepVolumes ? ' (volumes kept)' : ''}${machineDeleted ? ` and its machine ${machineDeleted}` : ''}`));
   }
 }
 

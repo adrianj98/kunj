@@ -21,6 +21,8 @@ export interface BackendSelection {
   dockerContext?: string;
   /** Ends what the selection opened (an SSH tunnel); safe to call twice */
   close(): Promise<void>;
+  /** The cloud machine the backend is, when the remote coordinates machines */
+  machine?: { name: string; delete(): Promise<void> };
 }
 
 export interface SelectOptions {
@@ -81,6 +83,7 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
   }
   const { RemoteKunjBackend } = await import('./remote');
   let backend = new RemoteKunjBackend({ baseUrl, token, name });
+  let machine: BackendSelection['machine'];
   try {
     await backend.ready();
     if (backend.machines) {
@@ -90,16 +93,18 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
         throw new ContainerError(`${name === LOCAL_MACHINES ? 'Cloud machines hold' : `Remote ${name} coordinates cloud machines, which hold`} one branch each, so this command needs a branch. kunj machine list shows them all.`, 'bad-remote');
       }
       const { MachineClient } = await import('../machines/client');
-      const located = await new MachineClient({ baseUrl, token, name }).locate({ repo: m.repo, repoName: m.repoName, branch: m.branch, wake: m.wake, create: m.create, size: m.size });
+      const client = new MachineClient({ baseUrl, token, name });
+      const located = await client.locate({ repo: m.repo, repoName: m.repoName, branch: m.branch, wake: m.wake, create: m.create, size: m.size });
       if (located.machine.state !== 'running') {
         throw new ContainerError(`The machine of ${m.branch} is ${located.machine.state}. kunj ct start ${m.branch} wakes it.`, 'remote-unreachable');
       }
       backend = new RemoteKunjBackend({ baseUrl, token, name: `${name}/${located.machine.name}`, basePath: `/v1/machines/${located.machine.name}/serve` });
       await backend.ready();
+      machine = { name: located.machine.name, delete: () => client.delete(located.machine.name, { disks: true }) };
     }
   } catch (err) {
     await close();
     throw err;
   }
-  return { backend, kind: 'remote', remote: name, dockerContext: backend.serverContext, close };
+  return { backend, kind: 'remote', remote: name, dockerContext: backend.serverContext, close, ...(machine ? { machine } : {}) };
 }

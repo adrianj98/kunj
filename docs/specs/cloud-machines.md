@@ -482,7 +482,11 @@ port and exits). `machine.bootTimeoutMs` defaults to 10 minutes.
 | Idle loop | `Coordinator.idleTick()` every minute in `kunj serve --machines`, asking each awake machine through src/lib/machines/idle.ts (`STATUS_SCRIPT` over the machine's serve): suspended after `machine.idleMinutes` with no proxied request, no open stream and no agent in the `running` state; a machine whose serve cannot be asked is not thereby busy, so one nobody reached for the whole spell is suspended rather than left billing. The loop's own question does not count as use. `--idle-exit` does not end a coordinator while a proxy is open or a machine is awake |
 | Tests | src/lib/machines/__tests__/proxy.test.ts: a coordinator serve in front of a machine serve, both in process (unary, WebSocket exec, streamed upload, one shared tunnel, tokens never crossing, wake rules, idle rules) |
 
-Not yet: machines in `ct list`/`kunj events`/the apps, machine prune and the delete on `ct remove`, the
+`kunj ct remove` on a machine deletes the machine too once the container is gone (the selection carries
+`machine.delete()`); with `--keep-volumes` the machine stays, since the volumes are on its disk; a failed
+delete is a warning naming `kunj machine delete`.
+
+Not yet: machines in `ct list`/`kunj events`/the apps, machine prune, the
 machine hooks, the self-suspend timer on the machine (so with a local coordinator a machine sleeps only
 while that coordinator runs, which `--idle-exit` now waits for), the cache volume.
 

@@ -1881,3 +1881,5 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - `container.caches` (src/lib/container/caches.ts, lifecycle.ts, setting, `bad-config`). Why: the user wants a shared,
   generic cache (their example: a database pull with `--cached <path>`) with nothing repository-specific in kunj.
 - Start lock in `ensureLocalCoordinator`. Why: two commands at once each started a coordinator (review follow-up).
+- `kunj ct remove` deletes the branch's cloud machine after the container (not with `--keep-volumes`). Why: a
+  machine holds one branch, so one without its container only costs money.

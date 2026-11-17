@@ -74,6 +74,12 @@ a few minutes; the log is `/var/log/kunj-bootstrap.log` on the machine. `machine
 kunj it installs (`kunj@1.4.0`, or `github:owner/repo#ref` to build a branch), and `machine.image` names
 an image of your own that already has everything, which starts in seconds.
 
+## Removing
+
+`kunj ct remove <branch>` checks the container for unpushed work, removes it, and then deletes the
+branch's machine and its disk. With `--keep-volumes` the machine is kept, because the volumes are on its
+disk; `kunj machine delete <branch>` removes it later.
+
 ## Bake an image so new machines start fast
 
 ```bash
