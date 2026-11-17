@@ -160,7 +160,9 @@ export class MachineCommand extends BaseCommand {
     }
     const zone = opts.zone || (typeof existing.zone === 'string' ? existing.zone : '') || 'us-central1-a';
     const { gceSetup } = await import('../lib/machines/setup/gce');
-    const plan = gceSetup({ project, zone, network: opts.network, cache: opts.cache !== false, existing }, run);
+    // The network machines are created on (machine.gce.network) is the one that needs the NAT and the rule
+    const network = opts.network || (typeof existing.network === 'string' ? existing.network : '') || undefined;
+    const plan = gceSetup({ project, zone, network, cache: opts.cache !== false, existing }, run);
 
     const say = (line: string) => (this.jsonMode ? console.error(line) : console.log(line));
     say(chalk.blue(`Checking ${plan.target}…`));

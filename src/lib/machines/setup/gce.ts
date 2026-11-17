@@ -58,6 +58,10 @@ export function gceSetup(opts: GceSetupOptions, run: CliRunner): SetupPlan {
   const email = `${GCE_SETUP.account}@${project}.iam.gserviceaccount.com`;
   const member = `serviceAccount:${email}`;
   const role = `projects/${project}/roles/${GCE_SETUP.role}`;
+  // A router belongs to one network and a NAT's name to one router: other networks get their own
+  const suffix = network === 'default' ? '' : `-${network}`.slice(0, 40).replace(/-+$/, '');
+  const router = `${GCE_SETUP.router}${suffix}`;
+  const nat = `${GCE_SETUP.nat}${suffix}`;
   const bucket = `${project}-kunj-cache`.slice(0, 63).replace(/-+$/, '');
 
   const gcloud = (args: string[]) => run('gcloud', [...args, '--project', project, '--quiet']);
@@ -79,6 +83,12 @@ export function gceSetup(opts: GceSetupOptions, run: CliRunner): SetupPlan {
     }
   };
 
+  // A custom role deleted in the last week still answers `describe`, marked deleted
+  const roleUsable = async () => {
+    const found = (await json(['iam', 'roles', 'describe', GCE_SETUP.role])) as { deleted?: boolean } | null;
+    return !!found && !found.deleted;
+  };
+
   const steps: SetupStep[] = [
     {
       title: 'Compute Engine and Identity-Aware Proxy turned on in the project',
@@ -98,11 +108,11 @@ export function gceSetup(opts: GceSetupOptions, run: CliRunner): SetupPlan {
         return routers.some(r => (r.network ?? '').endsWith(`/networks/${network}`) && (r.nats?.length ?? 0) > 0);
       },
       apply: async () => {
-        if (!(await ok(['compute', 'routers', 'describe', GCE_SETUP.router, '--region', region]))) {
-          await must(['compute', 'routers', 'create', GCE_SETUP.router, '--network', network, '--region', region], 'create the router');
+        if (!(await ok(['compute', 'routers', 'describe', router, '--region', region]))) {
+          await must(['compute', 'routers', 'create', router, '--network', network, '--region', region], 'create the router');
         }
         await must(
-          ['compute', 'routers', 'nats', 'create', GCE_SETUP.nat, '--router', GCE_SETUP.router, '--region', region, '--auto-allocate-nat-external-ips', '--nat-all-subnet-ip-ranges'],
+          ['compute', 'routers', 'nats', 'create', nat, '--router', router, '--region', region, '--auto-allocate-nat-external-ips', '--nat-all-subnet-ip-ranges'],
           'create the NAT',
         );
       },
@@ -111,7 +121,7 @@ export function gceSetup(opts: GceSetupOptions, run: CliRunner): SetupPlan {
       title: `A firewall rule that lets only Google's tunnel reach kunj on machines (port ${GCE_SETUP.port})`,
       // Any rule that does the job counts, whatever it is called: a project set up by hand is found
       exists: async () => {
-        type Rule = { network?: string; direction?: string; disabled?: boolean; sourceRanges?: string[]; targetTags?: string[]; allowed?: Array<{ IPProtocol?: string; ports?: string[] }> };
+        type Rule = { network?: string; direction?: string; disabled?: boolean; sourceRanges?: string[]; targetTags?: string[]; targetServiceAccounts?: string[]; allowed?: Array<{ IPProtocol?: string; ports?: string[] }> };
         const rules = ((await json(['compute', 'firewall-rules', 'list'])) ?? []) as Rule[];
         const covers = (ports: string[] | undefined) =>
           !ports || ports.some(p => {
@@ -124,6 +134,8 @@ export function gceSetup(opts: GceSetupOptions, run: CliRunner): SetupPlan {
             (r.direction ?? 'INGRESS') === 'INGRESS' &&
             (r.network ?? '').endsWith(`/networks/${network}`) &&
             !!r.sourceRanges?.includes(GCE_SETUP.iapRange) &&
+            // for every instance, or for kunj's tag; one aimed at other service accounts does not reach machines
+            !r.targetServiceAccounts?.length &&
             (!r.targetTags || r.targetTags.includes(GCE_SETUP.tag)) &&
             !!r.allowed?.some(a => (a.IPProtocol === 'tcp' || a.IPProtocol === 'all') && covers(a.ports)),
         );
@@ -142,12 +154,15 @@ export function gceSetup(opts: GceSetupOptions, run: CliRunner): SetupPlan {
     {
       title: 'Permission for a machine to put itself to sleep (and nothing else)',
       exists: async () => {
-        if (!(await ok(['iam', 'roles', 'describe', GCE_SETUP.role]))) return false;
-        const policy = (await json(['projects', 'get-iam-policy', project])) as { bindings?: Array<{ role?: string; members?: string[] }> } | null;
-        return !!policy?.bindings?.some(b => b.role === role && b.members?.includes(member));
+        if (!(await roleUsable())) return false;
+        const policy = (await json(['projects', 'get-iam-policy', project])) as { bindings?: Array<{ role?: string; members?: string[]; condition?: unknown }> } | null;
+        // A conditional binding may have run out: only an unconditional one counts
+        return !!policy?.bindings?.some(b => b.role === role && !b.condition && b.members?.includes(member));
       },
       apply: async () => {
-        if (!(await ok(['iam', 'roles', 'describe', GCE_SETUP.role]))) {
+        const found = (await json(['iam', 'roles', 'describe', GCE_SETUP.role])) as { deleted?: boolean } | null;
+        if (found?.deleted) await must(['iam', 'roles', 'undelete', GCE_SETUP.role], 'restore the deleted role');
+        else if (!found) {
           await must(['iam', 'roles', 'create', GCE_SETUP.role, '--permissions', 'compute.instances.suspend,compute.instances.get', '--title', 'kunj self suspend'], 'create the role');
         }
         await must(['projects', 'add-iam-policy-binding', project, '--member', member, '--role', role, '--condition=None'], 'grant the role');
@@ -161,8 +176,8 @@ export function gceSetup(opts: GceSetupOptions, run: CliRunner): SetupPlan {
       cost: 'about 2 cents per GB a month',
       exists: async () => {
         if (!(await ok(['storage', 'buckets', 'describe', `gs://${bucket}`]))) return false;
-        const policy = (await json(['storage', 'buckets', 'get-iam-policy', `gs://${bucket}`])) as { bindings?: Array<{ role?: string; members?: string[] }> } | null;
-        return !!policy?.bindings?.some(b => b.role === 'roles/storage.objectAdmin' && b.members?.includes(member));
+        const policy = (await json(['storage', 'buckets', 'get-iam-policy', `gs://${bucket}`])) as { bindings?: Array<{ role?: string; members?: string[]; condition?: unknown }> } | null;
+        return !!policy?.bindings?.some(b => b.role === 'roles/storage.objectAdmin' && !b.condition && b.members?.includes(member));
       },
       apply: async () => {
         if (!(await ok(['storage', 'buckets', 'describe', `gs://${bucket}`]))) {

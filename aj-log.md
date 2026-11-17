@@ -1923,3 +1923,4 @@ The user asked to be able to choose a remote in the app when remotes are availab
   Why: on `kunj-dev` the open Workspace app's listing kept a machine awake 26 minutes past its idle limit.
 - Idle timer: unanswered busy checks are counted within one quiet spell only (review finding). Why: two old failures plus one new one would have suspended a machine at once.
 - `kunj machine setup` (src/lib/machines/setup/gce.ts, `MachineSetupJson`). Why: the user found the Google Cloud setup "more complicated than it needs to be" and asked that it find a project that is already set up; the firewall rule is matched by what it allows because `kunj-dev`'s was made by hand under another name.
+- Setup review fixes: the network comes from machine.gce.network when not given; a router and NAT per network; a conditional IAM binding and a rule aimed at other service accounts do not count as present; a deleted role is restored.

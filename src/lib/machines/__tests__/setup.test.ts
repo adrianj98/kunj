@@ -21,7 +21,7 @@ function fakeGcloud(have: Set<string>) {
       return ok(JSON.stringify(have.has('firewall') ? [other, theirs] : [other]));
     }
     if (line.startsWith('iam service-accounts describe')) return have.has('account') ? ok() : missing;
-    if (line.startsWith('iam roles describe')) return have.has('role') ? ok() : missing;
+    if (line.startsWith('iam roles describe')) return have.has('role') ? ok(JSON.stringify({ name: 'kunjSelfSuspend', ...(have.has('role-deleted') ? { deleted: true } : {}) })) : missing;
     if (line.startsWith('projects get-iam-policy')) {
       return ok(JSON.stringify({ bindings: have.has('binding') ? [{ role: 'projects/my-proj-123/roles/kunjSelfSuspend', members: ['serviceAccount:kunj-machine@my-proj-123.iam.gserviceaccount.com'] }] : [] }));
     }
@@ -80,6 +80,16 @@ describe('kunj machine setup for Google Cloud', () => {
     await plan.steps[4].apply();
     expect(g.calls.some(c => c.startsWith('iam roles create'))).toBe(false);
     expect(g.calls.some(c => c.startsWith('projects add-iam-policy-binding'))).toBe(true);
+    // another network gets a router and a NAT of its own, and a role deleted last week is restored
+    const other = fakeGcloud(new Set(['role', 'role-deleted']));
+    const onVpc = gceSetup({ ...OPTS, network: 'vpc1', cache: false }, other.run);
+    expect(await onVpc.steps[4].exists()).toBe(false);
+    await onVpc.steps[1].apply();
+    await onVpc.steps[4].apply();
+    expect(other.calls).toContain('compute routers create kunj-router-vpc1 --network vpc1 --region us-central1');
+    expect(other.calls.some(c => c.startsWith('compute routers nats create kunj-nat-vpc1 --router kunj-router-vpc1'))).toBe(true);
+    expect(other.calls).toContain('iam roles undelete kunjSelfSuspend');
+    expect(onVpc.config['machine.gce']).toMatchObject({ network: 'vpc1' });
     expect(() => gceSetup({ ...OPTS, project: 'x; rm -rf /' }, g.run)).toThrow(/project id/);
     expect(() => gceSetup({ ...OPTS, zone: 'somewhere' }, g.run)).toThrow(/zone/);
   });
