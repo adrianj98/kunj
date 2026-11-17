@@ -135,9 +135,16 @@ export function machineRoutes(coordinator: Coordinator): (api: ServeExtension) =
     });
 
     for (const verb of ['suspend', 'resume', 'stop', 'start'] as const) {
-      api.route('POST', `/v1/machines/:name/${verb}`, async (_req, p) =>
+      api.route('POST', `/v1/machines/:name/${verb}`, async (_req, p, url) =>
         mapped(async () => {
           const name = nameParam(p.name);
+          // wait=0 (suspend, stop): answered once the machine is known; the cloud takes a minute or two
+          if ((verb === 'suspend' || verb === 'stop') && url.searchParams.get('wait') === '0') {
+            const machine = await coordinator.get(name);
+            void coordinator[verb](name).catch(err => coordinator.note(`${verb} of ${name} failed: ${(err as Error).message}`));
+            const going = machine.state === 'running' ? { ...machine, state: verb === 'suspend' ? ('suspending' as const) : ('stopping' as const) } : machine;
+            return { machine: machineJson(going, coordinator.isPaired(name)) };
+          }
           const result = await coordinator[verb](name);
           const machine = result ?? (await coordinator.get(name));
           return { machine: machineJson(machine, coordinator.isPaired(name)) };

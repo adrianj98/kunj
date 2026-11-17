@@ -161,6 +161,16 @@ A machine goes to sleep by itself after `machine.idleMinutes` (30) with no comma
 and no agent working. Its memory is kept, so the container, its tmux sessions and a waiting agent are
 there when it wakes.
 
+## Stop for the day
+
+`kunj ct stop` stops the container and puts its machine to sleep. You pay only for its disk while it
+sleeps, and `kunj ct start` wakes it with everything as it was. Add `--keep-awake` to stop only the
+container.
+
+```bash
+kunj ct stop
+```
+
 ## See your machines
 
 `kunj ct list` shows containers on running machines, and one row for each machine that is asleep.

@@ -552,7 +552,12 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   and the machine deletion of `ct remove` run them too. A failing `pre-machine-create` makes no machine;
   a failing `pre-machine-delete` after `ct remove` keeps the machine and is a warning.
 
-Not yet: `kind: 'machine'` in `kunj events`, `ct stop` suspending the machine, `--no-wake`.
+- **`kunj ct stop`** stops the container and suspends its machine (`--keep-awake` leaves it running).
+  The suspend is not waited for (`POST /v1/machines/<name>/suspend?wait=0`; the cloud takes about two
+  minutes), and `Coordinator.wake()` waits for a machine caught `suspending` or `stopping` before it
+  resumes it. `--no-wake` on any `kunj ct` command neither wakes nor creates a machine.
+
+Not yet: `kind: 'machine'` in `kunj events`.
 
 ## Golden image as built (2026-11-16)
 

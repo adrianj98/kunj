@@ -99,6 +99,10 @@ interface ContainerOptions {
   all?: boolean;
   force?: boolean;
   keepVolumes?: boolean;
+  /** --keep-awake: `stop` leaves the cloud machine running */
+  keepAwake?: boolean;
+  /** --no-wake: never wake (or create) a cloud machine for this command */
+  wake?: boolean;
   context?: string;
   snapshot?: boolean;
   global?: boolean;
@@ -204,6 +208,8 @@ export class ContainerCommand extends BaseCommand {
         { flags: '-a, --all', description: "[list] Show every repository's containers; [prune] prune every repository in ~/.kunj/repos.json" },
         { flags: '-f, --force', description: '[remove|prune] Remove even when the container holds unpushed work (prune: and volumes without a container)' },
         { flags: '--dry-run', description: '[prune] Only list what would be removed (the default without --yes when stdout is not a terminal, or with --json)' },
+        { flags: '--keep-awake', description: '[stop] On a cloud machine: stop the container but leave its machine running' },
+        { flags: '--no-wake', description: 'On a cloud machine: fail rather than wake a sleeping machine' },
         { flags: '--keep-volumes', description: "[remove] Keep the workspace and home volumes (and the services' volumes); [start --rebuild] keep the volumes of services no longer declared" },
         { flags: '--follow', description: '[logs] Keep streaming new output' },
         { flags: '-n, --new-window', description: '[open] Open in a new editor window' },
@@ -453,7 +459,7 @@ export class ContainerCommand extends BaseCommand {
     // For a remote that coordinates cloud machines: this command's branch (the current one by default)
     const intent = remote ? this.machineIntent : undefined;
     const machine = intent
-      ? { repo: repo.id, repoName: repo.name, branch: intent.branch || (await getCurrentBranch().catch(() => '')), wake: intent.wake, create: intent.create, size: options.size }
+      ? { repo: repo.id, repoName: repo.name, branch: intent.branch || (await getCurrentBranch().catch(() => '')), wake: intent.wake && options.wake !== false, create: intent.create && options.wake !== false, size: options.size }
       : undefined;
     const key = remote ? `remote:${remote}${machine?.branch ? `:${machine.branch}` : ''}` : `docker:${options.context || config.container?.dockerContext || ''}`;
     let selection = this.selections.get(key);
@@ -2174,11 +2180,22 @@ export class ContainerCommand extends BaseCommand {
     const branch = await this.resolveBranch(ctx, target);
     const main = await this.requireMain(ctx, branch);
     await stopContainer(ctx.backend, this.names(ctx, branch), this.warn);
+    // A cloud machine holds only this branch: with its container stopped it sleeps too (its disk and
+    // memory are kept, and the next start wakes it)
+    let suspended: string | undefined;
+    if (ctx.machine && !options.keepAwake) {
+      try {
+        await ctx.machine.suspend();
+        suspended = ctx.machine.name;
+      } catch (err) {
+        this.warn(`the container is stopped, but its machine ${ctx.machine.name} could not be suspended: ${(err as Error).message}. kunj machine suspend ${branch} does it.`);
+      }
+    }
     if (this.jsonMode) {
-      this.outputJSON({ success: true, branch, name: main.name });
+      this.outputJSON({ success: true, branch, name: main.name, ...(suspended ? { machineSuspended: suspended } : {}) });
       return;
     }
-    console.log(chalk.green(`✓ Stopped ${main.name}`));
+    console.log(chalk.green(`✓ Stopped ${main.name}${suspended ? ' and suspended its machine' : ''}`));
   }
 
   private async remove(target: string | undefined, options: ContainerOptions): Promise<void> {

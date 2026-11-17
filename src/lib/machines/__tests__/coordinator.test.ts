@@ -306,6 +306,28 @@ describe('kunj serve --machines routes', () => {
     expect(providers.body.sizes.map((s: any) => s.name)).toEqual(['small', 'medium', 'large']);
   });
 
+  it('suspends without waiting when asked, and a wake waits for a machine on its way to sleep', async () => {
+    const created = await call(port, 'POST', '/v1/machines/locate', { repo: REPO, repoName: 'app', branch: 'quick', create: true });
+    const name = created.body.machine.name;
+    const going = await call(port, 'POST', `/v1/machines/${name}/suspend?wait=0`);
+    expect(going.body.machine.state).toBe('suspending');
+    await new Promise(r => setTimeout(r, 20));
+    expect((await env.provider.get(name))!.state).toBe('suspended');
+    expect((await call(port, 'POST', '/v1/machines/nope-nope/suspend?wait=0')).status).toBe(404);
+
+    // caught between the two states, a wake waits and then resumes
+    env.provider.machines.get(name)!.state = 'suspending';
+    const get = env.provider.get.bind(env.provider);
+    let asked = 0;
+    env.provider.get = async n => {
+      // the clock here is a fake one, so the cloud "finishes" after a few polls
+      if (++asked === 3 && env.provider.machines.get(name)!.state === 'suspending') env.provider.machines.get(name)!.state = 'suspended';
+      return get(n);
+    };
+    const woke = await call(port, 'POST', '/v1/machines/locate', { repo: REPO, repoName: 'app', branch: 'quick', wake: true });
+    expect(woke.body).toMatchObject({ woke: true, machine: { state: 'running' } });
+  });
+
   it('creates through locate, with the calling client as owner, then lists, suspends, resumes and deletes', async () => {
     const created = await call(port, 'POST', '/v1/machines/locate', { repo: REPO, repoName: 'app', branch: 'feature/x', create: true, size: 'large' });
     expect(created.status).toBe(200);

@@ -325,6 +325,11 @@ export class Coordinator {
   }
 
   /** Deletes one of kunj's golden images; anything else is refused. */
+  /** A line in the coordinator's log */
+  note(line: string): void {
+    this.log(line);
+  }
+
   /** How machines sync their caches with the store, when this coordinator has one. */
   get cache(): CacheSync | undefined {
     return this.opts.cache;
@@ -359,6 +364,9 @@ export class Coordinator {
 
   /** Resumes (or starts) a machine and waits until its serve answers. */
   async wake(machine: Machine): Promise<Machine> {
+    // On its way to sleep (a `ct stop` that did not wait): a cloud refuses to resume it until it is there
+    if (machine.state === 'suspending') machine = await this.waitForState(machine.name, 'suspended');
+    else if (machine.state === 'stopping') machine = await this.waitForState(machine.name, 'stopped');
     if (machine.state === 'suspended' || machine.state === 'suspending') await this.provider.resume(machine.name);
     else if (machine.state === 'stopped' || machine.state === 'stopping') await this.provider.start(machine.name);
     const awake = await this.waitForState(machine.name, 'running');

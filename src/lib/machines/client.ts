@@ -95,8 +95,9 @@ export class MachineClient {
     return this.request('POST', '/v1/machines/locate', body);
   }
 
-  async action(name: string, verb: 'suspend' | 'resume' | 'stop' | 'start'): Promise<MachineJson> {
-    return (await this.request('POST', `/v1/machines/${encodeURIComponent(name)}/${verb}`)).machine;
+  /** `wait: false` (suspend, stop): returns once the coordinator has started it */
+  async action(name: string, verb: 'suspend' | 'resume' | 'stop' | 'start', opts: { wait?: boolean } = {}): Promise<MachineJson> {
+    return (await this.request('POST', `/v1/machines/${encodeURIComponent(name)}/${verb}${opts.wait === false ? '?wait=0' : ''}`)).machine;
   }
 
   async images(repo: string): Promise<MachineImageJson[]> {

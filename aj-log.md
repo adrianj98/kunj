@@ -1903,3 +1903,4 @@ The user asked to be able to choose a remote in the app when remotes are availab
   `ContainerListJson.machines`); machine hooks `pre/post-machine-create|delete`; a fleet member's SSH tunnel gets the
   listing's time limit and a timed-out tunnel no longer holds the process. Why: the spec's phase 2 list, and the
   user's `ct list` took 30 s while the old `gce` remote's VM was suspended.
+- `kunj ct stop` suspends the machine (not waited for; `--keep-awake`), `--no-wake`, `Coordinator.wake()` waits out `suspending`/`stopping`. Why: spec phase 2 ("Stop and remove", "Wake"); the first real stop waited 2 minutes for the cloud.
