@@ -58,6 +58,7 @@ export function writeRemotes(remotes: Remotes, file: string = getRemotesPath()):
 }
 
 export function checkRemoteName(name: string): void {
+  if (name === 'local' || name === 'machines') throw new ContainerError(`"${name}" cannot name a remote: it means ${name === 'local' ? "this machine's Docker" : "this machine's cloud machine coordinator"}.`, 'bad-remote');
   if (!REMOTE_NAME.test(name)) throw new ContainerError(`"${name}" cannot be a remote name. Use up to 32 letters, digits, _ . and -, starting with a letter or digit.`, 'bad-remote');
   if (name === 'local') throw new ContainerError('"local" means the laptop\'s own Docker and cannot be a remote name. Pick another name.', 'bad-remote');
 }

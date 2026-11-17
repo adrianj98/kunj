@@ -71,6 +71,8 @@ function str(body: Record<string, unknown>, key: string, required = true): strin
 
 export function machineRoutes(coordinator: Coordinator): (api: ServeExtension) => void {
   return api => {
+    api.proxy(name => mapped(() => coordinator.proxyTarget(name)));
+
     api.info(async () => ({
       machines: { provider: coordinator.provider.name, features: { ...coordinator.provider.features }, network: coordinator.network },
     }));

@@ -44,6 +44,8 @@ export interface RemoteOptions {
   token: string;
   /** How the remote is called in messages (its name in remotes.json) */
   name?: string;
+  /** A path put before every route: `/v1/machines/<name>/serve` reaches a machine through its coordinator */
+  basePath?: string;
   /** The terminal a TTY exec with 'inherit' streams drives (default: this process's) */
   terminal?: Terminal;
 }
@@ -108,6 +110,11 @@ export class RemoteKunjBackend implements ContainerBackend {
     return this.info_?.kunj;
   }
 
+  /** Set when the server coordinates cloud machines (`kunj serve --machines`), after ready(). */
+  get machines(): InfoJson['machines'] {
+    return this.info_?.machines;
+  }
+
   /** The Docker context on the box, after ready(). */
   get serverContext(): string | undefined {
     return this.info_?.context;
@@ -121,7 +128,7 @@ export class RemoteKunjBackend implements ContainerBackend {
   // ---- transport ---------------------------------------------------------------------------
 
   private request(method: string, path: string, body?: string): Promise<Reply> {
-    const target = new URL(path, this.url);
+    const target = new URL((this.opts.basePath ?? '') + path, this.url);
     const lib = target.protocol === 'https:' ? https : http;
     return new Promise((resolve, reject) => {
       const headers: Record<string, string> = { authorization: `Bearer ${this.opts.token}` };
@@ -453,7 +460,7 @@ export class RemoteKunjBackend implements ContainerBackend {
   // ---- streams -----------------------------------------------------------------------------
 
   private socket(path: string): WebSocket {
-    const target = new URL(path, this.url);
+    const target = new URL((this.opts.basePath ?? '') + path, this.url);
     target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:';
     return new WebSocket(target, { headers: { authorization: `Bearer ${this.opts.token}` }, maxPayload: 16 * 1024 * 1024 });
   }
@@ -468,7 +475,7 @@ export class RemoteKunjBackend implements ContainerBackend {
 
   /** A request whose body is a stream (a tar); the reply is JSON like a unary call. */
   private upload(method: string, path: string, body: NodeJS.ReadableStream, extraHeaders: Record<string, string> = {}): Promise<any> {
-    const target = new URL(path, this.url);
+    const target = new URL((this.opts.basePath ?? '') + path, this.url);
     const lib = target.protocol === 'https:' ? https : http;
     return new Promise((resolve, reject) => {
       const headers = { authorization: `Bearer ${this.opts.token}`, 'content-type': 'application/octet-stream', ...extraHeaders };

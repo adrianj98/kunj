@@ -80,6 +80,8 @@ import type { ContainerJson, ContainerListJson, ContainerTokenCheckJson, Contain
 interface ContainerOptions {
   json?: boolean;
   remote?: string;
+  /** [start] The size of a new cloud machine */
+  size?: string;
   create?: boolean;
   base?: string;
   image?: string;
@@ -199,7 +201,8 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--session <id>', description: "[shell] Keep the shell in the container's tmux session sh-<id>; [agent|attach] one of several agents, tmux session agent-<id> (letters, digits, _ and -; up to 32)" },
         { flags: '--kill', description: '[shell|agent] End the --session tmux session, or without --session every shell (sh-*) or agent (agent, agent-*) session; exit 0 whether or not one existed or the container runs' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
-        { flags: '--remote <name>', description: 'Run on this kunj serve remote (kunj remote add; default: container.remote); "local" forces this machine\'s Docker' },
+        { flags: '--size <size>', description: '[start] On cloud machines: the size of a new machine (small, medium, large or a provider shape; default machine.size)' },
+        { flags: '--remote <name>', description: 'Run on this kunj serve remote (kunj remote add; default: container.remote); "local" forces this machine\'s Docker, "machines" uses this machine\'s cloud machine coordinator (machine.provider)' },
       ],
       helpText: [
         'Actions:',
@@ -321,7 +324,40 @@ export class ContainerCommand extends BaseCommand {
     }
   }
 
+  /**
+   * The branch a command is about and whether it may wake or create that branch's cloud machine,
+   * for a remote that coordinates machines (select-backend.ts). Listings never wake one.
+   */
+  private machineIntent?: { branch?: string; wake: boolean; create: boolean };
+
+  private intentOf(verb: string, target: string | undefined, rest: string[], options: ContainerOptions): ContainerCommand['machineIntent'] {
+    switch (verb) {
+      case 'start':
+        return { branch: target, wake: true, create: true };
+      case 'exec':
+      case 'agent':
+        return { branch: this.splitCommand(target, rest).branch, wake: true, create: false };
+      case 'forward':
+        return { branch: !options.auto && isForwardSpec(target) ? undefined : target, wake: true, create: false };
+      case 'shell':
+      case 'attach':
+      case 'open':
+      case 'mcp':
+      case 'logs':
+      case 'remove':
+        return { branch: target, wake: true, create: false };
+      case 'file':
+        // file read|write [branch] <path>: with two more arguments the first is the branch
+        return { branch: rest.length >= 2 ? rest[0] : undefined, wake: true, create: false };
+      case 'stop':
+        return { branch: target, wake: false, create: false };
+      default:
+        return undefined;
+    }
+  }
+
   private async dispatch(verb: string, target: string | undefined, rest: string[], options: ContainerOptions): Promise<void> {
+    this.machineIntent = this.intentOf(verb, target, rest, options);
     switch (verb) {
       case 'list':
         return this.list(options);
@@ -389,10 +425,15 @@ export class ContainerCommand extends BaseCommand {
     const originUrl = stripUserinfo(getOriginUrl() || '');
     const repo = { root, name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root), originUrl };
     const remote = remoteNameOf(options, config);
-    const key = remote ? `remote:${remote}` : `docker:${options.context || config.container?.dockerContext || ''}`;
+    // For a remote that coordinates cloud machines: this command's branch (the current one by default)
+    const intent = remote ? this.machineIntent : undefined;
+    const machine = intent
+      ? { repo: repo.id, repoName: repo.name, branch: intent.branch || (await getCurrentBranch().catch(() => '')), wake: intent.wake, create: intent.create, size: options.size }
+      : undefined;
+    const key = remote ? `remote:${remote}${machine?.branch ? `:${machine.branch}` : ''}` : `docker:${options.context || config.container?.dockerContext || ''}`;
     let selection = this.selections.get(key);
     if (!selection) {
-      selection = await selectBackend({ remote: options.remote, context: options.context, config });
+      selection = await selectBackend({ remote: options.remote, context: options.context, config, machine: machine?.branch ? machine : undefined });
       this.selections.set(key, selection);
     }
     this.backend = selection.backend;

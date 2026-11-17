@@ -24,6 +24,7 @@ import {
 } from './protocol';
 import { bearerOf } from './http';
 import { Authenticator } from './token';
+import { ProxyResolver, proxyRoute, proxyUpgrade, refuseUpgrade } from './proxy';
 
 export interface StreamOptions {
   backend: ContainerBackend;
@@ -32,6 +33,8 @@ export interface StreamOptions {
   authenticate: Authenticator;
   log: (line: string) => void;
   logUnauthorized?: (what: string, address: string | undefined) => void;
+  /** The coordinator's machine proxy, when this server has one */
+  proxy?: () => ProxyResolver | undefined;
 }
 
 /** A Writable that sends each chunk as a frame and completes the write when the socket took it. */
@@ -298,6 +301,15 @@ export function attachWebSockets(server: http.Server, opts: StreamOptions): { cl
       else opts.log(`unauthorized upgrade from ${req.socket.remoteAddress ?? '?'}`);
       socket.write('HTTP/1.1 401 Unauthorized\r\nconnection: close\r\ncontent-length: 0\r\n\r\n');
       socket.destroy();
+      return;
+    }
+    const resolver = opts.proxy?.();
+    const proxied = resolver ? proxyRoute(url.pathname) : null;
+    if (proxied) {
+      resolver!(proxied.name).then(
+        target => proxyUpgrade(req, socket, head, target, proxied.path + url.search),
+        err => refuseUpgrade(socket, err),
+      );
       return;
     }
     const segments = url.pathname.split('/').filter(Boolean).map(s => decodeURIComponent(s));

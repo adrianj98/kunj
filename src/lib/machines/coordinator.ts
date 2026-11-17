@@ -167,6 +167,14 @@ export interface LocateResult {
 }
 
 const POLL_MS = 2000;
+const SHARED_IDLE_MS = 60_000;
+
+interface SharedEndpoint {
+  endpoint: Endpoint;
+  url: URL;
+  users: number;
+  idle?: NodeJS.Timeout;
+}
 
 export class Coordinator {
   readonly provider: MachineProvider;
@@ -175,6 +183,10 @@ export class Coordinator {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private readonly log: (line: string) => void;
+  /** One endpoint per machine for proxied requests, kept while in use and a minute after */
+  private readonly shared = new Map<string, Promise<SharedEndpoint>>();
+  /** When each machine last served a proxied request or had an open stream or a working agent */
+  private readonly lastBusy = new Map<string, number>();
   /** One ensure per branch at a time: two clients starting the same branch get one machine */
   private readonly inFlight = new Map<string, Promise<LocateResult>>();
 
@@ -275,6 +287,7 @@ export class Coordinator {
 
   async suspend(name: string): Promise<void> {
     await this.get(name);
+    await this.dropShared(name);
     await this.provider.suspend(name);
   }
 
@@ -284,6 +297,7 @@ export class Coordinator {
 
   async stop(name: string): Promise<void> {
     await this.get(name);
+    await this.dropShared(name);
     await this.provider.stop(name);
   }
 
@@ -294,8 +308,127 @@ export class Coordinator {
   async delete(name: string, opts: { disks: boolean }): Promise<void> {
     const m = await this.provider.get(name);
     if (m && !isKunjMachine(m)) throw new MachineError(`${name} was not created by kunj; it is left alone.`, 'machine-not-kunj');
+    await this.dropShared(name);
     await this.provider.delete(name, opts);
     this.opts.tokens.delete(name);
+  }
+
+  // ---- the proxy ---------------------------------------------------------------------------------
+
+  /**
+   * Where a proxied request for `name` goes. The endpoint (a tunnel, from a laptop) is shared by
+   * every request to the machine and closed a minute after the last one; a failed connection drops
+   * it, so the next request asks the provider whether the machine is asleep.
+   */
+  proxyTarget(name: string): Promise<{ host: string; port: number; token: string; done(failed: boolean): void }> {
+    return this.acquire(name, true);
+  }
+
+  /** `use` false: the idle loop's own question, which must not count as someone using the machine */
+  private async acquire(name: string, use: boolean): Promise<{ host: string; port: number; token: string; done(failed: boolean): void }> {
+    const token = this.opts.tokens.get(name);
+    if (!token) throw new MachineError(`This coordinator has no token for ${name}. Delete the machine and start the branch again.`, 'machine-token');
+    let pending = this.shared.get(name);
+    if (!pending) {
+      pending = (async (): Promise<SharedEndpoint> => {
+        const machine = await this.get(name);
+        if (!isAwake(machine.state)) throw new MachineError(`Machine ${name} is ${machine.state}. An acting command (kunj ct start, shell, agent) wakes it.`, 'machine-asleep');
+        const endpoint = await this.endpoint(machine);
+        return { endpoint, url: new URL(endpoint.baseUrl), users: 0 };
+      })();
+      this.shared.set(name, pending);
+      pending.catch(() => {
+        if (this.shared.get(name) === pending) this.shared.delete(name);
+      });
+    }
+    const entry = await pending;
+    entry.users++;
+    if (entry.idle) clearTimeout(entry.idle);
+    if (use) this.lastBusy.set(name, this.now());
+    let done = false;
+    return {
+      host: entry.url.hostname,
+      port: Number(entry.url.port),
+      token,
+      done: failed => {
+        if (done) return;
+        done = true;
+        entry.users--;
+        if (use) this.lastBusy.set(name, this.now());
+        if (failed) return void this.dropShared(name);
+        if (entry.users === 0) {
+          entry.idle = setTimeout(() => void this.dropShared(name), SHARED_IDLE_MS);
+          entry.idle.unref?.();
+        }
+      },
+    };
+  }
+
+  private async dropShared(name: string): Promise<void> {
+    const pending = this.shared.get(name);
+    if (!pending) return;
+    this.shared.delete(name);
+    const entry = await pending.catch(() => null);
+    if (entry?.idle) clearTimeout(entry.idle);
+    await entry?.endpoint.release().catch(() => {});
+  }
+
+  /** Proxied exchanges open now (a terminal, a build): a coordinator with any must not exit. */
+  async openProxies(): Promise<number> {
+    let n = 0;
+    for (const pending of this.shared.values()) n += (await pending.catch(() => null))?.users ?? 0;
+    return n;
+  }
+
+  /** Closes every shared endpoint (the server is stopping). */
+  async close(): Promise<void> {
+    await Promise.all([...this.shared.keys()].map(n => this.dropShared(n)));
+  }
+
+  // ---- idle ---------------------------------------------------------------------------------------
+
+  /**
+   * Suspends machines nobody is using: no proxied request, no open stream and no agent in the
+   * `running` state for `idleMs`. `agentBusy` asks a machine's serve (the idle loop gives one that
+   * reads STATUS_SCRIPT); a machine that cannot be asked counts as busy, never as idle.
+   */
+  async idleTick(idleMs: number, agentBusy: (baseUrl: string, token: string) => Promise<boolean>): Promise<string[]> {
+    const suspended: string[] = [];
+    for (const machine of await this.list()) {
+      if (!isAwake(machine.state)) {
+        this.lastBusy.delete(machine.name);
+        continue;
+      }
+      const now = this.now();
+      if (!this.lastBusy.has(machine.name)) this.lastBusy.set(machine.name, now);
+      const entry = await this.shared.get(machine.name)?.catch(() => null);
+      let busy = (entry?.users ?? 0) > 0;
+      const token = this.opts.tokens.get(machine.name);
+      if (!busy && token) {
+        try {
+          const target = await this.acquire(machine.name, false);
+          try {
+            busy = await agentBusy(`http://${target.host}:${target.port}`, token);
+          } finally {
+            target.done(false);
+          }
+        } catch {
+          busy = true;
+        }
+      }
+      if (busy) {
+        this.lastBusy.set(machine.name, now);
+        continue;
+      }
+      if (now - (this.lastBusy.get(machine.name) ?? now) >= idleMs) {
+        this.log(`suspending idle machine ${machine.name}`);
+        await this.dropShared(machine.name);
+        await this.provider.suspend(machine.name).catch(err => this.log(`could not suspend ${machine.name}: ${(err as Error).message}`));
+        this.lastBusy.delete(machine.name);
+        suspended.push(machine.name);
+      }
+    }
+    return suspended;
   }
 
   // ---- reaching a machine ----------------------------------------------------------------------

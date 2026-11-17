@@ -10,6 +10,7 @@ import { ContainerBackend, ContainerSpec, Labels, isImageRef } from '../containe
 import { Guard, GuardFlags, GuardLookup, backendLookup } from './guard';
 import { EngineJson, ErrorBody, InfoJson, PROTOCOL_VERSION, ServeError, parseLabelQuery } from './protocol';
 import { bearerOf, readJsonBody } from './http';
+import { ProxyResolver, proxyHttp, proxyRoute } from './proxy';
 import { StreamOptions, attachWebSockets, serveBuild, serveCopyIn } from './streams';
 import { Authenticator, newToken, singleTokenAuthenticator, tokenMatches } from './token';
 
@@ -53,6 +54,8 @@ export interface ServeExtension {
   route(method: string, path: string, handler: Handler): void;
   /** Extra fields for GET /v1/info */
   info(extra: () => Promise<Partial<InfoJson>>): void;
+  /** Serves /v1/machines/<name>/serve/v1/… by passing it to that machine's serve */
+  proxy(resolver: ProxyResolver): void;
   log(line: string): void;
 }
 
@@ -98,6 +101,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
   const route = (method: string, path: string, handler: Handler) =>
     routes.push({ method, pattern: path.split('/').filter(Boolean), handler });
   const infoExtras: Array<() => Promise<Partial<InfoJson>>> = [];
+  let proxyResolver: ProxyResolver | undefined;
 
   const base: Authenticator = opts.authenticate ?? (opts.token ? singleTokenAuthenticator(opts.token) : () => null);
   let pairedToken: string | undefined;
@@ -230,7 +234,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     unauthorizedAt.set(addr, now);
     log(`${what} from ${addr}`);
   };
-  const streamOpts: StreamOptions = { backend, guard, authenticate, log, logUnauthorized };
+  const streamOpts: StreamOptions = { backend, guard, authenticate, log, logUnauthorized, proxy: () => proxyResolver };
   route('POST', '/v1/containers/:id/copy', (req, p, url) => serveCopyIn(req, p.id, url, streamOpts));
   route('POST', '/v1/images/:tag/build', (req, p) => serveBuild(req, p.tag, streamOpts));
 
@@ -298,6 +302,16 @@ export function createServeServer(opts: ServeOptions): ServeServer {
       req.resume();
       return sendError(res, new ServeError(401, 'unauthorized', 'unauthorized'));
     }
+    const proxied = proxyResolver ? proxyRoute(url.pathname) : null;
+    if (proxied) {
+      client = who;
+      try {
+        return proxyHttp(req, res, await proxyResolver!(proxied.name), proxied.path + url.search);
+      } catch (err) {
+        req.resume();
+        return sendError(res, err);
+      }
+    }
     const segments = url.pathname.split('/').filter(Boolean);
     for (const r of routes) {
       if (r.method !== req.method) continue;
@@ -316,7 +330,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     sendError(res, new ServeError(404, 'not-found', `no route ${req.method} ${url.pathname} on kunj serve ${opts.version} (run the same kunj version on both machines)`));
   });
 
-  opts.extend?.({ route, info: extra => infoExtras.push(extra), log });
+  opts.extend?.({ route, info: extra => infoExtras.push(extra), log, proxy: resolver => (proxyResolver = resolver) });
 
   const sockets = attachWebSockets(server, streamOpts);
 

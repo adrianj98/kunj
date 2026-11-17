@@ -231,6 +231,7 @@ export class ServeCommand extends BaseCommand {
     const stamp = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 
     let extend: Parameters<typeof createServeServer>[0]['extend'];
+    let machines: { coordinator: import('../lib/machines/coordinator').Coordinator; idleMs: number } | undefined;
     let providerName = '';
     if (opts.machines) {
       const { machineSettings } = await import('../lib/machines/config');
@@ -255,6 +256,7 @@ export class ServeCommand extends BaseCommand {
         log: line => stderr(`${stamp()} ${line}`),
       });
       extend = machineRoutes(coordinator);
+      machines = { coordinator, idleMs: settings.idleMinutes * 60_000 };
     }
 
     const idleMs = opts.idleExit !== undefined ? Number(opts.idleExit) * 60_000 : 0;
@@ -264,7 +266,13 @@ export class ServeCommand extends BaseCommand {
     const touch = () => {
       if (!idleMs) return;
       if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => {
+      idleTimer = setTimeout(async () => {
+        // Not while a terminal or a build runs through this coordinator, and not while a machine is
+        // awake: its idle loop is what puts that machine to sleep
+        const held = machines
+          ? (await machines.coordinator.openProxies()) > 0 || (await machines.coordinator.list().then(l => l.some(m => m.state === 'running'), () => false))
+          : false;
+        if (held) return touch();
         stderr(`${stamp()} no request for ${opts.idleExit} min: exiting`);
         stopServer?.();
       }, idleMs);
@@ -316,6 +324,24 @@ export class ServeCommand extends BaseCommand {
       writeRecord(recordFile, { pid: process.pid, port: address.port, version: getVersion(), startedAt: new Date().toISOString() });
     }
     touch();
+    let idleLoop: NodeJS.Timeout | undefined;
+    if (machines) {
+      const { coordinator, idleMs: machineIdleMs } = machines;
+      const { agentBusy } = await import('../lib/machines/idle');
+      let ticking = false;
+      idleLoop = setInterval(async () => {
+        if (ticking) return;
+        ticking = true;
+        try {
+          await coordinator.idleTick(machineIdleMs, agentBusy);
+        } catch (err) {
+          if (opts.verbose) stderr(`${stamp()} idle check failed: ${(err as Error).message}`);
+        } finally {
+          ticking = false;
+        }
+      }, 60_000);
+      idleLoop.unref?.();
+    }
     if (opts.allowPrivileged) stderr(chalk.yellow('privileged containers allowed'));
     if (allowRuntimes.length) stderr(chalk.yellow(`runtimes allowed: ${allowRuntimes.join(', ')}`));
 
@@ -334,6 +360,8 @@ export class ServeCommand extends BaseCommand {
         process.on('SIGTERM', stop);
       }
     });
+    if (idleLoop) clearInterval(idleLoop);
+    await machines?.coordinator.close();
     if (recordFile) (await import('../lib/machines/local-coordinator')).removeRecord(recordFile, process.pid);
   }
 }

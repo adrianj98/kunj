@@ -9,6 +9,9 @@ import { ContainerError } from './errors';
 import { LocalDockerBackend } from './docker';
 import { RemoteEntry, requireRemote, DEFAULT_SERVE_PORT } from '../remotes';
 
+/** `--remote machines` / container.remote=machines: this machine's own coordinator (machine.provider) */
+export const LOCAL_MACHINES = 'machines';
+
 export interface BackendSelection {
   backend: ContainerBackend;
   kind: 'docker' | 'remote';
@@ -26,6 +29,13 @@ export interface SelectOptions {
   /** --context <docker context> */
   context?: string;
   config: KunjConfig;
+  /**
+   * The branch this command is about, for a remote that coordinates cloud machines: its machine is
+   * located (woken with `wake`, made with `create`) and the backend is that machine's serve.
+   */
+  machine?: { repo: string; repoName: string; branch: string; wake: boolean; create: boolean; size?: string };
+  /** The local coordinator (tests) */
+  localCoordinator?: (config: KunjConfig) => Promise<{ baseUrl: string; token: string }>;
   /** Test seams */
   remotes?: (name: string) => RemoteEntry;
   tunnel?: (opts: { ssh: string; port: number }) => Promise<{ localPort: number; close(): Promise<void> }>;
@@ -43,28 +53,50 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
     const dockerContext = options.context || options.config.container?.dockerContext || undefined;
     return { backend: new LocalDockerBackend({ context: dockerContext }), kind: 'docker', dockerContext, close: async () => {} };
   }
-  const entry = (options.remotes ?? requireRemote)(name);
   let baseUrl: string;
+  let token: string;
   let close = async (): Promise<void> => {};
-  if (entry.url) {
-    baseUrl = entry.url;
-  } else if (entry.ssh) {
-    const open = options.tunnel ?? (await import('../serve/tunnel')).openTunnel;
-    const tunnel = await open({ ssh: entry.ssh, port: entry.port ?? DEFAULT_SERVE_PORT });
-    baseUrl = `http://127.0.0.1:${tunnel.localPort}`;
-    let closed = false;
-    close = async () => {
-      if (closed) return;
-      closed = true;
-      await tunnel.close();
-    };
+  if (name === LOCAL_MACHINES) {
+    // This machine's own coordinator, started on demand (machine.provider)
+    const local = options.localCoordinator ?? (async (config: KunjConfig) => (await (await import('../machines/local-coordinator')).ensureLocalCoordinator(config)).client.opts);
+    ({ baseUrl, token } = await local(options.config));
   } else {
-    throw new ContainerError(`Remote "${name}" in ~/.kunj/remotes.json has neither a url nor an ssh destination. Add it again with kunj remote add ${name} --url <url> (or --ssh <user@host>).`, 'bad-remote');
+    const entry = (options.remotes ?? requireRemote)(name);
+    token = entry.token;
+    if (entry.url) {
+      baseUrl = entry.url;
+    } else if (entry.ssh) {
+      const open = options.tunnel ?? (await import('../serve/tunnel')).openTunnel;
+      const tunnel = await open({ ssh: entry.ssh, port: entry.port ?? DEFAULT_SERVE_PORT });
+      baseUrl = `http://127.0.0.1:${tunnel.localPort}`;
+      let closed = false;
+      close = async () => {
+        if (closed) return;
+        closed = true;
+        await tunnel.close();
+      };
+    } else {
+      throw new ContainerError(`Remote "${name}" in ~/.kunj/remotes.json has neither a url nor an ssh destination. Add it again with kunj remote add ${name} --url <url> (or --ssh <user@host>).`, 'bad-remote');
+    }
   }
   const { RemoteKunjBackend } = await import('./remote');
-  const backend = new RemoteKunjBackend({ baseUrl, token: entry.token, name });
+  let backend = new RemoteKunjBackend({ baseUrl, token, name });
   try {
     await backend.ready();
+    if (backend.machines) {
+      // A coordinator: the backend is the serve of this branch's machine, reached through it
+      const m = options.machine;
+      if (!m) {
+        throw new ContainerError(`${name === LOCAL_MACHINES ? 'Cloud machines hold' : `Remote ${name} coordinates cloud machines, which hold`} one branch each, so this command needs a branch. kunj machine list shows them all.`, 'bad-remote');
+      }
+      const { MachineClient } = await import('../machines/client');
+      const located = await new MachineClient({ baseUrl, token, name }).locate({ repo: m.repo, repoName: m.repoName, branch: m.branch, wake: m.wake, create: m.create, size: m.size });
+      if (located.machine.state !== 'running') {
+        throw new ContainerError(`The machine of ${m.branch} is ${located.machine.state}. kunj ct start ${m.branch} wakes it.`, 'remote-unreachable');
+      }
+      backend = new RemoteKunjBackend({ baseUrl, token, name: `${name}/${located.machine.name}`, basePath: `/v1/machines/${located.machine.name}/serve` });
+      await backend.ready();
+    }
   } catch (err) {
     await close();
     throw err;
