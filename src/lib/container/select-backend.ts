@@ -22,7 +22,7 @@ export interface BackendSelection {
   /** Ends what the selection opened (an SSH tunnel); safe to call twice */
   close(): Promise<void>;
   /** The cloud machine the backend is, when the remote coordinates machines */
-  machine?: { name: string; delete(): Promise<void> };
+  machine?: { name: string; delete(): Promise<void>; /** The coordinator's cache store, when it has one */ cacheSync(): Promise<import('../machines/provider').CacheSync | undefined> };
 }
 
 export interface SelectOptions {
@@ -100,7 +100,11 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
       }
       backend = new RemoteKunjBackend({ baseUrl, token, name: `${name}/${located.machine.name}`, basePath: `/v1/machines/${located.machine.name}/serve` });
       await backend.ready();
-      machine = { name: located.machine.name, delete: () => client.delete(located.machine.name, { disks: true }) };
+      machine = {
+        name: located.machine.name,
+        delete: () => client.delete(located.machine.name, { disks: true }),
+        cacheSync: async () => (await client.providers()).cache,
+      };
     }
   } catch (err) {
     await close();

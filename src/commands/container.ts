@@ -16,6 +16,7 @@
 //   kunj container prune [--all] [--dry-run] [--force] [--yes]
 //   kunj container blueprint init|snapshot|status|remove
 //   kunj container file read|write [branch] <path>
+//   kunj container cache status|pull|push [branch]   the repository's caches and their copy in the coordinator's store
 //   kunj container token status                       where a new container's GitHub token comes from
 //   kunj container token setup                        claude setup-token, checked and stored for containers
 //   kunj container token check                        whether the Claude Code token for containers works
@@ -38,6 +39,7 @@ import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
 import { BackendSelection, remoteNameOf, selectBackend } from '../lib/container/select-backend';
+import { CacheStore, parseCaches, syncCaches } from '../lib/container/caches';
 import { readRemotes } from '../lib/remotes';
 import { ContainerStatus, describeGuard, emptyStatus, forwardedEnv } from '../lib/container/env';
 import { githubTokenSource } from '../lib/container/tokens';
@@ -75,7 +77,7 @@ import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount
 import { KunjConfig } from '../types';
 import type { LoadSecretsOptions } from '../lib/secrets/resolve';
 import { vaultFiles, vaultStamp } from '../lib/secrets/vault';
-import type { ContainerJson, ContainerListJson, ContainerTokenCheckJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, SearchSourceJson, ShellKillJson } from '../lib/json-types';
+import type { ContainerCacheJson, ContainerCacheSyncJson, ContainerJson, ContainerListJson, ContainerTokenCheckJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, SearchSourceJson, ShellKillJson } from '../lib/json-types';
 
 interface ContainerOptions {
   json?: boolean;
@@ -119,9 +121,12 @@ interface Context {
   remote?: string;
   /** The cloud machine this command's branch runs on, when the remote coordinates machines */
   machine?: BackendSelection['machine'];
+  /** The coordinator's cache store, asked only when the repository has caches and the backend is a machine */
+  cacheStore?: CacheStore;
 }
 
-const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'mcp', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file', 'token'];
+const ACTIONS = ['start', 'shell', 'exec', 'agent', 'attach', 'open', 'forward', 'mcp', 'logs', 'list', 'stop', 'remove', 'prune', 'blueprint', 'file', 'token', 'cache'];
+const CACHE_ACTIONS = ['status', 'pull', 'push'];
 const TOKEN_ACTIONS = ['status', 'setup', 'check'];
 const FILE_ACTIONS = ['read', 'write'];
 const BLUEPRINT_ACTIONS = ['init', 'snapshot', 'status', 'remove'];
@@ -229,6 +234,7 @@ export class ContainerCommand extends BaseCommand {
         '  file read [branch] <path>            print a file of /workspace',
         '  file write [branch] <path>           write stdin to a file of /workspace (content on stdin)',
         '  token status                         where a new container\'s GitHub token comes from (never prints it)',
+        '  cache [status|pull|push] [branch]    the repository\'s caches; pull/push copy them between a cloud machine and its coordinator\'s store',
         '  token setup                          run claude setup-token, check the token and store it for containers',
         '  token check                          whether the Claude Code token for containers works (one claude -p)',
         '',
@@ -351,6 +357,9 @@ export class ContainerCommand extends BaseCommand {
       case 'logs':
       case 'remove':
         return { branch: target, wake: true, create: false };
+      case 'cache':
+        // cache status|pull|push [branch]; status never wakes a machine
+        return { branch: rest[0], wake: target === 'pull' || target === 'push', create: false };
       case 'file':
         // file read|write [branch] <path>: with two more arguments the first is the branch
         return { branch: rest.length >= 2 ? rest[0] : undefined, wake: true, create: false };
@@ -407,6 +416,8 @@ export class ContainerCommand extends BaseCommand {
         return this.file(target, rest, options);
       case 'token':
         return this.token(target, options);
+      case 'cache':
+        return this.cache(target, rest[0], options);
     }
   }
 
@@ -445,7 +456,15 @@ export class ContainerCommand extends BaseCommand {
       this.selections.set(key, selection);
     }
     this.backend = selection.backend;
-    return { config, repo, backend: this.backend, dockerContext: selection.dockerContext, remote: selection.remote, machine: selection.machine };
+    // One more request to the coordinator, so only for a repository that has caches
+    let cacheStore: CacheStore | undefined;
+    if (selection.machine && Array.isArray(config.container?.caches) && config.container.caches.length) {
+      cacheStore = await selection.machine.cacheSync().catch(err => {
+        this.warn(`could not ask the coordinator for its cache store: ${(err as Error).message}`);
+        return undefined;
+      });
+    }
+    return { config, repo, backend: this.backend, dockerContext: selection.dockerContext, remote: selection.remote, machine: selection.machine, ...(cacheStore ? { cacheStore } : {}) };
   }
 
   /** The options that make a background kunj use this command's backend */
@@ -630,6 +649,7 @@ export class ContainerCommand extends BaseCommand {
       worktreeRoot,
       ...(blueprint !== undefined ? { blueprint } : {}),
       secrets,
+      ...(ctx.cacheStore ? { cacheStore: ctx.cacheStore } : {}),
     });
 
     if (result.created) {
@@ -1542,6 +1562,82 @@ export class ContainerCommand extends BaseCommand {
   }
 
   // ---------------------------------------------------------------------
+  // cache
+  // ---------------------------------------------------------------------
+
+  /**
+   * `ct cache status|pull|push [branch]`: the repository's caches and, on a cloud machine whose
+   * coordinator has a cache store (machine.cache), the copy between the branch's machine and the store.
+   */
+  private async cache(sub: string | undefined, target: string | undefined, options: ContainerOptions): Promise<void> {
+    const action = (sub || 'status').toLowerCase();
+    if (!CACHE_ACTIONS.includes(action)) throw new ContainerError(`Unknown cache action '${sub}'. Expected one of: ${CACHE_ACTIONS.join(', ')}`);
+    const config = await loadResolvedConfig(process.cwd());
+    const root = getRepoCommonRoot();
+    if (!root) throw new ContainerError(NOT_IN_REPO);
+    const originUrl = stripUserinfo(getOriginUrl() || '');
+    const caches = parseCaches(config.container?.caches, { name: getRepoName() || path.basename(root), id: repoIdFromUrl(originUrl || root) });
+    const list = caches.map(c => ({ name: c.name, path: c.path, volume: c.volume }));
+
+    if (action === 'status') {
+      // The store is the coordinator's to say; a machine that sleeps or does not exist is not woken for it
+      let store: ContainerCacheJson['store'] = null;
+      let note = '';
+      if (remoteNameOf(options, config) && caches.length) {
+        try {
+          const ctx = await this.context(options, config);
+          store = ctx.cacheStore ? { kind: 'bucket', location: ctx.cacheStore.display } : null;
+          if (!ctx.machine) note = 'This remote is one Docker host: every branch there shares the volumes.';
+        } catch (err) {
+          note = `The store is not known: ${(err as Error).message}`;
+        }
+      }
+      if (this.jsonMode) return this.outputJSON({ caches: list, store } satisfies ContainerCacheJson);
+      if (!caches.length) {
+        console.log('No caches. Add one with: kunj config --set-json \'container.caches=[{"name":"data","path":"/cache/data"}]\'');
+        return;
+      }
+      for (const c of caches) console.log(`${c.name}  ${c.path}  ${chalk.gray(c.volume)}`);
+      if (store) console.log(`Store: ${store.location} (kunj ct cache push copies this branch's caches there, pull copies them back)`);
+      else console.log(chalk.gray(note || (remoteNameOf(options, config) ? 'No cache store on this coordinator (machine.cache).' : 'On this Docker host every branch shares these volumes.')));
+      return;
+    }
+
+    if (!caches.length) throw new ContainerError('This repository has no caches (container.caches), so there is nothing to copy.', 'bad-config');
+    const ctx = await this.context(options, config);
+    const branch = await this.resolveBranch(ctx, target);
+    if (!ctx.machine) throw new ContainerError('Caches are copied to a store only on cloud machines. On one Docker host every branch already shares the volumes.', 'bad-config');
+    if (!ctx.cacheStore) {
+      throw new ContainerError('This coordinator has no cache store. Set one where it runs: kunj config --set-json \'machine.cache={"bucket":"<name>"}\' --global, then restart it (kunj machine coordinator stop).', 'bad-config');
+    }
+    const direction = action as 'pull' | 'push';
+    const results = await syncCaches(ctx.backend, ctx.cacheStore, caches, direction, {
+      repoId: ctx.repo.id,
+      kunjVersion: getVersion(),
+      log: line => this.progress(chalk.gray(line)),
+    });
+    // What was pulled belongs to root: handed to the branch's user, through its container when it runs
+    if (direction === 'pull' && results.some(r => r.action === 'pulled')) {
+      const main = await this.findMain(ctx, branch);
+      const user = main ? this.userOf(main) : '';
+      if (main?.state === 'running' && user) {
+        await ctx.backend.exec(main.id, ['chown', '-R', user, ...caches.map(c => c.path)], { user: 'root' }).catch(err => this.warn(`could not hand the caches to ${user}: ${(err as Error).message}`));
+      }
+    }
+    const failed = results.filter(r => r.action === 'failed');
+    if (this.jsonMode) {
+      this.outputJSON({ success: failed.length === 0, branch, direction, store: { kind: 'bucket', location: ctx.cacheStore.display }, caches: results } satisfies ContainerCacheSyncJson);
+    } else {
+      for (const r of results) {
+        if (r.action === 'failed') console.log(chalk.red(`✗ ${r.name}: ${r.message}`));
+        else if (r.action === 'empty') console.log(chalk.gray(`- ${r.name}: nothing in ${ctx.cacheStore.display} yet (kunj ct cache push puts it there)`));
+        else console.log(chalk.green(`✓ ${r.name} ${r.action} ${direction === 'pull' ? 'from' : 'to'} ${ctx.cacheStore.display}`));
+      }
+    }
+    if (failed.length) process.exitCode = 1;
+  }
+
+  // ---------------------------------------------------------------------
   // token
   // ---------------------------------------------------------------------
 
@@ -1677,6 +1773,7 @@ export class ContainerCommand extends BaseCommand {
       cwd: process.cwd(),
       jsonMode: this.jsonMode,
       warn,
+      ...(ctx.cacheStore ? { cacheStore: ctx.cacheStore } : {}),
     };
   }
 

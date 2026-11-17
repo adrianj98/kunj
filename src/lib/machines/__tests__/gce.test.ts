@@ -164,6 +164,25 @@ describe('GceProvider argv', () => {
     expect(flag('--labels')).toBe(`kunj-branch=${gceValue('feature/x')},kunj-repo=${gceValue('github.com/acme/app')},kunj-role=machine`);
   });
 
+  it('gives a machine the service account for the cache bucket, and says how its containers reach it', async () => {
+    const sa = 'kunj-machine@my-proj-123.iam.gserviceaccount.com';
+    const p = new GceProvider({ ...CFG, serviceAccount: sa }, { run: gcloud.runner });
+    await p.create(spec({ cacheStore: true }));
+    const args = gcloud.calls[0];
+    expect(args[args.indexOf('--service-account') + 1]).toBe(sa);
+    expect(args).not.toContain('--no-service-account');
+    expect(p.cacheSync({ store: 'bucket', bucket: 'my-cache', prefix: 'team/a' })).toEqual({
+      store: 'bucket',
+      image: 'rclone/rclone:1.68.2',
+      env: { RCLONE_GCS_ENV_AUTH: 'true', RCLONE_GCS_BUCKET_POLICY_ONLY: 'true' },
+      remote: ':gcs:my-cache/team/a',
+      display: 'gs://my-cache/team/a',
+    });
+    expect(p.cacheSync({ store: 'bucket', bucket: 'my-cache', prefix: '' }).remote).toBe(':gcs:my-cache');
+    // No service account: a machine could never reach the bucket
+    expect(() => new GceProvider(CFG, { run: gcloud.runner }).cacheSync({ store: 'bucket', bucket: 'my-cache', prefix: '' })).toThrow(/machine\.gce\.serviceAccount/);
+  });
+
   it('boots a golden image, as spot, with the self-suspend service account when asked', async () => {
     const p = new GceProvider({ ...CFG, serviceAccount: 'kunj-machine@my-proj-123.iam.gserviceaccount.com', network: 'dev', subnet: 'dev-us' }, { run: gcloud.runner });
     await p.create(spec({ image: 'kunj-app-img-abc', spot: true, selfSuspend: true, size: 'n2d-highmem-8' }));

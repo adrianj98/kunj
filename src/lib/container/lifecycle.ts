@@ -7,7 +7,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import { ContainerBackend, ContainerInfo, ContainerSpec, ExecIO, ExecTimeoutError } from './backend';
-import { cacheEnv, cacheLabels, parseCaches } from './caches';
+import { CacheStore, cacheEnv, cacheLabels, parseCaches, syncCaches } from './caches';
 import { ContainerNames, LABEL, containerNames, labelsFor, labelsMatch, optionsLabel } from './names';
 import { ImageSource, credentialHelperSource, ensureImage, resolveHelperImage, resolveImage, tarDirectory, tarEntries } from './image';
 import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devcontainer';
@@ -113,6 +113,8 @@ export interface StartOptions {
    * gh fallback, `files` (relative to /workspace) are rendered on create and resume, `stamp` is
    * recorded as kunj.secrets. Ignored for a snapshot build (namesFor). */
   secrets?: { env: Record<string, string>; files: Map<string, string>; stamp: string };
+  /** The coordinator's cache store (a cloud machine): a new container's caches are pulled from it first */
+  cacheStore?: CacheStore;
 }
 
 export interface StartResult {
@@ -922,6 +924,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
   const created: { containers: string[]; volumes: string[]; networks: string[] } = { containers: [], volumes: [], networks: [] };
   // Set once the firewall is in place; a main container running before that is unfirewalled
   let mainRun = false;
+  let cachesPulled = false;
   let ready = false;
 
   try {
@@ -958,6 +961,17 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
         });
       }
       volumes.push({ name: c.volume, path: c.path });
+    }
+    // On a cloud machine the volume holds only what the machine image held: what was pushed to the
+    // coordinator's store since is pulled now, before setup or maintain look at the cache
+    if (caches.length && options.cacheStore) {
+      const store = options.cacheStore;
+      const synced = await step('docker', () => syncCaches(backend, store, caches, 'pull', { repoId: repo.id, kunjVersion: options.kunjVersion })).catch(err => {
+        warn(`the caches were not pulled from ${store.display}: ${message(err)}`);
+        return [];
+      });
+      for (const r of synced) if (r.action === 'failed') warn(`cache ${r.name} was not pulled from ${store.display}: ${r.message}`);
+      cachesPulled = synced.some(r => r.action === 'pulled');
     }
 
     // Services before the branch container, so they are up (and healthy) before seed and setup.
@@ -1045,7 +1059,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
     if (dind !== 'off') await startDockerd(backend, id, warn);
     // A new volume's mount point is root-owned; the cache is the user's to fill
     if (caches.length && user) {
-      await step('docker', () => backend.exec(id, ['chown', user, ...caches.map(c => c.path)], { user: 'root' })).catch(err => warn(`could not hand the cache to ${user}: ${message(err)}`));
+      await step('docker', () => backend.exec(id, ['chown', ...(cachesPulled ? ['-R'] : []), user, ...caches.map(c => c.path)], { user: 'root' })).catch(err => warn(`could not hand the cache to ${user}: ${message(err)}`));
     }
 
     // 8. Nothing runs in the container before this point. Seed, once the firewall is in place

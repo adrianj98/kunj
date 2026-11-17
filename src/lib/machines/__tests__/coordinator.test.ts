@@ -182,6 +182,25 @@ describe('Coordinator', () => {
     expect(r.machine.labels['kunj.image']).toBe('kunj-img-1');
   });
 
+  it('gives new machines the cache store credential and hands the store to clients, only when it has one', async () => {
+    const cache = { store: 'bucket' as const, image: 'rclone/rclone:1.68.2', env: {}, remote: ':gcs:b', display: 'gs://b' };
+    const { provider, coordinator } = setup();
+    const plain = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'plain', create: true });
+    expect(provider.specs.get(plain.machine.name)).toMatchObject({ cacheStore: false });
+    expect(coordinator.cache).toBeUndefined();
+
+    const c = new Coordinator({ ...(coordinator as any).opts, cache });
+    const r = await c.locate({ repo: REPO, repoName: 'app', branch: 'cached', create: true });
+    expect(provider.specs.get(r.machine.name)).toMatchObject({ cacheStore: true });
+    const server = createServeServer({ backend: new FakeBackend(), token: 'coord-token-0123456789', version: '1', extend: machineRoutes(c) });
+    const { port } = await server.listen('127.0.0.1', 0);
+    try {
+      expect((await call(port, 'GET', '/v1/machines/providers')).body.cache).toEqual(cache);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('keeps trying when the tunnel cannot come up yet (the port is closed while the machine installs)', async () => {
     let stored = '';
     const machineServe = createServeServer({ backend: new FakeBackend(), version: '1', pairing: { until: Date.now() + 60_000, onPaired: t => (stored = t) } });

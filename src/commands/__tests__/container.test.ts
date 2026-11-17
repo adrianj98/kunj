@@ -338,7 +338,7 @@ describe('ContainerCommand', () => {
   it('rejects unknown actions', async () => {
     await new ContainerCommand().execute('frobnicate', {});
     expect(errors).toEqual([
-      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, mcp, logs, list, stop, remove, prune, blueprint, file, token",
+      "✗ Unknown container action 'frobnicate'. Expected one of: start, shell, exec, agent, attach, open, forward, mcp, logs, list, stop, remove, prune, blueprint, file, token, cache",
     ]);
     expect(process.exitCode).toBe(1);
   });

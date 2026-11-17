@@ -234,7 +234,7 @@ export class ServeCommand extends BaseCommand {
     let machines: { coordinator: import('../lib/machines/coordinator').Coordinator; idleMs: number } | undefined;
     let providerName = '';
     if (opts.machines) {
-      const { machineSettings } = await import('../lib/machines/config');
+      const { machineSettings, cacheStoreConfig } = await import('../lib/machines/config');
       const settings = machineSettings(config);
       providerName = settings.provider;
       if (!providerName) throw new ContainerError('kunj serve --machines needs machine.provider (for example: kunj config --set machine.provider=gce --global, then machine.gce).');
@@ -246,9 +246,13 @@ export class ServeCommand extends BaseCommand {
       const startupScript = settings.bootstrap
         ? bootstrapScript({ kunjPackage: settings.kunjPackage || defaultKunjPackage(getVersion()), port: MACHINE_SERVE_PORT, pairWindowMinutes: settings.pairWindowMinutes })
         : undefined;
+      const cacheConfig = cacheStoreConfig(settings.cache);
+      if (cacheConfig && !provider.cacheSync) throw new ContainerError(`machine.cache is set, but the ${provider.name} provider has no cache store. Unset it with kunj config --unset machine.cache --global.`);
+      const cache = cacheConfig ? provider.cacheSync!(cacheConfig) : undefined;
       const coordinator = new Coordinator({
         provider,
         startupScript,
+        cache,
         network: settings.network,
         tokens: fileTokenStore(this.machinesPaths().machineTokens, provider.name),
         version: getVersion(),

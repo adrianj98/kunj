@@ -5,6 +5,7 @@ import * as path from 'path';
 import { getGlobalKunjDir } from '../config';
 import { KunjConfig } from '../../types';
 import { MachineDefaults } from './coordinator';
+import { CacheStoreConfig, MachineError } from './provider';
 
 export interface MachineSettings {
   provider: string;
@@ -19,6 +20,28 @@ export interface MachineSettings {
   kunjPackage: string;
   /** Give new machines the startup script (false: the image already runs kunj serve) */
   bootstrap: boolean;
+  /** machine.cache as written; a coordinator checks it with cacheStoreConfig() when it starts */
+  cache: unknown;
+}
+
+const BUCKET = /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/;
+const PREFIX = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
+
+/** machine.cache, checked: `{ "bucket": "<name>", "prefix": "<folder>" }` ("store": "none" turns it off). */
+export function cacheStoreConfig(value: unknown): CacheStoreConfig | null {
+  if (value === undefined || value === null) return null;
+  const bad = (why: string): never => {
+    throw new MachineError(`machine.cache ${why}. Expected { "bucket": "<bucket name>", "prefix": "<folder, optional>" }.`, 'bad-machine-config');
+  };
+  if (typeof value !== 'object' || Array.isArray(value)) bad('is not an object');
+  const { store, bucket, prefix } = value as { store?: unknown; bucket?: unknown; prefix?: unknown };
+  if (store === 'none') return null;
+  if (store !== undefined && store !== 'bucket') bad(`has the unknown store ${JSON.stringify(store)} (known: bucket, none)`);
+  if (bucket === undefined && store === undefined && Object.keys(value as object).length === 0) return null;
+  if (typeof bucket !== 'string' || !BUCKET.test(bucket)) bad(`needs a bucket name, not ${JSON.stringify(bucket)}`);
+  const folder = prefix === undefined || prefix === null ? '' : prefix;
+  if (typeof folder !== 'string' || (folder !== '' && (!PREFIX.test(folder) || folder.length > 200))) bad(`has a prefix that is not a plain folder path: ${JSON.stringify(prefix)}`);
+  return { store: 'bucket', bucket: bucket as string, prefix: folder as string };
 }
 
 const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback);
@@ -41,6 +64,7 @@ export function machineSettings(config: KunjConfig): MachineSettings {
     },
     kunjPackage: typeof m.kunjPackage === 'string' ? m.kunjPackage : '',
     bootstrap: m.bootstrap !== false,
+    cache: m.cache,
     idleMinutes: num(m.idleMinutes, 30),
     pairWindowMinutes: num(m.pairWindowMinutes, 10),
     coordinatorIdleMinutes: num(m.coordinatorIdleMinutes, 60),

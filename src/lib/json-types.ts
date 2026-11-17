@@ -596,3 +596,19 @@ export interface ConfigUnsetJson {
   scope: 'global' | 'local';
   removed: boolean;
 }
+
+/** `kunj ct cache status --json` */
+export interface ContainerCacheJson {
+  caches: Array<{ name: string; path: string; volume: string }>;
+  /** The coordinator's cache store (machine.cache); null when there is none or it is not a cloud machine */
+  store: { kind: 'bucket'; location: string } | null;
+}
+
+/** `kunj ct cache pull|push --json` */
+export interface ContainerCacheSyncJson {
+  success: boolean;
+  branch: string;
+  direction: 'pull' | 'push';
+  store: { kind: 'bucket'; location: string };
+  caches: Array<{ name: string; action: 'pulled' | 'pushed' | 'empty' | 'failed'; message?: string }>;
+}

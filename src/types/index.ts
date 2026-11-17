@@ -100,6 +100,8 @@ export interface KunjConfig {
     image?: string;
     kunjPackage?: string;
     bootstrap?: boolean;
+    /** Where caches are kept outside the machines: { bucket, prefix? } */
+    cache?: unknown;
     // machine.<provider>: that provider's own block (machine.gce: src/lib/machines/providers/gce.ts)
     [provider: string]: unknown;
   };

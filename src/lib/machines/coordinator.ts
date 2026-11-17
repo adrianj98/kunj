@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import {
+  CacheSync,
   IMAGE_BUILD_BRANCH,
   IMAGE_ROLE,
   Labels,
@@ -138,6 +139,8 @@ export interface CoordinatorOptions {
   servePort?: number;
   /** The script a new machine runs at boot to install and start kunj serve (bootstrap.ts) */
   startupScript?: string;
+  /** The cache store of machine.cache as this provider's machines reach it; none when unset */
+  cache?: CacheSync;
   /** Test seams */
   call?: ServeCaller;
   openTunnel?: TunnelOpener;
@@ -322,6 +325,11 @@ export class Coordinator {
   }
 
   /** Deletes one of kunj's golden images; anything else is refused. */
+  /** How machines sync their caches with the store, when this coordinator has one. */
+  get cache(): CacheSync | undefined {
+    return this.opts.cache;
+  }
+
   async deleteImage(name: string): Promise<void> {
     const ours = await this.provider.images.list({ [MACHINE_LABEL.role]: IMAGE_ROLE });
     if (!ours.some(i => i.name === name)) throw new MachineError(`No kunj machine image named ${name}.`, 'machine-not-found');
@@ -338,7 +346,7 @@ export class Coordinator {
       [MACHINE_LABEL.owner]: req.owner ?? '',
     });
     this.log(`creating machine ${name} for ${req.branch}${image ? ` from image ${image}` : ''}`);
-    let machine = await this.provider.create({ name, labels, size: req.size || d.size, image, diskGb: d.diskGb, spot: d.spot, selfSuspend: d.selfSuspend, startupScript: this.opts.startupScript });
+    let machine = await this.provider.create({ name, labels, size: req.size || d.size, image, diskGb: d.diskGb, spot: d.spot, selfSuspend: d.selfSuspend, startupScript: this.opts.startupScript, cacheStore: !!this.opts.cache });
     // A token left from an earlier machine of the same name would never match the new one. Only
     // after the create succeeded: a create refused with machine-exists (another coordinator made
     // it meanwhile) must leave that live machine's token alone

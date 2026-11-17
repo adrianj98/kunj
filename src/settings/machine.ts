@@ -116,6 +116,22 @@ export function registerMachineSettings(): void {
       category: 'machine',
     },
     {
+      key: 'machine.cache',
+      description: 'Where this coordinator keeps repository caches (container.caches) outside its machines: { "bucket": "<name>", "prefix": "<folder>" }',
+      type: 'object',
+      defaultValue: {},
+      category: 'machine',
+      detailedDescription:
+        'Each coordinator has its own: set it in the config of the machine that runs kunj serve --machines (the global config here ' +
+        'for the local coordinator). With a bucket, a new branch container first pulls each cache from the bucket, and ' +
+        'kunj ct cache push copies a machine\'s cache back so the next machines get it. Empty, or { "store": "none" }: caches ' +
+        'come only from the machine image. On Google Cloud the bucket is a Cloud Storage bucket and machine.gce.serviceAccount ' +
+        'must be set, with Storage Object Admin on that bucket.',
+      examples: ['{"bucket": "my-kunj-cache"}', '{"bucket": "my-kunj-cache", "prefix": "team-a"}', '{"store": "none"}'],
+      relatedSettings: ['container.caches', 'machine.gce'],
+      validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
+    },
+    {
       key: 'machine.gce',
       description: 'Google Compute Engine provider: { project, zone, network?, subnet?, serviceAccount?, machineTypes?, baseImage? }',
       type: 'object',
@@ -124,8 +140,8 @@ export function registerMachineSettings(): void {
       detailedDescription:
         'project and zone are required. Machines get no external IP (give the network a Cloud NAT for egress) and the ' +
         'network tag kunj-machine; a firewall rule must let IAP (35.235.240.0/20) reach port 7433 on that tag. ' +
-        'serviceAccount is used only with machine.selfSuspend and should hold nothing but compute.instances.suspend ' +
-        'and compute.instances.get on the machines. machineTypes overrides { small, medium, large } ' +
+        'serviceAccount is what machines run as, used with machine.selfSuspend (compute.instances.suspend and ' +
+        'compute.instances.get on the machines) and machine.cache (Storage Object Admin on the bucket); give it nothing else. machineTypes overrides { small, medium, large } ' +
         '(default e2-medium, e2-standard-2, e2-standard-4); baseImage is <project>/<image family> ' +
         '(default ubuntu-os-cloud/ubuntu-2404-lts-amd64). Notes: docs/specs/google-cloud-containers.md.',
       examples: ['{"project": "my-project", "zone": "us-central1-a"}'],

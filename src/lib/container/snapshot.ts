@@ -44,6 +44,8 @@ export interface SnapshotOptions {
   log: (m: string) => void;
   /** Clone from origin inside the container instead of a host-made bundle (origin must then be public) */
   noBundle?: boolean;
+  /** The coordinator's cache store (a cloud machine): the build's caches are pulled from it first */
+  cacheStore?: StartOptions['cacheStore'];
 }
 
 export interface SnapshotResult {
@@ -184,6 +186,7 @@ export async function planSnapshot(opts: Omit<SnapshotOptions, 'rebuild' | 'log'
     // Same (DinD) image as a start, but dockerd never runs: /var/lib/docker must not end up in the image
     withoutDind: true,
     presets,
+    ...(opts.cacheStore ? { cacheStore: opts.cacheStore } : {}),
   };
 
   // Same base image and lockfile ref as a start, so the two hashes agree

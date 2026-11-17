@@ -16,6 +16,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { CliRunner, execRunner, firstErrorLine } from '../cli';
 import {
+  CACHE_SYNC_IMAGE,
+  CacheStoreConfig,
+  CacheSync,
   Labels,
   Machine,
   MachineError,
@@ -37,7 +40,7 @@ export interface GceConfig {
   zone: string;
   network?: string;
   subnet?: string;
-  /** For machines; empty: none (machines get no credential at all) */
+  /** For machines (self-suspend, the cache bucket); empty: none (machines get no credential at all) */
   serviceAccount?: string;
   machineTypes?: Partial<Record<'small' | 'medium' | 'large', string>>;
   /** `<project>/<image family>` of the stock image a machine starts from without a golden image */
@@ -266,7 +269,7 @@ export class GceProvider implements MachineProvider {
     ];
     if (this.cfg.network) args.push('--network', this.cfg.network);
     if (this.cfg.subnet) args.push('--subnet', this.cfg.subnet);
-    if (spec.selfSuspend && this.cfg.serviceAccount) args.push('--service-account', this.cfg.serviceAccount, '--scopes', 'cloud-platform');
+    if ((spec.selfSuspend || spec.cacheStore) && this.cfg.serviceAccount) args.push('--service-account', this.cfg.serviceAccount, '--scopes', 'cloud-platform');
     else args.push('--no-service-account', '--no-scopes');
     if (spec.spot) args.push('--provisioning-model', 'SPOT', '--instance-termination-action', 'STOP');
     // The startup script goes by file: it is far too long and too full of delimiters for --metadata
@@ -356,6 +359,27 @@ export class GceProvider implements MachineProvider {
       if (r.code !== 0 && !GceProvider.notFound(r.stderr)) throw new MachineError(`gcloud could not delete image ${name}: ${firstErrorLine(r.stderr)}`, 'provider-failed');
     },
   };
+
+  /**
+   * A Cloud Storage bucket, reached with the machine's own service account (from the metadata
+   * service, which a branch container's firewall blocks: only the sync container sees it).
+   */
+  cacheSync(config: CacheStoreConfig): CacheSync {
+    if (!this.cfg.serviceAccount) {
+      throw new MachineError(
+        'machine.cache needs machine.gce.serviceAccount: the service account new machines run as, with Storage Object Admin on the cache bucket and nothing else it does not need.',
+        'bad-machine-config',
+      );
+    }
+    const root = `${config.bucket}${config.prefix ? `/${config.prefix}` : ''}`;
+    return {
+      store: 'bucket',
+      image: CACHE_SYNC_IMAGE,
+      env: { RCLONE_GCS_ENV_AUTH: 'true', RCLONE_GCS_BUCKET_POLICY_ONLY: 'true' },
+      remote: `:gcs:${root}`,
+      display: `gs://${root}`,
+    };
+  }
 
   sizes(): MachineSize[] {
     const types = this.cfg.machineTypes as Record<'small' | 'medium' | 'large', string>;

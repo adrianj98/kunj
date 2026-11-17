@@ -112,6 +112,11 @@ every new branch container and in the snapshot build, env `KUNJ_CACHE_DIR` and `
 sandbox user after READY, never rolled back, never removed by `ct remove` or prune. Validation errors are
 `bad-config` before anything is created. On cloud machines the golden image's disk carries the filled volume.
 
+With a cache store on the coordinator (`machine.cache`, see cloud-machines.md) `StartOptions.cacheStore` is set:
+`syncCaches()` pulls each cache from the store in a short-lived `kunj.role=cache-sync` container (rclone, only
+the cache volumes mounted) before the branch container is made, and the chown becomes recursive. `kunj ct cache
+push|pull|status` drive the same function by hand. A failed pull is a warning.
+
 [1] [src/lib/container/lifecycle.ts](/src/lib/container/lifecycle.ts)
 [2] [src/lib/container/env.ts](/src/lib/container/env.ts)
 [3] [src/lib/container/errors.ts](/src/lib/container/errors.ts)

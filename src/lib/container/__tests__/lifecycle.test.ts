@@ -478,6 +478,28 @@ describe('startContainer', () => {
     expect(tokens.gh).not.toHaveBeenCalled();
   });
 
+  it('pulls the caches from the coordinator\'s store before the branch container exists, then hands them over whole', async () => {
+    const config = { container: { caches: [{ name: 'db', path: '/cache/db' }] } } as KunjConfig;
+    const volume = cacheVolumeName(REPO.name, REPO.id, 'db');
+    const store = { image: 'rclone/rclone:1.68.2', env: {}, remote: ':gcs:bucket', display: 'gs://bucket' };
+    const b = backend();
+    b.execHandler = (_id, cmd) => (cmd[0] === 'rclone' && cmd[1] === 'lsf' ? Promise.resolve({ exitCode: 0, stdout: 'dump\n' }) : undefined);
+    await startContainer(b, options({ config, cacheStore: store }));
+    const specs = runSpecs(b);
+    expect(specs[0]).toMatchObject({ image: store.image, volumes: [{ name: volume, path: '/caches/db' }] });
+    expect(specs[1].volumes).toContainEqual({ name: volume, path: '/cache/db' });
+    expect(execCmds(b)).toContain(`rclone sync :gcs:bucket/${volume} /caches/db --links --transfers 8 --retries 2`);
+    expect(execCmds(b)).toContain('chown -R dev /cache/db');
+
+    // A store that cannot be reached is a warning, never a failed start
+    const warnings: string[] = [];
+    const failing = backend();
+    failing.execHandler = (_id, cmd) => (cmd[0] === 'rclone' ? Promise.resolve({ exitCode: 1, stdout: '' }) : undefined);
+    await startContainer(failing, options({ config, cacheStore: store, warn: (m: string) => warnings.push(m) }));
+    expect(warnings.some(w => w.includes('cache db was not pulled from gs://bucket'))).toBe(true);
+    expect(execCmds(failing)).toContain('chown dev /cache/db');
+  });
+
   it('mounts the repository caches, hands them to the user, and never rolls one back', async () => {
     const config = { container: { caches: [{ name: 'db', path: '/cache/db' }] } } as KunjConfig;
     const volume = cacheVolumeName(REPO.name, REPO.id, 'db');

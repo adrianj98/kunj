@@ -7,7 +7,7 @@ import * as https from 'https';
 import { ContainerError } from '../container/errors';
 import type { InfoJson } from '../serve/protocol';
 import type { MachineImageJson, MachineJson } from '../json-types';
-import { Labels, MachineError, MachineErrorCode, MachineSize, ProviderFeatures } from './provider';
+import { CacheSync, Labels, MachineError, MachineErrorCode, MachineSize, ProviderFeatures } from './provider';
 
 export interface MachineClientOptions {
   baseUrl: string;
@@ -30,6 +30,8 @@ export interface ProvidersJson {
   features: ProviderFeatures;
   sizes: MachineSize[];
   network: 'private' | 'tunnel';
+  /** The coordinator's cache store (machine.cache), when it has one */
+  cache?: CacheSync;
 }
 
 const MACHINE_CODES = new Set<string>([

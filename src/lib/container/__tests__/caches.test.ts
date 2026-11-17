@@ -1,4 +1,5 @@
-import { cacheEnv, cacheVolumeName, parseCaches } from '../caches';
+import { cacheEnv, cacheVolumeName, parseCaches, syncCaches } from '../caches';
+import { FakeBackend } from './fake-backend';
 
 const REPO = { name: 'My.App', id: 'github.com/acme/my.app' };
 
@@ -29,5 +30,60 @@ describe('container.caches', () => {
   ])('refuses %s', (_what, value) => {
     expect(() => parseCaches(value, REPO)).toThrow(/container\.caches/);
     expect(() => parseCaches(value, REPO)).toThrow(expect.objectContaining({ code: 'bad-config' }));
+  });
+});
+
+describe('syncCaches', () => {
+  const STORE = { image: 'rclone/rclone:1.68.2', env: { RCLONE_GCS_ENV_AUTH: 'true' }, remote: ':gcs:my-bucket/team', display: 'gs://my-bucket/team' };
+  const caches = parseCaches([{ name: 'db', path: '/cache/db' }, { name: 'npm', path: '/cache/npm' }], REPO);
+  const opts = { repoId: REPO.id, kunjVersion: '1.0.0' };
+  const execs = (b: FakeBackend) => b.callsOf('exec').map(a => (a[1] as string[]).join(' '));
+
+  it('pulls each cache in one sync container that sees only the cache volumes, then removes it', async () => {
+    const b = new FakeBackend();
+    b.execHandler = (_id, cmd) => (cmd[1] === 'lsf' ? Promise.resolve({ exitCode: 0, stdout: 'dump.sql\n' }) : undefined);
+    const results = await syncCaches(b, STORE, caches, 'pull', opts);
+    expect(results).toEqual([{ name: 'db', action: 'pulled' }, { name: 'npm', action: 'pulled' }]);
+    const [spec] = b.callsOf('run').map(a => a[0] as any);
+    expect(spec).toMatchObject({ image: STORE.image, env: STORE.env, network: 'bridge', entrypoint: ['sleep'], publish: [] });
+    expect(spec.labels).toMatchObject({ 'kunj.repo': REPO.id, 'kunj.role': 'cache-sync' });
+    expect(spec.volumes).toEqual(caches.map(c => ({ name: c.volume, path: `/caches/${c.name}` })));
+    expect(spec.capabilities).toBeUndefined();
+    expect(execs(b)).toContain(`rclone sync :gcs:my-bucket/team/${caches[0].volume} /caches/db --links --transfers 8 --retries 2`);
+    // executable bits come back from the list stored beside the data
+    expect(execs(b)).toContain(`sh -c cd "$1" && rclone cat "$2" 2>/dev/null | xargs -0 -r chmod +x sh /caches/db :gcs:my-bucket/team/${caches[0].volume}.exec`);
+    expect(b.callsOf('remove')).toHaveLength(1);
+  });
+
+  it('leaves a volume alone when nothing was ever pushed', async () => {
+    const b = new FakeBackend();
+    b.execHandler = (_id, cmd) => (cmd[1] === 'lsf' ? Promise.resolve(cmd[4].endsWith(caches[0].volume) ? { exitCode: 3, stdout: '' } : { exitCode: 0, stdout: '' }) : undefined);
+    expect(await syncCaches(b, STORE, caches, 'pull', opts)).toEqual([{ name: 'db', action: 'empty' }, { name: 'npm', action: 'empty' }]);
+    expect(execs(b).some(c => c.startsWith('rclone sync'))).toBe(false);
+  });
+
+  it('pushes the volume to the store, and one failure does not stop the others', async () => {
+    const b = new FakeBackend();
+    b.execHandler = (_id, cmd, io) => {
+      if (cmd[1] === 'sync' && cmd[2] === '/caches/db') {
+        (io.stderr as NodeJS.WritableStream).write('2026/01/01 NOTICE: retrying\n2026/01/01 ERROR : googleapi: Error 403: forbidden\n');
+        return Promise.resolve({ exitCode: 1, stdout: '' });
+      }
+      return undefined;
+    };
+    const results = await syncCaches(b, STORE, caches, 'push', opts);
+    expect(results).toEqual([{ name: 'db', action: 'failed', message: '2026/01/01 ERROR : googleapi: Error 403: forbidden' }, { name: 'npm', action: 'pushed' }]);
+    expect(execs(b)).toContain(`rclone sync /caches/npm :gcs:my-bucket/team/${caches[1].volume} --links --transfers 8 --retries 2`);
+    expect(execs(b).some(c => c.includes('lsf'))).toBe(false);
+    expect(execs(b)).toContain(`sh -c cd "$1" && find . -type f -perm -u+x -print0 | rclone rcat "$2" sh /caches/npm :gcs:my-bucket/team/${caches[1].volume}.exec`);
+    expect(b.callsOf('remove')).toHaveLength(1);
+  });
+
+  it('refuses a store that is not an rclone remote, and does nothing without caches', async () => {
+    const b = new FakeBackend();
+    await expect(syncCaches(b, { ...STORE, remote: '/etc' }, caches, 'push', opts)).rejects.toMatchObject({ code: 'bad-config' });
+    await expect(syncCaches(b, { ...STORE, remote: ':gcs:b/../x' }, caches, 'push', opts)).rejects.toMatchObject({ code: 'bad-config' });
+    expect(await syncCaches(b, STORE, [], 'pull', opts)).toEqual([]);
+    expect(b.callsOf('run')).toHaveLength(0);
   });
 });

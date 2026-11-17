@@ -68,6 +68,34 @@ export interface MachineSpec {
   metadata?: Record<string, string>;
   /** Run as root at every boot (cloud-init style); provider-visible, never a secret */
   startupScript?: string;
+  /** Give the machine the credential that reads and writes the cache store (machine.cache) */
+  cacheStore?: boolean;
+}
+
+/** machine.cache on a coordinator: where repository caches are kept outside any one machine. */
+export interface CacheStoreConfig {
+  store: 'bucket';
+  bucket: string;
+  /** A folder in the bucket, '' for its root */
+  prefix: string;
+}
+
+/** The image the sync container runs: rclone, which speaks every cloud's object store. */
+export const CACHE_SYNC_IMAGE = 'rclone/rclone:1.68.2';
+
+/**
+ * How a container on a machine reaches the cache store: an rclone image, the environment that
+ * selects the machine's own credential, and the rclone remote of the store's root. Never a secret:
+ * the credential is the machine's, read from its cloud's metadata service.
+ */
+export interface CacheSync {
+  store: 'bucket';
+  image: string;
+  env: Record<string, string>;
+  /** e.g. `:gcs:my-bucket/kunj` */
+  remote: string;
+  /** What to call it in messages, e.g. gs://my-bucket/kunj */
+  display: string;
 }
 
 export interface MachineImage {
@@ -117,6 +145,8 @@ export interface MachineProvider {
   };
   /** What each size class means on this cloud */
   sizes(): MachineSize[];
+  /** How this cloud's machines sync with a cache store; absent when the provider has none */
+  cacheSync?(config: CacheStoreConfig): CacheSync;
 }
 
 export type MachineErrorCode =

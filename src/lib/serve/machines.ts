@@ -100,6 +100,7 @@ export function machineRoutes(coordinator: Coordinator): (api: ServeExtension) =
       features: { ...coordinator.provider.features },
       sizes: coordinator.provider.sizes(),
       network: coordinator.network,
+      ...(coordinator.cache ? { cache: coordinator.cache } : {}),
     }));
 
     api.route('POST', '/v1/machines/locate', async (req, _p, _url, client) => {

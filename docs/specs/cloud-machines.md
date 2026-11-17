@@ -20,7 +20,7 @@ led here is [google-cloud-containers.md](google-cloud-containers.md).
 | Bootstrap script, `machine.image`/`kunjPackage`/`bootstrap`, nonce pairing | Shipped 2026-11-16 (883805e, f3e7e3b, and the tunnel retry in the commit after). Run on `kunj-dev`: `kunj machine create` from stock Ubuntu to a paired machine in 234 s (the script itself 3 min 19 s); suspend 156 s, resume to an answering serve 23 s |
 | Phase 1: `MachineProvider`, `FakeProvider`, `GceProvider`; `kunj serve --machines` (routes, per-client tokens, pairing); local auto-start; `kunj machine` | Shipped 2026-11-16 (924d4ae, 8423238, a2856bc); unit-tested, and the local coordinator smoke-tested against the real `gcloud` without a project login. No machine has been created on a real project yet |
 | Phase 2: containers through the coordinator (`/v1/machines/<name>/serve/…` proxy), `kunj ct` on machines, wake on act, idle loop | Shipped 2026-11-16 (2ce7433). Run on `kunj-dev` with the local coordinator: `kunj ct start --remote machines` woke the suspended machine and created the container in 363 s (images and snapshot built on the machine); `ct exec` 3 s; `ct exec` on a suspended machine woke it and ran in 20 s; `ct stop` did not wake it. Left: machines in `ct list` and `kunj events`, machine prune, the delete on `ct remove`, hooks. Also run 2026-11-16: `ct shell --session` (tmux session `sh-t1` on the machine, woke it in 33 s) and `ct agent` (Claude Code started in the container; its first try, soon after the wake, could not reach Anthropic for 10 s, the second did) through the proxy, and the idle loop with `machine.idleMinutes` 2 suspended the machine by itself 3 minutes after the last use |
-| Phase 3: golden image build, `container.caches`, registry copy | Golden image shipped 2026-11-16 (`kunj machine image build|list|delete`, new machines boot the newest). Run on `kunj-dev`: bake 470 s; a branch's first `ct start` on a new machine from the image 160 s, against 597 s without. Left: `container.caches`, the blueprint hash on the image and `image-stale`, registry copy |
+| Phase 3: golden image build, `container.caches`, registry copy | Golden image shipped 2026-11-16 (`kunj machine image build|list|delete`, new machines boot the newest). Run on `kunj-dev`: bake 470 s; a branch's first `ct start` on a new machine from the image 160 s, against 597 s without. `container.caches` and the cache store (`machine.cache`, a bucket per coordinator, `kunj ct cache`) shipped. Left: the blueprint hash on the image and `image-stale`, registry copy |
 | Phase 4: a second provider (EC2) to prove the seam; workspace app rows and Wake | Not started |
 
 ## Goals and non-goals
@@ -387,7 +387,44 @@ there is on every new machine. After READY the mount points are chowned to the s
 another start may be using it. Every branch can write to it, so its contents are only as trusted as the
 branches. On a cloud machine the cache volume is on that machine's disk: what a session adds to it stays
 on that machine and goes when `ct remove` deletes the machine. What every machine shares is what the
-golden image carried, so a shared cache is refreshed by baking a new image.
+golden image carried, so without a cache store a shared cache is refreshed by baking a new image.
+
+### The cache store (as built 2026-11-17)
+
+The image alone makes the cache a snapshot: filled at bake time, copied to each machine, never updated
+between machines. A coordinator can therefore keep the caches in a store outside its machines.
+
+- **Per coordinator.** `machine.cache` in the config of the machine that runs `kunj serve --machines`
+  (the global config for the local coordinator): `{ "bucket": "<name>", "prefix": "<folder>" }`. Each
+  remote has its own; unset or `{ "store": "none" }` means the image only. Checked when the coordinator
+  starts (`cacheStoreConfig()`, `bad-machine-config`); `store` is the seam for other kinds (a network
+  folder) later.
+- **Pluggable.** `MachineProvider.cacheSync(config)` returns a `CacheSync`: the sync image
+  (`rclone/rclone`, pinned), the environment that selects the machine's own cloud credential and the
+  rclone remote of the store's root. GCE: a Cloud Storage bucket, `RCLONE_GCS_ENV_AUTH`, and new machines
+  run as `machine.gce.serviceAccount` (required, Storage Object Admin on the bucket only). No secret
+  travels: the credential is the machine's, from the metadata service, which a branch container's
+  firewall blocks.
+- **Client driven.** The coordinator hands the `CacheSync` out in `GET /v1/machines/providers` (`cache`);
+  `selectBackend()` exposes it as `machine.cacheSync()`, asked only when the repository has caches.
+  `syncCaches()` (caches.ts) runs one container on the machine through the ordinary backend
+  (`kunj.role=cache-sync`, only the cache volumes mounted at `/caches/<name>`, default bridge, no
+  capabilities), execs `rclone sync` per cache and removes it. Each cache lives at
+  `<store>/<volume name>/`, so repositories never collide.
+- **Pull** makes the volume equal to the store; it runs in `startContainer` for a new container (and the
+  snapshot build) after the volumes exist and before the branch container, so `setup` and `maintain` see
+  it, and then the cache is chowned recursively. A store nothing was pushed to (`rclone lsf` empty or
+  exit 3) leaves the volume as the image made it. A failed pull is a warning, never a failed start.
+- **Push** makes the store equal to the volume: `kunj ct cache push [branch]`, never automatic, so the
+  newest push wins and it is always a person's choice. `kunj ct cache pull` repeats the pull by hand;
+  `kunj ct cache status` lists the caches and the store (`ContainerCacheJson`, `ContainerCacheSyncJson`).
+- **What survives the store:** file contents, times and symlinks (`--links`). An object store keeps no
+  modes, so the names of executable files travel beside the data (`<volume>.exec`) and get their bit
+  back; other mode bits and ownership do not survive (everything is the sandbox user's after a pull).
+
+Run on `kunj-dev` (bucket `kunj-dev-kunj-cache`, us-central1): push of a small cache 4 s; a machine
+deleted and made again from the golden image had the pushed files, the symlink and the executable bit
+before `setup` ran; a manual pull removed a local-only file and restored a changed one.
 
 ## `kunj machine`
 
@@ -433,6 +470,7 @@ cloud CLI is not installed or not logged in on the coordinator's host), `coordin
 | `machine.gce.project`, `.zone`, `.network`, `.subnet`, `.serviceAccount`, `.machineTypes`, `.baseImage` | Coordinator's host | — | Provider config; `machine.<provider>.*` for each |
 | `container.remote` | Client | — | Names a cloud coordinator; absent with `machine.provider` set means the local one |
 | `container.caches` | Client | `[]` | `{ name, path }` list, above |
+| `machine.cache` | Coordinator | `{}` | The cache store: `{ bucket, prefix? }`, above |
 
 ## Security
 

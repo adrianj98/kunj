@@ -93,6 +93,50 @@ change the blueprint. `kunj machine image` lists the images and `kunj machine im
 removes one; a new bake deletes the older ones itself. `--no-snapshot` bakes an image without the
 blueprint snapshot.
 
+## Share caches between machines
+
+A machine runs one branch, so a [cache](../configuration/#a-cache-shared-by-every-branch) on it starts
+as a copy of what the machine image held. A cache store keeps the caches in a bucket, so a change
+made on one machine reaches the next ones without a new image.
+
+Create a bucket and a service account that can only use that bucket:
+
+```bash
+gcloud iam service-accounts create kunj-machine --project my-project
+gcloud storage buckets create gs://my-kunj-cache --project my-project --location us-central1 --uniform-bucket-level-access
+gcloud storage buckets add-iam-policy-binding gs://my-kunj-cache --member serviceAccount:kunj-machine@my-project.iam.gserviceaccount.com --role roles/storage.objectAdmin
+```
+
+Tell the coordinator about both. Each coordinator has its own setting, so set it where that
+coordinator runs (here, for the one on your computer):
+
+```bash
+kunj config --set-json 'machine.gce={"project":"my-project","zone":"us-central1-a","serviceAccount":"kunj-machine@my-project.iam.gserviceaccount.com"}' --global
+kunj config --set-json 'machine.cache={"bucket":"my-kunj-cache"}' --global
+kunj machine coordinator stop
+```
+
+From then on:
+
+- A new branch container first pulls every cache from the bucket, before your blueprint's `setup` and
+  `maintain` run. Only files that differ are downloaded.
+- `kunj ct cache push` copies the branch's caches to the bucket. Nothing is pushed on its own, so the
+  bucket only changes when you say so.
+- `kunj ct cache pull` makes the machine's caches equal to the bucket again.
+- `kunj ct cache status` shows the caches and where they are stored.
+
+```bash
+kunj ct cache push
+```
+
+A push makes the bucket equal to that machine's cache, and a pull makes the machine's cache equal to
+the bucket, including deletions. File contents, dates, symlinks and the executable bit are kept. Other
+permissions are not. Machines created before the service account was set cannot reach the bucket.
+Remove and start them again.
+
+The branch container itself cannot reach the bucket. The copy runs in a separate short-lived container
+on the machine.
+
 ## Run a branch on its machine
 
 Name the coordinator with `--remote`: `machines` is the one kunj starts on this machine.

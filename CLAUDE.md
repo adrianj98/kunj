@@ -153,6 +153,7 @@ Daily activity tracking in `~/.kunj/{reponame}/work-logs/`:
 - `kunj agent [start|status|stop] [branch] [--session <id>] [--all] [--agent claude|antigravity] [--resume]` - Run one or more agents in host tmux sessions for a worktree (see Worktree agents below); `--resume` starts `claude --resume <id>` from the id the SessionStart hook saved in `~/.kunj/<repo>/agent-resume/<session>.json` when the session is not running; `--agent antigravity` runs `agent.antigravityCommand` (default `agy`, the Antigravity CLI), which has no waiting state; `start --detach [--prompt-file <f>] [--open-in-app]` starts without attaching, gives claude a first prompt and sets `@kunj_open=app` so the workspace app opens the tab (the `/handoff` skill, docs/specs/agent-handoff.md)
 - `kunj container [start|shell|exec|agent|attach|open|forward|logs|list|stop|remove|prune|file]` (alias `ct`) - Run a branch in a sandboxed Docker container (see Branch Containers below)
 - `kunj ct blueprint [init|snapshot|status|remove]` - The repository's container blueprint and its snapshot image (see Blueprints under Branch Containers)
+- `kunj ct cache [status|pull|push] [branch]` - The repository's caches (`container.caches`) and, on a cloud machine whose coordinator has `machine.cache`, the copy between the machine and that store (`ContainerCacheJson`, `ContainerCacheSyncJson`)
 - `kunj ct token status [--json]` - Where a new container's GitHub token comes from (`ContainerTokenStatusJson`; never prints the token)
 - `kunj ct token setup` / `check [--json]` - Store the Claude Code token for containers from `claude setup-token` (extracted from its output, checked first), and check it with one `claude -p` that has only that token (`ContainerTokenCheckJson`; src/lib/secrets/claude-token.ts)
 - `kunj secret [set|import|list|get|rm|env|apply]` - Encrypted secrets (global, repo, branch) and where they go: host commands, worktree files, branch containers (see Secrets under Branch Containers)
@@ -360,7 +361,11 @@ argument that takes a host path; bump the pin only after re-reading the new vers
 **Caches:** `container.caches` (`[{ name, path }]`, caches.ts) are volumes per repository and daemon
 (`kunj-<repo>-cache-<name>-<hash>`, `kunj.role=cache`, no branch label so prune never sees them), mounted in every new
 branch container and in the snapshot build with `KUNJ_CACHE_DIR`/`KUNJ_CACHE_<NAME>`, chowned after READY, never in
-a rollback or a `ct remove`. kunj puts nothing in them; never add repository-specific knowledge here.
+a rollback or a `ct remove`. kunj puts nothing in them; never add repository-specific knowledge here. On cloud machines a
+coordinator's `machine.cache` (`{ bucket, prefix? }`, per coordinator) is a store outside the machines: `MachineProvider.cacheSync()`
+gives the rclone image, env and remote (GCE: a bucket through `machine.gce.serviceAccount`), `syncCaches()` runs it in a
+`kunj.role=cache-sync` container on the machine (never in the branch container, which cannot reach the credential), pulling at a new
+container's start and pushing only on `kunj ct cache push` (`ct cache status|pull|push`).
 
 **Services:** `services.ts` parses and validates services (blueprint `services`, `container.services`, the
 devcontainer's compose file read through `backend.composeConfig()`, i.e. `docker compose config

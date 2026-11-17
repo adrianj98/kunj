@@ -1889,3 +1889,8 @@ The user asked to be able to choose a remote in the app when remotes are availab
   cache on a cloud machine is per machine and goes with it. Why: adversarial review of the golden image diff.
 - Real run on `kunj-dev`: image bake 470 s; first `ct start` of a branch on a machine from the image 160 s (was
   597 s); cache volume mounted and writable; `ct remove` deleted container and machine in 61 s. Recorded in the spec.
+- Cache store for cloud machines: `machine.cache` setting (per coordinator), `CacheSync`/`cacheSync()` on the
+  provider seam with the GCE bucket, `syncCaches()` and the pull in `startContainer`, `kunj ct cache
+  status|pull|push`, executable bits carried in `<volume>.exec`. Why: the user pointed out that a cache that only
+  comes from the machine image is a snapshot, chose the bucket option, and asked that each remote be configurable.
+  Created on `kunj-dev`: bucket `kunj-dev-kunj-cache`, service account `kunj-machine` (object admin on that bucket).
