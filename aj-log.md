@@ -1899,3 +1899,7 @@ The user asked to be able to choose a remote in the app when remotes are availab
   that cannot be listed is a failure, not "empty". Why: adversarial review of the cache store diff.
 - Seed: a fresh snapshot copy drops every local branch except the container's own. Why: `kunj ct remove` refused
   twice on real machines with "unpushed commits on main", which was the snapshot's leftover branch.
+- `kunj ct list` lists cloud machines (`collectMember()`, `selectBackend({ listing })`, `ContainerJson.machine`,
+  `ContainerListJson.machines`); machine hooks `pre/post-machine-create|delete`; a fleet member's SSH tunnel gets the
+  listing's time limit and a timed-out tunnel no longer holds the process. Why: the spec's phase 2 list, and the
+  user's `ct list` took 30 s while the old `gce` remote's VM was suspended.

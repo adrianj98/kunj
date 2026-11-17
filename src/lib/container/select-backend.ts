@@ -22,7 +22,16 @@ export interface BackendSelection {
   /** Ends what the selection opened (an SSH tunnel); safe to call twice */
   close(): Promise<void>;
   /** The cloud machine the backend is, when the remote coordinates machines */
-  machine?: { name: string; delete(): Promise<void>; /** The coordinator's cache store, when it has one */ cacheSync(): Promise<import('../machines/provider').CacheSync | undefined> };
+  /**
+   * Set instead of `machine` for a listing on a remote that coordinates machines: the machines it
+   * knows (asked from the cloud, never waking one) and the backend of one that is running.
+   */
+  coordinator?: {
+    provider: string;
+    list(filter: Record<string, string>): Promise<import('../json-types').MachineJson[]>;
+    backendFor(machine: string): Promise<ContainerBackend>;
+  };
+  machine?: { name: string; provider: string; delete(): Promise<void>; /** The coordinator's cache store, when it has one */ cacheSync(): Promise<import('../machines/provider').CacheSync | undefined> };
 }
 
 export interface SelectOptions {
@@ -36,11 +45,17 @@ export interface SelectOptions {
    * located (woken with `wake`, made with `create`) and the backend is that machine's serve.
    */
   machine?: { repo: string; repoName: string; branch: string; wake: boolean; create: boolean; size?: string };
+  /** Run around the creation of the branch's machine, on this computer (the machine hooks); `pre` may throw to stop it */
+  machineHooks?: { pre(machine: string, provider: string): Promise<void>; post(machine: string, provider: string): Promise<void> };
+  /** A listing: a coordinator is returned as `coordinator` (its machines), not refused for want of a branch */
+  listing?: boolean;
+  /** How long an SSH tunnel may take to come up (a fleet listing gives up early; default 2 minutes) */
+  tunnelTimeoutMs?: number;
   /** The local coordinator (tests) */
   localCoordinator?: (config: KunjConfig) => Promise<{ baseUrl: string; token: string }>;
   /** Test seams */
   remotes?: (name: string) => RemoteEntry;
-  tunnel?: (opts: { ssh: string; port: number }) => Promise<{ localPort: number; close(): Promise<void> }>;
+  tunnel?: (opts: { ssh: string; port: number; timeoutMs?: number }) => Promise<{ localPort: number; close(): Promise<void> }>;
 }
 
 /** The remote name a command should use, or undefined for the laptop. */
@@ -69,7 +84,7 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
       baseUrl = entry.url;
     } else if (entry.ssh) {
       const open = options.tunnel ?? (await import('../serve/tunnel')).openTunnel;
-      const tunnel = await open({ ssh: entry.ssh, port: entry.port ?? DEFAULT_SERVE_PORT });
+      const tunnel = await open({ ssh: entry.ssh, port: entry.port ?? DEFAULT_SERVE_PORT, ...(options.tunnelTimeoutMs ? { timeoutMs: options.tunnelTimeoutMs } : {}) });
       baseUrl = `http://127.0.0.1:${tunnel.localPort}`;
       let closed = false;
       close = async () => {
@@ -84,17 +99,46 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
   const { RemoteKunjBackend } = await import('./remote');
   let backend = new RemoteKunjBackend({ baseUrl, token, name });
   let machine: BackendSelection['machine'];
+  let coordinator: BackendSelection['coordinator'];
   try {
     await backend.ready();
     if (backend.machines) {
       // A coordinator: the backend is the serve of this branch's machine, reached through it
       const m = options.machine;
-      if (!m) {
+      if (!m && options.listing) {
+        const { MachineClient } = await import('../machines/client');
+        const client = new MachineClient({ baseUrl, token, name });
+        coordinator = {
+          provider: backend.machines.provider,
+          list: filter => client.list(filter),
+          backendFor: async machineName => {
+            const b = new RemoteKunjBackend({ baseUrl, token, name: `${name}/${machineName}`, basePath: `/v1/machines/${machineName}/serve` });
+            await b.ready();
+            return b;
+          },
+        };
+      } else if (!m) {
         throw new ContainerError(`${name === LOCAL_MACHINES ? 'Cloud machines hold' : `Remote ${name} coordinates cloud machines, which hold`} one branch each, so this command needs a branch. kunj machine list shows them all.`, 'bad-remote');
-      }
+      } else {
       const { MachineClient } = await import('../machines/client');
       const client = new MachineClient({ baseUrl, token, name });
-      const located = await client.locate({ repo: m.repo, repoName: m.repoName, branch: m.branch, wake: m.wake, create: m.create, size: m.size });
+      const provider = backend.machines.provider;
+      const ask = (create: boolean) => client.locate({ repo: m.repo, repoName: m.repoName, branch: m.branch, wake: m.wake, create, size: m.size });
+      let located: Awaited<ReturnType<typeof ask>>;
+      if (m.create && options.machineHooks) {
+        // Asked without create first, so the hooks run only when a machine is really made
+        const { MachineError, machineName } = await import('../machines/provider');
+        const existing = await ask(false).catch(err => {
+          if (err instanceof MachineError && err.code === 'machine-not-found') return undefined;
+          throw err;
+        });
+        if (existing) located = existing;
+        else {
+          await options.machineHooks.pre(machineName(m.repoName, m.repo, m.branch), provider);
+          located = await ask(true);
+          if (located.created) await options.machineHooks.post(located.machine.name, provider);
+        }
+      } else located = await ask(m.create);
       if (located.machine.state !== 'running') {
         throw new ContainerError(`The machine of ${m.branch} is ${located.machine.state}. kunj ct start ${m.branch} wakes it.`, 'remote-unreachable');
       }
@@ -102,13 +146,15 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
       await backend.ready();
       machine = {
         name: located.machine.name,
+        provider,
         delete: () => client.delete(located.machine.name, { disks: true }),
         cacheSync: async () => (await client.providers()).cache,
       };
+      }
     }
   } catch (err) {
     await close();
     throw err;
   }
-  return { backend, kind: 'remote', remote: name, dockerContext: backend.serverContext, close, ...(machine ? { machine } : {}) };
+  return { backend, kind: 'remote', remote: name, dockerContext: backend.serverContext, close, ...(machine ? { machine } : {}), ...(coordinator ? { coordinator } : {}) };
 }

@@ -164,6 +164,8 @@ export interface ContainerJson {
   secretsChanged?: boolean;
   /** The `kunj serve` remote the container is on (a name from kunj remote add); absent on this machine's Docker */
   remote?: string;
+  /** The cloud machine the container runs on, when its remote coordinates machines */
+  machine?: { provider: string; name: string; state: MachineJson['state']; size: string; owner?: string };
 }
 
 export interface ContainerListJson {
@@ -194,6 +196,12 @@ export interface ContainerListJson {
     features?: { localPorts: boolean; editorAttach: boolean; dockerInDocker: Array<'sysbox' | 'privileged'> };
   }>;
   containers: ContainerJson[];
+  /**
+   * Cloud machines of the repository that have no container row: asleep (suspended, stopped), not
+   * answering, or without a container yet. `remote` is the coordinator. A listing never wakes one;
+   * `kunj ct start <branch>` does. Absent when no backend coordinates machines.
+   */
+  machines?: Array<MachineJson & { remote: string; provider: string }>;
   // Helpers, services, volumes and networks whose branch container is gone (kunj ct prune removes them)
   orphans: PruneOrphan[];
 }

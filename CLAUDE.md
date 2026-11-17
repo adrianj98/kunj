@@ -337,7 +337,7 @@ would also remove kunj images of other versions on the daemon (otherwise only it
 unquoted context even within `"..."`; backtick spans get one more level of escaping), so every
 form passes the value literally. The container
 hooks are `pre/post-container-create` and `pre/post-container-delete` with `branch`, `container`,
-`image`; the create hooks are skipped when `start` resumes an existing container.
+`image` (and `pre/post-machine-create|delete` for cloud machines); the create hooks are skipped when `start` resumes an existing container.
 
 **MCP bridge:** `mcpbridge.ts` bridges host stdio MCP servers (`container.mcp`, host config only;
 v1 only `chrome`) into the container, for one container run (`containerRun()` StartedAt). Root runs
@@ -501,6 +501,8 @@ machine is awake). `kunj machine image build` bakes a golden image: a builder ma
 blueprint snapshot (`ct blueprint snapshot --machine`), `Coordinator.bake()` stops it and images its disk (role label
 `machine-image`), older images go, the builder is deleted; `create()` boots the repository's newest image, and the bootstrap
 deletes a baked-in serve token on a machine whose name differs from `/etc/kunj-machine`, so it pairs anew.
+`kunj ct list` lists a coordinator's machines without waking one (`collectMember()`: containers of running machines carry `machine`, the
+rest are `machines` rows); the machine hooks `pre/post-machine-create|delete` (`branch`, `machine`, `provider`) run on the client.
 `Coordinator.idleTick()` suspends a machine after `machine.idleMinutes` with no proxied request, open
 stream or running agent (src/lib/machines/idle.ts). `kunj serve` takes named client tokens (`token add|list|remove`).
 Tests: `FakeProvider`, a conformance suite every provider runs, and proxy.test.ts (a coordinator serve in front of a

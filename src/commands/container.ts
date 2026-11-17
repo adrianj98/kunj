@@ -38,7 +38,8 @@ import { shellQuote } from '../lib/config-vars';
 import { detectDefaultBranch } from '../lib/base-branch';
 import { ContainerBackend, ContainerInfo } from '../lib/container/backend';
 import { LocalDockerBackend } from '../lib/container/docker';
-import { BackendSelection, remoteNameOf, selectBackend } from '../lib/container/select-backend';
+import { BackendSelection, LOCAL_MACHINES, remoteNameOf, selectBackend } from '../lib/container/select-backend';
+import { IMAGE_BUILD_BRANCH } from '../lib/machines/provider';
 import { CacheStore, parseCaches, syncCaches } from '../lib/container/caches';
 import { readRemotes } from '../lib/remotes';
 import { ContainerStatus, describeGuard, emptyStatus, forwardedEnv } from '../lib/container/env';
@@ -77,6 +78,7 @@ import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount
 import { KunjConfig } from '../types';
 import type { LoadSecretsOptions } from '../lib/secrets/resolve';
 import { vaultFiles, vaultStamp } from '../lib/secrets/vault';
+import type { MachineJson } from '../lib/json-types';
 import type { ContainerCacheJson, ContainerCacheSyncJson, ContainerJson, ContainerListJson, ContainerTokenCheckJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, SearchSourceJson, ShellKillJson } from '../lib/json-types';
 
 interface ContainerOptions {
@@ -121,6 +123,8 @@ interface Context {
   remote?: string;
   /** The cloud machine this command's branch runs on, when the remote coordinates machines */
   machine?: BackendSelection['machine'];
+  /** A listing on a remote that coordinates machines: its machines instead of one backend */
+  coordinator?: BackendSelection['coordinator'];
   /** The coordinator's cache store, asked only when the repository has caches and the backend is a machine */
   cacheStore?: CacheStore;
 }
@@ -148,6 +152,8 @@ type KunjConfigOf = Awaited<ReturnType<typeof loadResolvedConfig>>;
 
 /** One backend's part of `kunj ct list`; `mains[i]` is the raw row of `containers[i]`. */
 interface ListPart {
+  /** Machines with no container row (a coordinator member only) */
+  machines?: NonNullable<ContainerListJson['machines']>;
   containers: ContainerJson[];
   orphans: ContainerListJson['orphans'];
   mains: ContainerInfo[];
@@ -436,7 +442,7 @@ export class ContainerCommand extends BaseCommand {
   // shared
   // ---------------------------------------------------------------------
 
-  private async context(options: ContainerOptions, loaded?: KunjConfigOf): Promise<Context> {
+  private async context(options: ContainerOptions, loaded?: KunjConfigOf, extra: { listing?: boolean; tunnelTimeoutMs?: number } = {}): Promise<Context> {
     const config = loaded ?? (await loadResolvedConfig(process.cwd()));
     const root = getRepoCommonRoot();
     if (!root) throw new ContainerError(NOT_IN_REPO);
@@ -452,7 +458,16 @@ export class ContainerCommand extends BaseCommand {
     const key = remote ? `remote:${remote}${machine?.branch ? `:${machine.branch}` : ''}` : `docker:${options.context || config.container?.dockerContext || ''}`;
     let selection = this.selections.get(key);
     if (!selection) {
-      selection = await selectBackend({ remote: options.remote, context: options.context, config, machine: machine?.branch ? machine : undefined });
+      selection = await selectBackend({ remote: options.remote, context: options.context, config, machine: machine?.branch ? machine : undefined, listing: extra.listing, tunnelTimeoutMs: extra.tunnelTimeoutMs,
+        ...(machine?.branch && machine.create
+          ? {
+              machineHooks: {
+                pre: (name: string, provider: string) => this.machineHook('pre-machine-create', machine.branch, name, provider, config, options),
+                post: (name: string, provider: string) => this.machineHook('post-machine-create', machine.branch, name, provider, config, options),
+              },
+            }
+          : {}),
+      });
       this.selections.set(key, selection);
     }
     this.backend = selection.backend;
@@ -464,7 +479,12 @@ export class ContainerCommand extends BaseCommand {
         return undefined;
       });
     }
-    return { config, repo, backend: this.backend, dockerContext: selection.dockerContext, remote: selection.remote, machine: selection.machine, ...(cacheStore ? { cacheStore } : {}) };
+    return { config, repo, backend: this.backend, dockerContext: selection.dockerContext, remote: selection.remote, machine: selection.machine, ...(selection.coordinator ? { coordinator: selection.coordinator } : {}), ...(cacheStore ? { cacheStore } : {}) };
+  }
+
+  /** A machine hook, on this computer; a failing post-* hook is a warning, a failing pre-* one throws. */
+  private async machineHook(name: 'pre-machine-create' | 'post-machine-create' | 'pre-machine-delete' | 'post-machine-delete', branch: string, machine: string, provider: string, config: KunjConfig, options: ContainerOptions): Promise<void> {
+    await runActionHook(name, { branch, machine, provider }, { hooks: config.hooks, jsonMode: this.jsonMode, skip: options.hooks === false });
   }
 
   /** The options that make a background kunj use this command's backend */
@@ -1226,7 +1246,7 @@ export class ContainerCommand extends BaseCommand {
 
     console.log(chalk.blue(options.all ? 'Containers (all repositories):' : `Containers for ${json.repo}:`));
     console.log(chalk.gray('─'.repeat(70)));
-    if (containers.length === 0) {
+    if (containers.length === 0 && !json.machines?.length) {
       console.log(chalk.gray('  none'));
     }
     containers.forEach((c, i) => {
@@ -1234,7 +1254,8 @@ export class ContainerCommand extends BaseCommand {
       let line = `${running ? chalk.green('●') : chalk.gray('○')} ${chalk.white(c.branch)}  ${running ? chalk.green(c.state) : chalk.gray(c.state)}  ${chalk.gray(c.image)}`;
       if (c.blueprint) line += c.blueprint.stale ? chalk.yellow('  [blueprint stale]') : chalk.cyan('  [blueprint]');
       if (c.dind !== 'off') line += chalk.magenta(`  [dind ${c.dind}]`);
-      if (c.remote) line += chalk.blue(`  [on ${c.remote}]`);
+      if (c.machine) line += chalk.blue(`  [machine ${c.machine.size}]`);
+      else if (c.remote) line += chalk.blue(`  [on ${c.remote}]`);
       if (c.agent.running) line += chalk.cyan('  [agent]');
       if (c.workspace.ahead) line += chalk.cyan(`  +${c.workspace.ahead} ahead`);
       if (c.workspace.dirty) line += chalk.yellow('  dirty');
@@ -1248,6 +1269,10 @@ export class ContainerCommand extends BaseCommand {
       if (running && helper?.state !== 'running') line += chalk.red('  [firewall helper down]');
       console.log(line);
     });
+    for (const m of json.machines ?? []) {
+      const asleep = m.state === 'suspended' || m.state === 'stopped';
+      console.log(`${chalk.gray('○')} ${chalk.white(m.branch)}  ${chalk.gray(`machine ${m.state}`)}  ${chalk.gray(m.size)}${asleep ? chalk.gray(`  (kunj ct start ${m.branch} wakes it)`) : ''}`);
+    }
     if (orphans.length) {
       console.log(chalk.yellow(`orphans: ${orphans.length} (${orphans.map(o => o.name).join(', ')}); run kunj ct prune`));
     }
@@ -1370,11 +1395,11 @@ export class ContainerCommand extends BaseCommand {
       features: ctx.backend.features,
     });
     if (options.remote !== undefined || options.context) {
-      const ctx = await this.context(options, config);
-      const part = await this.collectFrom(ctx, options);
+      const ctx = await this.context(options, config, { listing: true });
+      const part = await this.collectMember(ctx, options);
       const backend = describe(ctx);
       return {
-        json: { repo: ctx.repo.name, backend, backends: [{ ...backend, available: true }], containers: part.containers, orphans: part.orphans },
+        json: { repo: ctx.repo.name, backend, backends: [{ ...backend, available: true }], containers: part.containers, ...(part.machines ? { machines: part.machines } : {}), orphans: part.orphans },
         mains: part.mains,
         helpers: part.helpers,
       };
@@ -1389,16 +1414,19 @@ export class ContainerCommand extends BaseCommand {
       console.error(chalk.yellow(`Remotes not listed: ${describeError(error).message}`));
     }
     // This Mac first, then the remotes by name: the order of `backends` and of the rows
-    const members: Array<string | undefined> = [undefined, ...remoteNames];
+    // ...and this machine's own coordinator, when it has a provider (started on demand, as for any machine command)
+    const ownMachines = typeof config.machine?.provider === 'string' && config.machine.provider && !remoteNames.includes(LOCAL_MACHINES) ? [LOCAL_MACHINES] : [];
+    const members: Array<string | undefined> = [undefined, ...ownMachines, ...remoteNames];
     const asked = await Promise.all(
       members.map(async (name): Promise<{ name: string | undefined; ctx?: Context; part?: ListPart; error?: unknown }> => {
         let ctx: Context | undefined;
         try {
-          const opening = this.context({ ...options, remote: name ?? 'local' }, config);
+          // A remote left out after openMs must not hold the command until its ssh gives up on its own
+          const opening = this.context({ ...options, remote: name ?? 'local' }, config, { listing: true, ...(name ? { tunnelTimeoutMs: fleetTimeouts.openMs + 500 } : {}) });
           // This Mac's Docker is given the time it takes, as before
           if (!name) {
             ctx = await opening;
-            return { name, ctx, part: await this.collectFrom(ctx, options) };
+            return { name, ctx, part: await this.collectMember(ctx, options) };
           }
           // A remote that does not open or answer in time is left out rather than holding the listing
           const started = Date.now();
@@ -1411,7 +1439,7 @@ export class ContainerCommand extends BaseCommand {
             throw error;
           }
           const left = Math.max(1, fleetTimeouts.memberMs - (Date.now() - started));
-          return { name, ctx, part: await within(this.collectFrom(ctx, options), left, `${late} ${fleetTimeouts.memberMs / 1000}s`) };
+          return { name, ctx, part: await within(this.collectMember(ctx, options), left, `${late} ${fleetTimeouts.memberMs / 1000}s`) };
         } catch (error) {
           return { name, ctx, error };
         }
@@ -1432,7 +1460,9 @@ export class ContainerCommand extends BaseCommand {
     const helpers = new Map<string, ContainerInfo>();
     const orphans: ContainerListJson['orphans'] = [];
     const orphanKeys = new Set<string>();
+    const machines: NonNullable<ContainerListJson['machines']> = [];
     for (const m of answered) {
+      for (const machine of m.part.machines ?? []) if (!machines.some(x => x.name === machine.name && x.remote === machine.remote)) machines.push(machine);
       m.part.containers.forEach((c, i) => {
         if (seen.has(c.id)) return;
         seen.add(c.id);
@@ -1469,12 +1499,54 @@ export class ContainerCommand extends BaseCommand {
         : { kind: defaultRemote ? 'remote' : 'docker', context: 'default', ...(defaultRemote ? { remote: defaultRemote } : {}) },
       backends,
       containers,
+      ...(asked.some(m => m.part?.machines) ? { machines } : {}),
       orphans,
     };
     return { json, mains, helpers };
   }
 
   /** One backend's part of a listing: its containers (marked with its remote), orphans and raw rows. */
+  /**
+   * One member of a listing: a Docker backend's containers, or, for a coordinator, the containers on
+   * each machine that is running (asked through its proxy) and the other machines as rows of their
+   * own. Machines come from the cloud's listing: none is woken, and one that does not answer is a row.
+   */
+  private async collectMember(ctx: Context, options: ContainerOptions): Promise<ListPart> {
+    const coordinator = ctx.coordinator;
+    if (!coordinator) return this.collectFrom(ctx, options);
+    const remote = ctx.remote ?? LOCAL_MACHINES;
+    const all = await coordinator.list(options.all ? {} : { [LABEL.repo]: ctx.repo.id });
+    // The image builder is a machine too, but never a branch's
+    const listed = all.filter(m => m.branch !== IMAGE_BUILD_BRANCH);
+    const part: ListPart = { containers: [], orphans: [], mains: [], helpers: new Map(), machines: [] };
+    const row = (m: MachineJson) => part.machines!.push({ ...m, remote, provider: coordinator.provider });
+    await Promise.all(
+      listed.map(async m => {
+        if (m.state !== 'running' || !m.paired) return row(m);
+        try {
+          const backend = await coordinator.backendFor(m.name);
+          const one = await this.collectFrom({ ...ctx, backend, coordinator: undefined }, options);
+          if (one.containers.length === 0) row(m);
+          const machine = { provider: coordinator.provider, name: m.name, state: m.state, size: m.size, ...(m.owner ? { owner: m.owner } : {}) };
+          one.containers.forEach((c, i) => {
+            part.containers.push({ ...c, machine });
+            part.mains.push(one.mains[i]);
+          });
+          for (const [name, helper] of one.helpers) part.helpers.set(name, helper);
+          part.orphans.push(...one.orphans);
+        } catch {
+          row(m); // awake for the cloud, but its serve did not answer: still a machine, with no container row
+        }
+      }),
+    );
+    const byBranch = (a: { branch: string }, b: { branch: string }) => a.branch.localeCompare(b.branch);
+    const order = part.containers.map((c, i) => ({ c, main: part.mains[i] })).sort((a, b) => byBranch(a.c, b.c));
+    part.containers = order.map(o => o.c);
+    part.mains = order.map(o => o.main);
+    part.machines!.sort(byBranch);
+    return part;
+  }
+
   private async collectFrom(ctx: Context, options: ContainerOptions): Promise<ListPart> {
     const repoFilter: Record<string, string> = options.all ? {} : { [LABEL.repo]: ctx.repo.id };
     let all = await ctx.backend.list(repoFilter);
@@ -2138,8 +2210,10 @@ export class ContainerCommand extends BaseCommand {
     let machineDeleted: string | undefined;
     if (ctx.machine && !options.keepVolumes) {
       try {
+        await this.machineHook('pre-machine-delete', branch, ctx.machine.name, ctx.machine.provider, ctx.config, options);
         await ctx.machine.delete();
         machineDeleted = ctx.machine.name;
+        await this.machineHook('post-machine-delete', branch, ctx.machine.name, ctx.machine.provider, ctx.config, options);
       } catch (err) {
         this.warn(`the container is removed, but its machine ${ctx.machine.name} could not be deleted: ${(err as Error).message}. kunj machine delete ${branch} removes it.`);
       }

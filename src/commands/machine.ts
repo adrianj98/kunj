@@ -19,7 +19,8 @@ import { loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import type { CoordinatorAccess, ResolveOptions } from '../lib/machines/local-coordinator';
 import type { MachineJson, MachineListJson, MachineJsonResult, MachineProvidersJson, CoordinatorStatusJson, MachineImageListJson, MachineImageBuildJson } from '../lib/json-types';
-import { IMAGE_BUILD_BRANCH, MachineError } from '../lib/machines/provider';
+import { IMAGE_BUILD_BRANCH, MachineError, machineName } from '../lib/machines/provider';
+import type { KunjConfig } from '../types';
 
 interface MachineOptions {
   json?: boolean;
@@ -30,6 +31,8 @@ interface MachineOptions {
   keepDisks?: boolean;
   /** --no-snapshot */
   snapshot?: boolean;
+  /** --no-hooks */
+  hooks?: boolean;
 }
 
 export interface MachineCommandDeps {
@@ -76,6 +79,7 @@ export class MachineCommand extends BaseCommand {
         { flags: '--size <size>', description: '[create] small, medium, large or a provider shape (default machine.size)' },
         { flags: '-y, --yes', description: '[delete] Do not ask' },
         { flags: '--keep-disks', description: '[delete] Keep the machine\'s disks' },
+        { flags: '--no-hooks', description: '[create, delete] Skip the machine hooks' },
         { flags: '--no-snapshot', description: '[image build] Do not build the blueprint snapshot into the image' },
       ],
       helpText: [
@@ -137,14 +141,21 @@ export class MachineCommand extends BaseCommand {
     const resolve = this.deps.coordinator ?? (await import('../lib/machines/local-coordinator')).resolveCoordinator;
     const access = await resolve({ remote: opts.remote, config });
     try {
-      await this.run(verb, target, positionals.slice(2), opts, access);
+      await this.run(verb, target, positionals.slice(2), opts, access, config.hooks);
     } finally {
       await access.close();
     }
   }
 
-  private async run(verb: string, target: string | undefined, rest: string[], opts: MachineOptions, access: CoordinatorAccess): Promise<void> {
+  private async run(verb: string, target: string | undefined, rest: string[], opts: MachineOptions, access: CoordinatorAccess, hooks?: KunjConfig['hooks']): Promise<void> {
     const { client } = access;
+    // The machine hooks run here, on the client, where the user's config is
+    const hook = async (name: 'pre-machine-create' | 'post-machine-create' | 'pre-machine-delete' | 'post-machine-delete', branch: string, machine: string) => {
+      if (opts.hooks === false || !hooks) return;
+      const { runActionHook } = await import('../lib/hooks');
+      const provider = await client.providers().then(p => p.provider, () => '');
+      await runActionHook(name, { branch, machine, provider }, { hooks, jsonMode: this.jsonMode });
+    };
     if (verb === 'providers') {
       const p = await client.providers();
       if (this.jsonMode) return this.outputJSON({ coordinator: access.name, ...p } satisfies MachineProvidersJson);
@@ -171,7 +182,20 @@ export class MachineCommand extends BaseCommand {
 
     const b = await this.branchOf(target);
     if (verb === 'status' || verb === 'create') {
-      const r = await client.locate({ repo: repo.id, repoName: repo.name, branch: b, create: verb === 'create', size: opts.size });
+      const find = (create: boolean) => client.locate({ repo: repo.id, repoName: repo.name, branch: b, create, size: opts.size });
+      let r: Awaited<ReturnType<typeof find>>;
+      if (verb === 'create') {
+        const existing = await find(false).catch(err => {
+          if (err instanceof MachineError && err.code === 'machine-not-found') return undefined;
+          throw err;
+        });
+        if (existing) r = existing;
+        else {
+          await hook('pre-machine-create', b, machineName(repo.name, repo.id, b));
+          r = await find(true);
+          if (r.created) await hook('post-machine-create', b, r.machine.name);
+        }
+      } else r = await find(false);
       if (this.jsonMode) return this.outputJSON({ coordinator: access.name, machine: r.machine, created: r.created, woke: r.woke } satisfies MachineJsonResult);
       if (verb === 'create' && !r.created) console.log(chalk.gray(`${b} already has a machine.`));
       if (r.created) console.log(chalk.green(`✓ Created ${r.machine.name}`));
@@ -189,7 +213,9 @@ export class MachineCommand extends BaseCommand {
           return;
         }
       }
+      await hook('pre-machine-delete', b, machine.name);
       await client.delete(machine.name, { disks: !opts.keepDisks });
+      await hook('post-machine-delete', b, machine.name);
       if (this.jsonMode) return this.outputJSON({ coordinator: access.name, deleted: machine.name });
       console.log(chalk.green(`✓ Deleted ${machine.name}`));
       return;

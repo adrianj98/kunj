@@ -171,6 +171,49 @@ describe('containers on a machine, through the coordinator', () => {
     expect(f.tokens.has(name)).toBe(false);
   });
 
+  it('runs the machine hooks around a creation only, and a failing pre hook makes no machine', async () => {
+    const ran: string[] = [];
+    const hooked = (hooks: { pre(m: string, p: string): Promise<void>; post(m: string, p: string): Promise<void> }) =>
+      selectBackend({
+        remote: 'cloud',
+        config: {} as KunjConfig,
+        remotes: () => ({ url: f.baseUrl, token: CLIENT_TOKEN, addedAt: '' }),
+        machine: { repo: REPO, repoName: 'app', branch: 'hooked', wake: true, create: true },
+        machineHooks: hooks,
+      });
+    const refuse = { pre: async () => Promise.reject(new Error('not today')), post: async () => void ran.push('post') };
+    await expect(hooked(refuse)).rejects.toThrow('not today');
+    expect(f.provider.machines.size).toBe(0);
+
+    const record = { pre: async (m: string, p: string) => void ran.push(`pre ${m} ${p}`), post: async (m: string, p: string) => void ran.push(`post ${m} ${p}`) };
+    const sel = await hooked(record);
+    await sel.close();
+    const name = [...f.provider.machines.keys()][0];
+    expect(ran).toEqual([`pre ${name} fake`, `post ${name} fake`]);
+    expect(sel.machine).toMatchObject({ name, provider: 'fake' });
+    // the machine exists now: no hook runs again
+    (await hooked(record)).close();
+    expect(ran).toHaveLength(2);
+  });
+
+  it('gives a listing the coordinator\'s machines and the backend of a running one, waking none', async () => {
+    (await select(f, { branch: 'b', wake: true, create: true })).close();
+    const name = [...f.provider.machines.keys()][0];
+    const sel = await selectBackend({ remote: 'cloud', config: {} as KunjConfig, listing: true, remotes: () => ({ url: f.baseUrl, token: CLIENT_TOKEN, addedAt: '' }) });
+    try {
+      expect(sel.machine).toBeUndefined();
+      expect(sel.coordinator!.provider).toBe('fake');
+      expect((await sel.coordinator!.list({ 'kunj.repo': REPO })).map(m => [m.name, m.branch, m.state, m.paired])).toEqual([[name, 'b', 'running', true]]);
+      expect(await (await sel.coordinator!.backendFor(name)).list({})).toEqual([]);
+      await f.coordinator.suspend(name);
+      const calls = f.provider.methods().length;
+      expect((await sel.coordinator!.list({ 'kunj.repo': REPO })).map(m => m.state)).toEqual(['suspended']);
+      expect(f.provider.methods().slice(calls)).not.toContain('resume');
+    } finally {
+      await sel.close();
+    }
+  });
+
   it('uses this machine\'s own coordinator for --remote machines', async () => {
     const sel = await selectBackend({
       remote: 'machines',

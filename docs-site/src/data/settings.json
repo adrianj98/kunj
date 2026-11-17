@@ -1266,6 +1266,78 @@
     "sensitive": false
   },
   {
+    "key": "hooks.pre-machine-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-machine-create hook",
+    "detailedDescription": "Runs on this computer before a cloud machine is made for a branch (`kunj ct start` on a coordinator, `kunj machine create`). A non-zero exit aborts it. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${machine}, ${provider} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_MACHINE, KUNJ_PROVIDER in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-machine-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.post-machine-create",
+      "hooks.pre-machine-delete",
+      "hooks.post-machine-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-machine-create",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-machine-create hook",
+    "detailedDescription": "Runs on this computer after a branch's cloud machine exists and its kunj serve answers. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${machine}, ${provider} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_MACHINE, KUNJ_PROVIDER in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-machine-create in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-machine-create",
+      "hooks.pre-machine-delete",
+      "hooks.post-machine-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.pre-machine-delete",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the pre-machine-delete hook",
+    "detailedDescription": "Runs on this computer before a branch's cloud machine is deleted (`kunj ct remove`, `kunj machine delete`). A non-zero exit keeps the machine. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${machine}, ${provider} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_MACHINE, KUNJ_PROVIDER in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named pre-machine-delete in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-machine-create",
+      "hooks.post-machine-create",
+      "hooks.post-machine-delete"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "hooks.post-machine-delete",
+    "type": "string",
+    "category": "hooks",
+    "default": "",
+    "description": "Command run by the post-machine-delete hook",
+    "detailedDescription": "Runs on this computer after a branch's cloud machine has been deleted. The command runs through the shell with ${repoRoot}, ${repoconfig}, ${repoName}, ${home}, ${branch}, ${machine}, ${provider} expanded, and receives KUNJ_HOOK, KUNJ_REPO_ROOT, KUNJ_BRANCH, KUNJ_MACHINE, KUNJ_PROVIDER in its environment. Edit the config file by hand to list several commands as a JSON array. Executable scripts named post-machine-delete in ~/.kunj/hooks or ~/.kunj/<repo>/hooks run as well; see `kunj hooks`.",
+    "options": null,
+    "examples": [
+      "(empty) - No configured command (default)"
+    ],
+    "relatedSettings": [
+      "hooks.pre-machine-create",
+      "hooks.post-machine-create",
+      "hooks.pre-machine-delete"
+    ],
+    "sensitive": false
+  },
+  {
     "key": "container.image",
     "type": "string",
     "category": "container",

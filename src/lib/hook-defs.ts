@@ -27,7 +27,11 @@ export type HookName =
   | 'pre-container-create'
   | 'post-container-create'
   | 'pre-container-delete'
-  | 'post-container-delete';
+  | 'post-container-delete'
+  | 'pre-machine-create'
+  | 'post-machine-create'
+  | 'pre-machine-delete'
+  | 'post-machine-delete';
 
 export interface HookDefinition {
   name: HookName;
@@ -64,6 +68,7 @@ const WORKTREE_ENV = WORKTREE_ARGS.map(argEnvName);
 const BRANCH_CHANGE_ARGS = ['branch', 'previous-branch'];
 const PR_ARGS = ['branch', 'base-branch', 'title'];
 const STASH_ARGS = ['branch', 'message'];
+const MACHINE_ARGS = ['branch', 'machine', 'provider'];
 const CONTAINER_ARGS = ['branch', 'container', 'image'];
 
 export const HOOKS: HookDefinition[] = [
@@ -120,6 +125,10 @@ export const HOOKS: HookDefinition[] = [
   define('post-container-create', CONTAINER_ARGS, 'Runs after `kunj container start` has created and seeded a container.'),
   define('pre-container-delete', CONTAINER_ARGS, 'Runs before `kunj container remove` deletes a container. A non-zero exit aborts it.'),
   define('post-container-delete', CONTAINER_ARGS, 'Runs after `kunj container remove` has removed a container.'),
+  define('pre-machine-create', MACHINE_ARGS, 'Runs on this computer before a cloud machine is made for a branch (`kunj ct start` on a coordinator, `kunj machine create`). A non-zero exit aborts it.'),
+  define('post-machine-create', MACHINE_ARGS, 'Runs on this computer after a branch\'s cloud machine exists and its kunj serve answers.'),
+  define('pre-machine-delete', MACHINE_ARGS, 'Runs on this computer before a branch\'s cloud machine is deleted (`kunj ct remove`, `kunj machine delete`). A non-zero exit keeps the machine.'),
+  define('post-machine-delete', MACHINE_ARGS, 'Runs on this computer after a branch\'s cloud machine has been deleted.'),
 ];
 
 export const HOOK_NAMES: HookName[] = HOOKS.map(h => h.name);

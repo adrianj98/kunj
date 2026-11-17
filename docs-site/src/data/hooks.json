@@ -370,5 +370,93 @@
       }
     ],
     "abortsOnFailure": false
+  },
+  {
+    "name": "pre-machine-create",
+    "description": "Runs on this computer before a cloud machine is made for a branch (`kunj ct start` on a coordinator, `kunj machine create`). A non-zero exit aborts it.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "machine",
+        "env": "KUNJ_MACHINE",
+        "variable": "machine"
+      },
+      {
+        "name": "provider",
+        "env": "KUNJ_PROVIDER",
+        "variable": "provider"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-machine-create",
+    "description": "Runs on this computer after a branch's cloud machine exists and its kunj serve answers.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "machine",
+        "env": "KUNJ_MACHINE",
+        "variable": "machine"
+      },
+      {
+        "name": "provider",
+        "env": "KUNJ_PROVIDER",
+        "variable": "provider"
+      }
+    ],
+    "abortsOnFailure": false
+  },
+  {
+    "name": "pre-machine-delete",
+    "description": "Runs on this computer before a branch's cloud machine is deleted (`kunj ct remove`, `kunj machine delete`). A non-zero exit keeps the machine.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "machine",
+        "env": "KUNJ_MACHINE",
+        "variable": "machine"
+      },
+      {
+        "name": "provider",
+        "env": "KUNJ_PROVIDER",
+        "variable": "provider"
+      }
+    ],
+    "abortsOnFailure": true
+  },
+  {
+    "name": "post-machine-delete",
+    "description": "Runs on this computer after a branch's cloud machine has been deleted.",
+    "args": [
+      {
+        "name": "branch",
+        "env": "KUNJ_BRANCH",
+        "variable": "branch"
+      },
+      {
+        "name": "machine",
+        "env": "KUNJ_MACHINE",
+        "variable": "machine"
+      },
+      {
+        "name": "provider",
+        "env": "KUNJ_PROVIDER",
+        "variable": "provider"
+      }
+    ],
+    "abortsOnFailure": false
   }
 ]

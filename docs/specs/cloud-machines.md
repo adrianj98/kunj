@@ -532,6 +532,28 @@ Not yet: machines in `ct list`/`kunj events`/the apps, machine prune, the
 machine hooks, the self-suspend timer on the machine (so with a local coordinator a machine sleeps only
 while that coordinator runs, which `--idle-exit` now waits for), the cache volume.
 
+### Listings and hooks as built (2026-11-17)
+
+- **`kunj ct list`.** A coordinator is a member of the fleet listing: every coordinator remote, and this
+  computer's own (`machines`) when `machine.provider` is set. `selectBackend({ listing: true })` returns
+  `coordinator: { provider, list, backendFor }` instead of refusing for want of a branch;
+  `collectMember()` lists the repository's machines from the cloud (one provider call, none woken), asks
+  each running, paired machine for its containers through the proxy, and reports the rest (asleep, not
+  answering, no container yet) in `machines`. `ContainerJson.machine` is `{ provider, name, state, size,
+  owner? }`; `ContainerListJson.machines` is `MachineJson & { remote, provider }`. The image builder is
+  never listed. Text: `[machine <size>]` on a container, and a row `machine suspended (kunj ct start
+  <branch> wakes it)` for one asleep. On `kunj-dev` the coordinator's part of a listing took 2.7 s.
+- **A left-out remote no longer holds the listing.** A fleet member's SSH tunnel gets the listing's own
+  time limit, and a timed-out tunnel's pipe is released, so `kunj ct list` with an unreachable `--ssh`
+  remote takes 6 s where it took 30 s.
+- **Hooks**, on the client: `pre/post-machine-create` and `pre/post-machine-delete` with `branch`,
+  `machine`, `provider`. `selectBackend()` asks `locate` without `create` first, so they run only when
+  a machine is really made (`ct start`, `ct blueprint snapshot --machine`); `kunj machine create|delete`
+  and the machine deletion of `ct remove` run them too. A failing `pre-machine-create` makes no machine;
+  a failing `pre-machine-delete` after `ct remove` keeps the machine and is a warning.
+
+Not yet: `kind: 'machine'` in `kunj events`, `ct stop` suspending the machine, `--no-wake`.
+
 ## Golden image as built (2026-11-16)
 
 Simpler than the design above, and enough to take the install out of every new machine:

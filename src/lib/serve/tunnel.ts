@@ -131,6 +131,9 @@ async function spawnTunnel(cmd: string, args: string[], localPort: number, timeo
     if (Date.now() >= deadline) {
       kill();
       release();
+      // ssh's own helper (a ProxyCommand) may outlive it holding this pipe: neither may keep the command alive
+      child.stderr?.destroy();
+      child.unref();
       throw messages.timedOut(Math.round(timeoutMs / 1000), firstLine());
     }
     await new Promise(r => setTimeout(r, READY_POLL_MS));
