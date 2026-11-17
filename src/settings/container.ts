@@ -182,7 +182,8 @@ export function registerContainerSettings(): void {
         'container (new containers only) and in the blueprint snapshot build, and kept by kunj ct remove and prune. The ' +
         "container gets KUNJ_CACHE_DIR (the first cache's path) and KUNJ_CACHE_<NAME>. kunj puts nothing there: the " +
         "repository's own scripts keep what is expensive to fetch again, such as a database dump. Every branch can write " +
-        'to it, so do not trust its contents more than you trust the branches.',
+        'to it, so do not trust its contents more than you trust the branches. On cloud machines each machine has its own ' +
+        'copy, which starts as what the machine image held and is deleted with the machine.',
       examples: ['[{"name": "db", "path": "/cache/db"}]'],
       validate: (value: unknown) => Array.isArray(value),
     },

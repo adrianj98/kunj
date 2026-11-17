@@ -240,6 +240,11 @@ to a cache, so treat what is in it like code from any branch.
 
 A container that already exists gets a new cache after `kunj ct start --rebuild`.
 
+On [cloud machines](../cloud-machines/) every machine has its own disk, so each has its
+own copy of the cache. It starts as whatever the machine image held, because `kunj machine image build`
+runs your blueprint's `setup` with the cache mounted, and it is deleted with the machine. Bake a new
+image to refresh what new machines start with.
+
 ## Pruning old containers
 
 [`kunj ct prune`](../commands/#prune) always removes the containers of branches deleted on origin. To

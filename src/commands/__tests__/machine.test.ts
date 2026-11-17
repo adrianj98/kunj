@@ -133,6 +133,26 @@ describe('kunj machine', () => {
     await expect(cmd().execute('image', 'delete', 'not-kunjs-image', { json: true })).rejects.toMatchObject({ code: 'machine-not-found' });
   });
 
+  it('bakes only a builder, never a branch\'s machine, and refuses while a builder exists', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    await cmd().execute('create', { json: true });
+    const branchMachine = json().machine.name;
+    await expect(client.bake(branchMachine)).rejects.toThrow(/not an image builder/);
+    expect(provider.machines.get(branchMachine)?.state).toBe('running');
+    expect(provider.images_.size).toBe(0);
+
+    // a builder that already exists (another build, or an interrupted one) is neither baked nor deleted
+    const left = await client.locate({ repo: REPO.id, repoName: REPO.name, branch: 'kunj..image-build', create: true });
+    await expect(cmd({ snapshot: async () => 0 }).execute('image', 'build', { json: true })).rejects.toMatchObject({ code: 'machine-exists', message: expect.stringContaining('kunj machine delete') });
+    expect(provider.machines.has(left.machine.name)).toBe(true);
+    expect(provider.images_.size).toBe(0);
+    await cmd().execute('delete', 'kunj..image-build', { json: true, yes: true });
+    stdout.pop();
+    await cmd({ snapshot: async () => 0 }).execute('image', 'build', { json: true });
+    expect(json().builder).toBe(left.machine.name);
+    expect([...provider.machines.keys()]).toEqual([branchMachine]);
+  });
+
   it('makes no image and deletes the builder when the snapshot fails', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
     await expect(cmd({ snapshot: async () => 3 }).execute('image', 'build', { json: true })).rejects.toThrow(/--no-snapshot/);

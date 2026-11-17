@@ -1883,3 +1883,7 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - Start lock in `ensureLocalCoordinator`. Why: two commands at once each started a coordinator (review follow-up).
 - `kunj ct remove` deletes the branch's cloud machine after the container (not with `--keep-volumes`). Why: a
   machine holds one branch, so one without its container only costs money.
+- Review fixes: `Coordinator.bake()` refuses any machine but an image builder (a branch machine's disk holds its
+  containers' env); the start lock is taken over by rename, released only by its owner, and a dead holder is stale;
+  `image build` refuses while a builder exists (machine-exists) and deletes its own on SIGINT/SIGTERM, also during the create. Docs now say a
+  cache on a cloud machine is per machine and goes with it. Why: adversarial review of the golden image diff.

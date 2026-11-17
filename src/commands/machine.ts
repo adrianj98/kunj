@@ -234,10 +234,36 @@ export class MachineCommand extends BaseCommand {
     const started = Date.now();
     const say = (m: string) => console.error(chalk.gray(m));
     say('Creating the builder machine (a few minutes: it installs Docker, Node and kunj)…');
-    const { machine } = await client.locate({ repo: repo.id, repoName: repo.name, branch: IMAGE_BUILD_BRANCH, wake: true, create: true, size: opts.size });
+    const builder = { repo: repo.id, repoName: repo.name, branch: IMAGE_BUILD_BRANCH, wake: true, create: true, size: opts.size };
+    // A builder that already exists is another build in progress, or one left by an interrupted
+    // build with a disk in an unknown state: neither is baked, and only the user knows which it is
+    const existing = await client.locate({ ...builder, wake: false, create: false }).catch(err => {
+      if (err instanceof MachineError && err.code === 'machine-not-found') return null;
+      throw err;
+    });
+    if (existing) {
+      throw new MachineError(
+        `An image builder already exists (${existing.machine.name}, ${existing.machine.state}): another build is running, or one was interrupted. When no build is running, delete it and build again: kunj machine delete '${IMAGE_BUILD_BRANCH}' --yes`,
+        'machine-exists',
+      );
+    }
+    // Ctrl-C skips finally: the builder would stay, running and billed. From before the create,
+    // which takes minutes, so the builder is found by its branch
+    const onSignal = () => {
+      console.error(chalk.yellow('\nInterrupted: deleting the builder…'));
+      void client
+        .locate({ ...builder, wake: false, create: false })
+        .then(r => client.delete(r.machine.name, { disks: true }))
+        .catch(() => undefined)
+        .then(() => process.exit(130));
+    };
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
+    let machine: MachineJson | undefined;
     let image;
     const withSnapshot = opts.snapshot !== false;
     try {
+      ({ machine } = await client.locate(builder));
       if (withSnapshot) {
         say(`Building the blueprint snapshot on ${machine.name}…`);
         const code = await this.buildSnapshot(access.kind === 'local' ? 'machines' : access.name, IMAGE_BUILD_BRANCH);
@@ -249,7 +275,10 @@ export class MachineCommand extends BaseCommand {
       image = await client.bake(machine.name);
     } finally {
       // The builder is only ever a means: never left running, whatever failed
-      await client.delete(machine.name, { disks: true }).catch(err => console.error(chalk.yellow(`could not delete the builder ${machine.name}: ${(err as Error).message}`)));
+      process.removeListener('SIGINT', onSignal);
+      process.removeListener('SIGTERM', onSignal);
+      const name = machine?.name;
+      if (name) await client.delete(name, { disks: true }).catch(err => console.error(chalk.yellow(`could not delete the builder ${name}: ${(err as Error).message}`)));
     }
     const seconds = Math.round((Date.now() - started) / 1000);
     if (this.jsonMode) return this.outputJSON({ coordinator: access.name, image, builder: machine.name, snapshot: withSnapshot, seconds } satisfies MachineImageBuildJson);

@@ -73,10 +73,23 @@ describe('the local coordinator', () => {
     // a lock left by a start that died long ago does not block the next start
     for (const s of servers.splice(0)) await s.close();
     fs.rmSync(path.join(dir, 'coordinator.json'), { force: true });
-    fs.writeFileSync(path.join(dir, 'start.lock'), '1');
+    fs.writeFileSync(path.join(dir, 'start.lock'), String(process.pid));
     fs.utimesSync(path.join(dir, 'start.lock'), new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
     await ensureLocalCoordinator(CONFIG, { dir, start, waitMs: 5000 });
     expect(started).toHaveLength(2);
+
+    // so does a fresh lock whose holder is dead; a live holder's fresh lock is waited on, and left alone
+    for (const s of servers.splice(0)) await s.close();
+    fs.rmSync(path.join(dir, 'coordinator.json'), { force: true });
+    fs.writeFileSync(path.join(dir, 'start.lock'), '999999');
+    await ensureLocalCoordinator(CONFIG, { dir, start, waitMs: 5000 });
+    expect(started).toHaveLength(3);
+    for (const s of servers.splice(0)) await s.close();
+    fs.rmSync(path.join(dir, 'coordinator.json'), { force: true });
+    fs.writeFileSync(path.join(dir, 'start.lock'), String(process.pid));
+    await expect(ensureLocalCoordinator(CONFIG, { dir, start, waitMs: 300 })).rejects.toMatchObject({ code: 'coordinator-start-failed' });
+    expect(started).toHaveLength(3);
+    expect(fs.readFileSync(path.join(dir, 'start.lock'), 'utf8')).toBe(String(process.pid));
   });
 
   it('says so, with the log, when the coordinator does not come up', async () => {

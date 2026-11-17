@@ -385,7 +385,9 @@ there is on every new machine. After READY the mount points are chowned to the s
 `[a-z0-9-]`, paths absolute, without `..`, `:` or `,`, and never the workspace or a system directory
 (`bad-config`, checked before anything is created). A cache volume is not in a failed start's rollback:
 another start may be using it. Every branch can write to it, so its contents are only as trusted as the
-branches.
+branches. On a cloud machine the cache volume is on that machine's disk: what a session adds to it stays
+on that machine and goes when `ct remove` deletes the machine. What every machine shares is what the
+golden image carried, so a shared cache is refreshed by baking a new image.
 
 ## `kunj machine`
 
@@ -496,8 +498,8 @@ Simpler than the design above, and enough to take the install out of every new m
 
 | Piece | How it is built |
 | --- | --- |
-| `kunj machine image build [--no-snapshot] [--size s]` | src/commands/machine.ts. (1) `locate` with `create` for the reserved branch `kunj..image-build` (`IMAGE_BUILD_BRANCH`; `..` cannot be in a real branch name), which gives a builder machine from the provider's **stock** image, never from an older golden image. (2) Unless `--no-snapshot`, it runs this kunj's own `ct blueprint snapshot --remote <coordinator> --machine kunj..image-build` as a child (output on stderr), which builds `kunj-sandbox`, `kunj-nethelper` and the blueprint snapshot in the builder's Docker. (3) `POST /v1/machines/<builder>/image`. (4) The builder is deleted, also when a step failed. A failed snapshot makes no image |
-| `Coordinator.bake()` | Stops the machine, waits for `stopped`, `provider.images.createFrom()` as `<machine name without hash>-img-<UTC yyyymmddhhmmss>` with labels `kunj.repo`, `kunj.role=machine-image`, `kunj.version` (and `kunj.blueprint` when the client sends a hash; the command does not yet), then deletes the repository's older images |
+| `kunj machine image build [--no-snapshot] [--size s]` | src/commands/machine.ts. (1) `locate` with `create` for the reserved branch `kunj..image-build` (`IMAGE_BUILD_BRANCH`; `..` cannot be in a real branch name), which gives a builder machine from the provider's **stock** image, never from an older golden image. (2) Unless `--no-snapshot`, it runs this kunj's own `ct blueprint snapshot --remote <coordinator> --machine kunj..image-build` as a child (output on stderr), which builds `kunj-sandbox`, `kunj-nethelper` and the blueprint snapshot in the builder's Docker. (3) `POST /v1/machines/<builder>/image`. (4) The builder is deleted, also when a step failed or the command got SIGINT/SIGTERM; while a builder exists (another build, or an interrupted one) a build is refused with `machine-exists` and the delete command, so a disk in an unknown state is never baked and a live build is never cut off. A failed snapshot makes no image |
+| `Coordinator.bake()` | Refuses any machine but a builder (`kunj.branch` = `kunj..image-build`): a branch's machine has that branch's containers and their env on its disk. Stops the machine, waits for `stopped`, `provider.images.createFrom()` as `<machine name without hash>-img-<UTC yyyymmddhhmmss>` with labels `kunj.repo`, `kunj.role=machine-image`, `kunj.version` (and `kunj.blueprint` when the client sends a hash; the command does not yet), then deletes the repository's older images |
 | Booting from it | `Coordinator.create()` picks `machine.image` when set, else the repository's newest golden image, else the stock image; the name is in the machine's `kunj.image` label. A failed image listing means the stock image, not a failed create |
 | Pairing from an image | The image holds the builder's serve token. The bootstrap script writes the machine's hostname to `/etc/kunj-machine`; on a machine with another name it stops the unit and deletes `~kunj/.kunj/serve/token` before starting serve, so the new machine pairs like a first boot. The rest of the script finds everything installed and only rewrites the unit |
 | `kunj machine image [list]`, `image delete <name>` | `GET /v1/machines/images?repo=`, `DELETE /v1/machines/images/<name>` (only images with kunj's role label) |

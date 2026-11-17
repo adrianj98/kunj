@@ -295,6 +295,11 @@ export class Coordinator {
   async bake(name: string, opts: { blueprint?: string } = {}): Promise<MachineImage> {
     if (!this.provider.features.images) throw new MachineError(`The ${this.provider.name} provider cannot make machine images.`, 'bad-machine-config');
     const machine = await this.get(name);
+    // Only the builder: a branch's machine holds that branch's containers, and Docker keeps their
+    // environment (tokens, secrets) on the disk an image would copy to every new machine
+    if (machine.labels[MACHINE_LABEL.branch] !== IMAGE_BUILD_BRANCH) {
+      throw new MachineError(`${name} is a branch's machine, not an image builder; kunj machine image build makes one.`, 'bad-machine-config');
+    }
     const repo = machine.labels[MACHINE_LABEL.repo] ?? '';
     await this.dropShared(name);
     await this.provider.stop(name);

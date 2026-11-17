@@ -117,6 +117,14 @@ export async function ensureLocalCoordinator(config: KunjConfig, deps: LocalCoor
   // the wait is from a start that died, and is taken over.
   const waitMs = deps.waitMs ?? 20_000;
   const lock = path.join(path.dirname(paths.record), 'start.lock');
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  };
   const takeLock = (): boolean => {
     fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -125,21 +133,48 @@ export async function ensureLocalCoordinator(config: KunjConfig, deps: LocalCoor
         return true;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-        let age = Infinity;
+        let stale = false;
+        let seen = '';
         try {
-          age = Date.now() - fs.statSync(lock).mtimeMs;
+          seen = fs.readFileSync(lock, 'utf8').trim();
+          const holder = Number(seen);
+          // An empty file is a holder between creating it and writing its pid: only age makes it stale
+          stale = Date.now() - fs.statSync(lock).mtimeMs > waitMs || (holder > 0 && !alive(holder));
         } catch {
-          // gone meanwhile: try again
+          continue; // gone meanwhile: try again
         }
-        if (age <= waitMs) return false;
-        fs.rmSync(lock, { force: true });
+        if (!stale) return false;
+        // Taken over by renaming, then checked: if what was moved aside is not the stale lock that
+        // was judged (another command took it over in between), it is put back and this one waits
+        const aside = `${lock}.${process.pid}`;
+        try {
+          fs.renameSync(lock, aside);
+          if (fs.readFileSync(aside, 'utf8').trim() !== seen) {
+            try {
+              fs.linkSync(aside, lock); // fails when a third lock already exists, which then stands
+            } catch {
+              // nothing to restore over
+            }
+            fs.rmSync(aside, { force: true });
+            return false;
+          }
+          fs.rmSync(aside, { force: true });
+        } catch {
+          return false;
+        }
       }
     }
     return false;
   };
   const mine = takeLock();
+  // Only its own: after a takeover the file is someone else's
   const unlock = () => {
-    if (mine) fs.rmSync(lock, { force: true });
+    if (!mine) return;
+    try {
+      if (fs.readFileSync(lock, 'utf8').trim() === String(process.pid)) fs.rmSync(lock, { force: true });
+    } catch {
+      // already gone
+    }
   };
   if (mine) {
     const argv = [...kunjArgv(), 'serve', '--machines', '--listen', '127.0.0.1:0', '--idle-exit', String(settings.coordinatorIdleMinutes)];
