@@ -1859,3 +1859,12 @@ The user asked to be able to choose a remote in the app when remotes are availab
   when their last user is done); a machine whose serve did not answer was counted as busy forever, so it never
   suspended and the coordinator never exited; the boot timeout message now carries the last error.
 - Verdict pass on those fixes found a gap they opened: a stream on a retired tunnel was invisible to the idle loop and to --idle-exit, so a machine could be suspended under a live stream. Open exchanges are now counted per machine, whichever tunnel they are on.
+
+## 2026-11-16: cloud machines, the last unverified parts of phase 2 run for real
+
+- No code change. On `kunj-dev`: `ct shell --session t1 --remote machines` woke the suspended machine
+  (33 s) and ran in tmux `sh-t1`; `ct agent --remote machines` started Claude Code in the container
+  (first try after wake failed its 10 s connectivity check, the retry worked); with
+  `machine.idleMinutes` 2 the local coordinator's idle loop suspended the machine 3 minutes after the
+  last command (log line "suspending idle machine"). Setting restored to the default.
+- Why: these three were only unit-tested; the spec status row now says what was seen.
