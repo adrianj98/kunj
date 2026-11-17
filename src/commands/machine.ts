@@ -18,6 +18,7 @@ import { BaseCommand } from '../lib/command';
 import { loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import type { CoordinatorAccess, ResolveOptions } from '../lib/machines/local-coordinator';
+import type { MachinePruneJson } from '../lib/json-types';
 import type { MachineJson, MachineListJson, MachineJsonResult, MachineProvidersJson, CoordinatorStatusJson, MachineImageListJson, MachineImageBuildJson } from '../lib/json-types';
 import { IMAGE_BUILD_BRANCH, MachineError, machineName } from '../lib/machines/provider';
 import type { KunjConfig } from '../types';
@@ -33,6 +34,8 @@ interface MachineOptions {
   snapshot?: boolean;
   /** --no-hooks */
   hooks?: boolean;
+  force?: boolean;
+  dryRun?: boolean;
 }
 
 export interface MachineCommandDeps {
@@ -41,6 +44,10 @@ export interface MachineCommandDeps {
   /** The repository (default: this checkout's) */
   repo?: () => { id: string; name: string };
   branch?: () => Promise<string>;
+  /** [prune] Origin's branches, null when unreachable (default: git ls-remote) */
+  heads?: () => Promise<string[] | null>;
+  /** [prune] Looks inside a running machine (default: its containers and the remove guard, through the coordinator) */
+  inspect?: (machine: MachineJson) => Promise<import('../lib/machines/prune').MachineInside>;
   confirm?: (message: string) => Promise<boolean>;
   /**
    * Builds the blueprint snapshot on the builder machine (default: this kunj's
@@ -51,7 +58,7 @@ export interface MachineCommandDeps {
   coordinatorDir?: string;
 }
 
-const ACTIONS = ['list', 'status', 'create', 'suspend', 'resume', 'stop', 'start', 'delete', 'image', 'providers', 'coordinator'];
+const ACTIONS = ['list', 'status', 'create', 'suspend', 'resume', 'stop', 'start', 'delete', 'prune', 'image', 'providers', 'coordinator'];
 
 const STATE_COLOR: Record<string, (s: string) => string> = {
   running: chalk.green,
@@ -79,6 +86,8 @@ export class MachineCommand extends BaseCommand {
         { flags: '--size <size>', description: '[create] small, medium, large or a provider shape (default machine.size)' },
         { flags: '-y, --yes', description: '[delete] Do not ask' },
         { flags: '--keep-disks', description: '[delete] Keep the machine\'s disks' },
+        { flags: '--force', description: '[prune] Also delete machines that are asleep or hold work origin does not have' },
+        { flags: '--dry-run', description: '[prune] Only show what would be deleted' },
         { flags: '--no-hooks', description: '[create, delete] Skip the machine hooks' },
         { flags: '--no-snapshot', description: '[image build] Do not build the blueprint snapshot into the image' },
       ],
@@ -89,6 +98,7 @@ export class MachineCommand extends BaseCommand {
         '  create [branch]             make the branch\'s machine and wait until its kunj serve answers',
         '  suspend|resume|stop|start [branch]',
         '  delete [branch]             delete the machine and its disks (the branch is on origin)',
+        '  prune                       delete machines whose branch is gone from origin, and ones left without a container',
         '  image [list]                this repository\'s golden images; new machines boot the newest',
         '  image build                 bake one: a builder machine installs everything and builds the blueprint',
         '                              snapshot, its disk becomes the image, older images are deleted',
@@ -115,6 +125,22 @@ export class MachineCommand extends BaseCommand {
     const current = await (this.deps.branch ?? getCurrentBranch)().catch(() => '');
     if (!current) throw new MachineError('No branch given, and this checkout is not on a branch. Name it: kunj machine <action> <branch>.', 'machine-not-found');
     return current;
+  }
+
+  /** The branch's container on a running machine and what the remove guard finds in it, through the coordinator. */
+  private async inspectMachine(m: MachineJson, access: CoordinatorAccess, repo: { id: string; name: string }): Promise<import('../lib/machines/prune').MachineInside> {
+    const { RemoteKunjBackend } = await import('../lib/container/remote');
+    const { containerNames, LABEL, optionsLabel } = await import('../lib/container/names');
+    const { inspectForRemove } = await import('../lib/container/lifecycle');
+    const { describeGuard } = await import('../lib/container/env');
+    const o = access.client.opts;
+    const backend = new RemoteKunjBackend({ baseUrl: o.baseUrl, token: o.token, name: `${o.name}/${m.name}`, basePath: `/v1/machines/${m.name}/serve` });
+    await backend.ready();
+    const names = containerNames(repo.name, repo.id, m.branch);
+    const main = (await backend.list({ [LABEL.repo]: repo.id, [LABEL.branch]: m.branch })).find(c => c.name === names.container);
+    if (!main) return { container: false, problems: [] };
+    const guard = await inspectForRemove(backend, names, { user: optionsLabel(main.labels).user ?? '', kunjVersion: '', allowPrivileged: false, warn: () => {} });
+    return { container: true, problems: describeGuard(guard) };
   }
 
   private async confirm(message: string): Promise<boolean> {
@@ -179,6 +205,48 @@ export class MachineCommand extends BaseCommand {
     }
 
     if (verb === 'image') return this.image(target ?? 'list', rest[0], opts, access, repo);
+
+    if (verb === 'prune') {
+      const { planMachinePrune, machineRemovals } = await import('../lib/machines/prune');
+      const heads = await (this.deps.heads ?? (async () => (await import('../lib/container/prune')).lsRemoteHeads(process.cwd())))();
+      const inspect = this.deps.inspect ?? ((m: MachineJson) => this.inspectMachine(m, access, repo));
+      const plan = await planMachinePrune({ machines: await client.list({ 'kunj.repo': repo.id }), heads, force: !!opts.force, inspect });
+      const removals = machineRemovals(plan);
+      const dryRun = !!opts.dryRun || (!opts.yes && (this.jsonMode || !process.stdin.isTTY));
+      const why = { 'branch-gone': 'its branch is gone from origin', 'no-container': 'it holds no container', 'image-builder': 'an image build left it behind' };
+      if (!this.jsonMode) {
+        for (const w of plan.warnings) console.error(chalk.yellow(w));
+        for (const m of plan.machines) {
+          console.log(m.kept ? chalk.yellow(`keep    ${m.name}  (${m.branch}): ${why[m.reason]}, but ${m.kept}`) : `${dryRun ? 'would delete' : 'delete'}  ${m.name}  (${m.branch}): ${why[m.reason]}`);
+        }
+        if (plan.machines.length === 0) console.log(chalk.gray('Nothing to prune.'));
+      }
+      let apply = !dryRun && removals.length > 0;
+      if (apply && !opts.yes) {
+        apply = await this.confirm(`Delete ${removals.length} machine${removals.length === 1 ? '' : 's'} and their disks?`);
+        if (!apply) console.log(chalk.gray('Nothing deleted.'));
+      }
+      const removed: string[] = [];
+      const failed: string[] = [];
+      if (apply) {
+        for (const m of removals) {
+          try {
+            await hook('pre-machine-delete', m.branch, m.name);
+            await client.delete(m.name, { disks: true });
+            removed.push(m.name);
+            await hook('post-machine-delete', m.branch, m.name);
+          } catch (err) {
+            failed.push(m.name);
+            console.error(chalk.yellow(`could not delete ${m.name}: ${(err as Error).message}`));
+          }
+        }
+      }
+      if (this.jsonMode) return this.outputJSON({ coordinator: access.name, success: failed.length === 0, dryRun, plan, removed, failed } satisfies MachinePruneJson);
+      if (apply) console.log(chalk.green(`✓ Deleted ${removed.length} machine${removed.length === 1 ? '' : 's'}`));
+      else if (dryRun && removals.length) console.log(chalk.gray('Dry run: kunj machine prune --yes deletes them.'));
+      if (failed.length) process.exitCode = 1;
+      return;
+    }
 
     const b = await this.branchOf(target);
     if (verb === 'status' || verb === 'create') {

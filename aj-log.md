@@ -1904,3 +1904,4 @@ The user asked to be able to choose a remote in the app when remotes are availab
   listing's time limit and a timed-out tunnel no longer holds the process. Why: the spec's phase 2 list, and the
   user's `ct list` took 30 s while the old `gce` remote's VM was suspended.
 - `kunj ct stop` suspends the machine (not waited for; `--keep-awake`), `--no-wake`, `Coordinator.wake()` waits out `suspending`/`stopping`. Why: spec phase 2 ("Stop and remove", "Wake"); the first real stop waited 2 minutes for the cloud.
+- `kunj machine prune` with a pure planner (`planMachinePrune`). Why: spec "Prune"; a machine without its branch or container only costs money. Decided not to wake sleeping machines for the check.

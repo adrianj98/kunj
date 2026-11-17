@@ -557,7 +557,16 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   minutes), and `Coordinator.wake()` waits for a machine caught `suspending` or `stopping` before it
   resumes it. `--no-wake` on any `kunj ct` command neither wakes nor creates a machine.
 
-Not yet: `kind: 'machine'` in `kunj events`.
+- **`kunj machine prune [--dry-run] [--yes] [--force]`** (src/lib/machines/prune.ts, pure planning):
+  a machine goes when its branch is gone from origin (the client's `git ls-remote`; unreachable origin
+  removes none), when it runs with no container for its branch and is older than 10 minutes, or when
+  it is an image builder older than 2 hours. A running machine is looked into through the proxy (the
+  branch's container and the remove guard); one that holds work stays without `--force`. **Decision:**
+  a sleeping machine is never woken to be checked (the first draft resumed it); it stays, with the
+  reason, unless `--force`. Dry run without `--yes` when there is no terminal or with `--json`
+  (`MachinePruneJson`); the machine delete hooks run. `kunj ct prune` does not include machines yet.
+
+Not yet: `kind: 'machine'` in `kunj events`, machines in `kunj ct prune`.
 
 ## Golden image as built (2026-11-16)
 

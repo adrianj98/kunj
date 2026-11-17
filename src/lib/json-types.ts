@@ -283,6 +283,20 @@ export interface MachineListJson {
   machines: MachineJson[];
 }
 
+/** `kunj machine prune --json` */
+export interface MachinePruneJson {
+  coordinator: string;
+  success: boolean;
+  dryRun: boolean;
+  plan: {
+    /** Every machine with a reason to go; `kept` says why one stays anyway */
+    machines: Array<{ name: string; branch: string; state: MachineJson['state']; reason: 'branch-gone' | 'no-container' | 'image-builder'; kept?: string }>;
+    warnings: string[];
+  };
+  removed: string[];
+  failed: string[];
+}
+
 /** `kunj machine status|create|suspend|resume|stop|start --json` */
 export interface MachineJsonResult {
   coordinator: string;

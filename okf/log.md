@@ -144,3 +144,4 @@
 - Seed: a fresh snapshot copy keeps only the container's own local branch (fixes a false `unpushed commits on main` from the remove guard). Cache sync: no push of an empty cache without `--force`. Pages updated: none (behaviour notes in the spec).
 - Cloud machines in `kunj ct list` (`machine` per container, `machines` for the rest), machine hooks, fleet listing tunnel time limit. Page updated: containers/cloud-machines.md.
 - `kunj ct stop` suspends the branch's cloud machine (`?wait=0`), `--keep-awake`, `--no-wake`. Page updated: none (spec).
+- `kunj machine prune` (src/lib/machines/prune.ts): gone branches, machines without a container, stale builders; sleeping machines are never woken. Page updated: containers/cloud-machines.md.

@@ -184,6 +184,18 @@ To run your own script when a machine is made or deleted, use the hooks `pre-mac
 `post-machine-create`, `pre-machine-delete` and `post-machine-delete`. They run on your computer and
 get the branch, the machine name and the provider.
 
+## Clean up old machines
+
+`kunj machine prune` finds machines you no longer need: ones whose branch was deleted on origin, and
+ones left running with no container. It shows the list first and asks before deleting.
+
+```bash
+kunj machine prune
+```
+
+A machine that holds work origin does not have is kept. A sleeping machine is kept too, because kunj
+does not wake a machine just to look inside it. Add `--force` to delete those as well.
+
 ## Commands
 
 ```bash

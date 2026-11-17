@@ -180,6 +180,29 @@ describe('kunj machine', () => {
     expect(provider.machines.size).toBe(0);
   });
 
+  it('prunes the machine of a branch gone from origin, dry by default, and keeps one that holds work', async () => {
+    await cmd().execute('create', 'gone', {});
+    await cmd().execute('create', 'dirty', {});
+    await cmd().execute('create', 'here', {});
+    const deps = {
+      heads: async () => ['here'],
+      inspect: async (m: { branch: string }) => ({ container: true, problems: m.branch === 'dirty' ? ['uncommitted changes'] : [] }),
+    };
+    stdout.length = 0;
+    await cmd(deps).execute('prune', { json: true });
+    const dry = JSON.parse(stdout.pop()!);
+    expect(dry).toMatchObject({ dryRun: true, removed: [] });
+    expect(dry.plan.machines.map((m: any) => [m.branch, m.reason, !!m.kept])).toEqual([['dirty', 'branch-gone', true], ['gone', 'branch-gone', false]]);
+    expect(provider.machines.size).toBe(3);
+
+    await cmd(deps).execute('prune', { json: true, yes: true });
+    const done = JSON.parse(stdout.pop()!);
+    expect(done.removed).toHaveLength(1);
+    expect([...provider.machines.values()].map(m => m.labels['kunj.branch']).sort()).toEqual(['dirty', 'here']);
+    await cmd(deps).execute('prune', { json: true, yes: true, force: true });
+    expect([...provider.machines.values()].map(m => m.labels['kunj.branch'])).toEqual(['here']);
+  });
+
   it('lists in text, says when there is nothing, and shows the provider', async () => {
     await cmd().execute('list', {});
     expect(stdout.pop()).toMatch(/No machines for app/);
