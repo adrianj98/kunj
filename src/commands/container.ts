@@ -516,15 +516,24 @@ export class ContainerCommand extends BaseCommand {
   /**
    * The branch (named, else the current one) when it has no container on this computer's Docker but
    * does have a cloud machine with this computer's coordinator. Asked only when machine.provider is
-   * set; the machine is not woken by the question.
+   * set; the machine is not woken by the question, but the local coordinator is started when none
+   * runs (a sleeping machine can only be found, and later woken, through it). A branch that has a
+   * machine goes there for `start` too: `--remote local` is how to get a local container instead.
    */
   private async findBranchMachine(config: KunjConfig, repo: Context['repo'], named: string | undefined): Promise<string | undefined> {
     if (typeof config.machine?.provider !== 'string' || !config.machine.provider) return undefined;
     const branch = named || (await getCurrentBranch().catch(() => ''));
     if (!branch) return undefined;
     const local = new LocalDockerBackend({ context: config.container?.dockerContext || undefined });
-    const here = await local.inspectLabels(containerNames(repo.name, repo.id, branch).container).catch(() => null);
-    if (here) return undefined;
+    // A listing, because it fails when Docker cannot be asked: "no container here" must be known, not
+    // assumed, or a stopped Docker would send a branch with a local container to its machine
+    let here: ContainerInfo[];
+    try {
+      here = await local.list({ [LABEL.repo]: repo.id, [LABEL.branch]: branch });
+    } catch {
+      return undefined;
+    }
+    if (here.some(c => c.name === containerNames(repo.name, repo.id, branch).container)) return undefined;
     const lookup = this.machineLookup ?? (async (r: Context['repo'], b: string) => {
       const { ensureLocalCoordinator } = await import('../lib/machines/local-coordinator');
       const access = await ensureLocalCoordinator(config);
