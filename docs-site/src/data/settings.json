@@ -1778,6 +1778,47 @@
     "sensitive": false
   },
   {
+    "key": "machine.image",
+    "type": "string",
+    "category": "machine",
+    "default": "",
+    "description": "A machine image new machines boot instead of the provider's stock Ubuntu (one that already has Docker and kunj starts in seconds)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "kunj-machine-20261116"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "machine.kunjPackage",
+    "type": "string",
+    "category": "machine",
+    "default": "",
+    "description": "What a new machine installs as kunj: an npm spec (kunj@1.4.0) or github:<owner>/<repo>#<ref>, built on the machine; empty: this version from npm (a development build: main from GitHub)",
+    "detailedDescription": null,
+    "options": null,
+    "examples": [
+      "kunj@1.4.0",
+      "github:adrianj98/kunj#main"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "machine.bootstrap",
+    "type": "boolean",
+    "category": "machine",
+    "default": true,
+    "description": "Give new machines a startup script that installs Docker, Node and kunj and starts kunj serve; turn off only for an image that does all of that itself",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "machine.gce",
     "type": "object",
     "category": "machine",

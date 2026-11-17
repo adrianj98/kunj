@@ -1837,3 +1837,9 @@ The user asked to be able to choose a remote in the app when remotes are availab
   the interactive tests (`ct shell`, `ct agent`).
 - Docs only: phase 0 results in the specs, tracker and okf log. No code changed.
 - Adversarial review of the phase 1 code: one confirmed finding fixed (the coordinator deleted a machine's stored token before a create that can be refused with `machine-exists`, which would have stranded a live machine; now deleted only after the create succeeds, with a test). Four plausible ones are in the tracker.
+- Bootstrap script for new machines (src/lib/machines/bootstrap.ts) with `machine.kunjPackage`, `machine.image`,
+  `machine.bootstrap`. Why: `kunj machine create` booted a bare Ubuntu that could never pair.
+- `POST /v1/pair` repeatable by the caller's nonce. Why: the review found that a lost reply stranded the
+  machine with a token nobody stored.
+- Not done: the real `kunj machine create` on `kunj-dev`. The permission check refused changing the global
+  config and creating a second billed VM without being asked; left in the tracker under Waiting on you.

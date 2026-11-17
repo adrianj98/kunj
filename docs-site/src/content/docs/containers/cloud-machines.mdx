@@ -67,6 +67,14 @@ that alone talks to the cloud and to the machines. It runs in one of two places:
 
 </Steps>
 
+## What a new machine installs
+
+`kunj machine create` boots Google's stock Ubuntu with a startup script from kunj: it installs Docker,
+Node and kunj, then starts `kunj serve` so the coordinator can pair with it. From a bare image that takes
+a few minutes; the log is `/var/log/kunj-bootstrap.log` on the machine. `machine.kunjPackage` picks the
+kunj it installs (`kunj@1.4.0`, or `github:owner/repo#ref` to build a branch), and `machine.image` names
+an image of your own that already has everything, which starts in seconds.
+
 ## Commands
 
 ```bash

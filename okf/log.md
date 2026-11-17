@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-16 (bootstrap and nonce pairing)
+* `containers/cloud-machines.md`: the bootstrap script row and pairing by nonce.
+
 ## 2026-11-16 (phase 0 run)
 * No page changed in substance: phase 0 of cloud machines ran on a real Google Cloud VM (remote ping, start,
   exec, firewall, suspend/resume); results are in docs/specs/cloud-machines.md and google-cloud-containers.md.

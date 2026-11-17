@@ -23,6 +23,7 @@ the **provider** it drives.
 | `MachineProvider` | src/lib/machines/provider.ts | `list/get/create/suspend/resume/stop/start/delete`, `address()` (private network) or `tunnel()` (a local-port forwarder argv), `images`, `sizes()`, `features`; `machineName()` (the container name as a DNS label), `MachineError` |
 | Providers | src/lib/machines/providers/index.ts, gce.ts | Registered by name, loaded lazily (`registerProvider`). `GceProvider` drives gcloud with argv only; exact labels in instance metadata `kunj-labels`, GCE labels hashed for filtering; gcloud's "Some requests did not succeed" (exit 0, `[]`) is a failure. Only provider modules spawn a cloud CLI (src/lib/machines/cli.ts). `FakeProvider` and a shared conformance suite in `__tests__` |
 | Coordinator | src/lib/machines/coordinator.ts | Cloud-agnostic `Coordinator`: locate by labels (one in flight per branch), create, wake only when asked, pair with the machine's serve and wait until it answers; machine tokens in `~/.kunj/coordinator/machine-tokens.json` |
+| Bootstrap | src/lib/machines/bootstrap.ts | The startup script a new machine runs as root at every boot (GCE `--metadata-from-file startup-script=`): Docker, Node, the `kunj` user, `machine.kunjPackage` (npm version or `github:owner/repo#ref` built on the machine), the `kunj-serve` unit with `--allow-pairing` on the internal address; idempotent, no secret; `machine.image` and `machine.bootstrap` |
 | Routes | src/lib/serve/machines.ts | `kunj serve --machines` adds `/v1/machines` (list, providers, locate, suspend, resume, stop, start, delete) through `createServeServer`'s `extend` hook, and `machines` in `/v1/info` |
 | Local auto-start | src/lib/machines/local-coordinator.ts, config.ts | With `machine.provider` set here, kunj spawns `kunj serve --machines --listen 127.0.0.1:0 --idle-exit <min>` detached from the home directory; the server writes `~/.kunj/coordinator/coordinator.json` (pid, port) and removes it on exit; `resolveCoordinator()` prefers `--remote`/`container.remote` when that remote coordinates machines |
 | Client, command | src/lib/machines/client.ts, src/commands/machine.ts | `MachineClient` over the routes; `kunj machine list|status|create|suspend|resume|stop|start|delete|providers|coordinator` (fast path) |
@@ -41,7 +42,7 @@ Cloud labels (`kunj.repo`, `kunj.branch`, `kunj.version`, `kunj.role=machine`) a
 machines are named like their container. Listings never wake a machine, acting commands do (`--no-wake`).
 Idle is decided from agent state by the coordinator's loop, never from client connections; with a local
 coordinator the machine also suspends itself as a fallback (`machine.selfSuspend`, a one-permission credential).
-The coordinator pairs each machine's serve token once after boot (`POST /v1/pair`) over the private network or an
+The coordinator pairs each machine's serve token once after boot (`POST /v1/pair` with a nonce; a repeat with the same nonce gets the same token, so a lost reply is retried safely) over the private network or an
 IAP tunnel, never through metadata; clients hold one coordinator token each. Hooks run on the client. No secrets reach the
 provider. A golden image (`kunj machine image build`) carries Docker, Sysbox, kunj, the images, the blueprint
 snapshot and the generic cache volume (`container.caches`, `KUNJ_CACHE_DIR`).

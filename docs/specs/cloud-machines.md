@@ -17,6 +17,7 @@ led here is [google-cloud-containers.md](google-cloud-containers.md).
 | --- | --- |
 | Spec | Written 2026-11-16; coordinator architecture and local auto-start adopted the same day (see Decisions) |
 | Phase 0: one VM by hand with `kunj serve`, reached through an IAP tunnel | Done 2026-11-16 on project `kunj-dev`, VM `kunj-box` (e2-standard-2, Ubuntu 24.04, kernel 7.0, Docker 29.10, no external IP, Cloud NAT, IAP): `kunj remote ping` 1.4 s through the IAP ssh ProxyCommand; first `ct start` 303 s including the sandbox images and the blueprint snapshot; `ct exec` 3.3 s; metadata server blocked from the container, npm reachable; suspend 60 s, usable 18 s after resume with the container and a running process intact. `shell`/`agent` (interactive) and Sysbox not tried yet |
+| Bootstrap script, `machine.image`/`kunjPackage`/`bootstrap`, nonce pairing | Shipped 2026-11-16 (883805e); unit-tested, `bash -n` checked; not yet run on a real machine |
 | Phase 1: `MachineProvider`, `FakeProvider`, `GceProvider`; `kunj serve --machines` (routes, per-client tokens, pairing); local auto-start; `kunj machine` | Shipped 2026-11-16 (924d4ae, 8423238, a2856bc); unit-tested, and the local coordinator smoke-tested against the real `gcloud` without a project login. No machine has been created on a real project yet |
 | Phase 2: containers through the coordinator (`/v1/machines/<name>/…` proxy), `kunj ct` on machines, wake on act, idle loop, events | Not started |
 | Phase 3: golden image build, `container.caches`, registry copy | Not started |
@@ -258,7 +259,7 @@ remote-containers spec deferred.
 
 **Pairing a machine's token.** The golden image carries no token. On first boot a machine's serve
 accepts, for `machine.pairWindowMinutes` (default 10), one `POST /v1/pair` and returns a fresh token;
-every other route is `401` until then. The coordinator pairs right after `create`, over the private
+every other route is `401` until then. The call carries a nonce (16 to 128 characters) and a repeat with the same nonce inside the window gets the same token, so a reply lost on the way does not strand the machine; any other caller gets `403`. The coordinator sends one nonce per pairing attempt, right after `create`, over the private
 network or the IAP tunnel, both access-controlled, and keeps the token in
 `~/.kunj/coordinator/machine-tokens.json` (0600, keyed `<provider>/<name>`). A machine's serve refuses `pair` unless started with
 `--allow-pairing`, which the recipe sets. Metadata as the carrier was rejected: every project viewer can
@@ -274,6 +275,23 @@ session survives the suspend. An open workspace app does not keep a machine awak
 the cloud, per-machine tokens are in its file (a cloud coordinator's boot disk is the one thing worth a
 snapshot; a local one's file is in `~/.kunj`). Clients see `remote-unreachable` as for any remote. A
 machine whose token is lost is `machine-token`: delete and recreate it, the branch is on origin.
+
+## Bootstrap
+
+A new machine becomes a kunj machine by a startup script the coordinator gives the provider at create
+(src/lib/machines/bootstrap.ts; GCE: the `startup-script` metadata, passed with `--metadata-from-file`
+from a temp file removed afterwards). It runs as root at every boot and is idempotent: Docker from
+get.docker.com, Node 22, git and tmux when missing; a `kunj` user in the `docker` group;
+`machine.kunjPackage` installed when `/etc/kunj-package` names another one (`kunj@<version>` from npm, or
+`github:<owner>/<repo>#<ref>` cloned, built and packed on the machine; empty means this kunj's version,
+and `main` from GitHub for a development build); then the unit `kunj-serve.service`: `kunj serve --listen
+<internal-ip>:7433 --allow-remote-listen --allow-pairing --pair-window <minutes>` as that user. Log:
+`/var/log/kunj-bootstrap.log`. The script is in the instance's metadata, readable by project viewers, and
+carries no secret; the package value is checked against a pattern with no quotes or spaces before it is
+written into it. From stock Ubuntu the script takes a few minutes, inside `machine.bootTimeoutMs`; with
+`machine.image` naming an image that already has everything it only rewrites the unit, which is what the
+golden image of phase 3 automates. `machine.bootstrap: false` gives no script, for an image that starts
+serve by itself.
 
 ## Lifecycle
 
@@ -393,6 +411,9 @@ cloud CLI is not installed or not logged in on the coordinator's host), `coordin
 | `machine.idleMinutes` | Coordinator's host | `30` | Idle threshold (coordinator loop and machine-side timer) |
 | `machine.pairWindowMinutes` | Coordinator's host | `10` | Pairing window after a machine boots |
 | `machine.bootTimeoutMs` | Coordinator's host | `300000` | How long `locate --wake/--create` waits for a machine's serve |
+| `machine.image` | Coordinator's host | `""` | A machine image new machines boot instead of the stock Ubuntu |
+| `machine.kunjPackage` | Coordinator's host | `""` | What the bootstrap installs: `kunj@<version>` or `github:<owner>/<repo>#<ref>` |
+| `machine.bootstrap` | Coordinator's host | `true` | Give new machines the startup script |
 | `machine.registry` | Coordinator's host | `""` | A registry for snapshot pushes and pulls; empty means the golden image alone |
 | `machine.gce.project`, `.zone`, `.network`, `.subnet`, `.serviceAccount`, `.machineTypes`, `.baseImage` | Coordinator's host | — | Provider config; `machine.<provider>.*` for each |
 | `container.remote` | Client | — | Names a cloud coordinator; absent with `machine.provider` set means the local one |
@@ -431,11 +452,14 @@ cloud CLI is not installed or not logged in on the coordinator's host), `coordin
 | Settings, JSON | src/settings/machine.ts; `MachineJson`, `MachineListJson`, `MachineJsonResult`, `MachineProvidersJson`, `CoordinatorStatusJson` in json-types.ts |
 | Tests | src/lib/machines/__tests__ (conformance for FakeProvider and GceProvider over a simulated gcloud, coordinator, local coordinator), src/lib/serve/__tests__/clients.test.ts, src/commands/__tests__/{machine,serve-machines}.test.ts |
 
+Added 2026-11-16 after phase 0 and the review (883805e, f7608bd): the bootstrap script, `machine.image`,
+`machine.kunjPackage`, `machine.bootstrap`, pairing repeatable by nonce, and a live machine's token kept
+when a create is refused. `kunj machine create` from stock Ubuntu has not been run on a real project yet
+(the session that wrote it was not allowed to create a second billed VM unasked).
+
 Not yet: the proxy to a machine's serve and `kunj ct` on machines, the idle loop and machine
-self-suspend timer (`machine.idleMinutes` is registered but unused), prune, golden images, the cache
-volume. A coordinator machine created now boots the stock Ubuntu with nothing on it, so its serve never
-answers and `create` ends in `machine-timeout` until the phase 3 recipe (or a hand-made image) puts
-`kunj serve --allow-pairing` on it.
+self-suspend timer (`machine.idleMinutes` is registered but unused), prune, golden image build, the cache
+volume.
 
 ## Decisions
 
