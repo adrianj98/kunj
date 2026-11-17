@@ -7,6 +7,7 @@
 //   kunj machine create [branch] [--size <s>] [--json]
 //   kunj machine suspend|resume|stop|start [branch] [--json]
 //   kunj machine delete [branch] [--yes] [--keep-disks] [--json]
+//   kunj machine image [list|build|delete <name>] [--no-snapshot] [--json]
 //   kunj machine providers [--json]
 //   kunj machine coordinator [status|stop] [--json]
 //
@@ -17,8 +18,8 @@ import { BaseCommand } from '../lib/command';
 import { loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import type { CoordinatorAccess, ResolveOptions } from '../lib/machines/local-coordinator';
-import type { MachineJson, MachineListJson, MachineJsonResult, MachineProvidersJson, CoordinatorStatusJson } from '../lib/json-types';
-import { MachineError } from '../lib/machines/provider';
+import type { MachineJson, MachineListJson, MachineJsonResult, MachineProvidersJson, CoordinatorStatusJson, MachineImageListJson, MachineImageBuildJson } from '../lib/json-types';
+import { IMAGE_BUILD_BRANCH, MachineError } from '../lib/machines/provider';
 
 interface MachineOptions {
   json?: boolean;
@@ -27,6 +28,8 @@ interface MachineOptions {
   size?: string;
   yes?: boolean;
   keepDisks?: boolean;
+  /** --no-snapshot */
+  snapshot?: boolean;
 }
 
 export interface MachineCommandDeps {
@@ -36,11 +39,16 @@ export interface MachineCommandDeps {
   repo?: () => { id: string; name: string };
   branch?: () => Promise<string>;
   confirm?: (message: string) => Promise<boolean>;
+  /**
+   * Builds the blueprint snapshot on the builder machine (default: this kunj's
+   * `ct blueprint snapshot --remote <remote> --machine <builder branch>`); resolves to its exit code
+   */
+  snapshot?: (remote: string, branch: string) => Promise<number>;
   /** ~/.kunj/coordinator (tests) */
   coordinatorDir?: string;
 }
 
-const ACTIONS = ['list', 'status', 'create', 'suspend', 'resume', 'stop', 'start', 'delete', 'providers', 'coordinator'];
+const ACTIONS = ['list', 'status', 'create', 'suspend', 'resume', 'stop', 'start', 'delete', 'image', 'providers', 'coordinator'];
 
 const STATE_COLOR: Record<string, (s: string) => string> = {
   running: chalk.green,
@@ -61,13 +69,14 @@ export class MachineCommand extends BaseCommand {
     super({
       name: 'machine',
       description: 'Cloud machines that run branch containers, one per branch session',
-      arguments: '[action] [branch]',
+      arguments: '[action] [branch] [name]',
       options: [
         { flags: '--remote <name>', description: 'The coordinator: a remote running kunj serve --machines (local: the one kunj starts here)' },
         { flags: '--all', description: '[list] Every machine of the coordinator, not only this repository\'s' },
         { flags: '--size <size>', description: '[create] small, medium, large or a provider shape (default machine.size)' },
         { flags: '-y, --yes', description: '[delete] Do not ask' },
         { flags: '--keep-disks', description: '[delete] Keep the machine\'s disks' },
+        { flags: '--no-snapshot', description: '[image build] Do not build the blueprint snapshot into the image' },
       ],
       helpText: [
         'Actions:',
@@ -76,6 +85,10 @@ export class MachineCommand extends BaseCommand {
         '  create [branch]             make the branch\'s machine and wait until its kunj serve answers',
         '  suspend|resume|stop|start [branch]',
         '  delete [branch]             delete the machine and its disks (the branch is on origin)',
+        '  image [list]                this repository\'s golden images; new machines boot the newest',
+        '  image build                 bake one: a builder machine installs everything and builds the blueprint',
+        '                              snapshot, its disk becomes the image, older images are deleted',
+        '  image delete <name>',
         '  providers                   the coordinator\'s provider, its sizes and features',
         '  coordinator [status|stop]   the local coordinator kunj started on this machine',
         '',
@@ -108,8 +121,8 @@ export class MachineCommand extends BaseCommand {
     return ok;
   }
 
-  async execute(action?: any, branch?: any, options?: any): Promise<void> {
-    const args: unknown[] = [action, branch, options];
+  async execute(action?: any, branch?: any, name?: any, options?: any): Promise<void> {
+    const args: unknown[] = [action, branch, name, options];
     const optIndex = args.findIndex(a => a !== undefined && a !== null && typeof a === 'object');
     const opts = (optIndex === -1 ? {} : args[optIndex]) as MachineOptions;
     const positionals = (optIndex === -1 ? args : args.slice(0, optIndex)).filter((a): a is string => typeof a === 'string');
@@ -124,13 +137,13 @@ export class MachineCommand extends BaseCommand {
     const resolve = this.deps.coordinator ?? (await import('../lib/machines/local-coordinator')).resolveCoordinator;
     const access = await resolve({ remote: opts.remote, config });
     try {
-      await this.run(verb, target, opts, access);
+      await this.run(verb, target, positionals.slice(2), opts, access);
     } finally {
       await access.close();
     }
   }
 
-  private async run(verb: string, target: string | undefined, opts: MachineOptions, access: CoordinatorAccess): Promise<void> {
+  private async run(verb: string, target: string | undefined, rest: string[], opts: MachineOptions, access: CoordinatorAccess): Promise<void> {
     const { client } = access;
     if (verb === 'providers') {
       const p = await client.providers();
@@ -153,6 +166,8 @@ export class MachineCommand extends BaseCommand {
       for (const m of machines) console.log(line(m));
       return;
     }
+
+    if (verb === 'image') return this.image(target ?? 'list', rest[0], opts, access, repo);
 
     const b = await this.branchOf(target);
     if (verb === 'status' || verb === 'create') {
@@ -182,6 +197,63 @@ export class MachineCommand extends BaseCommand {
     const after = await client.action(machine.name, verb as 'suspend' | 'resume' | 'stop' | 'start');
     if (this.jsonMode) return this.outputJSON({ coordinator: access.name, machine: after, created: false, woke: verb === 'resume' || verb === 'start' } satisfies MachineJsonResult);
     console.log(line(after));
+  }
+
+  /** Runs this kunj's own `ct blueprint snapshot` against the builder machine, its output on stderr. */
+  private async buildSnapshot(remote: string, branch: string): Promise<number> {
+    if (this.deps.snapshot) return this.deps.snapshot(remote, branch);
+    const { spawn } = await import('child_process');
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [process.argv[1], 'ct', 'blueprint', 'snapshot', '--remote', remote, '--machine', branch], { stdio: ['ignore', 2, 2] });
+      child.on('error', reject);
+      child.on('exit', code => resolve(code ?? 1));
+    });
+  }
+
+  private async image(sub: string, name: string | undefined, opts: MachineOptions, access: CoordinatorAccess, repo: { id: string; name: string }): Promise<void> {
+    const { client } = access;
+    if (sub === 'list') {
+      const images = await client.images(repo.id);
+      if (this.jsonMode) return this.outputJSON({ coordinator: access.name, repo: repo.id, images } satisfies MachineImageListJson);
+      if (images.length === 0) {
+        console.log(chalk.gray(`No machine image for ${repo.name}: new machines install everything at boot. kunj machine image build bakes one.`));
+        return;
+      }
+      images.forEach((i, n) => console.log(`${i.name}  ${chalk.gray(i.createdAt)}${i.version ? chalk.gray(`  kunj ${i.version}`) : ''}${n === 0 ? chalk.green('  (new machines boot this)') : ''}`));
+      return;
+    }
+    if (sub === 'delete') {
+      if (!name) throw new MachineError('Name the image: kunj machine image delete <name> (kunj machine image lists them).', 'machine-not-found');
+      await client.deleteImage(name);
+      if (this.jsonMode) return this.outputJSON({ coordinator: access.name, deleted: name });
+      console.log(chalk.green(`✓ Deleted image ${name}`));
+      return;
+    }
+    if (sub !== 'build') throw new MachineError(`Unknown image action '${sub}'. Use list, build or delete.`, 'machine-not-found');
+
+    const started = Date.now();
+    const say = (m: string) => console.error(chalk.gray(m));
+    say('Creating the builder machine (a few minutes: it installs Docker, Node and kunj)…');
+    const { machine } = await client.locate({ repo: repo.id, repoName: repo.name, branch: IMAGE_BUILD_BRANCH, wake: true, create: true, size: opts.size });
+    let image;
+    const withSnapshot = opts.snapshot !== false;
+    try {
+      if (withSnapshot) {
+        say(`Building the blueprint snapshot on ${machine.name}…`);
+        const code = await this.buildSnapshot(access.kind === 'local' ? 'machines' : access.name, IMAGE_BUILD_BRANCH);
+        if (code !== 0) {
+          throw new MachineError(`The blueprint snapshot failed on the builder (exit ${code}), so no image was made. Fix it, or bake without one: kunj machine image build --no-snapshot.`, 'machine-create-failed');
+        }
+      }
+      say('Stopping the builder and baking its disk into an image…');
+      image = await client.bake(machine.name);
+    } finally {
+      // The builder is only ever a means: never left running, whatever failed
+      await client.delete(machine.name, { disks: true }).catch(err => console.error(chalk.yellow(`could not delete the builder ${machine.name}: ${(err as Error).message}`)));
+    }
+    const seconds = Math.round((Date.now() - started) / 1000);
+    if (this.jsonMode) return this.outputJSON({ coordinator: access.name, image, builder: machine.name, snapshot: withSnapshot, seconds } satisfies MachineImageBuildJson);
+    console.log(chalk.green(`✓ Image ${image.name} (${seconds} s). New machines of ${repo.name} boot from it.`));
   }
 
   private async coordinatorAction(sub: string): Promise<void> {

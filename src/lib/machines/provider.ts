@@ -24,6 +24,8 @@ export const MACHINE_LABEL = {
 
 export const MACHINE_ROLE = 'machine';
 export const IMAGE_ROLE = 'machine-image';
+/** The branch label of the machine a golden image is baked from; never a real branch (`..` is not allowed in one) */
+export const IMAGE_BUILD_BRANCH = 'kunj..image-build';
 
 export type MachineState = 'provisioning' | 'running' | 'suspending' | 'suspended' | 'stopping' | 'stopped' | 'unknown';
 

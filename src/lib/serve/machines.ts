@@ -2,14 +2,24 @@
 // (docs/specs/cloud-machines.md, "The coordinator"). Clients never talk to the cloud; they ask here.
 // The proxy to a machine's own serve (/v1/machines/<name>/…) is phase 2.
 
-import type { MachineJson } from '../json-types';
+import type { MachineImageJson, MachineJson } from '../json-types';
 import { Coordinator } from '../machines/coordinator';
-import { Labels, Machine, MachineError, MachineErrorCode } from '../machines/provider';
+import { Labels, MACHINE_LABEL, Machine, MachineError, MachineErrorCode, MachineImage } from '../machines/provider';
 import { readJsonBody } from './http';
 import { MachineRouteErrorCode, ServeError, parseLabelQuery } from './protocol';
 import { ServeExtension } from './server';
 
 export type { MachineJson };
+
+export function imageJson(i: MachineImage): MachineImageJson {
+  return {
+    name: i.name,
+    repo: i.labels[MACHINE_LABEL.repo] ?? '',
+    createdAt: i.createdAt,
+    ...(i.labels[MACHINE_LABEL.version] ? { version: i.labels[MACHINE_LABEL.version] } : {}),
+    ...(i.labels[MACHINE_LABEL.blueprint] ? { blueprint: i.labels[MACHINE_LABEL.blueprint] } : {}),
+  };
+}
 
 export function machineJson(m: Machine, paired: boolean): MachineJson {
   const l = m.labels;
@@ -102,6 +112,25 @@ export function machineRoutes(coordinator: Coordinator): (api: ServeExtension) =
         const r = await coordinator.locate({ repo, repoName, branch, size, wake: body.wake === true, create: body.create === true, owner: client });
         return { machine: machineJson(r.machine, r.paired), created: r.created, woke: r.woke };
       });
+    });
+
+    api.route('GET', '/v1/machines/images', async (_req, _p, url) =>
+      mapped(async () => ({ images: (await coordinator.images(url.searchParams.get('repo') ?? '')).map(imageJson) })),
+    );
+
+    api.route('DELETE', '/v1/machines/images/:name', async (_req, p) =>
+      mapped(async () => {
+        await coordinator.deleteImage(nameParam(p.name));
+        return { deleted: p.name };
+      }),
+    );
+
+    // Bakes a golden image from the machine (it is stopped first); the reply comes when the image exists
+    api.route('POST', '/v1/machines/:name/image', async (req, p) => {
+      const body = ((await readJsonBody(req)) ?? {}) as Record<string, unknown>;
+      const blueprint = str(body, 'blueprint', false);
+      if (blueprint !== undefined && !/^[0-9a-f]{0,64}$/.test(blueprint)) throw new ServeError(400, 'bad-request', 'expected a blueprint hash');
+      return mapped(async () => ({ image: imageJson(await coordinator.bake(nameParam(p.name), { blueprint: blueprint || undefined })) }));
     });
 
     for (const verb of ['suspend', 'resume', 'stop', 'start'] as const) {

@@ -76,6 +76,15 @@ if [ "$(cat /etc/kunj-package 2>/dev/null || true)" != "$KUNJ_PACKAGE" ] || ! co
   echo "$KUNJ_PACKAGE" > /etc/kunj-package
 fi
 
+# A machine booted from a golden image carries the builder's serve token: drop it, so this
+# machine's serve pairs with its coordinator like a first boot. Same machine, same name: kept.
+ME="$(hostname)"
+if [ "$(cat /etc/kunj-machine 2>/dev/null || true)" != "$ME" ]; then
+  systemctl stop kunj-serve 2>/dev/null || true
+  rm -f /home/kunj/.kunj/serve/token
+  echo "$ME" > /etc/kunj-machine
+fi
+
 IP="$(hostname -I | awk '{print $1}')"
 cat > /etc/systemd/system/kunj-serve.service <<UNIT
 [Unit]

@@ -98,6 +98,48 @@ describe('kunj machine', () => {
     expect(provider.callsOf('delete')[0].args[1]).toEqual({ disks: false });
   });
 
+  it('bakes a golden image from a builder machine, and new machines boot from the newest', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    await cmd().execute('image', { json: true });
+    expect(json()).toEqual({ coordinator: 'local', repo: REPO.id, images: [] });
+
+    const snapshots: string[] = [];
+    const snapshot = async (remote: string, branch: string) => (snapshots.push(`${remote} ${branch}`), 0);
+    await cmd({ snapshot }).execute('image', 'build', { json: true });
+    const built = json();
+    expect(snapshots).toEqual(['machines kunj..image-build']);
+    expect(built).toMatchObject({ coordinator: 'local', snapshot: true, image: { repo: REPO.id, version: '1.2.3' } });
+    expect(built.image.name).toMatch(/^kunj-app-.*-img-[0-9]{14}$/);
+    // the builder started from the stock image, was stopped before the bake and is gone
+    const builderSpec = provider.callsOf('create')[0].args[0] as { image: string; name: string };
+    expect(builderSpec.image).toBe('');
+    expect(provider.methods().join(' ')).toMatch(/stop .*images\.createFrom .*delete/);
+    expect(provider.machines.size).toBe(0);
+
+    await cmd().execute('create', { json: true });
+    expect(json().machine.image).toBe(built.image.name);
+
+    // a second bake replaces the first image
+    await new Promise(r => setTimeout(r, 1100));
+    await cmd({ snapshot }).execute('image', 'build', { json: true, snapshot: false });
+    const second = json();
+    expect(second.snapshot).toBe(false);
+    expect(snapshots).toHaveLength(1);
+    await cmd().execute('image', 'list', { json: true });
+    expect(json().images.map((i: { name: string }) => i.name)).toEqual([second.image.name]);
+
+    await cmd().execute('image', 'delete', second.image.name, { json: true });
+    expect(json()).toEqual({ coordinator: 'local', deleted: second.image.name });
+    await expect(cmd().execute('image', 'delete', 'not-kunjs-image', { json: true })).rejects.toMatchObject({ code: 'machine-not-found' });
+  });
+
+  it('makes no image and deletes the builder when the snapshot fails', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(cmd({ snapshot: async () => 3 }).execute('image', 'build', { json: true })).rejects.toThrow(/--no-snapshot/);
+    expect(provider.images_.size).toBe(0);
+    expect(provider.machines.size).toBe(0);
+  });
+
   it('asks before deleting on a terminal and deletes nothing on no', async () => {
     await cmd().execute('create', {});
     const asked: string[] = [];

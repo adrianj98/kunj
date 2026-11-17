@@ -8,10 +8,13 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import {
+  IMAGE_BUILD_BRANCH,
+  IMAGE_ROLE,
   Labels,
   MACHINE_LABEL,
   Machine,
   MachineError,
+  MachineImage,
   MachineProvider,
   isAwake,
   isKunjMachine,
@@ -260,16 +263,77 @@ export class Coordinator {
     return { machine, created: false, woke, paired: this.isPaired(machine.name) };
   }
 
+  /** The repository's golden images, newest first. */
+  async images(repo: string): Promise<MachineImage[]> {
+    if (!this.provider.features.images) return [];
+    const found = await this.provider.images.list({ [MACHINE_LABEL.repo]: repo, [MACHINE_LABEL.role]: IMAGE_ROLE });
+    return found.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.name.localeCompare(a.name));
+  }
+
+  /**
+   * The image a new machine boots: machine.image when set, else the repository's newest golden
+   * image, else the provider's stock one. The builder of a golden image always starts from stock,
+   * so an image never carries what an older one had. A listing that fails costs boot time, not the
+   * machine.
+   */
+  private async imageFor(req: LocateRequest): Promise<string> {
+    const d = this.opts.defaults;
+    if (d.image) return d.image;
+    if (req.branch === IMAGE_BUILD_BRANCH) return '';
+    try {
+      return (await this.images(req.repo))[0]?.name ?? '';
+    } catch (err) {
+      this.log(`could not list golden images, using the stock image: ${(err as Error).message}`);
+      return '';
+    }
+  }
+
+  /**
+   * Bakes a golden image from a machine: stops it, images its disk, and deletes the repository's
+   * older images. The machine is left stopped; the caller deletes the builder.
+   */
+  async bake(name: string, opts: { blueprint?: string } = {}): Promise<MachineImage> {
+    if (!this.provider.features.images) throw new MachineError(`The ${this.provider.name} provider cannot make machine images.`, 'bad-machine-config');
+    const machine = await this.get(name);
+    const repo = machine.labels[MACHINE_LABEL.repo] ?? '';
+    await this.dropShared(name);
+    await this.provider.stop(name);
+    const stopped = await this.waitForState(name, 'stopped');
+    const stem = name.replace(/-[a-z0-9]+$/, '').slice(0, 40).replace(/-+$/, '');
+    const imageName = `${stem}-img-${new Date(this.now()).toISOString().replace(/[^0-9]/g, '').slice(0, 14)}`;
+    const before = await this.images(repo);
+    this.log(`baking image ${imageName} from ${name}`);
+    const image = await this.provider.images.createFrom(stopped, imageName, {
+      [MACHINE_LABEL.repo]: repo,
+      [MACHINE_LABEL.role]: IMAGE_ROLE,
+      [MACHINE_LABEL.version]: this.opts.version,
+      ...(opts.blueprint ? { [MACHINE_LABEL.blueprint]: opts.blueprint } : {}),
+    });
+    for (const old of before) {
+      if (old.name === image.name) continue;
+      await this.provider.images.delete(old.name).catch(err => this.log(`could not delete old image ${old.name}: ${(err as Error).message}`));
+    }
+    return image;
+  }
+
+  /** Deletes one of kunj's golden images; anything else is refused. */
+  async deleteImage(name: string): Promise<void> {
+    const ours = await this.provider.images.list({ [MACHINE_LABEL.role]: IMAGE_ROLE });
+    if (!ours.some(i => i.name === name)) throw new MachineError(`No kunj machine image named ${name}.`, 'machine-not-found');
+    await this.provider.images.delete(name);
+  }
+
   private async create(req: LocateRequest): Promise<Machine> {
     const d = this.opts.defaults;
     const name = machineName(req.repoName, req.repo, req.branch);
+    const image = await this.imageFor(req);
     const labels = machineLabels(req.repo, req.branch, {
       [MACHINE_LABEL.version]: this.opts.version,
-      [MACHINE_LABEL.image]: d.image ?? '',
+      [MACHINE_LABEL.image]: image,
       [MACHINE_LABEL.owner]: req.owner ?? '',
     });
-    this.log(`creating machine ${name} for ${req.branch}`);
-    let machine = await this.provider.create({ name, labels, size: req.size || d.size, image: d.image ?? '', diskGb: d.diskGb, spot: d.spot, selfSuspend: d.selfSuspend, startupScript: this.opts.startupScript });
+    this.log(`creating machine ${name} for ${req.branch}${image ? ` from image ${image}` : ''}`);
+    let machine = await this.provider.create({ name, labels, size: req.size || d.size, image, diskGb: d.diskGb, spot: d.spot, selfSuspend: d.selfSuspend, startupScript: this.opts.startupScript });
     // A token left from an earlier machine of the same name would never match the new one. Only
     // after the create succeeded: a create refused with machine-exists (another coordinator made
     // it meanwhile) must leave that live machine's token alone

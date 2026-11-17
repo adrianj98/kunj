@@ -20,7 +20,8 @@ describe('bootstrapScript', () => {
     expect(script).toContain("KUNJ_PACKAGE='kunj@1.4.0'");
     expect(script).toContain('serve --listen $IP:$PORT --allow-remote-listen --allow-pairing --pair-window $PAIR_WINDOW');
     expect(script).toContain('User=kunj');
-    expect(script).not.toMatch(/token/i);
+    // no secret: the only mention of a token is the file it deletes on a machine booted from an image
+    expect(script.replace(/^#.*$/gm, '').replace(/^\s*rm -f \/home\/kunj\/\.kunj\/serve\/token$/m, '')).not.toMatch(/token/i);
     // a ref may be a commit: fetched and checked out, never `clone --branch`
     expect(script).toContain('git fetch -q --depth 1 "https://github.com/$repo.git" "$ref"');
     expect(script).not.toContain('--branch');
@@ -56,5 +57,13 @@ describe('GceProvider startup script', () => {
     await p.create({ name: 'kunj-a-1', labels: machineLabels('r', 'b'), size: 'small', image: '', diskGb: 30, spot: false, selfSuspend: false, startupScript: '#!/bin/bash\necho hi\n' });
     expect(seen).toBe('#!/bin/bash\necho hi\n');
     expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it('drops a baked-in serve token when the machine is not the one that wrote it', () => {
+    const script = bootstrapScript({ kunjPackage: 'kunj@1.2.3', port: 7433, pairWindowMinutes: 10 });
+    const reset = script.indexOf('rm -f /home/kunj/.kunj/serve/token');
+    expect(reset).toBeGreaterThan(-1);
+    expect(script).toContain('!= "$ME"');
+    expect(reset).toBeLessThan(script.indexOf('systemctl restart kunj-serve'));
   });
 });

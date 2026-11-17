@@ -6,7 +6,7 @@ import * as http from 'http';
 import * as https from 'https';
 import { ContainerError } from '../container/errors';
 import type { InfoJson } from '../serve/protocol';
-import type { MachineJson } from '../json-types';
+import type { MachineImageJson, MachineJson } from '../json-types';
 import { Labels, MachineError, MachineErrorCode, MachineSize, ProviderFeatures } from './provider';
 
 export interface MachineClientOptions {
@@ -95,6 +95,18 @@ export class MachineClient {
 
   async action(name: string, verb: 'suspend' | 'resume' | 'stop' | 'start'): Promise<MachineJson> {
     return (await this.request('POST', `/v1/machines/${encodeURIComponent(name)}/${verb}`)).machine;
+  }
+
+  async images(repo: string): Promise<MachineImageJson[]> {
+    return (await this.request('GET', `/v1/machines/images?repo=${encodeURIComponent(repo)}`)).images;
+  }
+
+  async bake(name: string, opts: { blueprint?: string } = {}): Promise<MachineImageJson> {
+    return (await this.request('POST', `/v1/machines/${encodeURIComponent(name)}/image`, opts)).image;
+  }
+
+  async deleteImage(name: string): Promise<void> {
+    await this.request('DELETE', `/v1/machines/images/${encodeURIComponent(name)}`);
   }
 
   async delete(name: string, opts: { disks: boolean }): Promise<void> {

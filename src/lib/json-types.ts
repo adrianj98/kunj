@@ -242,6 +242,32 @@ export interface MachineJson {
 }
 
 /** `kunj machine list --json`; `repo` is absent with --all */
+/** A golden machine image: what a repository's new machines boot from (`kunj machine image`). */
+export interface MachineImageJson {
+  name: string;
+  repo: string;
+  createdAt: string;
+  /** The kunj that baked it */
+  version?: string;
+  /** The blueprint hash of the snapshot inside, when known */
+  blueprint?: string;
+}
+
+export interface MachineImageListJson {
+  coordinator: string;
+  repo: string;
+  images: MachineImageJson[];
+}
+
+export interface MachineImageBuildJson {
+  coordinator: string;
+  image: MachineImageJson;
+  /** The builder machine, deleted after the bake */
+  builder: string;
+  snapshot: boolean;
+  seconds: number;
+}
+
 export interface MachineListJson {
   /** 'local' or the remote's name */
   coordinator: string;

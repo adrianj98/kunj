@@ -82,6 +82,8 @@ interface ContainerOptions {
   remote?: string;
   /** [start] The size of a new cloud machine */
   size?: string;
+  /** [blueprint snapshot] The branch whose cloud machine builds the snapshot */
+  machine?: string;
   create?: boolean;
   base?: string;
   image?: string;
@@ -202,6 +204,7 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--kill', description: '[shell|agent] End the --session tmux session, or without --session every shell (sh-*) or agent (agent, agent-*) session; exit 0 whether or not one existed or the container runs' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
         { flags: '--size <size>', description: '[start] On cloud machines: the size of a new machine (small, medium, large or a provider shape; default machine.size)' },
+        { flags: '--machine <branch>', description: '[blueprint snapshot] On cloud machines: build on this branch\'s machine (default: the current branch\'s)' },
         { flags: '--remote <name>', description: 'Run on this kunj serve remote (kunj remote add; default: container.remote); "local" forces this machine\'s Docker, "machines" uses this machine\'s cloud machine coordinator (machine.provider)' },
       ],
       helpText: [
@@ -351,6 +354,9 @@ export class ContainerCommand extends BaseCommand {
         return { branch: rest.length >= 2 ? rest[0] : undefined, wake: true, create: false };
       case 'stop':
         return { branch: target, wake: false, create: false };
+      case 'blueprint':
+        // A machine has its own Docker, so a snapshot is built on one machine: the current branch's, or --machine's
+        return target === 'snapshot' ? { branch: options.machine, wake: true, create: true } : undefined;
       default:
         return undefined;
     }
