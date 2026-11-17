@@ -388,7 +388,8 @@ export class RemoteKunjBackend implements ContainerBackend {
       const restore = () => rawMode(wasRaw);
 
       const onData = (chunk: Buffer | string) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
+        // An empty frame is the end of stdin on the wire: an empty chunk is never sent as one
+        if (ws.readyState !== WebSocket.OPEN || chunk.length === 0) return;
         for (const frame of encodeFrames(CHANNEL.stdin, typeof chunk === 'string' ? Buffer.from(chunk) : chunk)) ws.send(frame, { binary: true });
       };
       const onEnd = () => {
@@ -551,6 +552,9 @@ export class RemoteKunjBackend implements ContainerBackend {
       const onStdinData = (chunk: Buffer | string) => {
         if (ws.readyState !== WebSocket.OPEN) return;
         const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        // An empty frame is the end of stdin on the wire: an empty chunk (an empty file in a tar
+        // stream) must not be sent as one, or everything after it arrives past the end
+        if (bytes.length === 0) return;
         if (ws.bufferedAmount > HIGH_WATER) stdinStream!.pause();
         const frames = encodeFrames(CHANNEL.stdin, bytes);
         frames.forEach((frame, i) =>

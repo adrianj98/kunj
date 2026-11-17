@@ -222,6 +222,25 @@ One Claude Code session at a time can use each bridged server.
 `container.dockerContext` makes every docker call use that context, for example to run containers in
 Colima while Docker Desktop stays your default; `--context` overrides it for one command.
 
+## Your Claude skills in the container
+
+kunj copies your own Claude Code setup into every container, so an agent there has the same skills
+it has on your computer. On each `kunj ct start` it copies these from `~/.claude`:
+
+| Copied | Not copied |
+| --- | --- |
+| `skills/`, `agents/`, `commands/`, `CLAUDE.md` | `settings.json`, credentials, history, hidden folders |
+
+Skills that live in the repository (`.claude/skills`) come with the clone and need nothing. To copy
+less, or nothing:
+
+```bash
+kunj config --set-json 'container.claude=["skills"]'
+kunj config --set-json 'container.claude=[]'
+```
+
+A container that already exists gets them the next time you run `kunj ct start` for it.
+
 ## A cache shared by every branch
 
 Some things are slow to fetch and the same for every branch: a database dump, a package store. Give the

@@ -113,6 +113,8 @@ export interface StartOptions {
    * gh fallback, `files` (relative to /workspace) are rendered on create and resume, `stamp` is
    * recorded as kunj.secrets. Ignored for a snapshot build (namesFor). */
   secrets?: { env: Record<string, string>; files: Map<string, string>; stamp: string };
+  /** Where the user's Claude Code setup is (default ~/.claude); tests point it elsewhere */
+  claudeDir?: string;
   /** The coordinator's cache store (a cloud machine): a new container's caches are pulled from it first */
   cacheStore?: CacheStore;
 }
@@ -664,7 +666,58 @@ async function copyFiles(
     }
     copiedFiles.push(target);
   }
+  copiedFiles.push(...(await copyClaude(backend, id, user, home, options)));
   return { keptFiles, copiedFiles };
+}
+
+/**
+ * The user's own Claude Code setup into the container (container.claude): skills, agents, commands
+ * and CLAUDE.md from ~/.claude, so an agent there works the way it does on this computer. Never the
+ * settings (their hooks name host paths), credentials or history. On every start, so a skill added
+ * since reaches a container that already exists. Returns what was copied.
+ */
+async function copyClaude(backend: ContainerBackend, id: string, user: string, home: string | null, options: StartOptions): Promise<string[]> {
+  const copiedFiles: string[] = [];
+  let resolvedHome: string | undefined;
+  for (const part of claudeParts(options.config.container?.claude)) {
+    const hostPath = path.join(options.claudeDir ?? path.join(os.homedir(), '.claude'), part);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(hostPath);
+    } catch {
+      continue; // not something this user has
+    }
+    resolvedHome ??= await containerHome(backend, id, user, home);
+    const target = path.posix.join(resolvedHome, '.claude', part);
+    try {
+      if (stat.isDirectory()) {
+        // Entry by entry: hidden ones (.trash, .DS_Store) stay behind
+        const names = fs.readdirSync(hostPath).filter(n => !n.startsWith('.')).sort();
+        for (const name of names) {
+          const full = path.join(hostPath, name);
+          const s = fs.statSync(full);
+          if (s.isDirectory()) await extractInto(backend, id, user, path.posix.join(target, name), tarDirectory(full));
+          else if (s.isFile()) await extractInto(backend, id, user, target, tarEntries([{ path: name, content: fs.readFileSync(full), mode: s.mode & 0o777 }]));
+        }
+        if (names.length === 0) continue;
+      } else {
+        await extractInto(backend, id, user, path.posix.dirname(target), tarEntries([{ path: part, content: fs.readFileSync(hostPath), mode: stat.mode & 0o777 }]));
+      }
+      copiedFiles.push(target);
+    } catch (err) {
+      options.warn(`container.claude: ~/.claude/${part} was not copied: ${message(err)}`);
+    }
+  }
+  return copiedFiles;
+}
+
+/** What of ~/.claude goes into a container; anything else named in container.claude is ignored. */
+export const CLAUDE_PARTS = ['skills', 'agents', 'commands', 'CLAUDE.md'];
+
+export function claudeParts(value: unknown): string[] {
+  if (value === undefined || value === null || value === true) return CLAUDE_PARTS;
+  if (value === false) return [];
+  return Array.isArray(value) ? CLAUDE_PARTS.filter(p => value.includes(p)) : CLAUDE_PARTS;
 }
 
 type StartSecrets = NonNullable<StartOptions['secrets']>;
@@ -1283,8 +1336,15 @@ async function resume(
     const renderSecrets = async (user: string) => {
       if (secrets) await step('docker', () => renderSecretFiles(backend, main.id, user, secrets.files));
     };
+    // A skill added since the container was made reaches it on the next start; a failure is a warning
+    const refreshClaude = (u: string) =>
+      step('docker', () => copyClaude(backend, main.id, u, u ? `/home/${u}` : null, options)).catch(err => {
+        warn(`container.claude: not refreshed: ${message(err)}`);
+        return [] as string[];
+      });
     if (mainWasRunning && keepHelper) {
       await renderSecrets(recorded.user ?? '');
+      result.copiedFiles = await refreshClaude(recorded.user ?? '');
       return result;
     }
 
@@ -1295,6 +1355,7 @@ async function resume(
     // A running container whose helper was only out of date: nothing else to do
     if (mainWasRunning && helperRunning) {
       await renderSecrets(recorded.user ?? '');
+      result.copiedFiles = await refreshClaude(recorded.user ?? '');
       return result;
     }
     if (dind !== 'off') await startDockerd(backend, main.id, warn);
@@ -1308,6 +1369,8 @@ async function resume(
       seedIfNeeded(backend, main.id, user, home, options, origin, !seededBefore && (await hasToken()), seededBefore, fromSnapshot));
     if (result.seeded) {
       Object.assign(result, await step('docker', () => copyFiles(backend, main.id, user, home, options, variables(options))));
+    } else {
+      result.copiedFiles = await refreshClaude(user);
     }
     await renderSecrets(user);
     await mcpConfig(backend, main.id, user, options);

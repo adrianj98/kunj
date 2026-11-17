@@ -46,6 +46,19 @@ export function registerContainerSettings(): void {
       examples: ['~/.gitconfig:/home/node/.gitconfig'],
     },
     {
+      key: 'container.claude',
+      description: 'What of your ~/.claude is copied into containers: skills, agents, commands, CLAUDE.md',
+      type: 'array',
+      defaultValue: ['skills', 'agents', 'commands', 'CLAUDE.md'],
+      category: 'container',
+      detailedDescription:
+        'Copied into the container user\'s ~/.claude on every kunj ct start, on this computer and on a remote or cloud machine, so an ' +
+        'agent there has your skills. Skills in the repository itself (.claude/skills) come with the clone and need nothing. ' +
+        'Never copied: settings.json (its hooks name paths on this computer), credentials, history. An empty list turns it off. ' +
+        'A blueprint snapshot never contains them.',
+      examples: ['["skills"]', '[]'],
+    },
+    {
       key: 'container.keepFiles',
       description: "Copy the repository's keep files into new containers",
       type: 'boolean',

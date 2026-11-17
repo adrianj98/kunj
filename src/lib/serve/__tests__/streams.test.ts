@@ -54,6 +54,36 @@ describe('RemoteKunjBackend: streams', () => {
       expect(io).toMatchObject({ user: 'root', workdir: '/w', env: { A: '1' }, timeoutMs: 5000 });
     });
 
+    it('an empty chunk in stdin is not its end (an empty file in a tar stream), and input after the end never ends the server', async () => {
+      const out = collect();
+      const stdin = Readable.from([Buffer.from('before '), Buffer.alloc(0), Buffer.from('after')]);
+      const r = await h.remote.exec('kunj-r-b-1', ['cat'], { stdin, stdout: out.stream });
+      expect(r.exitCode).toBe(0);
+      expect(h.fake.stdinData).toEqual(['before after']);
+
+      // what a client from before the fix does: an empty frame mid-stream, then more data
+      const uncaught = jest.fn();
+      process.once('uncaughtException', uncaught);
+      const ws = new WebSocket(`ws://127.0.0.1:${h.port}/v1/containers/kunj-r-b-1/exec`, { headers: { authorization: `Bearer ${HARNESS_TOKEN}` } });
+      await new Promise<void>((resolve, reject) => {
+        ws.on('open', () => {
+          ws.send(JSON.stringify({ cmd: ['cat'], stdin: true }));
+          const frame = (text: string) => Buffer.concat([Buffer.from([0]), Buffer.from(text)]);
+          ws.send(frame('one'), { binary: true });
+          ws.send(frame(''), { binary: true });
+          ws.send(frame('late'), { binary: true });
+        });
+        ws.on('close', () => resolve());
+        ws.on('error', reject);
+        setTimeout(() => ws.close(), 300);
+      });
+      await new Promise(r => setTimeout(r, 50));
+      process.off('uncaughtException', uncaught);
+      expect(uncaught).not.toHaveBeenCalled();
+      // the server is still there
+      expect((await h.remote.exec('kunj-r-b-1', ['true'])).exitCode).toBe(0);
+    });
+
     it('streams stdin in and stdout out (the fake echoes uppercased)', async () => {
       h.fake.echoUpper = true;
       const out = collect();

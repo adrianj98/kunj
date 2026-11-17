@@ -1930,3 +1930,8 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - `kunj resources` (src/lib/resources.ts, src/commands/resources.ts, `ResourcesJson`) and the workspace app's Resources window (Core `Resources.swift`, `ResourcesWindow.swift`, Window menu, `--resources`). `Coordinator.images('')` lists every repository's golden images. Why: the user asked for "a window that shows all containers and resources managed by kunj".
 - A machine gets 8 s to answer a listing (was 5), and the workspace app keeps an awake machine's row usable when its containers were not listed. Why: the user's alertd-core row flipped to Stopped with Shell and Agent disabled while the machine was running.
 - Review fixes: `bake()` and `imageFor()` never call `images('')` (it lists every repository's images since the Resources listing, and bake deletes what it lists); the app keeps Start available on an awake machine whose container is unknown.
+- `container.claude`: skills, agents, commands and CLAUDE.md from `~/.claude` go into containers on every start
+  (`copyClaude()`, setting, tests). Why: the user reported their skills never reach a container, local or cloud.
+- Remote exec: an empty stdin chunk is no longer sent as an empty frame (the wire's end-of-input), and the server
+  drops input after the end. Why: copying a skill folder with an empty file crashed the machine's `kunj serve`
+  (ERR_STREAM_WRITE_AFTER_END), found on `kunj-dev`.

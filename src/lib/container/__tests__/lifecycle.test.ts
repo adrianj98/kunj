@@ -88,6 +88,8 @@ function options(over: Partial<StartOptions> = {}): StartOptions {
     kunjVersion: VERSION,
     hostEnv: { GH_TOKEN: 'tok', ANTHROPIC_API_KEY: 'k' },
     cwd: tmp,
+    // never this computer's own ~/.claude
+    claudeDir: path.join(tmp, 'no-claude'),
     jsonMode: false,
     skipHooks: false,
     keepOnError: false,
@@ -873,6 +875,39 @@ describe('startContainer', () => {
     const tarCalls = b.callsOf('exec').filter(a => (a[1] as string[]).some(x => x.includes('tar -xf')));
     expect(tarCalls.map(a => (a[1] as string[]).slice(-1)[0])).toEqual(['/home/dev/.kunj/bin', '/workspace', '/home/dev/.aws']);
     expect(b.stdinData.filter(Boolean).join('')).toContain('SECRET=1');
+  });
+
+  it('copies the user\'s Claude skills, agents and CLAUDE.md into the container, never settings or hidden entries', async () => {
+    const claude = path.join(tmp, 'claude');
+    fs.mkdirSync(path.join(claude, 'skills', 'handoff', 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(claude, 'skills', 'handoff', 'SKILL.md'), 'name: handoff\n');
+    fs.writeFileSync(path.join(claude, 'skills', 'handoff', 'scripts', 'run.sh'), '#!/bin/sh\n', { mode: 0o755 });
+    fs.mkdirSync(path.join(claude, 'skills', '.trash', 'old'), { recursive: true });
+    fs.writeFileSync(path.join(claude, 'skills', '.trash', 'old', 'SKILL.md'), 'OLD-SKILL\n');
+    fs.mkdirSync(path.join(claude, 'agents'));
+    fs.writeFileSync(path.join(claude, 'agents', 'reviewer.md'), 'AGENT-FILE\n');
+    fs.writeFileSync(path.join(claude, 'CLAUDE.md'), 'MY-RULES\n');
+    fs.writeFileSync(path.join(claude, 'settings.json'), '{"hooks":"HOST-SETTINGS"}');
+    fs.writeFileSync(path.join(claude, '.credentials.json'), 'ZZ-PRIVATE-LOGIN');
+
+    const b = backend();
+    const result = await startContainer(b, options({ claudeDir: claude }));
+    expect(result.copiedFiles).toEqual(['/home/dev/.claude/skills', '/home/dev/.claude/agents', '/home/dev/.claude/CLAUDE.md']);
+    const tarDirs = b.callsOf('exec').filter(a => (a[1] as string[]).some(x => x.includes('tar -xf'))).map(a => (a[1] as string[]).slice(-1)[0]);
+    expect(tarDirs).toEqual(expect.arrayContaining(['/home/dev/.claude/skills/handoff', '/home/dev/.claude/agents', '/home/dev/.claude']));
+    const sent = b.stdinData.filter(Boolean).join('');
+    expect(sent).toContain('name: handoff');
+    expect(sent).toContain('AGENT-FILE');
+    expect(sent).toContain('MY-RULES');
+    expect(sent).not.toContain('HOST-SETTINGS');
+    expect(sent).not.toContain('ZZ-PRIVATE-LOGIN');
+    expect(sent).not.toContain('OLD-SKILL');
+
+    // a list picks parts, and an empty one turns it off
+    const only = await startContainer(backend(), options({ claudeDir: claude, config: { container: { claude: ['skills'] } } as KunjConfig }));
+    expect(only.copiedFiles).toEqual(['/home/dev/.claude/skills']);
+    const none = await startContainer(backend(), options({ claudeDir: claude, config: { container: { claude: [] as string[] } } as unknown as KunjConfig }));
+    expect(none.copiedFiles).toEqual([]);
   });
 
   it('publishes requested ports on free host ports', async () => {

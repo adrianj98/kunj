@@ -178,6 +178,9 @@ async function serveExec(ws: WebSocket, id: string, opts: StreamOptions): Promis
     }
     const { channel, data: bytes } = decoded;
     if (channel !== CHANNEL.stdin) return;
+    // Input after its end (an older client sent an empty chunk mid-stream, or the command is gone):
+    // dropped. A write there is an 'error' nobody handles, which would end the whole server
+    if (stdin.writableEnded || stdin.destroyed) return;
     if (bytes.length === 0) {
       stdin.end();
       return;

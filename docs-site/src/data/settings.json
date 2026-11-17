@@ -1414,6 +1414,26 @@
     "sensitive": false
   },
   {
+    "key": "container.claude",
+    "type": "array",
+    "category": "container",
+    "default": [
+      "skills",
+      "agents",
+      "commands",
+      "CLAUDE.md"
+    ],
+    "description": "What of your ~/.claude is copied into containers: skills, agents, commands, CLAUDE.md",
+    "detailedDescription": "Copied into the container user's ~/.claude on every kunj ct start, on this computer and on a remote or cloud machine, so an agent there has your skills. Skills in the repository itself (.claude/skills) come with the clone and need nothing. Never copied: settings.json (its hooks name paths on this computer), credentials, history. An empty list turns it off. A blueprint snapshot never contains them.",
+    "options": null,
+    "examples": [
+      "[\"skills\"]",
+      "[]"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "container.keepFiles",
     "type": "boolean",
     "category": "container",
