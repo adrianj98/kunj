@@ -54,6 +54,23 @@ describe('the machine-side idle timer', () => {
     }
   });
 
+  it('counts unanswered looks only within one quiet spell', async () => {
+    const s = { clock: 0, fired: 0 };
+    const w = idleWatch({ idleMs: 5 * MIN, tickMs: MIN, busyTimeoutMs: 20, now: () => s.clock, busy: async () => Promise.reject(new Error('slow')), fire: async () => void s.fired++, log: () => {} });
+    const look = async () => {
+      s.clock += MIN;
+      await w.tick();
+    };
+    for (let i = 0; i < 6; i++) await look(); // idle at the 5th look: two unanswered questions
+    expect(s.fired).toBe(0);
+    w.touch(); // used again
+    for (let i = 0; i < 6; i++) await look(); // a new spell: its first unanswered look must not be "the third"
+    expect(s.fired).toBe(0);
+    await look();
+    expect(s.fired).toBe(1);
+    w.stop();
+  });
+
   it('does not count the time the machine slept as idle time', async () => {
     const { s, watch, pass } = setup();
     await pass(20);

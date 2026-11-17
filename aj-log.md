@@ -1921,3 +1921,4 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - Listings are passive through the coordinator's proxy (`ProxyResolver(name, passive)`, `proxyTarget(name, use)`,
   `backendFor` with `passive: true`); idle timer needs three unanswered busy checks; `ct prune` names `kunj machine prune`.
   Why: on `kunj-dev` the open Workspace app's listing kept a machine awake 26 minutes past its idle limit.
+- Idle timer: unanswered busy checks are counted within one quiet spell only (review finding). Why: two old failures plus one new one would have suspended a machine at once.

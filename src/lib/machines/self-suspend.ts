@@ -41,7 +41,10 @@ export function idleWatch(opts: IdleWatchOptions): IdleWatch {
       // and the time asleep is not idle time
       if (t - lastTick > tickMs * 3) lastUse = t;
       lastTick = t;
-      if (t - lastUse < opts.idleMs) return;
+      if (t - lastUse < opts.idleMs) {
+        unanswered = 0; // in use since: earlier unanswered looks are not part of this spell
+        return;
+      }
       // A question that fails or hangs (Docker wedged) is not proof of use, as for the coordinator's
       // loop: suspend keeps memory, and a machine nobody can ask must not bill for ever
       let timer: NodeJS.Timeout | undefined;
