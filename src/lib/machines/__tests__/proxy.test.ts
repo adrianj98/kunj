@@ -174,6 +174,55 @@ describe('containers on a machine, through the coordinator', () => {
   });
 });
 
+describe('the shared endpoint', () => {
+  it('survives one failed request while another is still on it, and an old timer never closes a newer one', async () => {
+    jest.useFakeTimers();
+    const released: number[] = [];
+    let opened = 0;
+    const provider = new FakeProvider();
+    const tokens = memoryTokenStore();
+    const coordinator = new Coordinator({
+      provider,
+      network: 'tunnel',
+      tokens,
+      version: '1',
+      defaults: { size: 'medium', diskGb: 30, spot: false, selfSuspend: false, bootTimeoutMs: 1000 },
+      freePort: async () => 40000 + opened,
+      openTunnel: async () => {
+        const id = ++opened;
+        return { close: async () => void released.push(id) };
+      },
+    });
+    try {
+      await provider.create({ name: 'kunj-app-a-111111', labels: { 'kunj.repo': 'r', 'kunj.branch': 'a', 'kunj.role': 'machine' }, size: 'small', image: '', diskGb: 30, spot: false, selfSuspend: false });
+      tokens.set('kunj-app-a-111111', 't');
+      const a = await coordinator.proxyTarget('kunj-app-a-111111');
+      const b = await coordinator.proxyTarget('kunj-app-a-111111');
+      expect(opened).toBe(1);
+      b.done(true); // B's connection failed
+      await Promise.resolve();
+      expect(released).toEqual([]); // A is still on tunnel 1
+      const c = await coordinator.proxyTarget('kunj-app-a-111111'); // a new request gets a new tunnel
+      expect(opened).toBe(2);
+      a.done(false);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(released).toEqual([1]);
+      jest.advanceTimersByTime(120_000); // nothing left of tunnel 1 may touch tunnel 2
+      await Promise.resolve();
+      expect(released).toEqual([1]);
+      c.done(false);
+      jest.advanceTimersByTime(61_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(released).toEqual([1, 2]);
+    } finally {
+      jest.useRealTimers();
+      await coordinator.close();
+    }
+  });
+});
+
 describe('idle machines', () => {
   let f: Awaited<ReturnType<typeof fleet>>;
   beforeEach(async () => {
@@ -203,9 +252,14 @@ describe('idle machines', () => {
     await sel.close();
   });
 
-  it('counts a machine it cannot ask as busy', async () => {
+  it('does not keep a machine awake because its serve cannot be asked', async () => {
     (await select(f, { branch: 'b', wake: true, create: true })).close();
-    f.advance(10 * 60 * 60_000);
-    expect(await f.coordinator.idleTick(60_000, async () => { throw new Error('no answer'); })).toEqual([]);
+    const name = [...f.provider.machines.keys()][0];
+    const unreachable = async () => {
+      throw new Error('no answer');
+    };
+    expect(await f.coordinator.idleTick(60_000, unreachable)).toEqual([]);
+    f.advance(61_000);
+    expect(await f.coordinator.idleTick(60_000, unreachable)).toEqual([name]);
   });
 });

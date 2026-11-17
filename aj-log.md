@@ -1854,3 +1854,7 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - Global kunj config on this Mac now has `machine.provider=gce`, `machine.gce` (project `kunj-dev`, zone
   us-central1-a) and `machine.selfSuspend=false` (set by the user). The machine for
   `feature/charming-darwin-nmp9sg` is left suspended; `kunj-box` is suspended.
+- Review of phase 2, four confirmed findings fixed: a failed request closed the shared tunnel under other live
+  streams, and an old idle timer could close a newer tunnel (endpoints are now retired by identity and released
+  when their last user is done); a machine whose serve did not answer was counted as busy forever, so it never
+  suspended and the coordinator never exited; the boot timeout message now carries the last error.

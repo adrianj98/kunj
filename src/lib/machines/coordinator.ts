@@ -174,6 +174,9 @@ interface SharedEndpoint {
   url: URL;
   users: number;
   idle?: NodeJS.Timeout;
+  /** Taken out of use (a connection through it failed): released when its last user is done */
+  retired?: boolean;
+  released?: boolean;
 }
 
 export class Coordinator {
@@ -355,22 +358,42 @@ export class Coordinator {
         done = true;
         entry.users--;
         if (use) this.lastBusy.set(name, this.now());
-        if (failed) return void this.dropShared(name);
-        if (entry.users === 0) {
-          entry.idle = setTimeout(() => void this.dropShared(name), SHARED_IDLE_MS);
-          entry.idle.unref?.();
-        }
+        // A failed connection takes this endpoint out of use for new requests; the exchanges still
+        // on it keep it until they end
+        if (failed) this.retire(name, pending!, entry);
+        if (entry.users > 0) return;
+        if (entry.retired) return void this.release(entry);
+        entry.idle = setTimeout(() => {
+          this.retire(name, pending!, entry);
+          if (entry.users === 0) void this.release(entry);
+        }, SHARED_IDLE_MS);
+        entry.idle.unref?.();
       },
     };
   }
 
+  /** Stops handing `entry` to new requests. By identity: a newer endpoint of the same machine stays. */
+  private retire(name: string, pending: Promise<SharedEndpoint>, entry: SharedEndpoint): void {
+    entry.retired = true;
+    if (this.shared.get(name) === pending) this.shared.delete(name);
+  }
+
+  private async release(entry: SharedEndpoint): Promise<void> {
+    if (entry.released) return;
+    entry.released = true;
+    if (entry.idle) clearTimeout(entry.idle);
+    await entry.endpoint.release().catch(() => {});
+  }
+
+  /** The machine is going away or to sleep: its endpoint is closed now, whoever is on it. */
   private async dropShared(name: string): Promise<void> {
     const pending = this.shared.get(name);
     if (!pending) return;
     this.shared.delete(name);
     const entry = await pending.catch(() => null);
-    if (entry?.idle) clearTimeout(entry.idle);
-    await entry?.endpoint.release().catch(() => {});
+    if (!entry) return;
+    entry.retired = true;
+    await this.release(entry);
   }
 
   /** Proxied exchanges open now (a terminal, a build): a coordinator with any must not exit. */
@@ -390,7 +413,7 @@ export class Coordinator {
   /**
    * Suspends machines nobody is using: no proxied request, no open stream and no agent in the
    * `running` state for `idleMs`. `agentBusy` asks a machine's serve (the idle loop gives one that
-   * reads STATUS_SCRIPT); a machine that cannot be asked counts as busy, never as idle.
+   * reads STATUS_SCRIPT); a machine that cannot be asked is not thereby busy.
    */
   async idleTick(idleMs: number, agentBusy: (baseUrl: string, token: string) => Promise<boolean>): Promise<string[]> {
     const suspended: string[] = [];
@@ -413,7 +436,8 @@ export class Coordinator {
             target.done(false);
           }
         } catch {
-          busy = true;
+          // Its serve does not answer: not proof of use. Suspend keeps memory, so a machine nobody
+          // has reached for the whole quiet spell is put to sleep rather than left billing
         }
       }
       if (busy) {
@@ -468,6 +492,7 @@ export class Coordinator {
   private async poll<T>(machine: Machine, step: (baseUrl: string) => Promise<T | undefined>): Promise<T> {
     const deadline = this.now() + this.opts.defaults.bootTimeoutMs;
     let endpoint: Endpoint | undefined;
+    let last = '';
     try {
       for (;;) {
         try {
@@ -476,10 +501,13 @@ export class Coordinator {
           if (result !== undefined) return result;
         } catch (err) {
           if (err instanceof MachineError && err.code === 'machine-token') throw err;
+          last = err instanceof Error ? err.message : String(err);
           await endpoint?.release().catch(() => {});
           endpoint = undefined;
         }
-        if (this.now() >= deadline) throw new MachineError(`kunj serve on ${machine.name} did not answer within ${Math.round(this.opts.defaults.bootTimeoutMs / 1000)} s.`, 'machine-timeout');
+        if (this.now() >= deadline) {
+          throw new MachineError(`kunj serve on ${machine.name} did not answer within ${Math.round(this.opts.defaults.bootTimeoutMs / 1000)} s.${last ? ` Last error: ${last}` : ''}`, 'machine-timeout');
+        }
         await this.sleep(POLL_MS);
       }
     } finally {

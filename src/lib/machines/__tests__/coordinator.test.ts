@@ -211,7 +211,7 @@ describe('Coordinator', () => {
     const { provider, coordinator } = setup();
     // created, but its serve never comes up
     provider.create = FakeProvider.prototype.create.bind(provider);
-    await expect(coordinator.locate({ repo: REPO, repoName: 'app', branch: 't', create: true })).rejects.toMatchObject({ code: 'machine-timeout' });
+    await expect(coordinator.locate({ repo: REPO, repoName: 'app', branch: 't', create: true })).rejects.toMatchObject({ code: 'machine-timeout', message: expect.stringContaining('Last error: ECONNREFUSED') });
   });
 
   it('deletes a machine with its token and refuses another tool\'s machine', async () => {
