@@ -884,6 +884,8 @@ describe('startContainer', () => {
     fs.writeFileSync(path.join(claude, 'skills', 'handoff', 'scripts', 'run.sh'), '#!/bin/sh\n', { mode: 0o755 });
     fs.mkdirSync(path.join(claude, 'skills', '.trash', 'old'), { recursive: true });
     fs.writeFileSync(path.join(claude, 'skills', '.trash', 'old', 'SKILL.md'), 'OLD-SKILL\n');
+    // a link to something that is gone is skipped, and what comes after it is still copied
+    fs.symlinkSync(path.join(tmp, 'gone-elsewhere'), path.join(claude, 'skills', 'a-dangling'));
     fs.mkdirSync(path.join(claude, 'agents'));
     fs.writeFileSync(path.join(claude, 'agents', 'reviewer.md'), 'AGENT-FILE\n');
     fs.writeFileSync(path.join(claude, 'CLAUDE.md'), 'MY-RULES\n');

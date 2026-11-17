@@ -666,7 +666,11 @@ async function copyFiles(
     }
     copiedFiles.push(target);
   }
-  copiedFiles.push(...(await copyClaude(backend, id, user, home, options)));
+  // A convenience, never a reason for a start to fail
+  copiedFiles.push(...(await copyClaude(backend, id, user, home, options).catch(err => {
+    options.warn(`container.claude: not copied: ${message(err)}`);
+    return [] as string[];
+  })));
   return { keptFiles, copiedFiles };
 }
 
@@ -695,7 +699,13 @@ async function copyClaude(backend: ContainerBackend, id: string, user: string, h
         const names = fs.readdirSync(hostPath).filter(n => !n.startsWith('.')).sort();
         for (const name of names) {
           const full = path.join(hostPath, name);
-          const s = fs.statSync(full);
+          // One entry that cannot be read (a link to something gone) must not cost the others
+          let s: fs.Stats;
+          try {
+            s = fs.statSync(full);
+          } catch {
+            continue;
+          }
           if (s.isDirectory()) await extractInto(backend, id, user, path.posix.join(target, name), tarDirectory(full));
           else if (s.isFile()) await extractInto(backend, id, user, target, tarEntries([{ path: name, content: fs.readFileSync(full), mode: s.mode & 0o777 }]));
         }
@@ -717,6 +727,8 @@ export const CLAUDE_PARTS = ['skills', 'agents', 'commands', 'CLAUDE.md'];
 export function claudeParts(value: unknown): string[] {
   if (value === undefined || value === null || value === true) return CLAUDE_PARTS;
   if (value === false) return [];
+  // One name written as a string means that one, not everything
+  if (typeof value === 'string') return CLAUDE_PARTS.filter(p => p === value);
   return Array.isArray(value) ? CLAUDE_PARTS.filter(p => value.includes(p)) : CLAUDE_PARTS;
 }
 
