@@ -188,6 +188,8 @@ export class Coordinator {
   private readonly log: (line: string) => void;
   /** One endpoint per machine for proxied requests, kept while in use and a minute after */
   private readonly shared = new Map<string, Promise<SharedEndpoint>>();
+  /** Proxied exchanges open per machine, on whichever endpoint (a retired one still counts) */
+  private readonly inUse = new Map<string, number>();
   /** When each machine last served a proxied request or had an open stream or a working agent */
   private readonly lastBusy = new Map<string, number>();
   /** One ensure per branch at a time: two clients starting the same branch get one machine */
@@ -346,6 +348,7 @@ export class Coordinator {
     }
     const entry = await pending;
     entry.users++;
+    if (use) this.inUse.set(name, (this.inUse.get(name) ?? 0) + 1);
     if (entry.idle) clearTimeout(entry.idle);
     if (use) this.lastBusy.set(name, this.now());
     let done = false;
@@ -357,7 +360,12 @@ export class Coordinator {
         if (done) return;
         done = true;
         entry.users--;
-        if (use) this.lastBusy.set(name, this.now());
+        if (use) {
+          const left = (this.inUse.get(name) ?? 1) - 1;
+          if (left > 0) this.inUse.set(name, left);
+          else this.inUse.delete(name);
+          this.lastBusy.set(name, this.now());
+        }
         // A failed connection takes this endpoint out of use for new requests; the exchanges still
         // on it keep it until they end
         if (failed) this.retire(name, pending!, entry);
@@ -399,7 +407,7 @@ export class Coordinator {
   /** Proxied exchanges open now (a terminal, a build): a coordinator with any must not exit. */
   async openProxies(): Promise<number> {
     let n = 0;
-    for (const pending of this.shared.values()) n += (await pending.catch(() => null))?.users ?? 0;
+    for (const users of this.inUse.values()) n += users;
     return n;
   }
 
@@ -424,8 +432,7 @@ export class Coordinator {
       }
       const now = this.now();
       if (!this.lastBusy.has(machine.name)) this.lastBusy.set(machine.name, now);
-      const entry = await this.shared.get(machine.name)?.catch(() => null);
-      let busy = (entry?.users ?? 0) > 0;
+      let busy = (this.inUse.get(machine.name) ?? 0) > 0;
       const token = this.opts.tokens.get(machine.name);
       if (!busy && token) {
         try {

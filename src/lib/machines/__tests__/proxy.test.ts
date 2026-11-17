@@ -202,6 +202,10 @@ describe('the shared endpoint', () => {
       b.done(true); // B's connection failed
       await Promise.resolve();
       expect(released).toEqual([]); // A is still on tunnel 1
+      // A, on the retired tunnel, still counts: the machine is in use and must not be suspended
+      expect(await coordinator.openProxies()).toBe(1);
+      expect(await coordinator.idleTick(0, async () => false)).toEqual([]);
+      expect(provider.methods()).not.toContain('suspend');
       const c = await coordinator.proxyTarget('kunj-app-a-111111'); // a new request gets a new tunnel
       expect(opened).toBe(2);
       a.done(false);
@@ -216,6 +220,7 @@ describe('the shared endpoint', () => {
       await Promise.resolve();
       await Promise.resolve();
       expect(released).toEqual([1, 2]);
+      expect(await coordinator.openProxies()).toBe(0);
     } finally {
       jest.useRealTimers();
       await coordinator.close();

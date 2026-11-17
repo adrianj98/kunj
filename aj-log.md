@@ -1858,3 +1858,4 @@ The user asked to be able to choose a remote in the app when remotes are availab
   streams, and an old idle timer could close a newer tunnel (endpoints are now retired by identity and released
   when their last user is done); a machine whose serve did not answer was counted as busy forever, so it never
   suspended and the coordinator never exited; the boot timeout message now carries the last error.
+- Verdict pass on those fixes found a gap they opened: a stream on a retired tunnel was invisible to the idle loop and to --idle-exit, so a machine could be suspended under a live stream. Open exchanges are now counted per machine, whichever tunnel they are on.
