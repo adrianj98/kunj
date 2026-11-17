@@ -299,7 +299,8 @@ export class Coordinator {
     if (d.image) return d.image;
     if (req.branch === IMAGE_BUILD_BRANCH) return '';
     try {
-      return (await this.images(req.repo))[0]?.name ?? '';
+      // '' would mean every repository's images (images('') is the Resources listing): never for a boot
+      return req.repo ? ((await this.images(req.repo))[0]?.name ?? '') : '';
     } catch (err) {
       this.log(`could not list golden images, using the stock image: ${(err as Error).message}`);
       return '';
@@ -324,7 +325,9 @@ export class Coordinator {
     const stopped = await this.waitForState(name, 'stopped');
     const stem = name.replace(/-[a-z0-9]+$/, '').slice(0, 40).replace(/-+$/, '');
     const imageName = `${stem}-img-${new Date(this.now()).toISOString().replace(/[^0-9]/g, '').slice(0, 14)}`;
-    const before = await this.images(repo);
+    // Older images of this repository go afterwards. A builder without a repository label has none
+    // to replace: '' would list, and so delete, every repository's images
+    const before = repo ? await this.images(repo) : [];
     this.log(`baking image ${imageName} from ${name}`);
     const image = await this.provider.images.createFrom(stopped, imageName, {
       [MACHINE_LABEL.repo]: repo,

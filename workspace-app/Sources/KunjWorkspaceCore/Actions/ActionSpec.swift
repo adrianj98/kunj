@@ -37,7 +37,10 @@ public func actionPlan(_ action: EnvAction, env: Environment, worktreeOfSameBran
     switch action {
     case .ctStart:
         guard isContainer else { return containerOnly }
-        if env.state == .running { return .disabled(reason: "The container is running") }
+        // A machine that is awake but whose container is not known (no row came back for it) can
+        // still need its container started: Start stays available there
+        let containerUnknown = env.machine != nil && env.containerName == nil
+        if env.state == .running && !containerUnknown { return .disabled(reason: "The container is running") }
         return terminal(["ct", "start", branch] + on)
     case .ctStop:
         guard isContainer else { return containerOnly }
