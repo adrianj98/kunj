@@ -311,7 +311,7 @@ export function attachWebSockets(server: http.Server, opts: StreamOptions): { cl
     const resolver = opts.proxy?.();
     const proxied = resolver ? proxyRoute(url.pathname) : null;
     if (proxied) {
-      resolver!(proxied.name).then(
+      resolver!(proxied.name, !!req.headers[PASSIVE_HEADER]).then(
         target => proxyUpgrade(req, socket, head, target, proxied.path + url.search),
         err => refuseUpgrade(socket, err),
       );

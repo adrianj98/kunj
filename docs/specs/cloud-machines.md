@@ -437,6 +437,10 @@ between machines. A coordinator can therefore keep the caches in a store outside
   modes, so the names of executable files travel beside the data (`<volume>.exec`) and get their bit
   back; other mode bits and ownership do not survive (everything is the sandbox user's after a pull).
 
+Run on `kunj-dev` (2026-11-17): an image baked with the store set (605 s, labelled with the blueprint
+hash) carried the pushed cache, so a new machine from it started the branch in 134 s with `/cache/db`
+already filled and only the difference to pull.
+
 Run on `kunj-dev` (bucket `kunj-dev-kunj-cache`, us-central1): push of a small cache 4 s; a machine
 deleted and made again from the golden image had the pushed files, the symlink and the executable bit
 before `setup` ran; a manual pull removed a local-only file and restored a changed one.
@@ -605,6 +609,14 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   the fallback for a local coordinator whose laptop is shut; the coordinator's loop stays primary.
   The bootstrap passes the flags only when the kunj on the machine knows `--idle-suspend` (a golden
   image baked earlier holds an older kunj, whose serve would not start with them: found on `kunj-dev`).
+- **Looking is not using.** A listing reaches a machine through the proxy marked `x-kunj-passive`
+  (`selectBackend({ listing })`'s `backendFor`): the coordinator's proxy resolver takes it without
+  counting it (`proxyTarget(name, use = false)`), and the machine's own timer ignores it. Found on
+  `kunj-dev`: an open workspace app lists every few seconds, restarted the coordinator and kept the
+  machine awake for 26 minutes past its limit. After the fix, with the app open and
+  `machine.idleMinutes` 1, the coordinator suspended the machine 165 s after it started. The
+  machine-side timer itself is unit tested and installed by the bootstrap, but has not been seen to
+  fire on a real machine: the app restarts the coordinator, whose loop then suspends first.
 - **A machine being created or woken is never idle.** `Coordinator.locate()` counts it in `starting`,
   `idleTick()` treats it as busy, and its quiet spell starts when it is ready (found on `kunj-dev` with
   `machine.idleMinutes` 1: a booting machine was suspended before it had paired).
@@ -616,7 +628,8 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   line and status bar say `machine suspended`, or `machine <size>` when awake. A `machine` event
   refreshes the listing like a container event. `kunj worktree list --containers` carries `machines` too.
 
-Not yet: machines in `kunj ct prune`, the image in `kunj ct blueprint status`.
+`kunj ct prune` does not prune machines; with `machine.provider` set it ends by naming `kunj machine
+prune`. Not yet: the image in `kunj ct blueprint status`.
 
 ## Golden image as built (2026-11-16)
 

@@ -1918,3 +1918,6 @@ The user asked to be able to choose a remote in the app when remotes are availab
   kunj's machine among instances of one Name; a machine that does not answer a listing within 5 s is its own row;
   in-flight requests (a long image build or upload) count as use for the machine's idle timer; the idle timer's busy
   question has a 30 s limit and an unanswered one is not use; `ct stop` on a machine already asleep succeeds.
+- Listings are passive through the coordinator's proxy (`ProxyResolver(name, passive)`, `proxyTarget(name, use)`,
+  `backendFor` with `passive: true`); idle timer needs three unanswered busy checks; `ct prune` names `kunj machine prune`.
+  Why: on `kunj-dev` the open Workspace app's listing kept a machine awake 26 minutes past its idle limit.

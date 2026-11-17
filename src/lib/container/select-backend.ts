@@ -112,7 +112,8 @@ export async function selectBackend(options: SelectOptions): Promise<BackendSele
           provider: backend.machines.provider,
           list: filter => client.list(filter),
           backendFor: async machineName => {
-            const b = new RemoteKunjBackend({ baseUrl, token, name: `${name}/${machineName}`, basePath: `/v1/machines/${machineName}/serve` });
+            // passive: looking at a machine's containers is not using the machine (its idle timers ignore it)
+            const b = new RemoteKunjBackend({ baseUrl, token, name: `${name}/${machineName}`, basePath: `/v1/machines/${machineName}/serve`, passive: true });
             await b.ready();
             return b;
           },

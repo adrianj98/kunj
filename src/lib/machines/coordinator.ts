@@ -424,8 +424,10 @@ export class Coordinator {
    * every request to the machine and closed a minute after the last one; a failed connection drops
    * it, so the next request asks the provider whether the machine is asleep.
    */
-  proxyTarget(name: string): Promise<{ host: string; port: number; token: string; done(failed: boolean): void }> {
-    return this.acquire(name, true);
+  proxyTarget(name: string, use = true): Promise<{ host: string; port: number; token: string; done(failed: boolean): void }> {
+    // A listing (a passive request) goes through like any other but is not someone using the machine:
+    // an open workspace app must not keep every machine awake
+    return this.acquire(name, use);
   }
 
   /** `use` false: the idle loop's own question, which must not count as someone using the machine */

@@ -2166,6 +2166,9 @@ export class ContainerCommand extends BaseCommand {
         const how = options.dryRun ? 'without --dry-run' : 'in a terminal, or with --yes,';
         console.log(chalk.gray(`Dry run: nothing removed. Run kunj ct prune${options.all ? ' --all' : ''} ${how} to remove these.`));
       }
+      // Cloud machines are pruned by their own command: it asks the cloud, which this one never does
+      const machineConfig = runs[0]?.ctx.config.machine;
+      if (typeof machineConfig?.provider === 'string' && machineConfig.provider) console.log(chalk.gray('Cloud machines are not included: kunj machine prune.'));
     } finally {
       if (options.all) {
         process.chdir(startDir);

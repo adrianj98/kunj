@@ -313,7 +313,7 @@ export function createServeServer(opts: ServeOptions): ServeServer {
     if (proxied) {
       client = who;
       try {
-        return proxyHttp(req, res, await proxyResolver!(proxied.name), proxied.path + url.search);
+        return proxyHttp(req, res, await proxyResolver!(proxied.name, !!req.headers[PASSIVE_HEADER]), proxied.path + url.search);
       } catch (err) {
         req.resume();
         return sendError(res, err);

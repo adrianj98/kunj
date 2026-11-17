@@ -321,4 +321,22 @@ describe('idle machines', () => {
     f.advance(61_000);
     expect(await f.coordinator.idleTick(60_000, unreachable)).toEqual([name]);
   });
+
+  it('is not kept awake by listings: an open app that looks every few seconds is not use', async () => {
+    (await select(f, { branch: 'b', wake: true, create: true })).close();
+    const name = [...f.provider.machines.keys()][0];
+    const listing = await selectBackend({ remote: 'cloud', config: {} as KunjConfig, listing: true, remotes: () => ({ url: f.baseUrl, token: CLIENT_TOKEN, addedAt: '' }) });
+    const idle = async () => false;
+    try {
+      expect(await f.coordinator.idleTick(60_000, idle)).toEqual([]);
+      for (let i = 0; i < 4; i++) {
+        f.advance(20_000);
+        // what kunj ct list does for each running machine, through the proxy
+        expect(await (await listing.coordinator!.backendFor(name)).list({})).toEqual([]);
+      }
+      expect(await f.coordinator.idleTick(60_000, idle)).toEqual([name]);
+    } finally {
+      await listing.close();
+    }
+  });
 });

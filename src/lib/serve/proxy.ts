@@ -18,7 +18,8 @@ export interface ProxyTarget {
 }
 
 /** Resolves a machine name to where its serve answers; throws a ServeError (machine-asleep…) */
-export type ProxyResolver = (name: string) => Promise<ProxyTarget>;
+/** `passive`: the caller only looks (a listing, x-kunj-passive), which must not count as use of the machine */
+export type ProxyResolver = (name: string, passive?: boolean) => Promise<ProxyTarget>;
 
 const PROXY_PATH = /^\/v1\/machines\/([a-z][-a-z0-9]{0,62})\/serve(\/v1\/.*)$/;
 
