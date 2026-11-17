@@ -17,9 +17,9 @@ led here is [google-cloud-containers.md](google-cloud-containers.md).
 | --- | --- |
 | Spec | Written 2026-11-16; coordinator architecture and local auto-start adopted the same day (see Decisions) |
 | Phase 0: one VM by hand with `kunj serve`, reached through an IAP tunnel | Done 2026-11-16 on project `kunj-dev`, VM `kunj-box` (e2-standard-2, Ubuntu 24.04, kernel 7.0, Docker 29.10, no external IP, Cloud NAT, IAP): `kunj remote ping` 1.4 s through the IAP ssh ProxyCommand; first `ct start` 303 s including the sandbox images and the blueprint snapshot; `ct exec` 3.3 s; metadata server blocked from the container, npm reachable; suspend 60 s, usable 18 s after resume with the container and a running process intact. `shell`/`agent` (interactive) and Sysbox not tried yet |
-| Bootstrap script, `machine.image`/`kunjPackage`/`bootstrap`, nonce pairing | Shipped 2026-11-16 (883805e); unit-tested, `bash -n` checked; not yet run on a real machine |
+| Bootstrap script, `machine.image`/`kunjPackage`/`bootstrap`, nonce pairing | Shipped 2026-11-16 (883805e, f3e7e3b, and the tunnel retry in the commit after). Run on `kunj-dev`: `kunj machine create` from stock Ubuntu to a paired machine in 234 s (the script itself 3 min 19 s); suspend 156 s, resume to an answering serve 23 s |
 | Phase 1: `MachineProvider`, `FakeProvider`, `GceProvider`; `kunj serve --machines` (routes, per-client tokens, pairing); local auto-start; `kunj machine` | Shipped 2026-11-16 (924d4ae, 8423238, a2856bc); unit-tested, and the local coordinator smoke-tested against the real `gcloud` without a project login. No machine has been created on a real project yet |
-| Phase 2: containers through the coordinator (`/v1/machines/<name>/…` proxy), `kunj ct` on machines, wake on act, idle loop, events | Not started |
+| Phase 2: containers through the coordinator (`/v1/machines/<name>/serve/…` proxy), `kunj ct` on machines, wake on act, idle loop | Shipped 2026-11-16 (2ce7433). Run on `kunj-dev` with the local coordinator: `kunj ct start --remote machines` woke the suspended machine and created the container in 363 s (images and snapshot built on the machine); `ct exec` 3 s; `ct exec` on a suspended machine woke it and ran in 20 s; `ct stop` did not wake it. Left: machines in `ct list` and `kunj events`, machine prune, the delete on `ct remove`, hooks, the idle loop on a real machine (unit-tested only), `shell`/`agent` through the proxy by hand |
 | Phase 3: golden image build, `container.caches`, registry copy | Not started |
 | Phase 4: a second provider (EC2) to prove the seam; workspace app rows and Wake | Not started |
 
@@ -253,7 +253,7 @@ remote-containers spec deferred.
 | `POST /v1/machines/locate` `{ repo, branch, wake, create?, size? }` | Finds the branch's machine; with `wake`, resumes or starts it and waits for its serve; with `create`, makes one from the newest golden image when there is none. Returns `{ machine, state }` or `machine-asleep` / `machine-not-found` |
 | `POST /v1/machines/<name>/suspend|resume|stop|start`, `DELETE /v1/machines/<name>?disks=1` | Explicit control |
 | `POST /v1/machines/prune` `{ repo, gone: [branches], dryRun }` | The machine part of `ct prune`; the client computes `gone` from its own `ls-remote`, as today |
-| `/v1/machines/<name>/<any serve route>` | Proxy to the machine's serve, WebSockets included; `503 machine-asleep` when it is not running |
+| `/v1/machines/<name>/serve/v1/<any serve route>` | Proxy to the machine's serve, WebSockets included; `machine-asleep` when it is not running |
 | `GET /v1/machines/images`, `POST /v1/machines/images/build`, `DELETE …` | Golden images |
 | `GET /v1/info` | Adds `features.machines: true`, the provider name, its features and `network` |
 
@@ -452,14 +452,26 @@ cloud CLI is not installed or not logged in on the coordinator's host), `coordin
 | Settings, JSON | src/settings/machine.ts; `MachineJson`, `MachineListJson`, `MachineJsonResult`, `MachineProvidersJson`, `CoordinatorStatusJson` in json-types.ts |
 | Tests | src/lib/machines/__tests__ (conformance for FakeProvider and GceProvider over a simulated gcloud, coordinator, local coordinator), src/lib/serve/__tests__/clients.test.ts, src/commands/__tests__/{machine,serve-machines}.test.ts |
 
-Added 2026-11-16 after phase 0 and the review (883805e, f7608bd): the bootstrap script, `machine.image`,
-`machine.kunjPackage`, `machine.bootstrap`, pairing repeatable by nonce, and a live machine's token kept
-when a create is refused. `kunj machine create` from stock Ubuntu has not been run on a real project yet
-(the session that wrote it was not allowed to create a second billed VM unasked).
+Added 2026-11-16 after phase 0 and the reviews: the bootstrap script, `machine.image`,
+`machine.kunjPackage`, `machine.bootstrap`, pairing repeatable by nonce, a live machine's token kept when a
+create is refused, and `Coordinator.poll()`: the endpoint is opened inside the retry loop, because the
+first real create failed on a tunnel opened before the machine's port was listening (gcloud tests the
+port and exits). `machine.bootTimeoutMs` defaults to 10 minutes.
 
-Not yet: the proxy to a machine's serve and `kunj ct` on machines, the idle loop and machine
-self-suspend timer (`machine.idleMinutes` is registered but unused), prune, golden image build, the cache
-volume.
+### Phase 2 as built (2026-11-16)
+
+| Piece | Where |
+| --- | --- |
+| Proxy | src/lib/serve/proxy.ts: `/v1/machines/<name>/serve/v1/<route>` goes to that machine's serve as `/v1/<route>`; http piped with the hop-by-hop and authorization headers dropped and the machine's token set; an upgrade is passed as raw bytes over a TCP connection (frames are never parsed). The path has `serve/` in it so it cannot collide with `/v1/machines/<name>/suspend` and friends. Registered through `ServeExtension.proxy()`; streams.ts asks it before its own WebSocket routes |
+| Shared endpoint | `Coordinator.proxyTarget()`: one endpoint (an IAP tunnel, from a laptop) per machine, opened by the first request, shared, closed a minute after the last or at once after a failed connection; `machine-asleep` when the provider says the machine is not running; dropped on suspend, stop and delete |
+| Client | `RemoteKunjBackend` `basePath`; `selectBackend()` with `machine: { repo, repoName, branch, wake, create, size }`: a remote whose `/v1/info` has `machines` is a coordinator, the branch's machine is located and the backend rooted at its path. `--remote machines` / `container.remote=machines` is this machine's own coordinator (`LOCAL_MACHINES`); `local` and `machines` cannot name a remote |
+| Intent | `ContainerCommand.intentOf()` (src/commands/container.ts): `start` creates and wakes; `shell`, `exec`, `agent`, `attach`, `open`, `mcp`, `logs`, `forward`, `file`, `remove` wake; `stop` does not; `list`, `prune`, `blueprint`, `token` have no branch and are refused on a coordinator for now. `ct start --size` |
+| Idle loop | `Coordinator.idleTick()` every minute in `kunj serve --machines`, asking each awake machine through src/lib/machines/idle.ts (`STATUS_SCRIPT` over the machine's serve): suspended after `machine.idleMinutes` with no proxied request, no open stream and no agent in the `running` state; a machine that cannot be asked is busy. The loop's own question does not count as use. `--idle-exit` does not end a coordinator while a proxy is open or a machine is awake |
+| Tests | src/lib/machines/__tests__/proxy.test.ts: a coordinator serve in front of a machine serve, both in process (unary, WebSocket exec, streamed upload, one shared tunnel, tokens never crossing, wake rules, idle rules) |
+
+Not yet: machines in `ct list`/`kunj events`/the apps, machine prune and the delete on `ct remove`, the
+machine hooks, the self-suspend timer on the machine (so with a local coordinator a machine sleeps only
+while that coordinator runs, which `--idle-exit` now waits for), golden image build, the cache volume.
 
 ## Decisions
 

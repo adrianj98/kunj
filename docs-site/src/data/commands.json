@@ -379,8 +379,13 @@
         "default": null
       },
       {
+        "flags": "--size <size>",
+        "description": "[start] On cloud machines: the size of a new machine (small, medium, large or a provider shape; default machine.size)",
+        "default": null
+      },
+      {
         "flags": "--remote <name>",
-        "description": "Run on this kunj serve remote (kunj remote add; default: container.remote); \"local\" forces this machine's Docker",
+        "description": "Run on this kunj serve remote (kunj remote add; default: container.remote); \"local\" forces this machine's Docker, \"machines\" uses this machine's cloud machine coordinator (machine.provider)",
         "default": null
       },
       {

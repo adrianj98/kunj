@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-16 (cloud machines phase 2)
+* `containers/cloud-machines.md`: the proxy, `kunj ct` on a branch's machine and the idle loop, as shipped.
+
 ## 2026-11-16 (bootstrap and nonce pairing)
 * `containers/cloud-machines.md`: the bootstrap script row and pairing by nonce.
 

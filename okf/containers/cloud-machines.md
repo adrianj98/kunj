@@ -1,7 +1,7 @@
 ---
 type: Container
 title: Cloud Machines
-description: A small cloud VM per branch session behind a coordinator (kunj serve --machines, auto-started locally or always-on in the cloud) that drives a pluggable MachineProvider, Google Cloud first. Phase 1 shipped; containers on machines are phase 2.
+description: A small cloud VM per branch session behind a coordinator (kunj serve --machines, auto-started locally or always-on in the cloud) that drives a pluggable MachineProvider, Google Cloud first. Phases 0 to 2 shipped and run on a real project.
 resource: src/lib/machines/coordinator.ts
 tags: [container, remote, serve, machines, provider, google-cloud]
 timestamp: 2026-11-16T00:00:00Z
@@ -27,7 +27,10 @@ the **provider** it drives.
 | Routes | src/lib/serve/machines.ts | `kunj serve --machines` adds `/v1/machines` (list, providers, locate, suspend, resume, stop, start, delete) through `createServeServer`'s `extend` hook, and `machines` in `/v1/info` |
 | Local auto-start | src/lib/machines/local-coordinator.ts, config.ts | With `machine.provider` set here, kunj spawns `kunj serve --machines --listen 127.0.0.1:0 --idle-exit <min>` detached from the home directory; the server writes `~/.kunj/coordinator/coordinator.json` (pid, port) and removes it on exit; `resolveCoordinator()` prefers `--remote`/`container.remote` when that remote coordinates machines |
 | Client, command | src/lib/machines/client.ts, src/commands/machine.ts | `MachineClient` over the routes; `kunj machine list|status|create|suspend|resume|stop|start|delete|providers|coordinator` (fast path) |
-| Not yet | — | The proxy `/v1/machines/<name>/…` and `kunj ct` on machines, the idle loop, self-suspend timer, prune, golden images, `container.caches` |
+| Proxy | src/lib/serve/proxy.ts | `/v1/machines/<name>/serve/v1/<route>` to that machine's serve: http piped with the machine's token in place of the client's, upgrades as raw bytes; `Coordinator.proxyTarget()` shares one endpoint per machine, closes it a minute after the last use, answers `machine-asleep` |
+| `kunj ct` on machines | src/lib/container/select-backend.ts, src/commands/container.ts | A remote reporting `machines` (or `--remote machines`, the local coordinator) is a coordinator: `intentOf()` gives the command's branch and whether it creates (`start`), wakes (acting commands) or never wakes (`stop`); the backend is a `RemoteKunjBackend` with `basePath` |
+| Idle loop | `Coordinator.idleTick()`, src/lib/machines/idle.ts | Every minute: suspend after `machine.idleMinutes` with no proxied request, open stream or agent in the `running` state |
+| Not yet | — | Machines in `ct list` and `kunj events`, machine prune, hooks, the machine-side self-suspend timer, golden images, `container.caches` |
 
 # Blueprint to image
 

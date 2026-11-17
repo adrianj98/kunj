@@ -1844,3 +1844,13 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - Not done: the real `kunj machine create` on `kunj-dev`. The permission check refused changing the global
   config and creating a second billed VM without being asked; left in the tracker under Waiting on you.
 - Second review round: the bootstrap fetched a GitHub ref with `git clone --branch`, which fails for a commit; now `git fetch` + checkout, checked against GitHub for a branch and a commit. Why: `machine.kunjPackage` accepts a commit, and a failed clone left the machine unable to ever pair.
+- First real `kunj machine create` (run by the user) left a machine that never paired. Cause: the coordinator
+  opened its IAP tunnel once, before the machine's port was listening; gcloud exits then, and that ended
+  the create. Fix: `Coordinator.poll()` opens the endpoint inside the retry loop; boot timeout 10 minutes.
+  The failed machine was deleted at the user's request after saving its serial log.
+- Phase 2: the coordinator's proxy, `kunj ct … --remote machines`, wake on acting commands, the idle loop.
+  Why: this is what makes a machine usable day to day. Run on `kunj-dev`: create 234 s, `ct start` 363 s,
+  `ct exec` 3 s, exec on a suspended machine 20 s.
+- Global kunj config on this Mac now has `machine.provider=gce`, `machine.gce` (project `kunj-dev`, zone
+  us-central1-a) and `machine.selfSuspend=false` (set by the user). The machine for
+  `feature/charming-darwin-nmp9sg` is left suspended; `kunj-box` is suspended.

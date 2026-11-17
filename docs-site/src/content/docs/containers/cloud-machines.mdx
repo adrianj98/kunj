@@ -8,11 +8,10 @@ sidebar:
 import { Aside, Steps } from '@astrojs/starlight/components';
 
 <Aside type="caution" title="Preview">
-This is the first part of [cloud machines](https://github.com/adrianj98/kunj/blob/main/docs/specs/cloud-machines.md):
-kunj can create, list, suspend, resume and delete one machine per branch and pair with the `kunj serve`
-on it. Starting a branch container on its machine with `kunj ct start` is the next step and does not
-work yet; until then, run containers on a machine you set up yourself with
-[remote containers](/kunj/docs/containers/remote/).
+Cloud machines work end to end on Google Cloud, but are new: `kunj ct list`, `kunj events` and the apps
+do not show machines yet (use `kunj machine list`), and a first start on a new machine takes several
+minutes because it installs Docker and builds the images there. Design and status:
+[cloud-machines.md](https://github.com/adrianj98/kunj/blob/main/docs/specs/cloud-machines.md).
 </Aside>
 
 A cloud machine is a small VM (8 GB by default) that runs Docker and `kunj serve` for one branch.
@@ -75,6 +74,29 @@ a few minutes; the log is `/var/log/kunj-bootstrap.log` on the machine. `machine
 kunj it installs (`kunj@1.4.0`, or `github:owner/repo#ref` to build a branch), and `machine.image` names
 an image of your own that already has everything, which starts in seconds.
 
+## Run a branch on its machine
+
+Name the coordinator with `--remote`: `machines` is the one kunj starts on this machine.
+
+```bash
+kunj ct start feature/search --remote machines   # makes or wakes the machine, then the container
+kunj ct agent feature/search --remote machines
+kunj ct shell feature/search --remote machines
+kunj ct exec feature/search --remote machines -- npm test
+```
+
+`start` creates the branch's machine when there is none (`--size large` for a bigger one). Commands
+that act wake a sleeping machine, which takes about 20 seconds; `stop` and listings never do. To make
+it the default for a repository:
+
+```bash
+kunj config --set container.remote=machines
+```
+
+A machine goes to sleep by itself after `machine.idleMinutes` (30) with no command, no open terminal
+and no agent working. Its memory is kept, so the container, its tmux sessions and a waiting agent are
+there when it wakes.
+
 ## Commands
 
 ```bash
@@ -119,7 +141,6 @@ kunj remote add cloud --url http://127.0.0.1:7433 --token-stdin   # through an I
 kunj machine --remote cloud
 ```
 
-Do not set `container.remote` to a coordinator yet: `kunj ct` does not place containers on machines
-until the next step ships, and would fail there.
+`kunj ct … --remote cloud` then runs a branch on its machine through that coordinator.
 
 `kunj serve token list --machines` shows the clients, never their tokens; `token remove` revokes one.

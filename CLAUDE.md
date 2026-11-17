@@ -473,19 +473,24 @@ remote, in parallel: `remote` on each container, `backends` with who answered, a
 `collectList()`, docs/specs/multi-remote-containers.md; branch commands still use the default backend only); detached forwarders and bridges get `--remote`. Tests: `npm run test:remote`
 runs the container suites over the wire (`testBackend()` in remote-harness.ts; `itLocal` for the few that
 compare stream objects); `remote.docker.test.ts` needs a real daemon.
-**Cloud machines** (docs/specs/cloud-machines.md; phase 1 built, `kunj ct` on machines is phase 2): a small VM per
-branch session running Docker and `kunj serve`, behind a **coordinator**, `kunj serve --machines` (src/lib/serve/machines.ts
-over `Coordinator` in src/lib/machines/coordinator.ts), which alone talks to the cloud through a pluggable `MachineProvider`
-(src/lib/machines/provider.ts; providers registered by name in providers/index.ts, `gce.ts` first, notes in
-docs/specs/google-cloud-containers.md). Only a provider module spawns its cloud CLI (argv, cli.ts). Cloud labels are the
-only machine state; GCE keeps the exact labels in instance metadata `kunj-labels` because its label values cannot hold a
-branch. kunj auto-starts a local coordinator on loopback when `machine.provider` is set here
-(src/lib/machines/local-coordinator.ts: detached, `--idle-exit`, `~/.kunj/coordinator/{token,tokens.json,
-machine-tokens.json,coordinator.json,serve.log}`), or a remote named by `--remote`/`container.remote` that reports
-`machines` in `/v1/info` is used. `kunj serve` accepts named client tokens (`token add|list|remove`) and, with
-`--allow-pairing`, hands one coordinator a token on a machine's first boot (`POST /v1/pair`). Listings never wake a
-machine; `create`/`wake` locate one per branch at a time. Tests: `FakeProvider` and a conformance suite that every
-provider runs (GceProvider over a simulated gcloud).
+**Cloud machines** (docs/specs/cloud-machines.md; phases 0–2 built and run on a real Google Cloud project): a small VM
+per branch session running Docker and `kunj serve`, behind a **coordinator**, `kunj serve --machines`
+(src/lib/serve/machines.ts over `Coordinator` in src/lib/machines/coordinator.ts), which alone talks to the cloud through a
+pluggable `MachineProvider` (src/lib/machines/provider.ts; providers by name in providers/index.ts, `gce.ts` first; only a
+provider module spawns its cloud CLI, argv only). Cloud labels are the only machine state (GCE keeps the exact ones in
+instance metadata `kunj-labels`). A new machine runs the startup script of src/lib/machines/bootstrap.ts (Docker, Node,
+`machine.kunjPackage`, the `kunj-serve` unit with `--allow-pairing`); the coordinator pairs once (`POST /v1/pair` with a
+nonce, repeatable for that nonce) and keeps the token in `~/.kunj/coordinator/machine-tokens.json`. Its retry loops open the
+endpoint inside the loop (`poll()`): a tunnel to a port that is not listening yet is "not yet", not an error. The
+coordinator proxies `/v1/machines/<name>/serve/v1/…` to that machine's serve (src/lib/serve/proxy.ts: http piped, upgrades
+as raw bytes, one shared endpoint per machine), and `selectBackend()` roots a `RemoteKunjBackend` (`basePath`) there after
+locating the command's branch machine: `ContainerCommand.intentOf()` says which commands create (`start`), wake (acting
+ones) or never wake (`stop`, listings). `--remote machines` is this machine's own coordinator, which kunj starts on loopback
+when `machine.provider` is set (src/lib/machines/local-coordinator.ts, `--idle-exit`, never while a proxy is open or a
+machine is awake). `Coordinator.idleTick()` suspends a machine after `machine.idleMinutes` with no proxied request, open
+stream or running agent (src/lib/machines/idle.ts). `kunj serve` takes named client tokens (`token add|list|remove`).
+Tests: `FakeProvider`, a conformance suite every provider runs, and proxy.test.ts (a coordinator serve in front of a
+machine serve, in process).
 
 ## Repository Registry & macOS App
 
