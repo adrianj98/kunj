@@ -277,7 +277,8 @@ export class MachineCommand extends BaseCommand {
       // The builder is only ever a means: never left running, whatever failed
       process.removeListener('SIGINT', onSignal);
       process.removeListener('SIGTERM', onSignal);
-      const name = machine?.name;
+      // A create that failed after the VM existed returned no machine: found by its branch
+      const name = machine?.name ?? (await client.locate({ ...builder, wake: false, create: false }).then(r => r.machine.name, () => undefined));
       if (name) await client.delete(name, { disks: true }).catch(err => console.error(chalk.yellow(`could not delete the builder ${name}: ${(err as Error).message}`)));
     }
     const seconds = Math.round((Date.now() - started) / 1000);

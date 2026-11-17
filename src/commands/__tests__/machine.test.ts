@@ -155,6 +155,16 @@ describe('kunj machine', () => {
 
   it('makes no image and deletes the builder when the snapshot fails', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
+    // also a builder whose create failed after the VM existed
+    const locate = client.locate.bind(client);
+    jest.spyOn(client, 'locate').mockImplementation(async body => {
+      const r = await locate(body);
+      if (body.create) throw new Error('serve never answered');
+      return r;
+    });
+    await expect(cmd({ snapshot: async () => 0 }).execute('image', 'build', { json: true })).rejects.toThrow(/never answered/);
+    expect(provider.machines.size).toBe(0);
+    jest.mocked(client.locate).mockRestore();
     await expect(cmd({ snapshot: async () => 3 }).execute('image', 'build', { json: true })).rejects.toThrow(/--no-snapshot/);
     expect(provider.images_.size).toBe(0);
     expect(provider.machines.size).toBe(0);
