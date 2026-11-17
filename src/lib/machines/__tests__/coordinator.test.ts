@@ -3,7 +3,7 @@ import { FakeBackend } from '../../container/__tests__/fake-backend';
 import { ServeServer, createServeServer } from '../../serve/server';
 import { machineRoutes } from '../../serve/machines';
 import { Coordinator, CoordinatorOptions, ServeCaller, memoryTokenStore } from '../coordinator';
-import { machineLabels, machineName } from '../provider';
+import { MachineError, machineLabels, machineName } from '../provider';
 import { FakeProvider } from './fake-provider';
 
 const REPO = 'github.com/acme/app';
@@ -128,6 +128,18 @@ describe('Coordinator', () => {
     await expect(ok.coordinator.locate({ repo: REPO, repoName: 'app', branch: 'q', wake: true })).rejects.toMatchObject({ code: 'machine-token' });
     expect(ok.tokens.all.has(machine.name)).toBe(false);
     expect(tokens.all.size).toBe(0);
+  });
+
+  it('keeps a live machine\'s token when a create is refused because the name exists', async () => {
+    const { provider, tokens, coordinator } = setup();
+    const name = machineName('app', REPO, 'raced');
+    tokens.set(name, 'token-of-the-live-machine');
+    // another coordinator created it between this one's find and its create
+    provider.create = async () => {
+      throw new MachineError(`A machine named ${name} already exists.`, 'machine-exists');
+    };
+    await expect(coordinator.locate({ repo: REPO, repoName: 'app', branch: 'raced', create: true })).rejects.toMatchObject({ code: 'machine-exists' });
+    expect(tokens.all.get(name)).toBe('token-of-the-live-machine');
   });
 
   it('times out on a machine that never answers', async () => {

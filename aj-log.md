@@ -1836,3 +1836,4 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - Started `feature/charming-darwin-nmp9sg` in a container on the VM and left it and the VM running for
   the interactive tests (`ct shell`, `ct agent`).
 - Docs only: phase 0 results in the specs, tracker and okf log. No code changed.
+- Adversarial review of the phase 1 code: one confirmed finding fixed (the coordinator deleted a machine's stored token before a create that can be refused with `machine-exists`, which would have stranded a live machine; now deleted only after the create succeeds, with a test). Four plausible ones are in the tracker.

@@ -242,9 +242,11 @@ export class Coordinator {
       [MACHINE_LABEL.owner]: req.owner ?? '',
     });
     this.log(`creating machine ${name} for ${req.branch}`);
-    // A token left from an earlier machine of the same name would never match the new one
-    this.opts.tokens.delete(name);
     let machine = await this.provider.create({ name, labels, size: req.size || d.size, image: '', diskGb: d.diskGb, spot: d.spot, selfSuspend: d.selfSuspend });
+    // A token left from an earlier machine of the same name would never match the new one. Only
+    // after the create succeeded: a create refused with machine-exists (another coordinator made
+    // it meanwhile) must leave that live machine's token alone
+    this.opts.tokens.delete(name);
     machine = await this.waitForState(machine.name, 'running');
     await this.pair(machine);
     await this.ready(machine);
