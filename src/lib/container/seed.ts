@@ -281,6 +281,12 @@ export function seedScript(input: SeedInput): string {
     lines.push(
       `if command -v git-lfs >/dev/null 2>&1 && [ -n "$(git lfs ls-files 2>/dev/null | head -n 1)" ]; then GIT_LFS_SKIP_SMUDGE=0 git lfs pull || echo 'kunj: git lfs pull failed; run it in the container' >&2; fi`
     );
+    // The copy also carries the snapshot's own local branch (the default branch, at the snapshot's
+    // commit). Nobody made it here, and with its remote-tracking ref dropped above the remove guard
+    // would count it as unpushed work: a fresh copy keeps only the branch it is for.
+    lines.push(
+      `if [ -f ${SEED_FRESH} ]; then git for-each-ref --format='%(refname)' refs/heads | grep -vxF ${q(`refs/heads/${input.branch}`)} | while read -r r; do git update-ref --no-deref -d "$r"; done; fi`
+    );
     lines.push(`rm -f ${SEED_FRESH}`);
   }
   for (const name of input.seedFrom ? [SEED_MARKER_EXCLUDE, SEED_COPYING, SEED_FRESH] : [SEED_MARKER_EXCLUDE]) {

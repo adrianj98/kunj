@@ -414,9 +414,11 @@ between machines. A coordinator can therefore keep the caches in a store outside
 - **Pull** makes the volume equal to the store; it runs in `startContainer` for a new container (and the
   snapshot build) after the volumes exist and before the branch container, so `setup` and `maintain` see
   it, and then the cache is chowned recursively. A store nothing was pushed to (`rclone lsf` empty or
-  exit 3) leaves the volume as the image made it. A failed pull is a warning, never a failed start.
+  exit 3, with the store's own root listing) leaves the volume as the image made it; a store that cannot
+  be listed is a failure. What a pull wrote is handed to the owner of the cache's top directory. A failed pull is a warning, never a failed start.
 - **Push** makes the store equal to the volume: `kunj ct cache push [branch]`, never automatic, so the
-  newest push wins and it is always a person's choice. `kunj ct cache pull` repeats the pull by hand;
+  newest push wins and it is always a person's choice. An empty cache is not pushed without `--force`
+  (a machine whose pull failed would otherwise empty the store for everyone). `kunj ct cache pull` repeats the pull by hand;
   `kunj ct cache status` lists the caches and the store (`ContainerCacheJson`, `ContainerCacheSyncJson`).
 - **What survives the store:** file contents, times and symlinks (`--links`). An object store keeps no
   modes, so the names of executable files travel beside the data (`<volume>.exec`) and get their bit

@@ -141,3 +141,4 @@
 - `container.caches`: per-repository cache volumes in every new branch container and the snapshot build (`KUNJ_CACHE_DIR`). Page updated: containers/lifecycle.md.
 - `kunj ct remove` on a cloud machine deletes the machine after the container (`BackendSelection.machine`). Page updated: containers/cloud-machines.md.
 - Cache store for cloud machines: `machine.cache` (a bucket per coordinator), `MachineProvider.cacheSync()`, `syncCaches()`, `kunj ct cache status|pull|push`. Pages updated: containers/cloud-machines.md, containers/lifecycle.md.
+- Seed: a fresh snapshot copy keeps only the container's own local branch (fixes a false `unpushed commits on main` from the remove guard). Cache sync: no push of an empty cache without `--force`. Pages updated: none (behaviour notes in the spec).

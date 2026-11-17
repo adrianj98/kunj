@@ -1615,15 +1615,8 @@ export class ContainerCommand extends BaseCommand {
       repoId: ctx.repo.id,
       kunjVersion: getVersion(),
       log: line => this.progress(chalk.gray(line)),
+      force: !!options.force,
     });
-    // What was pulled belongs to root: handed to the branch's user, through its container when it runs
-    if (direction === 'pull' && results.some(r => r.action === 'pulled')) {
-      const main = await this.findMain(ctx, branch);
-      const user = main ? this.userOf(main) : '';
-      if (main?.state === 'running' && user) {
-        await ctx.backend.exec(main.id, ['chown', '-R', user, ...caches.map(c => c.path)], { user: 'root' }).catch(err => this.warn(`could not hand the caches to ${user}: ${(err as Error).message}`));
-      }
-    }
     const failed = results.filter(r => r.action === 'failed');
     if (this.jsonMode) {
       this.outputJSON({ success: failed.length === 0, branch, direction, store: { kind: 'bucket', location: ctx.cacheStore.display }, caches: results } satisfies ContainerCacheSyncJson);

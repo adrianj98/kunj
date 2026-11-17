@@ -1894,3 +1894,8 @@ The user asked to be able to choose a remote in the app when remotes are availab
   status|pull|push`, executable bits carried in `<volume>.exec`. Why: the user pointed out that a cache that only
   comes from the machine image is a snapshot, chose the bucket option, and asked that each remote be configurable.
   Created on `kunj-dev`: bucket `kunj-dev-kunj-cache`, service account `kunj-machine` (object admin on that bucket).
+- Cache store review fixes: an empty cache is not pushed without `--force`; a pull hands files to the owner of the
+  cache directory (inside the sync container, so it also works while the branch container is stopped); a store
+  that cannot be listed is a failure, not "empty". Why: adversarial review of the cache store diff.
+- Seed: a fresh snapshot copy drops every local branch except the container's own. Why: `kunj ct remove` refused
+  twice on real machines with "unpushed commits on main", which was the snapshot's leftover branch.

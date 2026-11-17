@@ -122,7 +122,7 @@ export async function syncCaches(
   store: CacheStore,
   caches: CacheMount[],
   direction: CacheSyncDirection,
-  opts: { repoId: string; kunjVersion: string; log?: (line: string) => void },
+  opts: { repoId: string; kunjVersion: string; log?: (line: string) => void; /** push: also when the volume is empty, which empties the store */ force?: boolean },
 ): Promise<CacheSyncResult[]> {
   if (!caches.length) return [];
   if (!REMOTE.test(store.remote) || store.remote.includes('..')) throw new ContainerError(`The cache store ${store.display} is not one kunj can copy to.`, 'bad-config');
@@ -154,11 +154,23 @@ export async function syncCaches(
           // A folder nothing was pushed to: rclone exits 3 (directory not found) or lists nothing
           const listed = await run(['lsf', '--max-depth', '1', remote]);
           if (listed.exitCode === 3 || (listed.exitCode === 0 && !listed.stdout.trim())) {
-            results.push({ name: c.name, action: 'empty' });
+            // "Not found" is also what a bucket that does not exist says: the store's own root must list
+            const root = await run(['lsf', '--max-depth', '1', store.remote.replace(/^(:[a-z0-9]+:[^/]+).*$/, '$1')]);
+            if (root.exitCode !== 0) results.push({ name: c.name, action: 'failed', message: lastLine(root.stderr) || `${store.display} cannot be listed` });
+            else results.push({ name: c.name, action: 'empty' });
             continue;
           }
           if (listed.exitCode !== 0) {
             results.push({ name: c.name, action: 'failed', message: lastLine(listed.stderr) || `rclone exit ${listed.exitCode}` });
+            continue;
+          }
+        }
+        if (direction === 'push' && !opts.force) {
+          // A push mirrors: from a volume that was never filled (a failed pull, a new machine) it
+          // would delete what the other machines pushed
+          const mine = await run(['lsf', '--max-depth', '1', local]);
+          if (mine.exitCode === 0 && !mine.stdout.trim()) {
+            results.push({ name: c.name, action: 'failed', message: 'this cache is empty here, so nothing was pushed (--force empties the store too)' });
             continue;
           }
         }
@@ -169,9 +181,10 @@ export async function syncCaches(
           results.push({ name: c.name, action: 'failed', message: lastLine(r.stderr) || `rclone exit ${r.exitCode}` });
           continue;
         }
-        // An object store keeps no file modes: the names of the executable files travel beside the
+        // What rclone wrote is root's: handed to whoever owns the cache (the sandbox user, once a
+        // container has started with it). An object store keeps no file modes: the names of the executable files travel beside the
         // data (<volume>.exec, NUL-separated) and get their bit back after a pull. Best effort.
-        const script = direction === 'pull' ? 'cd "$1" && rclone cat "$2" 2>/dev/null | xargs -0 -r chmod +x' : 'cd "$1" && find . -type f -perm -u+x -print0 | rclone rcat "$2"';
+        const script = direction === 'pull' ? 'cd "$1" && chown -R "$(stat -c %u:%g .)" . ; rclone cat "$2" 2>/dev/null | xargs -0 -r chmod +x' : 'cd "$1" && find . -type f -perm -u+x -print0 | rclone rcat "$2"';
         const modes = await backend.exec(id, ['sh', '-c', script, 'sh', local, `${remote}.exec`], { user: 'root' }).catch(() => ({ exitCode: 1 }));
         if (modes.exitCode !== 0 && direction === 'push') opts.log?.(`cache ${c.name}: the list of executable files was not stored; they come back without the executable bit`);
         results.push({ name: c.name, action: direction === 'pull' ? 'pulled' : 'pushed' });

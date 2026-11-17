@@ -283,7 +283,7 @@ describe('seedScript', () => {
   });
 
   it('a snapshot copy drops stale remote-tracking refs before checkout (all but the base)', () => {
-    const drop = (s: string) => s.split('\n').find(l => l.includes('for-each-ref'))!;
+    const drop = (s: string) => s.split('\n').find(l => l.includes('for-each-ref') && l.includes('refs/remotes/origin'))!;
     const existing = seedScript({ ...base, seedFrom: '/opt/kunj/seed' });
     expect(drop(existing)).toContain('if [ -f .kunj-fresh ]');
     expect(drop(existing)).toContain("grep -vxF ''");
@@ -292,6 +292,13 @@ describe('seedScript', () => {
     const created = seedScript({ ...base, create: true, base: 'main', seedFrom: '/opt/kunj/seed' });
     expect(drop(created)).toContain("grep -vxF 'refs/remotes/origin/main'");
     expect(created.indexOf('for-each-ref')).toBeLessThan(created.indexOf('git switch'));
+    // the snapshot's own local branch goes too, once the copy is on its branch: the remove guard
+    // would read it as unpushed work
+    const heads = existing.split('\n').find(l => l.includes('for-each-ref') && l.includes('refs/heads'))!;
+    expect(heads).toContain('if [ -f .kunj-fresh ]');
+    expect(heads).toContain(`grep -vxF 'refs/heads/${base.branch}'`);
+    expect(existing.indexOf(heads)).toBeGreaterThan(existing.indexOf('git switch -C'));
+    expect(existing.indexOf(heads)).toBeLessThan(existing.indexOf('rm -f .kunj-fresh'));
     // other paths have nothing stale to drop
     expect(seedScript(base)).not.toContain('for-each-ref');
     expect(seedScript({ ...base, bundlePath: '/tmp/o.bundle' })).not.toContain('for-each-ref');

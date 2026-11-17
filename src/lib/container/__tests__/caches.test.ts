@@ -51,7 +51,7 @@ describe('syncCaches', () => {
     expect(spec.capabilities).toBeUndefined();
     expect(execs(b)).toContain(`rclone sync :gcs:my-bucket/team/${caches[0].volume} /caches/db --links --transfers 8 --retries 2`);
     // executable bits come back from the list stored beside the data
-    expect(execs(b)).toContain(`sh -c cd "$1" && rclone cat "$2" 2>/dev/null | xargs -0 -r chmod +x sh /caches/db :gcs:my-bucket/team/${caches[0].volume}.exec`);
+    expect(execs(b)).toContain(`sh -c cd "$1" && chown -R "$(stat -c %u:%g .)" . ; rclone cat "$2" 2>/dev/null | xargs -0 -r chmod +x sh /caches/db :gcs:my-bucket/team/${caches[0].volume}.exec`);
     expect(b.callsOf('remove')).toHaveLength(1);
   });
 
@@ -60,11 +60,20 @@ describe('syncCaches', () => {
     b.execHandler = (_id, cmd) => (cmd[1] === 'lsf' ? Promise.resolve(cmd[4].endsWith(caches[0].volume) ? { exitCode: 3, stdout: '' } : { exitCode: 0, stdout: '' }) : undefined);
     expect(await syncCaches(b, STORE, caches, 'pull', opts)).toEqual([{ name: 'db', action: 'empty' }, { name: 'npm', action: 'empty' }]);
     expect(execs(b).some(c => c.startsWith('rclone sync'))).toBe(false);
+    // "not found" from a bucket that does not exist is a failure, not an empty store
+    const missing = new FakeBackend();
+    missing.execHandler = (_id, cmd, io) => {
+      if (cmd[1] !== 'lsf') return undefined;
+      if (cmd[4] === ':gcs:my-bucket') (io.stderr as NodeJS.WritableStream).write('ERROR : bucket not found\n');
+      return Promise.resolve({ exitCode: 3, stdout: '' });
+    };
+    expect(await syncCaches(missing, STORE, [caches[0]], 'pull', opts)).toEqual([{ name: 'db', action: 'failed', message: 'ERROR : bucket not found' }]);
   });
 
   it('pushes the volume to the store, and one failure does not stop the others', async () => {
     const b = new FakeBackend();
     b.execHandler = (_id, cmd, io) => {
+      if (cmd[1] === 'lsf') return Promise.resolve({ exitCode: 0, stdout: 'file\n' });
       if (cmd[1] === 'sync' && cmd[2] === '/caches/db') {
         (io.stderr as NodeJS.WritableStream).write('2026/01/01 NOTICE: retrying\n2026/01/01 ERROR : googleapi: Error 403: forbidden\n');
         return Promise.resolve({ exitCode: 1, stdout: '' });
@@ -74,9 +83,17 @@ describe('syncCaches', () => {
     const results = await syncCaches(b, STORE, caches, 'push', opts);
     expect(results).toEqual([{ name: 'db', action: 'failed', message: '2026/01/01 ERROR : googleapi: Error 403: forbidden' }, { name: 'npm', action: 'pushed' }]);
     expect(execs(b)).toContain(`rclone sync /caches/npm :gcs:my-bucket/team/${caches[1].volume} --links --transfers 8 --retries 2`);
-    expect(execs(b).some(c => c.includes('lsf'))).toBe(false);
     expect(execs(b)).toContain(`sh -c cd "$1" && find . -type f -perm -u+x -print0 | rclone rcat "$2" sh /caches/npm :gcs:my-bucket/team/${caches[1].volume}.exec`);
     expect(b.callsOf('remove')).toHaveLength(1);
+  });
+
+  it('does not push an empty cache over the store unless forced', async () => {
+    const b = new FakeBackend();
+    const [r] = await syncCaches(b, STORE, [caches[0]], 'push', opts);
+    expect(r).toMatchObject({ name: 'db', action: 'failed' });
+    expect(r.message).toContain('empty');
+    expect(execs(b).some(c => c.startsWith('rclone sync'))).toBe(false);
+    expect(await syncCaches(b, STORE, [caches[0]], 'push', { ...opts, force: true })).toEqual([{ name: 'db', action: 'pushed' }]);
   });
 
   it('refuses a store that is not an rclone remote, and does nothing without caches', async () => {

@@ -131,7 +131,8 @@ kunj ct cache push
 
 A push makes the bucket equal to that machine's cache, and a pull makes the machine's cache equal to
 the bucket, including deletions. File contents, dates, symlinks and the executable bit are kept. Other
-permissions are not. Machines created before the service account was set cannot reach the bucket.
+permissions are not. An empty cache is not pushed unless you add `--force`, so a new machine cannot
+empty the bucket by mistake. Machines created before the service account was set cannot reach the bucket.
 Remove and start them again.
 
 The branch container itself cannot reach the bucket. The copy runs in a separate short-lived container
