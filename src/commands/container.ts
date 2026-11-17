@@ -527,7 +527,11 @@ export class ContainerCommand extends BaseCommand {
 
   private async requireMain(ctx: Context, branch: string): Promise<ContainerInfo> {
     const main = await this.findMain(ctx, branch);
-    if (!main) throw new ContainerError(`No container for ${branch}. Start one with kunj ct start ${branch}.`);
+    if (!main) {
+      // Looked on this computer only: a branch on a cloud machine needs to be asked for there
+      const elsewhere = !ctx.remote && typeof ctx.config.machine?.provider === 'string' && ctx.config.machine.provider ? ` If ${branch} runs on a cloud machine, add --remote machines (kunj ct list shows where each branch runs).` : '';
+      throw new ContainerError(`No container for ${branch}${ctx.remote ? '' : ' on this computer'}. Start one with kunj ct start ${branch}.${elsewhere}`);
+    }
     return main;
   }
 
@@ -620,8 +624,10 @@ export class ContainerCommand extends BaseCommand {
     if (result.services?.length) console.log(`  services  ${result.services.join(', ')} (reach them by name from the container)`);
     if (result.dind) console.log(`  docker    ${result.dind} (dockerd inside the container)`);
     console.log('');
-    console.log(`Next: kunj ct agent ${branch}`);
-    console.log(`      kunj ct shell ${branch}`);
+    // The next command must reach the same place: without the remote it would look on this computer
+    const where = options.remote && options.remote !== 'local' ? ` --remote ${options.remote}` : '';
+    console.log(`Next: kunj ct agent ${branch}${where}`);
+    console.log(`      kunj ct shell ${branch}${where}`);
   }
 
   /** Creates or resumes the branch's container, with the create hooks and the snapshot; `start` and `open` share it. */
