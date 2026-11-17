@@ -172,6 +172,9 @@ interface ListPart {
  */
 export const fleetTimeouts = { openMs: 5_000, memberMs: 8_000, /** One machine of a coordinator: less than a member's, so a silent machine is a row and the rest are listed */ machineMs: 5_000 };
 
+/** How long this computer's Docker gets to say whether a branch has a container here, before a cloud machine is looked for */
+const LOCAL_DOCKER_ASK_MS = 4_000;
+
 function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout;
   // The work goes on after a timeout; its late failure is nobody's to handle
@@ -525,15 +528,17 @@ export class ContainerCommand extends BaseCommand {
     const branch = named || (await getCurrentBranch().catch(() => ''));
     if (!branch) return undefined;
     const local = new LocalDockerBackend({ context: config.container?.dockerContext || undefined });
-    // A listing, because it fails when Docker cannot be asked: "no container here" must be known, not
-    // assumed, or a stopped Docker would send a branch with a local container to its machine
-    let here: ContainerInfo[];
+    // A listing, because it fails when Docker cannot be asked, and with a time limit, because a stuck
+    // Docker never answers. A Docker that cannot say is no use for this command either: when the
+    // branch has a machine, the command goes there, and says why
+    let dockerSilent = false;
     try {
-      here = await local.list({ [LABEL.repo]: repo.id, [LABEL.branch]: branch });
+      const here = await within(local.list({ [LABEL.repo]: repo.id, [LABEL.branch]: branch }), LOCAL_DOCKER_ASK_MS, 'Docker did not answer');
+      if (here.some(c => c.name === containerNames(repo.name, repo.id, branch).container)) return undefined;
     } catch {
-      return undefined;
+      dockerSilent = true;
+      local.killChildren?.();
     }
-    if (here.some(c => c.name === containerNames(repo.name, repo.id, branch).container)) return undefined;
     const lookup = this.machineLookup ?? (async (r: Context['repo'], b: string) => {
       const { ensureLocalCoordinator } = await import('../lib/machines/local-coordinator');
       const access = await ensureLocalCoordinator(config);
@@ -544,7 +549,9 @@ export class ContainerCommand extends BaseCommand {
         await access.close();
       }
     });
-    return (await lookup(repo, branch)) ? branch : undefined;
+    if (!(await lookup(repo, branch))) return undefined;
+    if (dockerSilent) this.warn(`Docker on this computer did not answer, so ${branch} is run on its cloud machine.`);
+    return branch;
   }
 
   /** Test seam: whether a branch has a cloud machine */

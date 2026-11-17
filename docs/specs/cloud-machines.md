@@ -614,7 +614,14 @@ while that coordinator runs, which `--idle-exit` now waits for), the cache volum
   whether the branch has a machine (`findBranchMachine()`, a `locate` that neither wakes nor creates)
   and, when it has, runs as `--remote machines`, saying so. Found by the user: `kunj ct shell <branch>`
   after starting the branch on a machine from the app said "No container". Costs one coordinator
-  question only when the local container is missing; no unit test yet (run on `kunj-dev`).
+  question only when the local container is missing; no unit test yet (run on `kunj-dev`). The local
+  Docker gets 4 s to answer: one that is stopped or stuck cannot run the command either, so a branch
+  with a machine goes there with a warning (found when OrbStack hung during the first alertd-core run).
+
+Run on `kunj-dev` with a second repository (2026-11-17), a private one with a host blueprint and two
+services (`db`, `pulsar`): `kunj machine image build` took 1281 s (its `setup` runs a full build), and
+`kunj ct start develop` on a new machine from that image took 242 s with the keep files, a copied
+file and both services up (ports 5432 and 6650 open from the branch container; 3 of 8 GB used).
 - **Looking is not using.** A listing reaches a machine through the proxy marked `x-kunj-passive`
   (`selectBackend({ listing })`'s `backendFor`): the coordinator's proxy resolver takes it without
   counting it (`proxyTarget(name, use = false)`), and the machine's own timer ignores it. Found on
