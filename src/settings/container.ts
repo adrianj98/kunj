@@ -42,8 +42,8 @@ export function registerContainerSettings(): void {
       description: 'Host files and folders copied into containers on every start, as hostPath:containerPath',
       detailedDescription:
         'Copied when a container is created and again on every kunj ct start, so a change on this computer reaches a container that ' +
-        'already exists (this computer is the source of truth: an edit made to the copy in the container is replaced). A folder is copied ' +
-        'whole. A containerPath starting with ~ or without a leading / is under the container user\'s home. For your Claude Code skills: ' +
+        'already exists. Files are added and replaced, so an edit made to the copy in the container is lost; a file deleted here stays ' +
+        'there. A folder is copied whole. A containerPath starting with ~ or without a leading / is under the container user\'s home. For your Claude Code skills: ' +
         '"~/.claude/skills:~/.claude/skills".',
       type: 'array',
       defaultValue: [],

@@ -1940,3 +1940,4 @@ The user asked to be able to choose a remote in the app when remotes are availab
   alertd-core settings got `~/.claude/skills:~/.claude/skills`. Why: the user said the existing files list "should
   also be used to copy skills" and asked what my setting added besides forcing the copy; the answer was too little
   to keep a second mechanism.
+- container.files review fixes: on a later start one entry that fails is a warning and the rest are copied; `ct open` copies nothing; docs say files are added and replaced, not deleted.

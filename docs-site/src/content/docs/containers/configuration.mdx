@@ -233,8 +233,9 @@ kunj config --set-json 'container.files=["~/.claude/skills:~/.claude/skills"]'
 
 Each entry is `path on your computer:path in the container`, and a folder is copied whole. The list
 is copied when a container is created and again on every `kunj ct start`, so a skill you add later
-reaches a container that already exists. Your computer is the source of truth: a change made to the
-copy inside the container is replaced on the next start.
+reaches a container that already exists. Files are added and replaced: a change made to the copy
+inside the container is lost on the next start, and a skill you delete on your computer stays in the
+container until you remove it there.
 
 ## A cache shared by every branch
 

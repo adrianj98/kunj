@@ -900,6 +900,24 @@ describe('startContainer', () => {
     // (this fixture's container records no user, so its home is root's)
     expect(resumed.copiedFiles).toEqual(['/root/.claude/skills']);
     expect(running.stdinData.filter(Boolean).join('')).toContain('name: added-later');
+
+    // on a later start one entry that cannot be copied is a warning, and the next one is still copied
+    fs.writeFileSync(path.join(tmp, 'aws-config'), '[default]\n');
+    const partly = backend();
+    partly.existing = [
+      info({ state: 'exited' }),
+      info({ id: 'helper-id', name: names.helper, state: 'exited', labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'helper' }) }),
+    ];
+    partly.execHandler = (_id, cmd) => (cmd.some(x => x.includes('tar -xf')) && cmd[cmd.length - 1].endsWith('/.claude/skills') ? Promise.resolve({ exitCode: 2, stdout: '' }) : undefined);
+    const warnings: string[] = [];
+    const both = { container: { files: [`${skills}:~/.claude/skills`, `${tmp}/aws-config:~/.aws/config`] } } as KunjConfig;
+    const second = await startContainer(partly, options({ config: both, warn: (m: string) => warnings.push(m) }));
+    expect(second.copiedFiles).toEqual(['/root/.aws/config']);
+    expect(warnings.some(w => w.includes('was not copied again'))).toBe(true);
+    // and kunj ct open copies nothing
+    const opened = backend();
+    opened.existing = partly.existing;
+    expect((await startContainer(opened, options({ config: both, keepStaleHelper: true }))).copiedFiles).toEqual([]);
   });
 
   it('publishes requested ports on free host ports', async () => {

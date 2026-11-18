@@ -617,7 +617,8 @@ function splitFileEntry(entry: string): [string, string] | null {
 /**
  * container.files: host files and folders into the container (`hostPath:containerPath`). On every
  * start, a running container's included, so what changed on this computer (a skill added to a copied
- * folder, a new AWS profile) reaches a container that already exists; the host is the source of truth.
+ * folder, a new AWS profile) reaches a container that already exists. It adds and replaces; a file
+ * deleted on this computer stays in the container.
  */
 async function copyHostFiles(
   backend: ContainerBackend,
@@ -625,7 +626,8 @@ async function copyHostFiles(
   user: string,
   home: string | null,
   options: StartOptions,
-  vars: ConfigVariables
+  vars: ConfigVariables,
+  tolerant = false
 ): Promise<string[]> {
   const copiedFiles: string[] = [];
   let resolvedHome: string | undefined;
@@ -648,13 +650,20 @@ async function copyHostFiles(
       options.warn(`container.files: ${hostPath} not found; skipped`);
       continue;
     }
-    if (stat.isDirectory()) {
-      await extractInto(backend, id, user, target, tarDirectory(hostPath));
-    } else {
-      const tar = tarEntries([{ path: path.posix.basename(target), content: fs.readFileSync(hostPath), mode: stat.mode & 0o777 }]);
-      await extractInto(backend, id, user, path.posix.dirname(target), tar);
+    try {
+      if (stat.isDirectory()) {
+        await extractInto(backend, id, user, target, tarDirectory(hostPath));
+      } else {
+        const tar = tarEntries([{ path: path.posix.basename(target), content: fs.readFileSync(hostPath), mode: stat.mode & 0o777 }]);
+        await extractInto(backend, id, user, path.posix.dirname(target), tar);
+      }
+      copiedFiles.push(target);
+    } catch (err) {
+      // A new container without a file it was told to have is a failed start, as before. On a
+      // later start one entry that cannot be copied is a warning and the others still are
+      if (!tolerant) throw err;
+      options.warn(`container.files: ${hostPath} was not copied again: ${message(err)}`);
     }
-    copiedFiles.push(target);
   }
   return copiedFiles;
 }
@@ -1304,8 +1313,10 @@ async function resume(
     // container.files is copied again on every start: a skill added to a copied folder since the
     // container was made reaches it on the next one; a failure is a warning
     const refreshFiles = async (u: string) => {
+      // `kunj ct open` only brings a container back up: it copies nothing into it
+      if (options.keepStaleHelper) return [] as string[];
       const home = u ? `/home/${u}` : null;
-      const files = await step('docker', () => copyHostFiles(backend, main.id, u, home, options, variables(options))).catch(err => {
+      const files = await step('docker', () => copyHostFiles(backend, main.id, u, home, options, variables(options), true)).catch(err => {
         warn(`container.files: not refreshed: ${message(err)}`);
         return [] as string[];
       });
