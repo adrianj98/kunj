@@ -156,3 +156,4 @@
 - Branch commands find the branch's cloud machine without `--remote` when it has no local container. Page updated: none (spec).
 - `kunj resources` and the workspace app's Resources window. Pages updated: containers/cloud-machines.md.
 - `container.claude` copies the user's Claude skills, agents, commands and CLAUDE.md into containers; remote exec stdin no longer ends on an empty chunk. Page updated: containers/lifecycle.md.
+- `container.files` is applied on every start; the short-lived `container.claude` setting is removed. Page updated: containers/lifecycle.md.

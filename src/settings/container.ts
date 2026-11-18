@@ -39,24 +39,16 @@ export function registerContainerSettings(): void {
     },
     {
       key: 'container.files',
-      description: 'Host files copied into new containers, as hostPath:containerPath',
+      description: 'Host files and folders copied into containers on every start, as hostPath:containerPath',
+      detailedDescription:
+        'Copied when a container is created and again on every kunj ct start, so a change on this computer reaches a container that ' +
+        'already exists (this computer is the source of truth: an edit made to the copy in the container is replaced). A folder is copied ' +
+        'whole. A containerPath starting with ~ or without a leading / is under the container user\'s home. For your Claude Code skills: ' +
+        '"~/.claude/skills:~/.claude/skills".',
       type: 'array',
       defaultValue: [],
       category: 'container',
-      examples: ['~/.gitconfig:/home/node/.gitconfig'],
-    },
-    {
-      key: 'container.claude',
-      description: 'What of your ~/.claude is copied into containers: skills, agents, commands, CLAUDE.md',
-      type: 'array',
-      defaultValue: ['skills', 'agents', 'commands', 'CLAUDE.md'],
-      category: 'container',
-      detailedDescription:
-        'Copied into the container user\'s ~/.claude on every kunj ct start, on this computer and on a remote or cloud machine, so an ' +
-        'agent there has your skills. Skills in the repository itself (.claude/skills) come with the clone and need nothing. ' +
-        'Never copied: settings.json (its hooks name paths on this computer), credentials, history. An empty list turns it off. ' +
-        'A blueprint snapshot never contains them.',
-      examples: ['["skills"]', '[]'],
+      examples: ['~/.gitconfig:/home/node/.gitconfig', '~/.claude/skills:~/.claude/skills'],
     },
     {
       key: 'container.keepFiles',

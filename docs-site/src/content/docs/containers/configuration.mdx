@@ -224,22 +224,17 @@ Colima while Docker Desktop stays your default; `--context` overrides it for one
 
 ## Your Claude skills in the container
 
-kunj copies your own Claude Code setup into every container, so an agent there has the same skills
-it has on your computer. On each `kunj ct start` it copies these from `~/.claude`:
-
-| Copied | Not copied |
-| --- | --- |
-| `skills/`, `agents/`, `commands/`, `CLAUDE.md` | `settings.json`, credentials, history, hidden folders |
-
-Skills that live in the repository (`.claude/skills`) come with the clone and need nothing. To copy
-less, or nothing:
+Skills that live in the repository (`.claude/skills`) come with the clone. For the skills in your own
+home folder, add the folder to the files kunj copies into containers:
 
 ```bash
-kunj config --set-json 'container.claude=["skills"]'
-kunj config --set-json 'container.claude=[]'
+kunj config --set-json 'container.files=["~/.claude/skills:~/.claude/skills"]'
 ```
 
-A container that already exists gets them the next time you run `kunj ct start` for it.
+Each entry is `path on your computer:path in the container`, and a folder is copied whole. The list
+is copied when a container is created and again on every `kunj ct start`, so a skill you add later
+reaches a container that already exists. Your computer is the source of truth: a change made to the
+copy inside the container is replaced on the next start.
 
 ## A cache shared by every branch
 

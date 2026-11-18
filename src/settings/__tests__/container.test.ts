@@ -17,7 +17,6 @@ describe('container settings', () => {
       publish: [],
       services: {},
       caches: [],
-      claude: ['skills', 'agents', 'commands', 'CLAUDE.md'],
       useGhToken: true,
       forward: { auto: true, ignore: [] },
       pruneAfterDays: 0,

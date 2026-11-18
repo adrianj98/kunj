@@ -250,11 +250,11 @@ mirrors, the summaries and `claudeTokenSetupSpec`) and the Containers section of
 - [x] **Secret manager** ([Secrets](#secrets)): `kunj secret set|import|list|get|rm|env|apply`,
   `kunj run`, encrypted vault with a Keychain key, delivery to containers and worktrees by explicit
   target, `.env` import. Shipped; plan `docs/superpowers/plans/2026-10-23-secret-manager.md`.
-- [x] **The user's Claude Code setup in containers** (`container.claude`, default `skills`, `agents`,
-  `commands`, `CLAUDE.md`): copied from `~/.claude` into the container user's `~/.claude` on every
-  `kunj ct start`, also for a container that already runs, on this computer, a remote or a cloud
-  machine (`copyClaude()` in lifecycle.ts). Hidden entries stay behind; never `settings.json` (its
-  hooks name host paths), credentials or history; never in a blueprint snapshot. Shipped 2026-11-17.
+- [x] **The user's Claude Code setup in containers**: through `container.files`, which copies folders
+  and is applied on every `kunj ct start` (new, resumed or already running; local, remote or cloud), so
+  `"~/.claude/skills:~/.claude/skills"` keeps a container's skills current. A separate `container.claude`
+  setting was built and removed the same day (2026-11-17): one explicit list is enough, and the user
+  did not want a second mechanism that copied without being asked. Nothing is copied by default.
 - Run `kunj` itself inside the container, with the user's kunj config minus sensitive settings.
 - Extra repos cloned next to the workspace (driveday's `../ideazone`).
 - Containers in the VS Code extension and the macOS app, reading `kunj ct list --json`.

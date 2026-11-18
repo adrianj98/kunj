@@ -88,8 +88,6 @@ function options(over: Partial<StartOptions> = {}): StartOptions {
     kunjVersion: VERSION,
     hostEnv: { GH_TOKEN: 'tok', ANTHROPIC_API_KEY: 'k' },
     cwd: tmp,
-    // never this computer's own ~/.claude
-    claudeDir: path.join(tmp, 'no-claude'),
     jsonMode: false,
     skipHooks: false,
     keepOnError: false,
@@ -877,39 +875,31 @@ describe('startContainer', () => {
     expect(b.stdinData.filter(Boolean).join('')).toContain('SECRET=1');
   });
 
-  it('copies the user\'s Claude skills, agents and CLAUDE.md into the container, never settings or hidden entries', async () => {
-    const claude = path.join(tmp, 'claude');
-    fs.mkdirSync(path.join(claude, 'skills', 'handoff', 'scripts'), { recursive: true });
-    fs.writeFileSync(path.join(claude, 'skills', 'handoff', 'SKILL.md'), 'name: handoff\n');
-    fs.writeFileSync(path.join(claude, 'skills', 'handoff', 'scripts', 'run.sh'), '#!/bin/sh\n', { mode: 0o755 });
-    fs.mkdirSync(path.join(claude, 'skills', '.trash', 'old'), { recursive: true });
-    fs.writeFileSync(path.join(claude, 'skills', '.trash', 'old', 'SKILL.md'), 'OLD-SKILL\n');
-    // a link to something that is gone is skipped, and what comes after it is still copied
-    fs.symlinkSync(path.join(tmp, 'gone-elsewhere'), path.join(claude, 'skills', 'a-dangling'));
-    fs.mkdirSync(path.join(claude, 'agents'));
-    fs.writeFileSync(path.join(claude, 'agents', 'reviewer.md'), 'AGENT-FILE\n');
-    fs.writeFileSync(path.join(claude, 'CLAUDE.md'), 'MY-RULES\n');
-    fs.writeFileSync(path.join(claude, 'settings.json'), '{"hooks":"HOST-SETTINGS"}');
-    fs.writeFileSync(path.join(claude, '.credentials.json'), 'ZZ-PRIVATE-LOGIN');
+  it('copies a host folder (your Claude skills) with container.files, and again on a start of a container that already runs', async () => {
+    const skills = path.join(tmp, 'claude', 'skills');
+    fs.mkdirSync(path.join(skills, 'handoff'), { recursive: true });
+    fs.writeFileSync(path.join(skills, 'handoff', 'SKILL.md'), 'name: handoff\n');
+    fs.writeFileSync(path.join(skills, 'handoff', 'empty'), '');
+    const config = { container: { files: [`${skills}:~/.claude/skills`] } } as KunjConfig;
 
     const b = backend();
-    const result = await startContainer(b, options({ claudeDir: claude }));
-    expect(result.copiedFiles).toEqual(['/home/dev/.claude/skills', '/home/dev/.claude/agents', '/home/dev/.claude/CLAUDE.md']);
-    const tarDirs = b.callsOf('exec').filter(a => (a[1] as string[]).some(x => x.includes('tar -xf'))).map(a => (a[1] as string[]).slice(-1)[0]);
-    expect(tarDirs).toEqual(expect.arrayContaining(['/home/dev/.claude/skills/handoff', '/home/dev/.claude/agents', '/home/dev/.claude']));
-    const sent = b.stdinData.filter(Boolean).join('');
-    expect(sent).toContain('name: handoff');
-    expect(sent).toContain('AGENT-FILE');
-    expect(sent).toContain('MY-RULES');
-    expect(sent).not.toContain('HOST-SETTINGS');
-    expect(sent).not.toContain('ZZ-PRIVATE-LOGIN');
-    expect(sent).not.toContain('OLD-SKILL');
+    const created = await startContainer(b, options({ config }));
+    expect(created.copiedFiles).toEqual(['/home/dev/.claude/skills']);
+    expect(b.stdinData.filter(Boolean).join('')).toContain('name: handoff');
 
-    // a list picks parts, and an empty one turns it off
-    const only = await startContainer(backend(), options({ claudeDir: claude, config: { container: { claude: ['skills'] } } as KunjConfig }));
-    expect(only.copiedFiles).toEqual(['/home/dev/.claude/skills']);
-    const none = await startContainer(backend(), options({ claudeDir: claude, config: { container: { claude: [] as string[] } } as unknown as KunjConfig }));
-    expect(none.copiedFiles).toEqual([]);
+    // a skill added since reaches the container on the next start, though nothing is seeded again
+    fs.mkdirSync(path.join(skills, 'added-later'));
+    fs.writeFileSync(path.join(skills, 'added-later', 'SKILL.md'), 'name: added-later\n');
+    const running = backend();
+    running.existing = [
+      info({ state: 'exited' }),
+      info({ id: 'helper-id', name: names.helper, state: 'exited', labels: labelsFor(REPO.id, BRANCH, { [LABEL.role]: 'helper' }) }),
+    ];
+    const resumed = await startContainer(running, options({ config }));
+    expect(resumed.created).toBe(false);
+    // (this fixture's container records no user, so its home is root's)
+    expect(resumed.copiedFiles).toEqual(['/root/.claude/skills']);
+    expect(running.stdinData.filter(Boolean).join('')).toContain('name: added-later');
   });
 
   it('publishes requested ports on free host ports', async () => {

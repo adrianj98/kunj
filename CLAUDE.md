@@ -359,11 +359,10 @@ argument that takes a host path; bump the pin only after re-reading the new vers
 `~/.claude.json`; agent spawns a detached `kunj ct mcp`, registered in `~/.kunj/container-bridges.json`
 (`pidRegistry`, shared with the forward registry).
 
-**Claude setup:** `container.claude` (default `skills`, `agents`, `commands`, `CLAUDE.md`) copies those parts of the user's `~/.claude` into the
-container user's `~/.claude` on every start, a running container's included (`copyClaude()` in lifecycle.ts; `StartOptions.claudeDir` is
-the test seam, and the test `options()` points it away from the real home). Never `settings.json`, credentials, history, hidden entries, or
-a snapshot. On the wire an empty stdin frame is the end of input, so `RemoteKunjBackend` never sends an empty chunk and the server drops
-input that arrives after the end.
+**Host files:** `container.files` (`hostPath:containerPath`, folders too) is copied on create and again on every start, a running container's
+included (`copyHostFiles()` in lifecycle.ts): the host is the source of truth. It is how a user's `~/.claude/skills` reach a container; there is
+no separate skills setting, and nothing of `~/.claude` is copied by default. On the wire an empty stdin frame is the end of input, so
+`RemoteKunjBackend` never sends an empty chunk and the server drops input that arrives after the end.
 
 **Caches:** `container.caches` (`[{ name, path }]`, caches.ts) are volumes per repository and daemon
 (`kunj-<repo>-cache-<name>-<hash>`, `kunj.role=cache`, no branch label so prune never sees them), mounted in every new

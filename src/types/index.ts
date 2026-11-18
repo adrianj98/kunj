@@ -64,8 +64,6 @@ export interface KunjConfig {
     // Forward `gh auth token` as GH_TOKEN when the host env has no token (default true)
     useGhToken?: boolean;
     files?: string[];
-    /** What of ~/.claude is copied into containers (skills, agents, commands, CLAUDE.md); [] for none */
-    claude?: string[];
     keepFiles?: boolean;
     network?: { allow?: string[]; allowHost?: boolean };
     dockerContext?: string;

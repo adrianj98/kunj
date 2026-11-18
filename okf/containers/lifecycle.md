@@ -104,11 +104,11 @@ line, then `pre-container-delete`, removal with `force: true`, `post-container-d
 
 # Citations
 
-# The user's Claude setup
+# Host files
 
-`container.claude` (default `skills`, `agents`, `commands`, `CLAUDE.md`): `copyClaude()` in lifecycle.ts copies those
-parts of `~/.claude` into the container user's `~/.claude` on every start, new or resumed, local or remote. Hidden
-entries, `settings.json`, credentials and history are never copied, and a snapshot build copies nothing.
+`container.files` (`hostPath:containerPath`, a file or a folder): `copyHostFiles()` in lifecycle.ts copies them when a
+container is created and again on every start, also when it already runs. It is how `~/.claude/skills` are kept
+current in a container; nothing of `~/.claude` is copied unless listed.
 
 # Repository caches
 

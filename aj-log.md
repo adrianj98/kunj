@@ -1936,3 +1936,7 @@ The user asked to be able to choose a remote in the app when remotes are availab
   drops input after the end. Why: copying a skill folder with an empty file crashed the machine's `kunj serve`
   (ERR_STREAM_WRITE_AFTER_END), found on `kunj-dev`.
 - container.claude review fixes: an unreadable entry (dangling link) is skipped alone; a string value means that one part; a failed copy never fails a new start.
+- Removed `container.claude` again; `container.files` is now applied on every start (`copyHostFiles()`), and the
+  alertd-core settings got `~/.claude/skills:~/.claude/skills`. Why: the user said the existing files list "should
+  also be used to copy skills" and asked what my setting added besides forcing the copy; the answer was too little
+  to keep a second mechanism.
