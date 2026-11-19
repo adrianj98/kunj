@@ -412,15 +412,22 @@ final class TabRegistry {
         remove(tab)
     }
 
+    /// Removes an agent tab whose process exited, without ending its tmux session: a resumed agent
+    /// starts that session again, and the stop would race it.
+    func dropExited(_ tab: TerminalTab) {
+        guard tab.exited != nil else { return }
+        remove(tab, endSession: false)
+    }
+
     /// Called with an action tab's exit code (`open(onFinish:)`); dropped when the tab closes first.
     private var finishers: [String: (Int32) -> Void] = [:]
 
-    private func remove(_ tab: any WorkspaceTab) {
+    private func remove(_ tab: any WorkspaceTab, endSession: Bool = true) {
         guard var tabs = tabsByEnv[tab.envId], let i = tabs.firstIndex(where: { $0 === tab }) else { return }
         finishers.removeValue(forKey: tab.id)
         if let terminal = tab as? TerminalTab {
             // closed by the user (quitting goes through closeAll): its tmux session ends too
-            if terminal.spec?.session != nil { onSessionClosed?(terminal) }
+            if endSession && terminal.spec?.session != nil { onSessionClosed?(terminal) }
             terminal.onExit = nil
             terminal.close()
             terminal.removeFromSuperview()
@@ -462,7 +469,9 @@ final class TabRegistry {
             return
         }
         let muted = "\u{1b}[90m"
-        tab.feed(text: "\r\n\(muted)[process exited with code \(code)]\u{1b}[0m\r\n")
+        let hint = tab.kind == .agent && tab.spec.map(canResumeAgent) == true
+            ? " Resume Agent (⌘⇧R) continues its conversation." : ""
+        tab.feed(text: "\r\n\(muted)[process exited with code \(code)]\(hint)\u{1b}[0m\r\n")
         onChange?(tab.envId)
     }
 }

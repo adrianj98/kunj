@@ -256,6 +256,12 @@ resumes its conversation: kunj saves Claude Code's session id as the agent start
 tab runs `kunj agent --resume`, which starts `claude --resume <id>` when no session is running. A
 closed shell starts fresh. Agents in containers are not resumed yet.
 
+To bring back an agent whose tab you closed, or one that exited, use **Environment > Resume
+Agent…** (⌘⇧R) or **Resume Agent…** in the sidebar row's menu. It lists the worktree's saved
+Claude conversations that are not running, newest first, by their first prompt; pick one and it
+opens in a new agent tab where it left off. **Forget These** clears the list. From a terminal,
+`kunj agent saved` lists the same conversations with the command that resumes each.
+
 **Session > Close All Sessions…** closes every environment that has tabs, like Close Session on
 each, after one confirmation.
 

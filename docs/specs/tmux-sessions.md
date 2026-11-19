@@ -18,6 +18,7 @@ each, its CPU and memory, and whether it is orphaned, so stray sessions can be f
 | Opening a listed session as a tab | Not done (Copy Attach Command instead) |
 | Workspace app: quit asks Leave Running / Close All Sessions (Leave Running after 20 s); Session > Close All Sessions… | Shipped |
 | Host Claude agents save their session id; `kunj agent --resume`; restored agent tabs resume | Shipped |
+| `kunj agent saved` / `forget` (`AgentSavedJson`, `AgentForgetJson`); workspace app Resume Agent… (⌘⇧R, sidebar row menu), exited agent tabs say so | Shipped |
 | Resuming container agents | Not done |
 
 ## Why
@@ -100,6 +101,19 @@ when the tmux session is not running, and then runs `claude --resume <id>` (`wit
 other agent command is left alone). The app passes `--resume` for every agent tab it restores from
 the layout (never for a new tab, whose session id is new), so a session that still runs is
 reattached as before.
+
+Closed tabs and exited agents: `kunj agent saved [branch] [--session <id>] --json` (`AgentSavedJson`,
+`savedAgents()`) lists the branch's saved conversations (`<base>.json` and `<base>-a-<id>.json` in
+`agent-resume/`) whose tmux session is not running (all of them when tmux could not be asked), newest
+first by file mtime, each with its first prompt as `title` (`conversationTitle()`: the first 256 KB of the
+`transcript_path` the hook saved, the first user line that is not meta and does not start with `<`, cut to
+100 characters). `kunj agent forget [branch] (--session <id> | --all)` removes saved files
+(`AgentForgetJson`). In the app, Environment > Resume Agent… (⌘⇧R, worktrees only) and the sidebar row
+menu run `agent saved` and pop up a menu at the top of the terminal column (25 newest, then Forget These);
+picking one opens an agent tab with `--session <id> --resume`. A tab of that session that is still open is
+selected when it runs, and replaced when its process exited (`TabRegistry.dropExited()`, which does not run
+the tab's `agent stop`: that would race the new start). An exited agent tab prints the shortcut after
+its exit code (`canResumeAgent()`: a worktree agent of the default command).
 
 Session > Close All Sessions… runs Close Session (`finishClosingSession`) for every environment that
 has tabs, after one confirmation; an unsaved editor stops it.

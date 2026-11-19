@@ -371,7 +371,7 @@ describe('sessions follow their worktree across a checkout', () => {
 });
 
 describe('resuming a Claude conversation', () => {
-  const { agentResumeFile, readAgentResume, withAgentResume, claudeHookSettings } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+  const { agentResumeFile, readAgentResume, withAgentResume, claudeHookSettings, savedAgents, conversationTitle } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
   const fs = jest.requireActual<typeof import('fs')>('fs');
   const os = jest.requireActual<typeof import('os')>('os');
   const path = jest.requireActual<typeof import('path')>('path');
@@ -391,6 +391,52 @@ describe('resuming a Claude conversation', () => {
     expect(readAgentResume(file)).toBe('0b5e-41aa');
     fs.writeFileSync(file, JSON.stringify({ session_id: 'x; rm -rf ~' }));
     expect(readAgentResume(file)).toBeNull();
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('the title is the first real prompt of the transcript', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-title-'));
+    const t = path.join(dir, 't.jsonl');
+    fs.writeFileSync(t, [
+      JSON.stringify({ type: 'summary', summary: 'x' }),
+      JSON.stringify({ type: 'user', isMeta: true, message: { content: 'caveat' } }),
+      JSON.stringify({ type: 'user', message: { content: '<command-name>/clear</command-name>' } }),
+      'not json "user"',
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: '  fix the\nlogin   bug ' }] } }),
+      JSON.stringify({ type: 'user', message: { content: 'later' } }),
+    ].join('\n'));
+    expect(conversationTitle(t)).toBe('fix the login bug');
+    expect(conversationTitle('relative.jsonl')).toBeNull();
+    expect(conversationTitle(path.join(dir, 'missing.jsonl'))).toBeNull();
+    fs.writeFileSync(t, JSON.stringify({ type: 'user', message: { content: 'y'.repeat(300) } }));
+    expect(conversationTitle(t)).toHaveLength(100);
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('savedAgents lists the branch saved conversations that do not run, newest first', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-saved-'));
+    const save = (session: string, body: unknown, at: number) => {
+      const f = agentResumeFile(dir, session);
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, JSON.stringify(body));
+      fs.utimesSync(f, at, at);
+    };
+    const transcript = path.join(dir, 'a.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'user', message: { content: 'hello' } }));
+    expect(savedAgents(dir, 'kunj-r-main', [])).toEqual([]);
+    save('kunj-r-main', { session_id: 'c0' }, 1000);
+    save('kunj-r-main-a-1', { session_id: 'c1', transcript_path: transcript }, 2000);
+    save('kunj-r-main-a-2', { session_id: 'c2' }, 3000);
+    save('kunj-r-other', { session_id: 'c3' }, 4000);
+    save('kunj-r-main-a-3', { session_id: 'bad id' }, 5000);
+    const items = savedAgents(dir, 'kunj-r-main', ['kunj-r-main-a-2']);
+    expect(items.map(i => [i.session, i.id, i.conversation, i.title])).toEqual([
+      ['kunj-r-main-a-1', '1', 'c1', 'hello'],
+      ['kunj-r-main', null, 'c0', null],
+    ]);
+    expect(items[0].savedAt).toBe(new Date(2000_000).toISOString());
+    // tmux could not be asked: nothing is left out as running
+    expect(savedAgents(dir, 'kunj-r-main', null)).toHaveLength(3);
     fs.rmSync(dir, { recursive: true });
   });
 

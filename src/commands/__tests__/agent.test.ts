@@ -33,6 +33,7 @@ jest.mock('../../lib/agent-session', () => ({
   hasTmuxSession: jest.fn(async () => false),
   killTmuxSessionIfExists: jest.fn(async () => true),
   readAgentResume: jest.fn(() => null),
+  savedAgents: jest.fn(() => []),
 }));
 
 jest.mock('../../lib/config', () => ({
@@ -41,7 +42,7 @@ jest.mock('../../lib/config', () => ({
 }));
 
 // The state directory under the mocked kunj dir is never created on disk
-jest.mock('fs', () => ({ ...jest.requireActual<object>('fs'), mkdirSync: jest.fn() }));
+jest.mock('fs', () => ({ ...jest.requireActual<object>('fs'), mkdirSync: jest.fn(), unlinkSync: jest.fn() }));
 
 // The secrets a direct start puts in the agent's environment; the tmux path never opens the vault
 jest.mock('../../lib/secrets/host', () => ({
@@ -365,5 +366,39 @@ describe('--resume', () => {
     await new AgentCommand().execute('start', 'feature-a', {});
     expect(readAgentResume).not.toHaveBeenCalled();
     for (const call of (runTmux as jest.Mock).mock.calls) expect(JSON.stringify(call[0])).not.toContain('--resume');
+  });
+});
+
+describe('saved and forget', () => {
+  const { savedAgents } = jest.requireMock<any>('../../lib/agent-session');
+  const fs = jest.requireMock<any>('fs');
+  const item = (id: string | null) => ({ session: id ? `${session}-a-${id}` : session, id, conversation: `c-${id}`, savedAt: '2026-11-19T10:00:00.000Z', title: 'fix it' });
+  afterEach(() => { savedAgents.mockReset(); savedAgents.mockReturnValue([]); fs.unlinkSync.mockReset(); });
+
+  test('saved --json lists what is saved for the branch, leaving out running sessions', async () => {
+    tmuxSessions.mockResolvedValue([`${session}-a-2`]);
+    savedAgents.mockReturnValue([item('1'), item(null)]);
+    await new AgentCommand().execute('saved', 'feature-a', { json: true } as any);
+    expect(savedAgents).toHaveBeenCalledWith('/h/.kunj/app', session, [`${session}-a-2`]);
+    expect(JSON.parse(stdout.join(''))).toEqual({ branch: 'feature-a', worktree: '/wt/feature-a', items: [item('1'), item(null)] });
+  });
+
+  test('saved --session keeps only that one', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    savedAgents.mockReturnValue([item('1'), item(null)]);
+    await new AgentCommand().execute('saved', 'feature-a', { json: true, session: '1' } as any);
+    expect(JSON.parse(stdout.join('')).items).toEqual([item('1')]);
+  });
+
+  test('forget needs --session or --all, and removes the saved files', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    await expect(new AgentCommand().execute('forget', 'feature-a', {})).rejects.toThrow(/--session <id> or --all/);
+    await new AgentCommand().execute('forget', 'feature-a', { json: true, session: '1' } as any);
+    expect(fs.unlinkSync).toHaveBeenCalledWith(`/h/.kunj/app/agent-resume/${session}-a-1.json`);
+    stdout = [];
+    savedAgents.mockReturnValue([item('1'), item(null)]);
+    fs.unlinkSync.mockImplementation((f: string) => { if (f.includes('-a-1')) throw new Error('ENOENT'); });
+    await new AgentCommand().execute('forget', 'feature-a', { json: true, all: true } as any);
+    expect(JSON.parse(stdout.join(''))).toEqual({ branch: 'feature-a', forgotten: [session] });
   });
 });

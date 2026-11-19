@@ -34,6 +34,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
+| Resume closed agents: `kunj agent saved` / `forget` (saved Claude conversations of a worktree whose session no longer runs, with their first prompt); workspace app Resume Agent… (⌘⇧R, sidebar row menu), exited agent tabs point at it | [tmux-sessions.md](tmux-sessions.md#quitting-and-resuming) | this commit |
 | Cloud machines golden image: `kunj machine image build|list|delete` (a builder machine from the stock image builds the blueprint snapshot, its disk becomes the repository's image, older ones are deleted), new machines boot the newest, the bootstrap resets a baked-in serve token; `ct blueprint snapshot --machine`; one local coordinator when two commands start at once (start lock) | [cloud-machines.md](cloud-machines.md#golden-image-as-built-2026-11-16) | this commit and the one before |
 | `container.files` is applied on every `kunj ct start` (a running container's included), so a folder such as `~/.claude/skills` stays current in containers; and a `kunj serve` crash fixed: an empty chunk in an exec's stdin was sent as its end, and the input that followed ended the server | [container-system.md](container-system.md#roadmap) | this commit and the two before |
 | `kunj resources` and the workspace app's Resources window (Window ▸ Resources): everything kunj manages on this computer, on remotes and in the cloud, read-only | [cloud-machines.md](cloud-machines.md#resources-as-built-2026-11-17) | this commit |

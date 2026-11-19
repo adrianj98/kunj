@@ -424,6 +424,35 @@ export interface AgentStartJson {
   started: boolean;
 }
 
+/**
+ * `kunj agent saved [branch] --json`: Claude conversations of the worktree's agent sessions that are
+ * not running (a closed tab, an ended session, a reboot), newest first. `kunj agent start --session
+ * <id> --resume` (no --session for a null id) continues one.
+ */
+export interface AgentSavedJson {
+  branch: string;
+  worktree: string;
+  items: Array<{
+    /** The tmux session the agent ran in */
+    session: string;
+    /** Its `--session <id>`; null for the default session */
+    id: string | null;
+    /** Claude Code's session id, what `claude --resume` takes */
+    conversation: string;
+    /** When the conversation was saved (ISO 8601): it started, or /clear began a new one */
+    savedAt: string;
+    /** The conversation's first prompt, shortened; null when it has none yet */
+    title: string | null;
+  }>;
+}
+
+/** `kunj agent forget [branch] (--session <id> | --all) --json` */
+export interface AgentForgetJson {
+  branch: string;
+  /** The tmux sessions whose saved conversation was removed */
+  forgotten: string[];
+}
+
 export interface AgentStopJson {
   success: true;
   branch: string;

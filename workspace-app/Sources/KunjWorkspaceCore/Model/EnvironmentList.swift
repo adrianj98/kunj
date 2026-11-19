@@ -56,7 +56,7 @@ private func byBranch(_ a: Environment, _ b: Environment) -> Bool {
     a.branch.localizedStandardCompare(b.branch) == .orderedAscending
 }
 
-private func parseDate(_ s: String) -> Date? {
+func parseDate(_ s: String) -> Date? {
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     if let d = f.date(from: s) { return d }

@@ -355,6 +355,78 @@ export function readAgentResume(file: string): string | null {
   }
 }
 
+// The first prompt of a Claude transcript (JSONL), for telling saved conversations apart. Reads at
+// most the first 256 KB; skips command and tool-result lines. null when there is none.
+export function conversationTitle(transcript: unknown, maxBytes = 256 * 1024): string | null {
+  if (typeof transcript !== 'string' || !path.isAbsolute(transcript)) return null;
+  let text: string;
+  try {
+    const fd = fs.openSync(transcript, 'r');
+    try {
+      const buf = Buffer.alloc(maxBytes);
+      text = buf.subarray(0, fs.readSync(fd, buf, 0, maxBytes, 0)).toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+  for (const line of text.split('\n')) {
+    if (!line.includes('"user"')) continue;
+    let entry: any;
+    try { entry = JSON.parse(line); } catch { continue; }
+    if (entry?.type !== 'user' || entry.isMeta) continue;
+    const content = entry.message?.content;
+    const raw = typeof content === 'string' ? content
+      : Array.isArray(content) ? content.find((c: any) => c?.type === 'text' && typeof c.text === 'string')?.text : undefined;
+    if (typeof raw !== 'string') continue;
+    const oneLine = raw.replace(/\s+/g, ' ').trim();
+    if (!oneLine || oneLine.startsWith('<')) continue;
+    return oneLine.length > 100 ? `${oneLine.slice(0, 99)}…` : oneLine;
+  }
+  return null;
+}
+
+export interface SavedAgent {
+  session: string;
+  id: string | null;
+  conversation: string;
+  savedAt: string;
+  title: string | null;
+}
+
+// The saved conversations of a branch's agent sessions (`base` and `base-a-<id>`) whose session is
+// not running, newest first. `running` null: tmux could not be asked, so none is left out.
+export function savedAgents(kunjDir: string, base: string, running: string[] | null): SavedAgent[] {
+  const dir = path.join(kunjDir, 'agent-resume');
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const items: SavedAgent[] = [];
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    const session = name.slice(0, -'.json'.length);
+    const id = agentSessionId(session, base);
+    if (id === undefined || running?.includes(session)) continue;
+    const file = path.join(dir, name);
+    const conversation = readAgentResume(file);
+    if (!conversation) continue;
+    let saved: any = null;
+    let mtime: Date;
+    try {
+      saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      mtime = fs.statSync(file).mtime;
+    } catch {
+      continue;
+    }
+    items.push({ session, id, conversation, savedAt: mtime.toISOString(), title: conversationTitle(saved?.transcript_path) });
+  }
+  return items.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+}
+
 // `command --resume <id>` when the command is claude; any other agent cannot resume
 export function withAgentResume(command: string, id: string | null): string {
   if (!id) return command;

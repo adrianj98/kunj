@@ -2,6 +2,17 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-19 — resume closed agents
+
+- `kunj agent saved [branch]` lists the worktree's saved Claude conversations whose tmux session no
+  longer runs (closed tab, exited agent, reboot), newest first, titled by their first prompt;
+  `kunj agent forget` clears them. Why: the user wants to restart the machine and then resume each
+  agent; the conversation ids were already saved but only restored tabs could use them.
+- Workspace app: Environment > Resume Agent… (⌘⇧R) and the sidebar row menu pop up that list;
+  picking one opens an agent tab with `--session <id> --resume`. An exited agent tab is replaced
+  (without the `agent stop` that would race the new start) and prints the shortcut. Why: a simple
+  way in the workspace to start each one again.
+
 ## 2026-11-03 — workspace app: go to declaration
 
 - ⌘-click (or F12, or *Go to Declaration*) on a name in an editor tab or the Changes diff opens the

@@ -21,6 +21,8 @@ final class ActionRunner {
     /// Opens the agent in an environment (New session with "Start an agent").
     /// A new agent tab in the environment: the default agent, or a named one (`--agent`).
     var openAgent: (Environment, AgentChoice?) -> Void = { _, _ in }
+    /// Resume Agent…: the worktree's closed Claude conversations, to pick one
+    var resumeAgent: (Environment) -> Void = { _ in }
     /// The sidebar row menu's New Shell and Close Session.
     var openShell: (Environment) -> Void = { _ in }
     var closeSession: (Environment) -> Void = { _ in }
@@ -257,6 +259,7 @@ extension ActionRunner {
         add("New Shell") { [weak self] in self?.select(env.id); self?.openShell(env) }
         add("New Agent") { [weak self] in self?.openAgent(env, nil) }
         if env.kind == .worktree { add("New Antigravity Agent") { [weak self] in self?.openAgent(env, .antigravity) } }
+        if env.kind == .worktree { add("Resume Agent…") { [weak self] in self?.resumeAgent(env) } }
         menu.addItem(.separator())
         add("Open in VS Code", env.kind == .container ? .ctOpen : .worktreeOpen)
         add("Open in New VS Code Window", .worktreeOpenNewWindow)

@@ -510,6 +510,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.windowController.select(env.id)
             self?.openTab(.agent, agent: agent)
         }
+        runner.resumeAgent = { [weak self] env in
+            self?.windowController.select(env.id)
+            self?.showSavedAgents(env)
+        }
         // --demo renders the mockup, whose buttons are all enabled (its container has no host
         // worktree in DemoData, and nothing runs without kunj anyway)
         let demo = self.demo
@@ -522,6 +526,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openShell(_ sender: Any?) { openTab(.shell) }
     @objc func openAgent(_ sender: Any?) { openTab(.agent) }
     @objc func openAntigravityAgent(_ sender: Any?) { openTab(.agent, agent: .antigravity) }
+
+    @objc func resumeAgent(_ sender: Any?) {
+        if let env = windowController.selectedEnvironment { showSavedAgents(env) }
+    }
+
+    /// Resume Agent…: lists the worktree's closed Claude conversations (`kunj agent saved`) in a menu
+    /// at the top of the terminal column; picking one opens its agent tab with `--resume`.
+    private func showSavedAgents(_ env: Environment) {
+        let column = windowController.terminalColumn
+        guard let cli = kunj, let args = savedAgentsArguments(env) else { return }
+        Task { @MainActor [weak self] in
+            let saved: SavedAgentsJson
+            do {
+                saved = try await cli.run(args, cwd: env.repo.root, timeout: 20)
+            } catch {
+                self?.inform("Could not list the saved agents of \(env.branch)", detail: "\(error)")
+                return
+            }
+            guard let self else { return }
+            guard !saved.items.isEmpty else {
+                self.inform("No closed agent to resume in \(env.branch)",
+                            detail: "A Claude agent's conversation is saved as it starts; once its session ends (a closed tab, Close All Sessions, a restart) it is listed here.")
+                return
+            }
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            let header = NSMenuItem(title: "Resume an agent in \(env.branch)", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            for item in saved.items.prefix(25) {
+                let entry = MenuAction(title: savedAgentTitle(item)) { [weak self] in self?.resume(item, in: env) }
+                entry.toolTip = "claude --resume \(item.conversation)"
+                menu.addItem(entry)
+            }
+            if let forget = forgetSavedAgentsArguments(env) {
+                menu.addItem(.separator())
+                menu.addItem(MenuAction(title: "Forget These") {
+                    Task { _ = try? await cli.runRaw(forget, cwd: env.repo.root, stdin: nil, timeout: 20) }
+                })
+            }
+            menu.popUp(positioning: menu.items.dropFirst().first, at: NSPoint(x: 16, y: 40), in: column)
+        }
+    }
+
+    /// Opens the saved conversation's agent tab: an exited tab of that session is replaced, a running one selected.
+    private func resume(_ item: SavedAgent, in env: Environment) {
+        let column = windowController.terminalColumn
+        windowController.select(env.id)
+        if let tab = column.registry.allTerminals.first(where: { $0.envId == env.id && $0.kind == .agent && $0.spec?.session == item.id }) {
+            guard tab.exited != nil else { column.registry.activate(tab); return }
+            column.registry.dropExited(tab)
+        }
+        log("resume agent \(item.id ?? "default") in \(env.id) (conversation \(item.conversation))")
+        if startTab(env: env, kind: .agent, session: item.id, resume: true) {
+            DispatchQueue.main.async { column.focusActive() }
+        }
+    }
+
+    private func inform(_ message: String, detail: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = detail
+        if let window = windowController.window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+    }
 
     @objc func openInEditor(_ sender: Any?) {
         guard let env = windowController.selectedEnvironment else { return }
@@ -1174,6 +1242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        keyEquivalent: "a")
         antigravity.keyEquivalentModifierMask = [.command, .option]
         antigravity.target = self
+        menu.addItem(withTitle: "Resume Agent…", action: #selector(resumeAgent(_:)), keyEquivalent: "R").target = self
         menu.addItem(withTitle: "Open in VS Code", action: #selector(openInEditor(_:)), keyEquivalent: "o").target = self
         menu.addItem(withTitle: "Create PR", action: #selector(createPR(_:)), keyEquivalent: "P").target = self
         menu.addItem(.separator())
@@ -1242,7 +1311,7 @@ extension AppDelegate: NSMenuItemValidation {
         switch item.action {
         case #selector(openShell(_:)), #selector(openAgent(_:)):
             return env != nil && kunj != nil && env?.state != .missing && env?.state != .stopped
-        case #selector(openAntigravityAgent(_:)):
+        case #selector(openAntigravityAgent(_:)), #selector(resumeAgent(_:)):
             return env?.kind == .worktree && kunj != nil && env?.state != .missing
         case #selector(nextTab(_:)), #selector(previousTab(_:)):
             return env.map { windowController.terminalColumn.registry.tabs(for: $0.id).count > 1 } ?? false

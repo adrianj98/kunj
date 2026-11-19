@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-19 (resume closed agents)
+* `features/worktree-agents.md`: `kunj agent saved` / `forget` and the workspace app's Resume Agent… (⌘⇧R).
+
 ## 2026-11-16 (cloud machines phase 2)
 * `containers/cloud-machines.md`: the proxy, `kunj ct` on a branch's machine and the idle loop, as shipped.
 

@@ -10,8 +10,8 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
-import type { AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import type { AgentForgetJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
   json?: boolean;
@@ -29,7 +29,7 @@ interface AgentOptions {
 // The largest brief --prompt-file takes (it becomes one shell argument)
 const MAX_PROMPT_BYTES = 256 * 1024;
 
-const ACTIONS = ['start', 'status', 'stop'];
+const ACTIONS = ['start', 'status', 'stop', 'saved', 'forget'];
 
 export class AgentCommand extends BaseCommand {
   constructor() {
@@ -43,7 +43,7 @@ export class AgentCommand extends BaseCommand {
         { flags: '--no-tmux', description: 'Run the agent directly in this terminal, without a tmux session' },
         { flags: '--session <id>', description: "One of several agents of the worktree: its own tmux session (<agent session>-a-<id>; letters, digits, _ and -, up to 32)" },
         { flags: '--resume', description: "[start] When the session is not running, resume its agent's last Claude conversation (saved by a hook)" },
-        { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs)' },
+        { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs); [forget] forget every saved conversation of the worktree' },
         { flags: '--detach', description: '[start] Start the tmux session without attaching to it (no terminal needed); a running one is left as it is' },
         { flags: '--prompt-file <file>', description: "[start] The agent's first prompt, read from a file (claude only; a new session only)" },
         { flags: '--open-in-app', description: '[start] Ask the workspace app to open, select and focus a tab for the new session' },
@@ -53,6 +53,8 @@ export class AgentCommand extends BaseCommand {
         '  start [branch]    run the agent in the worktree\'s tmux session, or reattach to it (default)',
         '  status [branch]   whether the session exists',
         '  stop [branch]     kill the session',
+        '  saved [branch]    saved Claude conversations of sessions that are not running (to resume)',
+        '  forget [branch]   forget a saved conversation (--session <id>, or --all)',
         '',
         '[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with',
         '--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.',
@@ -63,6 +65,8 @@ export class AgentCommand extends BaseCommand {
         '',
         '--resume: a Claude agent saves its conversation id as it starts; when its session was ended',
         '(the app quit with Close All, a reboot), start --resume runs claude --resume <id> in a new one.',
+        '`saved` lists those conversations with their first prompt; resume one with',
+        '`kunj agent start <branch> --session <id> --resume` (no --session for the default one).',
         '',
         '--detach starts the session in the background and returns (with --json: branch, worktree,',
         'session, id, started). --prompt-file gives a new claude agent its first prompt; --open-in-app',
@@ -122,6 +126,40 @@ export class AgentCommand extends BaseCommand {
         const state = running === null ? chalk.yellow(unknown) : running ? chalk.green('running') : chalk.dim('not running');
         console.log(`${wt.branch}: ${state} (${session})`);
         if (id === undefined && all && all.length > 1) for (const s of all) console.log(`  ${s.session}${s.state ? ` ${s.state}` : ''}`);
+      }
+      return;
+    }
+
+    if (verb === 'saved') {
+      const items = savedAgents(getKunjDir(), base, sessions).filter(s => id === undefined || s.id === id);
+      if (this.jsonMode) {
+        this.outputJSON({ branch: wt.branch, worktree: wt.path, items } satisfies AgentSavedJson);
+      } else if (items.length === 0) {
+        console.log(chalk.dim(`No saved conversation of ${wt.branch} to resume`));
+      } else {
+        for (const s of items) {
+          const flag = s.id ? ` --session ${s.id}` : '';
+          console.log(`${chalk.bold(s.title ?? '(no prompt yet)')}\n  ${chalk.dim(`${new Date(s.savedAt).toLocaleString()}  kunj agent start ${wt.branch}${flag} --resume`)}`);
+        }
+      }
+      return;
+    }
+
+    if (verb === 'forget') {
+      if (id === undefined && !opts.all) throw new AgentError('bad-option', '`kunj agent forget` needs --session <id> or --all.');
+      const kunjDir = getKunjDir();
+      const targets = opts.all ? savedAgents(kunjDir, base, sessions).map(s => s.session) : [session];
+      const forgotten: string[] = [];
+      for (const t of targets) {
+        try {
+          fs.unlinkSync(agentResumeFile(kunjDir, t));
+          forgotten.push(t);
+        } catch { /* nothing saved */ }
+      }
+      if (this.jsonMode) {
+        this.outputJSON({ branch: wt.branch, forgotten } satisfies AgentForgetJson);
+      } else {
+        console.log(forgotten.length ? chalk.green(`✓ Forgot ${forgotten.length} saved conversation${forgotten.length === 1 ? '' : 's'}`) : chalk.dim('Nothing saved to forget'));
       }
       return;
     }
