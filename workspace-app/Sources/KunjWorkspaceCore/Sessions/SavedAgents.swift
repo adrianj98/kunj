@@ -31,6 +31,12 @@ public struct SavedAgent: Decodable, Equatable, Sendable {
     }
 }
 
+/// `kunj agent forget --json`
+public struct AgentForgetJson: Decodable, Equatable, Sendable {
+    public var branch: String
+    public var forgotten: [String]
+}
+
 /// `kunj agent saved <branch>` for a worktree; nil for a container (agents there do not save one yet).
 public func savedAgentsArguments(_ env: Environment) -> [String]? {
     guard env.kind == .worktree else { return nil }

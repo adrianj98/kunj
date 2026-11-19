@@ -15,7 +15,7 @@ import { kunjEntry } from './self';
 const execFileAsync = promisify(execFile);
 
 export type AgentErrorCode = 'tmux-missing' | 'no-tty' | 'not-running' | 'no-worktree' | 'bad-session-id' | 'unknown-agent'
-  | 'bad-option' | 'prompt-needs-claude' | 'prompt-not-found' | 'prompt-too-large' | 'start-failed';
+  | 'bad-option' | 'prompt-needs-claude' | 'prompt-not-found' | 'prompt-too-large' | 'start-failed' | 'tmux-failed';
 
 // Expected outcomes: printed without a stack trace
 export class AgentError extends Error {

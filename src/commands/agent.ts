@@ -148,6 +148,13 @@ export class AgentCommand extends BaseCommand {
     if (verb === 'forget') {
       if (id === undefined && !opts.all) throw new AgentError('bad-option', '`kunj agent forget` needs --session <id> or --all.');
       const kunjDir = getKunjDir();
+      // --all leaves running agents' conversations alone, so it needs to know which run
+      if (opts.all && !sessions) {
+        throw new AgentError(tmux === 'missing' ? 'tmux-missing' : 'tmux-failed', 'Could not ask tmux which agents are running, so nothing was forgotten. Use --session <id> to forget one.');
+      }
+      if (!opts.all && sessions?.includes(session)) {
+        throw new AgentError('bad-option', `${session} is running; its conversation is kept so it can be resumed later. Stop it first.`);
+      }
       const targets = opts.all ? savedAgents(kunjDir, base, sessions).map(s => s.session) : [session];
       const forgotten: string[] = [];
       for (const t of targets) {

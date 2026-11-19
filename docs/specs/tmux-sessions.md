@@ -108,7 +108,8 @@ Closed tabs and exited agents: `kunj agent saved [branch] [--session <id>] --jso
 first by file mtime, each with its first prompt as `title` (`conversationTitle()`: the first 256 KB of the
 `transcript_path` the hook saved, the first user line that is not meta and does not start with `<`, cut to
 100 characters). `kunj agent forget [branch] (--session <id> | --all)` removes saved files
-(`AgentForgetJson`). In the app, Environment > Resume Agent… (⌘⇧R, worktrees only) and the sidebar row
+(`AgentForgetJson`); it never removes a running session's (`--session` of a running one is refused, `--all`
+skips them and refuses with `tmux-failed`/`tmux-missing` when tmux cannot be asked). In the app, Environment > Resume Agent… (⌘⇧R, worktrees only) and the sidebar row
 menu run `agent saved` and pop up a menu at the top of the terminal column (25 newest, then Forget These);
 picking one opens an agent tab with `--session <id> --resume`. A tab of that session that is still open is
 selected when it runs, and replaced when its process exited (`TabRegistry.dropExited()`, which does not run

@@ -12,6 +12,8 @@ Changes made with Claude, and why.
   picking one opens an agent tab with `--session <id> --resume`. An exited agent tab is replaced
   (without the `agent stop` that would race the new start) and prints the shortcut. Why: a simple
   way in the workspace to start each one again.
+- Review fixes: `forget` never removes a running agent's saved id (refused for `--session`; `--all`
+  refuses when tmux cannot be asked), and the app's Forget These reports a failure.
 
 ## 2026-11-03 — workspace app: go to declaration
 

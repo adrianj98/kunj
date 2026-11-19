@@ -563,7 +563,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let forget = forgetSavedAgentsArguments(env) {
                 menu.addItem(.separator())
                 menu.addItem(MenuAction(title: "Forget These") {
-                    Task { _ = try? await cli.runRaw(forget, cwd: env.repo.root, stdin: nil, timeout: 20) }
+                    Task { @MainActor [weak self] in
+                        do {
+                            let _: AgentForgetJson = try await cli.run(forget, cwd: env.repo.root, timeout: 20)
+                        } catch {
+                            self?.inform("Could not forget the saved agents of \(env.branch)", detail: "\(error)")
+                        }
+                    }
                 })
             }
             menu.popUp(positioning: menu.items.dropFirst().first, at: NSPoint(x: 16, y: 40), in: column)

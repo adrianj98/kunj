@@ -401,4 +401,17 @@ describe('saved and forget', () => {
     await new AgentCommand().execute('forget', 'feature-a', { json: true, all: true } as any);
     expect(JSON.parse(stdout.join(''))).toEqual({ branch: 'feature-a', forgotten: [session] });
   });
+
+  test('forget --session keeps the conversation of a running session', async () => {
+    tmuxSessions.mockResolvedValue([`${session}-a-1`]);
+    await expect(new AgentCommand().execute('forget', 'feature-a', { session: '1' } as any)).rejects.toThrow(/is running/);
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+  });
+
+  test('forget --all refuses when tmux cannot say which agents run', async () => {
+    tmuxSessions.mockResolvedValue('failed');
+    savedAgents.mockReturnValue([item('1')]);
+    await expect(new AgentCommand().execute('forget', 'feature-a', { all: true } as any)).rejects.toThrow(/nothing was forgotten/);
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+  });
 });
