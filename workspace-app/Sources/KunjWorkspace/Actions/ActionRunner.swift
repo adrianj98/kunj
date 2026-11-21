@@ -23,6 +23,10 @@ final class ActionRunner {
     var openAgent: (Environment, AgentChoice?) -> Void = { _, _ in }
     /// Resume Agent…: the worktree's closed Claude conversations, to pick one
     var resumeAgent: (Environment) -> Void = { _ in }
+    /// Which of Suspend Session / Resume Session the row menu offers (nil: neither)
+    var sessionToggle: (Environment) -> SessionToggle? = { _ in nil }
+    var suspendSession: (Environment) -> Void = { _ in }
+    var resumeSession: (Environment) -> Void = { _ in }
     /// The sidebar row menu's New Shell and Close Session.
     var openShell: (Environment) -> Void = { _ in }
     var closeSession: (Environment) -> Void = { _ in }
@@ -281,12 +285,20 @@ extension ActionRunner {
         add(env.kind == .container ? "Copy Container Name" : "Copy Path", .copyPath)
         add("Copy Branch Name", .copyBranch)
         menu.addItem(.separator())
+        switch sessionToggle(env) {
+        case .suspend?: add("Suspend Session") { [weak self] in self?.suspendSession(env) }
+        case .resume?: add("Resume Session") { [weak self] in self?.resumeSession(env) }
+        case nil: break
+        }
         add("Close Session") { [weak self] in self?.closeSession(env) }
         add(env.kind == .container ? "Delete Container…" : "Delete Worktree…",
             env.kind == .container ? .ctRemove(force: false) : .worktreeRemove(force: false))
         return menu
     }
 }
+
+/// The row menu's Suspend Session or Resume Session.
+enum SessionToggle { case suspend, resume }
 
 /// A menu item that runs a closure.
 final class MenuAction: NSMenuItem {

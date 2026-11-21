@@ -13,8 +13,11 @@ final class LayoutKeeper {
     var environment: (String) -> Environment? = { _ in nil }
     /// The tabs of an environment, in order, and the active one (the registry's).
     var tabs: (String) -> (tabs: [SavedTab], active: Int?) = { _ in ([], nil) }
-    /// Opens a restored tab (a refused spec opens nothing); called in the saved order.
-    var open: (Environment, SavedTab) -> Void = { _, _ in }
+    /// Opens a restored tab (a refused spec opens nothing); called in the saved order. `suspended`:
+    /// a tab without a process, until Resume Session.
+    var open: (Environment, SavedTab, _ suspended: Bool) -> Void = { _, _, _ in }
+    /// Whether an environment has suspended tabs open (the registry's).
+    var hasSuspendedTabs: (String) -> Bool = { _ in false }
     /// Makes the environment's `index`th tab active once its tabs are restored.
     var activate: (String, Int) -> Void = { _, _ in }
     /// A `lastActivity` changed (the sidebar refreshes its times).
@@ -47,7 +50,7 @@ final class LayoutKeeper {
         guard let plan = restorePlan(entry, env: env, kinds: [.shell, .agent, .editor]) else { return }
         restored.insert(env.id)
         let before = tabs(env.id).tabs.count
-        for tab in plan.tabs { open(env, tab) }
+        for (i, tab) in plan.tabs.enumerated() { open(env, tab, plan.suspended.contains(i)) }
         if let active = plan.active, before + active < tabs(env.id).tabs.count {
             activate(env.id, before + active)
         }
@@ -60,11 +63,27 @@ final class LayoutKeeper {
         guard restored.contains(envId), let env = environment(envId) else { return }
         let open = tabs(envId)
         let saved = tabsToSave(open.tabs, active: open.active)
+        let suspended = hasSuspendedTabs(envId)
         let entry = layouts.layout(repo: env.repo.dirName, fallback: env.repo.name).branches[key(env)]
-        guard entry?.tabs != saved.tabs || entry?.active != saved.active else { return }
+        guard entry?.tabs != saved.tabs || entry?.active != saved.active || (entry?.suspended ?? false) != suspended else { return }
         layouts.update(repo: env.repo.dirName, fallback: env.repo.name, key: key(env)) {
             $0.tabs = saved.tabs
             $0.active = saved.active
+            $0.suspended = suspended
+        }
+    }
+
+    /// Whether the environment's session is suspended: its open tabs once restored, else the layout file.
+    func isSuspended(_ env: Environment) -> Bool {
+        if restored.contains(env.id) { return hasSuspendedTabs(env.id) }
+        return layoutSuspended(layouts.layout(repo: env.repo.dirName, fallback: env.repo.name).branches[key(env)], env: env)
+    }
+
+    /// Close All Sessions on quit: these environments' tabs come back suspended next time.
+    func markSuspended(_ envIds: [String]) {
+        for id in Set(envIds) {
+            guard let env = environment(id) else { continue }
+            layouts.update(repo: env.repo.dirName, fallback: env.repo.name, key: key(env)) { $0.suspended = true }
         }
     }
 
@@ -95,6 +114,7 @@ final class LayoutKeeper {
         layouts.update(repo: env.repo.dirName, fallback: env.repo.name, key: key(env)) {
             $0.tabs = []
             $0.active = nil
+            $0.suspended = false
         }
     }
 

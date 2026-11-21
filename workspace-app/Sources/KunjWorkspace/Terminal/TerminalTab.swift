@@ -17,6 +17,8 @@ final class TerminalTab: LocalProcessTerminalView {
     /// The title the program set (OSC 0/2), shown as the pill's tooltip.
     private(set) var programTitle: String?
     private(set) var exited: Int32?
+    /// A suspended session's tab: never started, it shows a note until Resume Session replaces it.
+    var suspended = false
     /// When the process started (the tab bar's agent uptime); `--demo` sets it.
     var startedAt = Date()
     var onExit: ((TerminalTab) -> Void)?

@@ -16,6 +16,8 @@ final class SidebarView: NSView {
     var isOpen: (Environment) -> Bool = { _ in true } { didSet { reload() } }
     /// A row's right-click menu.
     var rowMenu: (Environment) -> NSMenu? = { _ in nil }
+    /// Whether an environment's session is suspended (its status reads "Suspended").
+    var isSuspended: (Environment) -> Bool = { _ in false }
     /// Repository roots whose `N more…` row is expanded (for this run).
     private var expanded: Set<String> = []
     /// Repository roots collapsed to their header (a click on the header toggles); remembered.
@@ -162,7 +164,7 @@ final class SidebarView: NSView {
         let n = agentsRunning(repos)
         agents.stringValue = n == 1 ? "1 agent running" : "\(n) agents running"
         list.set(groups: groups(), selectedId: selectedId, time: timeText)
-        list.rows.forEach { $0.usage = usageOf($0.environment); $0.showUsage = hovering }
+        list.rows.forEach { $0.usage = usageOf($0.environment); $0.showUsage = hovering; $0.suspended = isSuspended($0.environment) }
         list.frame.size.width = scroll.contentSize.width
         list.needsLayout = true
     }

@@ -18,6 +18,7 @@ each, its CPU and memory, and whether it is orphaned, so stray sessions can be f
 | Opening a listed session as a tab | Not done (Copy Attach Command instead) |
 | Workspace app: quit asks Leave Running / Close All Sessions (Leave Running after 20 s); Session > Close All Sessions… | Shipped |
 | Host Claude agents save their session id; `kunj agent --resume`; restored agent tabs resume | Shipped |
+| Workspace app: Suspend Session / Resume Session (sidebar row menu, Environment menu ⌘⇧U); Close All on quit and ended agents restore suspended, sidebar shows "Suspended" | Shipped |
 | `kunj agent saved` / `forget` (`AgentSavedJson`, `AgentForgetJson`); workspace app Resume Agent… (⌘⇧R, sidebar row menu), exited agent tabs say so | Shipped |
 | Resuming container agents | Not done |
 
@@ -91,6 +92,21 @@ session id) asks **Leave Running** (the default), **Close All Sessions** or **Ca
 (a timer in the modal run loop mode calls `stopModal`). Close All runs each tab's
 `sessionKillArguments` (10 s each, in parallel) before `kunj events` is stopped. The layout is flushed
 either way, so the tabs come back on the next launch. `--demo` never asks.
+
+Suspending: Suspend Session (the sidebar row menu, or Environment > Suspend Session ⌘⇧U, whose title
+turns into Resume Session) ends the environment's shell and agent tabs' processes and tmux sessions
+(`sessionKillArguments`) and puts a suspended tab in each one's place (`TabRegistry.replace(start:
+false)`: no process, a note, the spec kept so its session and agent are saved); editors stay.
+`BranchLayout.suspended` is written while any tab is suspended. Resume Session builds each suspended
+tab's spec again with `resume: true` and starts it in its place, so Claude agents continue their
+conversation and shells start fresh in the same session id. Close All Sessions on quit marks every
+environment it ends as suspended (`LayoutKeeper.markSuspended`) before the layout is flushed, so
+nothing starts on the next launch: the sidebar reads "Suspended" (`layoutSuspended()`, also true when
+a saved agent tab's agent no longer runs, as after a restart) and each session is resumed from its
+row. `restorePlan()` returns the indexes to restore suspended: every shell and agent tab of a
+suspended entry, and any agent tab whose agent is not running (before this they were dropped). A
+stopped container restores nothing until it runs; Resume Session says so. Picking a suspended or
+exited tab's conversation in Resume Agent… starts it in that tab.
 
 Resuming: the Claude hooks (`claudeHookSettings()`) include `SessionStart`, which copies its input
 (JSON with `session_id`) to `$KUNJ_AGENT_RESUME`. `kunj agent` sets that to

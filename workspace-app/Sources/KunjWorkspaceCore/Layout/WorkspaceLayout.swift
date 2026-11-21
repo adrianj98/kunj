@@ -25,14 +25,18 @@ public struct BranchLayout: Codable, Equatable, Sendable {
     public var tabs: [SavedTab]
     public var active: Int?
     public var lastActivity: Date?
+    /// The session was suspended (Suspend Session, or Close All Sessions on quit): its shell and
+    /// agent tabs come back without a process until Resume Session.
+    public var suspended: Bool
 
-    public init(tabs: [SavedTab] = [], active: Int? = nil, lastActivity: Date? = nil) {
+    public init(tabs: [SavedTab] = [], active: Int? = nil, lastActivity: Date? = nil, suspended: Bool = false) {
         self.tabs = tabs
         self.active = active
         self.lastActivity = lastActivity
+        self.suspended = suspended
     }
 
-    enum CodingKeys: String, CodingKey { case tabs, active, lastActivity }
+    enum CodingKeys: String, CodingKey { case tabs, active, lastActivity, suspended }
 
     /// Tabs this build cannot read (a kind from a newer app) are skipped, not the whole entry.
     public init(from decoder: Decoder) throws {
@@ -40,6 +44,7 @@ public struct BranchLayout: Codable, Equatable, Sendable {
         tabs = (try c.decodeIfPresent([Lenient<SavedTab>].self, forKey: .tabs) ?? []).compactMap(\.value)
         active = try? c.decodeIfPresent(Int.self, forKey: .active)
         lastActivity = try? c.decodeIfPresent(Date.self, forKey: .lastActivity)
+        suspended = (try? c.decodeIfPresent(Bool.self, forKey: .suspended)) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -47,6 +52,7 @@ public struct BranchLayout: Codable, Equatable, Sendable {
         try c.encode(tabs, forKey: .tabs)
         try c.encodeIfPresent(active, forKey: .active)
         try c.encodeIfPresent(lastActivity, forKey: .lastActivity)
+        if suspended { try c.encode(true, forKey: .suspended) }
     }
 }
 
@@ -102,34 +108,47 @@ public func tabsToSave(_ open: [SavedTab], active: Int?) -> (tabs: [SavedTab], a
     return (tabs, newActive)
 }
 
-/// The tabs to reopen when an environment is selected for the first time in a session, and which
-/// one becomes active. nil while the environment cannot run them (a missing worktree, a stopped
-/// container): the caller tries again on a later selection, and must not save over the entry
-/// meanwhile. An agent tab comes back only while its agent runs (it reattaches to its tmux
-/// session; restoring one that ended would start a new agent): each tab whose session is among
-/// `env.agentSessions`, once per session, or, when the sessions are not known (an older kunj),
-/// one tab while any agent runs. `kinds` are the kinds the app can reopen (editor tabs once they exist).
+/// The tabs to reopen when an environment is selected for the first time in a session, which one
+/// becomes active, and which come back suspended (indexes into `tabs`: no process until Resume
+/// Session). nil while the environment cannot run them (a missing worktree, a stopped container):
+/// the caller tries again on a later selection, and must not save over the entry meanwhile. An
+/// agent tab reattaches while its agent runs: its session is among `env.agentSessions`, or, when the
+/// sessions are not known (an older kunj), the first agent tab while any agent runs. One whose agent
+/// ended (Close All Sessions, a restart) comes back suspended, as does every shell and agent tab of
+/// a suspended entry. An agent session is restored once. `kinds` are the kinds the app can reopen.
 public func restorePlan(_ entry: BranchLayout, env: Environment,
-                        kinds: Set<TabKind> = [.shell, .agent]) -> (tabs: [SavedTab], active: Int?)? {
+                        kinds: Set<TabKind> = [.shell, .agent]) -> (tabs: [SavedTab], active: Int?, suspended: Set<Int>)? {
     guard env.state == .ok || env.state == .running else { return nil }
     let agentRuns = env.agent == .running || env.agent == .waiting
     var tabs: [SavedTab] = []
     var active: Int?
+    var suspended: Set<Int> = []
     var agentSessions: Set<String?> = []
     for (i, tab) in entry.tabs.enumerated() where kinds.contains(tab.kind) && tab.kind != .action {
+        var live = !entry.suspended
         if tab.kind == .agent {
-            guard agentRuns, !agentSessions.contains(tab.session) else { continue }
+            guard !agentSessions.contains(tab.session) else { continue }
             if let running = env.agentSessions {
-                guard running.contains(where: { $0.id == tab.session }) else { continue }
-            } else if !agentSessions.isEmpty {
-                continue
+                live = live && agentRuns && running.contains(where: { $0.id == tab.session })
+            } else {
+                live = live && agentRuns && agentSessions.isEmpty
             }
             agentSessions.insert(tab.session)
         }
         if i == entry.active { active = tabs.count }
+        if !live && tab.kind != .editor { suspended.insert(tabs.count) }
         tabs.append(tab)
     }
-    return (tabs, active)
+    return (tabs, active, suspended)
+}
+
+/// Whether the environment's session is suspended before its tabs are restored (the sidebar's
+/// "Suspended"): the entry says so, or an agent tab's agent has ended.
+public func layoutSuspended(_ entry: BranchLayout?, env: Environment) -> Bool {
+    guard let entry, !entry.tabs.isEmpty else { return false }
+    if entry.suspended { return true }
+    guard let plan = restorePlan(entry, env: env) else { return false }
+    return !plan.suspended.isEmpty
 }
 
 /// Which environments changed since the last listing, for `lastActivity`. The first listing only

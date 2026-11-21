@@ -251,10 +251,15 @@ ends with the app.
 
 When you quit with shell or agent tabs open, the app asks **Leave Running** or **Close All
 Sessions**. If you don't answer within 20 seconds it leaves them running. Either way the tabs come
-back the next time you open the app. A Claude agent whose session was closed (or lost to a reboot)
-resumes its conversation: kunj saves Claude Code's session id as the agent starts, and the restored
-tab runs `kunj agent --resume`, which starts `claude --resume <id>` when no session is running. A
-closed shell starts fresh. Agents in containers are not resumed yet.
+back the next time you open the app. Sessions left running reattach. Sessions you closed, and agents
+lost to a restart, come back **suspended**: the sidebar row reads *Suspended* and nothing runs until
+you right-click it and choose **Resume Session**. A resumed Claude agent continues its conversation
+(kunj saves Claude Code's session id as the agent starts and runs `claude --resume <id>`); a shell
+starts fresh. Agents in containers start a new conversation.
+
+To pause a session yourself, right-click its row and choose **Suspend Session** (or
+**Environment > Suspend Session**, ⌘⇧U). Its shells and agents stop and their tmux sessions end,
+freeing their CPU and memory; the tabs stay, and **Resume Session** starts them again.
 
 To bring back an agent whose tab you closed, or one that exited, use **Environment > Resume
 Agent…** (⌘⇧R) or **Resume Agent…** in the sidebar row's menu. It lists the worktree's saved

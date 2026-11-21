@@ -2,6 +2,17 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-20 — suspend and resume sessions in the workspace app
+
+- Sidebar row menu (and Environment > ⌘⇧U) shows Suspend Session or Resume Session by state.
+  Suspend ends the session's shells and agents and their tmux sessions but keeps the tabs; Resume
+  starts them again in place, Claude agents in their conversation. Why: the user wants to pause a
+  session and resume each one by hand.
+- Close All Sessions on quit now brings tabs back suspended (sidebar reads "Suspended") instead
+  of starting them; agents that ended (a restart) come back suspended too. Why: the user wants to
+  resume each session manually after reopening; and saved agent tabs whose agent had ended were
+  being dropped on restore, so the earlier "restored tabs resume" never happened.
+
 ## 2026-11-19 — resume closed agents
 
 - `kunj agent saved [branch]` lists the worktree's saved Claude conversations whose tmux session no

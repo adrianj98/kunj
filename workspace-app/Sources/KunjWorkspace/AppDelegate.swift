@@ -353,16 +353,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         agent: ($0 as? TerminalTab)?.spec?.agent) },
                     tabs.firstIndex { $0 === active })
         }
-        keeper.open = { [weak self] env, tab in
+        keeper.open = { [weak self] env, tab, suspended in
             if tab.kind == .editor {
                 if let path = tab.path { self?.windowController.terminalColumn.registry.openEditor(env: env, path: path) }
             } else {
-                // a tab saved before sessions has none: the default agent session, a plain shell
-                // an agent whose session ended (Close All on quit, a reboot) resumes its conversation
+                // a tab saved before sessions has none: the default agent session, a plain shell.
+                // An agent whose session ended (Close All on quit, a restart) comes back suspended,
+                // and Resume Session continues its conversation
                 _ = self?.startTab(env: env, kind: tab.kind, session: tab.session,
-                                   agent: tab.agent.flatMap(AgentChoice.init(rawValue:)), resume: true)
+                                   agent: tab.agent.flatMap(AgentChoice.init(rawValue:)), resume: true, suspended: suspended)
             }
         }
+        keeper.hasSuspendedTabs = { [weak registry] id in !(registry?.suspendedTabs(for: id).isEmpty ?? true) }
         keeper.activate = { [weak registry] id, index in
             guard let registry else { return }
             let tabs = registry.tabs(for: id)
@@ -378,6 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.windowController.sidebar.reloadRows()
         }
         windowController.sidebar.hideEmptyRepos = !UserDefaults.standard.bool(forKey: Self.showEmptyReposKey)
+        windowController.sidebar.isSuspended = { [weak keeper] env in keeper?.isSuspended(env) ?? false }
         windowController.sidebar.isOpen = { [weak keeper, weak registry] env in
             !(registry?.tabs(for: env.id).isEmpty ?? true) || keeper?.hasSavedTabs(env) == true
         }
@@ -434,7 +437,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !sessions.isEmpty {
             switch askAboutSessions(sessions) {
             case .cancel: return .terminateCancel
-            case .closeAll: kills = sessions.map { ($0.env, sessionKillArguments(env: $0.env, kind: $0.kind, session: $0.session)) }
+            case .closeAll:
+                kills = sessions.map { ($0.env, sessionKillArguments(env: $0.env, kind: $0.kind, session: $0.session)) }
+                // their tabs come back suspended: Resume Session in the sidebar starts each again
+                layoutKeeper?.markSuspended(sessions.map(\.env.id))
             case .leaveRunning: break
             }
         }
@@ -510,6 +516,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.windowController.select(env.id)
             self?.openTab(.agent, agent: agent)
         }
+        runner.sessionToggle = { [weak self] env in
+            guard let self, let keeper = self.layoutKeeper else { return nil }
+            if keeper.isSuspended(env) { return .resume }
+            return self.canSuspend(env) ? .suspend : nil
+        }
+        runner.suspendSession = { [weak self] env in self?.suspendSession(env) }
+        runner.resumeSession = { [weak self] env in self?.resumeSession(env) }
         runner.resumeAgent = { [weak self] env in
             self?.windowController.select(env.id)
             self?.showSavedAgents(env)
@@ -529,6 +542,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func resumeAgent(_ sender: Any?) {
         if let env = windowController.selectedEnvironment { showSavedAgents(env) }
+    }
+
+    /// Session > Suspend Session / Resume Session (⌘⇧U), whichever applies to the selected environment.
+    @objc func toggleSuspended(_ sender: Any?) {
+        guard let env = windowController.selectedEnvironment else { return }
+        if layoutKeeper?.isSuspended(env) == true { resumeSession(env) } else { suspendSession(env) }
+    }
+
+    /// The environment has shell or agent tabs with something running (Suspend Session applies).
+    private func canSuspend(_ env: Environment) -> Bool {
+        windowController.terminalColumn.registry.tabs(for: env.id).contains {
+            guard let t = $0 as? TerminalTab else { return false }
+            return (t.kind == .shell || t.kind == .agent) && !t.suspended && t.exited == nil
+        }
+    }
+
+    /// Suspend Session: ends the processes and tmux sessions of the environment's shell and agent
+    /// tabs, keeping the tabs (suspended, saved so) and the editors. Resume Session starts them again,
+    /// Claude agents in their conversation.
+    private func suspendSession(_ env: Environment) {
+        guard let cli = kunj else { return }
+        let registry = windowController.terminalColumn.registry
+        var kills: [[String]] = []
+        for case let tab as TerminalTab in registry.tabs(for: env.id)
+        where (tab.kind == .shell || tab.kind == .agent) && !tab.suspended {
+            guard let spec = tab.spec else { continue }
+            if let session = spec.session { kills.append(sessionKillArguments(env: env, kind: tab.kind, session: session)) }
+            registry.replace(tab, env: env, spec: spec, start: false)
+        }
+        log("suspended \(env.id): \(kills.count) session(s)")
+        for args in kills { runQuietly(cli, args, in: env) }
+        windowController.sidebar.reloadRows()
+    }
+
+    /// Resume Session: every suspended tab of the environment starts again in its place, agents
+    /// with `--resume` (restoring its tabs first when it was not opened yet in this run).
+    private func resumeSession(_ env: Environment) {
+        guard let cli = kunj else { return }
+        let column = windowController.terminalColumn
+        windowController.select(env.id)
+        layoutKeeper?.selected(env)
+        let tabs = column.registry.suspendedTabs(for: env.id)
+        guard !tabs.isEmpty else {
+            inform("\(env.branch) has nothing to resume", detail: env.state == .stopped
+                   ? "Start the container first; its tabs come back once it runs." : "Its shell and agent tabs are already running.")
+            return
+        }
+        for tab in tabs {
+            do {
+                let spec = try terminalSpec(cli: cli, env: env, kind: tab.kind, shell: Self.loginShell,
+                                            terminalEnv: ProcessInfo.processInfo.environment, session: tab.spec?.session,
+                                            agent: tab.spec?.agent.flatMap(AgentChoice.init(rawValue:)), resume: true)
+                column.registry.replace(tab, env: env, spec: spec, start: true)
+            } catch let error as TerminalSpecError {
+                column.showMessage(error.message)
+                return
+            } catch {
+                column.showMessage("\(error)")
+                return
+            }
+        }
+        log("resumed \(env.id): \(tabs.count) tab(s)")
+        windowController.sidebar.reloadRows()
+        DispatchQueue.main.async { column.focusActive() }
     }
 
     /// Resume Agent…: lists the worktree's closed Claude conversations (`kunj agent saved`) in a menu
@@ -580,14 +657,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func resume(_ item: SavedAgent, in env: Environment) {
         let column = windowController.terminalColumn
         windowController.select(env.id)
-        if let tab = column.registry.allTerminals.first(where: { $0.envId == env.id && $0.kind == .agent && $0.spec?.session == item.id }) {
-            guard tab.exited != nil else { column.registry.activate(tab); return }
-            column.registry.dropExited(tab)
-        }
         log("resume agent \(item.id ?? "default") in \(env.id) (conversation \(item.conversation))")
-        if startTab(env: env, kind: .agent, session: item.id, resume: true) {
-            DispatchQueue.main.async { column.focusActive() }
+        if let tab = column.registry.allTerminals.first(where: { $0.envId == env.id && $0.kind == .agent && $0.spec?.session == item.id }) {
+            guard tab.exited != nil || tab.suspended else { column.registry.activate(tab); return }
+            // an exited or suspended tab starts again in its place
+            guard let cli = kunj, let spec = try? terminalSpec(cli: cli, env: env, kind: .agent, shell: Self.loginShell,
+                                                                 terminalEnv: ProcessInfo.processInfo.environment,
+                                                                 session: item.id, resume: true) else { return }
+            column.registry.replace(tab, env: env, spec: spec, start: true)
+        } else if !startTab(env: env, kind: .agent, session: item.id, resume: true) {
+            return
         }
+        DispatchQueue.main.async { column.focusActive() }
     }
 
     private func inform(_ message: String, detail: String) {
@@ -839,13 +920,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// inline in the column and opens nothing.
     @discardableResult
     private func startTab(env: Environment, kind: TabKind, session: String?, agent: AgentChoice? = nil,
-                          resume: Bool = false) -> Bool {
+                          resume: Bool = false, suspended: Bool = false) -> Bool {
         let column = windowController.terminalColumn
         guard let cli = kunj else { return false }
         do {
             let spec = try terminalSpec(cli: cli, env: env, kind: kind, shell: Self.loginShell,
                                         terminalEnv: ProcessInfo.processInfo.environment, session: session, agent: agent,
                                         resume: resume)
+            if suspended {
+                column.registry.openSuspended(spec: spec, env: env, kind: kind)
+                log("opened suspended \(kind.rawValue) in \(env.id)")
+                return true
+            }
             column.registry.open(spec: spec, env: env, kind: kind)
             log("opened \(kind.rawValue) in \(env.id): \(spec.executable) \(spec.arguments.joined(separator: " ")) (cwd \(spec.cwd))")
             return true
@@ -1257,6 +1343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clone.keyEquivalentModifierMask = [.command, .option]
         clone.target = self
         menu.addItem(withTitle: "Search Sessions", action: #selector(focusSearch(_:)), keyEquivalent: "k").target = self
+        menu.addItem(withTitle: "Suspend Session", action: #selector(toggleSuspended(_:)), keyEquivalent: "U").target = self
         menu.addItem(withTitle: "Close Session", action: #selector(closeSession(_:)), keyEquivalent: "W").target = self
         menu.addItem(withTitle: "Close All Sessions…", action: #selector(closeAllSessions(_:)), keyEquivalent: "").target = self
         // the running language servers, each with Stop (filled when the menu opens)
@@ -1317,6 +1404,11 @@ extension AppDelegate: NSMenuItemValidation {
         switch item.action {
         case #selector(openShell(_:)), #selector(openAgent(_:)):
             return env != nil && kunj != nil && env?.state != .missing && env?.state != .stopped
+        case #selector(toggleSuspended(_:)):
+            guard let env, kunj != nil, let keeper = layoutKeeper else { item.title = "Suspend Session"; return false }
+            let suspended = keeper.isSuspended(env)
+            item.title = suspended ? "Resume Session" : "Suspend Session"
+            return suspended || canSuspend(env)
         case #selector(openAntigravityAgent(_:)), #selector(resumeAgent(_:)):
             return env?.kind == .worktree && kunj != nil && env?.state != .missing
         case #selector(nextTab(_:)), #selector(previousTab(_:)):

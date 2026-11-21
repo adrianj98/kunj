@@ -174,19 +174,44 @@ private func repos(_ envs: [Environment]) -> [RepoEnvironments] {
         #expect(restorePlan(entry, env: diffTestEnvironment(path: "/w"))?.tabs == [shell()])
     }
 
-    @Test func agentTabsReattachOnlyToARunningAgent() {
+    @Test func agentTabsReattachToARunningAgentAndComeBackSuspendedOtherwise() {
         let entry = BranchLayout(tabs: [shell(), agentTab], active: 1)
         var env = diffTestEnvironment(path: "/w")
-        env.agent = .none
-        #expect(restorePlan(entry, env: env)?.tabs == [shell()])
-        #expect(restorePlan(entry, env: env)?.active == nil)
-        env.agent = .unknown
-        #expect(restorePlan(entry, env: env)?.tabs == [shell()])
-        for state in [AgentActivity.running, .waiting] {
+        for state in [AgentActivity.none, .unknown] {
             env.agent = state
             #expect(restorePlan(entry, env: env)?.tabs == [shell(), agentTab])
             #expect(restorePlan(entry, env: env)?.active == 1)
+            #expect(restorePlan(entry, env: env)?.suspended == [1])
+            #expect(layoutSuspended(entry, env: env))
         }
+        for state in [AgentActivity.running, .waiting] {
+            env.agent = state
+            #expect(restorePlan(entry, env: env)?.tabs == [shell(), agentTab])
+            #expect(restorePlan(entry, env: env)?.suspended == [])
+            #expect(!layoutSuspended(entry, env: env))
+        }
+    }
+
+    @Test func aSuspendedEntryRestoresEveryTerminalTabSuspended() {
+        var env = diffTestEnvironment(path: "/w")
+        env.agent = .running
+        let entry = BranchLayout(tabs: [editorTab, shell(), agentTab], active: 0, suspended: true)
+        let plan = restorePlan(entry, env: env, kinds: [.shell, .agent, .editor])
+        #expect(plan?.tabs == [editorTab, shell(), agentTab])
+        #expect(plan?.suspended == [1, 2])
+        #expect(layoutSuspended(entry, env: env))
+        #expect(!layoutSuspended(BranchLayout(tabs: [], suspended: true), env: env))
+        #expect(!layoutSuspended(nil, env: env))
+        // a stopped container cannot restore, but the entry still says suspended
+        #expect(layoutSuspended(entry, env: diffTestEnvironment(kind: .container, path: nil, state: .stopped)))
+    }
+
+    @Test func suspendedIsWrittenOnlyWhenTrue() throws {
+        let plain = String(decoding: try JSONEncoder().encode(BranchLayout(tabs: [])), as: UTF8.self)
+        #expect(!plain.contains("suspended"))
+        let data = try JSONEncoder().encode(BranchLayout(tabs: [], suspended: true))
+        #expect(try JSONDecoder().decode(BranchLayout.self, from: data).suspended)
+        #expect(try JSONDecoder().decode(BranchLayout.self, from: Data(#"{"tabs":[]}"#.utf8)).suspended == false)
     }
 
     @Test func restoreKeepsOneAgentAndTheKindsAsked() {
@@ -196,6 +221,7 @@ private func repos(_ envs: [Environment]) -> [RepoEnvironments] {
         let plan = restorePlan(entry, env: env)
         #expect(plan?.tabs == [agentTab, shell("a"), shell("b")])
         #expect(plan?.active == 2)
+        #expect(plan?.suspended == [])
         let withEditors = restorePlan(entry, env: env, kinds: [.shell, .agent, .editor])
         #expect(withEditors?.tabs == [editorTab, agentTab, shell("a"), shell("b")])
         #expect(withEditors?.active == 3)
@@ -213,10 +239,11 @@ private func repos(_ envs: [Environment]) -> [RepoEnvironments] {
                              AgentSessionInfo(session: "kunj-x", id: nil)]
         let entry = BranchLayout(tabs: [a, shell(), b, ended, a, agentTab], active: 2)
         let plan = restorePlan(entry, env: env)
-        #expect(plan?.tabs == [a, shell(), b, agentTab])
+        #expect(plan?.tabs == [a, shell(), b, ended, agentTab])
         #expect(plan?.active == 2)
+        #expect(plan?.suspended == [3])
         env.agentSessions = []
-        #expect(restorePlan(entry, env: env)?.tabs == [shell()])
+        #expect(restorePlan(entry, env: env)?.suspended == [0, 2, 3, 4])
     }
 
     @Test func trackerPrimesThenReportsChangedAndNewEnvironments() {

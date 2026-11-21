@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-20 (suspend and resume sessions)
+* `features/worktree-agents.md`: Suspend Session / Resume Session in the workspace app.
+
 ## 2026-11-19 (resume closed agents)
 * `features/worktree-agents.md`: `kunj agent saved` / `forget` and the workspace app's Resume Agent… (⌘⇧R).
 

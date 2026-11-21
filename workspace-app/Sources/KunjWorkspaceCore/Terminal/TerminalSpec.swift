@@ -173,7 +173,8 @@ public func tabDot(kind: TabKind, running: Bool, agent: AgentActivity) -> DotCol
 }
 
 /// What quitting does with the tabs' tmux sessions: leave them running (they reattach when the
-/// app opens again), or end them (agents then resume their saved Claude conversation).
+/// app opens again), or end them (their tabs come back suspended; Resume Session starts them again,
+/// agents in their saved Claude conversation).
 public enum QuitSessionsChoice: Equatable, Sendable {
     case leaveRunning, closeAll, cancel
 
@@ -187,7 +188,8 @@ public enum QuitSessionsChoice: Equatable, Sendable {
     }
 
     public static func detail(secondsLeft: Int) -> String {
-        "Running sessions reattach when you open Kunj Workspace again. Closed agents resume their "
-            + "Claude conversation; closed shells start fresh.\n\nLeaving them running in \(secondsLeft) s."
+        "Running sessions reattach when you open Kunj Workspace again. Closed ones come back suspended: "
+            + "Resume Session in the sidebar starts them again, agents in their Claude conversation."
+            + "\n\nLeaving them running in \(secondsLeft) s."
     }
 }

@@ -18,6 +18,11 @@ final class SidebarRowView: NSView {
     var usage: SessionUsage? { didSet { if usage != oldValue { needsDisplay = true } } }
     /// The mouse is over the sidebar: the usage is drawn only then.
     var showUsage = false { didSet { if showUsage != oldValue { needsDisplay = true } } }
+    /// The session is suspended: the status reads "Suspended" (unless the worktree is missing or the container stopped).
+    var suspended = false { didSet { if suspended != oldValue { needsDisplay = true } } }
+    private var statusVerb: String {
+        suspended && environment.state != .missing && environment.state != .stopped ? "Suspended" : environment.statusVerb
+    }
     var selected: Bool { didSet { needsDisplay = true; setAccessibilitySelected(selected) } }
     var theme: Theme { didSet { needsDisplay = true } }
     var onSelect: ((String) -> Void)?
@@ -91,7 +96,7 @@ final class SidebarRowView: NSView {
         if showUsage, let usage {
             let text = formatUsageShort(usage)
             let place = folder.map { width($0, Theme.mono(caption)) + 6 + width("·", Theme.sans(caption)) + 6 } ?? 0
-            let status = iconSize + 6 + place + width(environment.statusVerb, Theme.sans(caption))
+            let status = iconSize + 6 + place + width(statusVerb, Theme.sans(caption))
             if textX + status + 8 + width(text, Theme.mono(caption)) <= right {
                 let color = usage.cpu >= 50 ? theme.color(\.amber) : theme.color(\.muted)
                 right -= draw(text, font: Theme.mono(caption), color: color, rightEdge: right, midY: line2) + 8
@@ -107,7 +112,7 @@ final class SidebarRowView: NSView {
                       in: x, width: right - x, midY: line2) + 6
         }
         let verbColor = environment.agent == .waiting ? theme.color(\.amber) : lineColor
-        draw(environment.statusVerb, font: Theme.sans(caption), color: verbColor,
+        draw(statusVerb, font: Theme.sans(caption), color: verbColor,
              in: x, width: right - x, midY: line2)
     }
 

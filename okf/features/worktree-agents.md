@@ -81,6 +81,9 @@ When the command's first word is `claude` and `agent.hooks` is not false, `withA
 
 `SessionStart` copies its input (JSON with Claude Code's `session_id`) to `KUNJ_AGENT_RESUME` =
 `~/.kunj/<repo>/agent-resume/<session>.json` (`agentResumeFile()`, host only, never removed).
+The workspace app's Suspend Session / Resume Session (sidebar row menu, ⌘⇧U) ends a session's shells and
+agents but keeps their tabs; Close All on quit and agents that ended come back suspended and resume from the
+sidebar row (`BranchLayout.suspended`, `restorePlan()`'s suspended indexes).
 `kunj agent saved [branch]` (`savedAgents()`, `AgentSavedJson`) lists the saved conversations whose session
 is not running, newest first, titled by their first prompt; `kunj agent forget` removes them. The workspace
 app's Resume Agent… (⌘⇧R) shows that list and opens the picked one with `--session <id> --resume`.

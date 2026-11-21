@@ -145,6 +145,54 @@ final class TabRegistry {
         return tab
     }
 
+    /// A suspended session's tab: the spec is kept (its session and agent are saved in the layout)
+    /// but nothing runs; Resume Session replaces it.
+    @discardableResult
+    func openSuspended(spec: TerminalSpec, env: Environment, kind: TabKind) -> TerminalTab {
+        let tab = makeTab(env: env, kind: kind, title: spec.title, spec: spec)
+        tab.suspended = true
+        tab.show(text: Self.suspendedNote(kind))
+        onChange?(env.id)
+        return tab
+    }
+
+    /// Puts a new tab for `spec` in `old`'s place (same position, active if it was) and drops `old`
+    /// without ending its tmux session (the caller does, or it has ended). `start` false makes it a
+    /// suspended tab.
+    @discardableResult
+    func replace(_ old: TerminalTab, env: Environment, spec: TerminalSpec, start: Bool) -> TerminalTab {
+        let tab = TerminalTab(id: nextId(env: env, kind: old.kind), envId: env.id, kind: old.kind, title: spec.title,
+                              spec: spec, theme: theme)
+        tab.onExit = { [weak self] t in self?.exited(t) }
+        tab.onTitle = { [weak self] t in self?.onChange?(t.envId) }
+        wireLinks(tab, env: env)
+        let wasActive = activeByEnv[old.envId] == old.id
+        var tabs = tabsByEnv[old.envId] ?? []
+        tabs.insert(tab, at: tabs.firstIndex(where: { $0 === old }) ?? tabs.count)
+        tabsByEnv[old.envId] = tabs
+        remove(old, endSession: false)
+        if wasActive || activeByEnv[env.id] == nil { activeByEnv[env.id] = tab.id }
+        if start {
+            tab.start()
+        } else {
+            tab.suspended = true
+            tab.show(text: Self.suspendedNote(old.kind))
+        }
+        onChange?(env.id)
+        return tab
+    }
+
+    /// The environment's suspended tabs, in order.
+    func suspendedTabs(for envId: String) -> [TerminalTab] {
+        tabs(for: envId).compactMap { $0 as? TerminalTab }.filter(\.suspended)
+    }
+
+    static func suspendedNote(_ kind: TabKind) -> String {
+        let what = kind == .agent ? "This agent" : "This shell"
+        return "\n\u{1b}[90m  \(what) is suspended.\n  Resume Session (right-click the session in the sidebar, or ⌘⇧U) "
+            + (kind == .agent ? "continues its conversation." : "starts it again.") + "\u{1b}[0m\n"
+    }
+
     /// A tab without a process showing `text` (`--demo`).
     @discardableResult
     func openDemo(env: Environment, kind: TabKind, title: String, text: String) -> TerminalTab {
@@ -410,13 +458,6 @@ final class TabRegistry {
     /// Closes a tab without asking, unsaved text included (Close Session asked already).
     func discard(_ tab: any WorkspaceTab) {
         remove(tab)
-    }
-
-    /// Removes an agent tab whose process exited, without ending its tmux session: a resumed agent
-    /// starts that session again, and the stop would race it.
-    func dropExited(_ tab: TerminalTab) {
-        guard tab.exited != nil else { return }
-        remove(tab, endSession: false)
     }
 
     /// Called with an action tab's exit code (`open(onFinish:)`); dropped when the tab closes first.
