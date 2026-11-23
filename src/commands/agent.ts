@@ -10,7 +10,8 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPlugin, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import { packagedPluginDir } from '../lib/skills';
 import type { AgentForgetJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
@@ -237,7 +238,9 @@ export class AgentCommand extends BaseCommand {
         fs.chmodSync(promptCopy, 0o600);
       }
     }
-    const command = withAgentPrompt(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false), promptCopy);
+    // kunj's skills (claude-plugin/ in this install) in every claude agent, before the first prompt
+    const plugin = fs.existsSync(path.join(packagedPluginDir(), '.claude-plugin', 'plugin.json')) ? packagedPluginDir() : null;
+    const command = withAgentPrompt(withAgentPlugin(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false), plugin), promptCopy);
     const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile };
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;

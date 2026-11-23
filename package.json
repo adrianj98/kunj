@@ -10,7 +10,7 @@
   "files": [
     "dist",
     "!dist/**/__tests__",
-    "skills",
+    "claude-plugin",
     "README.md"
   ],
   "scripts": {

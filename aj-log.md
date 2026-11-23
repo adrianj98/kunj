@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — kunj's skills load into every agent
+
+- `skills/` moved to `claude-plugin/skills/`, with `claude-plugin/.claude-plugin/plugin.json` making it
+  a Claude Code plugin named `kunj`; `kunj agent` adds `--plugin-dir <package>/claude-plugin` to every
+  claude it starts. Why: the user wants agents to get the app's skills automatically, without
+  `kunj install skill`. Agents see it as `/kunj:handoff`.
+- Removed the installed copy `~/.claude/skills/handoff` (kunj-installed, identical) so agents do not
+  list the skill twice; `kunj install skill` still installs it for a claude started by hand.
+
 ## 2026-11-20 — suspend and resume sessions in the workspace app
 
 - Sidebar row menu (and Environment > ⌘⇧U) shows Suspend Session or Resume Session by state.

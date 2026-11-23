@@ -34,6 +34,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
+| kunj's Claude Code skills (`/handoff`) are a plugin in the package (`claude-plugin/`) that every `kunj agent` claude loads with `--plugin-dir`: agents get `/kunj:handoff` without `kunj install skill` | [agent-handoff.md](agent-handoff.md#install) | this commit |
 | Suspend / Resume Session in the workspace app (sidebar row menu, ⌘⇧U): ends a session's shells and agents but keeps their tabs; Close All on quit and agents that ended (a restart) come back suspended instead of being dropped, resumed from the sidebar | [tmux-sessions.md](tmux-sessions.md#quitting-and-resuming) | this commit |
 | Resume closed agents: `kunj agent saved` / `forget` (saved Claude conversations of a worktree whose session no longer runs, with their first prompt); workspace app Resume Agent… (⌘⇧R, sidebar row menu), exited agent tabs point at it | [tmux-sessions.md](tmux-sessions.md#quitting-and-resuming) | this commit |
 | Cloud machines golden image: `kunj machine image build|list|delete` (a builder machine from the stock image builds the blueprint snapshot, its disk becomes the repository's image, older ones are deleted), new machines boot the newest, the bootstrap resets a baked-in serve token; `ct blueprint snapshot --machine`; one local coordinator when two commands start at once (start lock) | [cloud-machines.md](cloud-machines.md#golden-image-as-built-2026-11-16) | this commit and the one before |

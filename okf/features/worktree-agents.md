@@ -102,9 +102,11 @@ argument. `--open-in-app` sets the tmux user option `@kunj_open` to `app` (`SESS
 `readTaggedTmuxSessions()` reads it with `@kunj_worktree`, and the events poll adds `id`, `worktree`
 and `open` to a new session's `agent` event. The workspace app turns that into
 `KunjEvent.openAgent`, waits up to 30 s for the worktree to be listed (`resolvePendingOpens()`), then
-opens, selects and focuses the tab. The `/handoff` skill (`skills/handoff/SKILL.md`, installed by
-`kunj install skill` into `~/.claude/skills/` with a `.kunj-version` marker, src/lib/skills.ts) drives
-it. Spec: docs/specs/agent-handoff.md.
+opens, selects and focuses the tab. The `/handoff` skill (`claude-plugin/skills/handoff/SKILL.md`) drives it: `claude-plugin/` is a
+Claude Code plugin in the package that `kunj agent` passes to every claude it starts
+(`withAgentPlugin()`, `--plugin-dir`, so agents have `/kunj:handoff` with no install), and
+`kunj install skill` still copies the skill into `~/.claude/skills/` (`.kunj-version` marker,
+src/lib/skills.ts) for a claude started by hand. Spec: docs/specs/agent-handoff.md.
 
 # Status in the listing
 

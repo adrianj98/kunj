@@ -12,11 +12,12 @@ agent there with the brief as its first prompt, and the workspace app switches t
 | CLI: `kunj agent start --detach --prompt-file --open-in-app` | Shipped |
 | CLI: `kunj events` agent event `open`, `id`, `worktree` | Shipped |
 | Workspace app: open, select and focus the handed-off agent | Shipped |
-| Skill: `skills/handoff/SKILL.md`, `kunj install skill`, offered by `kunj setup` | Shipped |
+| Skill: `claude-plugin/skills/handoff/SKILL.md`, `kunj install skill`, offered by `kunj setup` | Shipped |
+| Every kunj agent loads the skills (`claude-plugin/` as a Claude Code plugin, `--plugin-dir`) | Shipped |
 
 ## The skill
 
-`skills/handoff/SKILL.md` in the kunj package. When invoked it:
+`claude-plugin/skills/handoff/SKILL.md` in the kunj package. When invoked it:
 
 1. **Writes the brief** to a temporary file, from the conversation so far: the goal; what was found,
    with `file:line`; decisions made and by whom; constraints and the user's standing instructions that
@@ -68,7 +69,12 @@ is not in the listing yet is retried on the next refresh for 30 s.
 
 ## Install
 
-- The npm package's `files` gains `skills`.
+- The npm package's `files` gains `claude-plugin` (it was `skills` until 2026-11-23): a Claude Code
+  plugin (`claude-plugin/.claude-plugin/plugin.json`, name `kunj`, skills in `claude-plugin/skills/`).
+  `kunj agent` appends `--plugin-dir <package>/claude-plugin` to a claude command when the plugin is
+  in the install (`withAgentPlugin()`, before the first prompt), so every agent kunj starts has the
+  skills as `/kunj:<name>`, in step with the installed kunj, without `kunj install skill`. Container
+  agents do not get it (the path is the host's).
 - `kunj install skill` copies `skills/handoff/` to `~/.claude/skills/handoff/`, replacing an older copy
   kunj wrote (a `.kunj-version` file in it) and refusing to overwrite one it did not write without
   `--force`. It is not in `kunj install all`'s download list (no release asset).

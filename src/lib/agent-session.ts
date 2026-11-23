@@ -490,6 +490,13 @@ export function withAgentHooks(command: string, _stateFile: string, enabled: boo
   return `${command.trim()} --settings '${claudeHookSettings().replace(/'/g, "'\\''")}'`;
 }
 
+// `command` with kunj's Claude Code plugin (its skills, e.g. /kunj:handoff) when it is claude and the
+// plugin is in this install. The path is single-quoted for the shell tmux runs the command through.
+export function withAgentPlugin(command: string, pluginDir: string | null): string {
+  if (!pluginDir || !isClaudeCommand(command)) return command;
+  return `${command.trim()} --plugin-dir '${pluginDir.replace(/'/g, "'\\''")}'`;
+}
+
 export function readAgentState(stateFile: string): AgentHookState | null {
   try {
     const s = fs.readFileSync(stateFile, 'utf8').trim();

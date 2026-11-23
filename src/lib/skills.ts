@@ -10,9 +10,14 @@ import { UserError } from './errors';
 export const KUNJ_SKILLS = ['handoff'] as const;
 const MARKER = '.kunj-version';
 
-// skills/ next to dist/ (and src/) in the package
+// The Claude Code plugin in the package (claude-plugin/ next to dist/ and src/): `kunj agent` loads it
+// into every claude it starts (--plugin-dir), so agents get these skills without an install
+export function packagedPluginDir(): string {
+  return path.resolve(__dirname, '..', '..', 'claude-plugin');
+}
+
 export function packagedSkillsDir(): string {
-  return path.resolve(__dirname, '..', '..', 'skills');
+  return path.join(packagedPluginDir(), 'skills');
 }
 
 export function userSkillsDir(home = os.homedir()): string {
