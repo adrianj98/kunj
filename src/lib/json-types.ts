@@ -775,3 +775,91 @@ export interface AgentPlanItemJson {
 export interface AgentPlanJson {
   plans: AgentPlanItemJson[];
 }
+
+// ---- kunj agent overview --json --------------------------------------------------------------
+// Everything a consumer needs to draw the agents of a repository as lines of stops: which agents,
+// their text and every position. A consumer only strokes it (docs/specs/agent-overview.md).
+// Coordinates are in points, y down. Inside a family, x is measured from the right edge of the
+// label column (`metrics.labelWidth` wide, where a lane's title, place and status go) and y from
+// the family's top; families are stacked by the consumer in the order given.
+
+export interface AgentOverviewStopJson {
+  x: number;
+  y: number;
+  kind: 'done' | 'current' | 'todo';
+  /** The step's subject (a tooltip; drawn above the stop, or beside it when `labelBeside`) */
+  label: string;
+}
+
+/** A subagent: a loop that leaves the line at `fromX`, runs along `y` and rejoins at `toX`. */
+export interface AgentOverviewLoopJson {
+  fromX: number;
+  toX: number;
+  /** y of the lane's line, where the loop starts and ends */
+  lineY: number;
+  y: number;
+  running: boolean;
+  /** Drawn as done from `fromX` along the bottom up to here; the whole loop once it ended */
+  doneToX: number;
+  stops: AgentOverviewStopJson[];
+  label: string;
+}
+
+/** A branch or worktree change (or a fork): a diamond on the line at `x`,`y`, its label at `labelY`. */
+export interface AgentOverviewMarkerJson {
+  x: number;
+  y: number;
+  labelY: number;
+  label: string;
+}
+
+export interface AgentOverviewLaneJson {
+  session: string;
+  id: string | null;
+  branch: string;
+  worktree: string;
+  container?: string;
+  /** The label column's three lines */
+  title: string;
+  place: string;
+  status: string;
+  waiting: boolean;
+  /** A handed-off agent: indented under the lane it branches from */
+  child: boolean;
+  top: number;
+  height: number;
+  /** y of the line */
+  y: number;
+  stops: AgentOverviewStopJson[];
+  /** The line between the first and last stop; absent with fewer than two stops */
+  line?: { fromX: number; toX: number; /** drawn as done up to here; null: none of it */ doneToX: number | null };
+  loops: AgentOverviewLoopJson[];
+  markers: AgentOverviewMarkerJson[];
+  /** The elbow from the parent's stop down to this lane's line */
+  elbow?: { fromX: number; fromY: number; toX: number; toY: number };
+  /** No task list: the one stop's label goes right of it */
+  labelBeside: boolean;
+}
+
+/** An agent with the agents it handed work to: `lanes[0]` is the root. */
+export interface AgentOverviewFamilyJson {
+  width: number;
+  height: number;
+  lanes: AgentOverviewLaneJson[];
+}
+
+/**
+ * `kunj agent overview [--containers] --json`: the running agents of the repository, grouped and
+ * laid out. Ended sessions are left out. `containers` is present with `--containers`: whether the
+ * branch containers could be asked (their agents are among the families when they could).
+ */
+export interface AgentOverviewJson {
+  repo: { name: string; root: string };
+  agents: number;
+  waiting: number;
+  /** "3 agents · 1 waiting for you" */
+  summary: string;
+  metrics: { labelWidth: number; stopSpacing: number };
+  families: AgentOverviewFamilyJson[];
+  containers?: { available: boolean; message?: string };
+}

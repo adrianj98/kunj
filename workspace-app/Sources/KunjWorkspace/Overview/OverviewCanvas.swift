@@ -2,20 +2,20 @@ import AppKit
 import KunjWorkspaceCore
 
 /// The Overview window's drawing: repositories as headings, under each its agents as lanes, a lane's
-/// plan as a line of stops (`layoutFamily` in Core gives every position; this only strokes them).
+/// plan as a line of stops. Every position and every text comes from `kunj agent overview --json`
+/// (`AgentOverviewJson`); this only strokes them, and holds no layout logic of its own.
 /// The scroll view's document view: it sizes itself to what it draws. A click on a lane calls `onOpen`.
 final class OverviewCanvas: NSView {
-    /// A click on an agent's lane: the plan and its repository.
-    var onOpen: ((AgentPlan, OverviewRepo) -> Void)?
+    /// A click on an agent's lane: the lane and its repository.
+    var onOpen: ((OverviewLane, AgentOverviewJson.Repo) -> Void)?
 
-    private(set) var repos: [OverviewRepo] = []
+    private(set) var repos: [AgentOverviewJson] = []
     private(set) var filter: OverviewFilter = .all
     private var theme = ThemeManager.shared.current
-    private let metrics = OverviewMetrics()
 
     private enum Row {
         case heading(name: String, count: Int, top: CGFloat)
-        case family(repo: Int, family: OverviewFamily, layout: FamilyLayout, top: CGFloat)
+        case family(repo: Int, family: OverviewFamily, top: CGFloat)
         case message(String, top: CGFloat)
     }
     private var rows: [Row] = []
@@ -33,7 +33,7 @@ final class OverviewCanvas: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(_ repos: [OverviewRepo], filter: OverviewFilter) {
+    func show(_ repos: [AgentOverviewJson], filter: OverviewFilter) {
         self.repos = repos
         self.filter = filter
         rebuild()
@@ -50,19 +50,18 @@ final class OverviewCanvas: NSView {
         var y: CGFloat = 0
         var width: CGFloat = 0
         for (index, repo) in repos.enumerated() {
-            let families = filterFamilies(overviewFamilies(repo.plans), filter)
+            let families = filterFamilies(repo.families, filter)
             if families.isEmpty { continue }
-            rows.append(.heading(name: repo.name, count: families.reduce(0) { $0 + $1.lanes.count }, top: y))
+            rows.append(.heading(name: repo.repo.name, count: families.reduce(0) { $0 + $1.lanes.count }, top: y))
             y += Self.headingHeight
             for family in families {
-                let layout = layoutFamily(family, metrics: metrics)
-                rows.append(.family(repo: index, family: family, layout: layout, top: y))
-                y += CGFloat(layout.height)
-                width = max(width, CGFloat(layout.width))
+                rows.append(.family(repo: index, family: family, top: y))
+                y += CGFloat(family.height)
+                width = max(width, CGFloat(family.width))
             }
         }
         if rows.isEmpty {
-            let text = repos.flatMap { $0.plans }.isEmpty
+            let text = repos.allSatisfy({ $0.families.isEmpty })
                 ? "No agents are running.\nStart one with the Agent button of a session; its plan appears here as it works."
                 : "No agent matches this filter."
             rows = [.message(text, top: 0)]
@@ -77,26 +76,25 @@ final class OverviewCanvas: NSView {
 
     // MARK: hit testing
 
-    private func lane(at point: NSPoint) -> (AgentPlan, OverviewRepo)? {
+    private func lane(at point: NSPoint) -> (OverviewLane, AgentOverviewJson.Repo)? {
         for row in rows {
-            guard case .family(let repo, let family, let layout, let top) = row else { continue }
-            guard point.y >= top, point.y < top + CGFloat(layout.height) else { continue }
-            guard let index = laneIndex(at: Double(point.y - top), in: layout), index < family.lanes.count,
-                  repo < repos.count else { return nil }
-            return (family.lanes[index].plan, repos[repo])
+            guard case .family(let repo, let family, let top) = row else { continue }
+            guard point.y >= top, point.y < top + CGFloat(family.height) else { continue }
+            guard let index = laneIndex(at: Double(point.y - top), in: family), repo < repos.count else { return nil }
+            return (family.lanes[index], repos[repo].repo)
         }
         return nil
     }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if let (plan, repo) = lane(at: point) { onOpen?(plan, repo) }
+        if let (lane, repo) = lane(at: point) { onOpen?(lane, repo) }
     }
 
     override func resetCursorRects() {
         for row in rows {
-            if case .family(_, _, let layout, let top) = row {
-                addCursorRect(NSRect(x: 0, y: top, width: bounds.width, height: CGFloat(layout.height)), cursor: .pointingHand)
+            if case .family(_, let family, let top) = row {
+                addCursorRect(NSRect(x: 0, y: top, width: bounds.width, height: CGFloat(family.height)), cursor: .pointingHand)
             }
         }
     }
@@ -104,18 +102,18 @@ final class OverviewCanvas: NSView {
     private func rebuildToolTips() {
         removeAllToolTips()
         tipOwners = []
-        let gx = CGFloat(metrics.labelWidth)
-        func tip(_ stop: StopLayout, top: CGFloat, radius: CGFloat) {
+        func tip(_ stop: OverviewStop, gx: CGFloat, top: CGFloat, radius: CGFloat) {
             let owner = stop.label as NSString
             tipOwners.append(owner)
             addToolTip(NSRect(x: gx + CGFloat(stop.x) - radius, y: top + CGFloat(stop.y) - radius, width: radius * 2, height: radius * 2),
                        owner: owner, userData: nil)
         }
         for row in rows {
-            guard case .family(_, _, let layout, let top) = row else { continue }
-            for lane in layout.lanes {
-                for stop in lane.stops where !lane.labelBeside { tip(stop, top: top, radius: 9) }
-                for loop in lane.loops { for stop in loop.stops { tip(stop, top: top, radius: 7) } }
+            guard case .family(let repo, let family, let top) = row, repo < repos.count else { continue }
+            let gx = CGFloat(repos[repo].metrics.labelWidth)
+            for lane in family.lanes {
+                for stop in lane.stops where !lane.labelBeside { tip(stop, gx: gx, top: top, radius: 9) }
+                for loop in lane.loops { for stop in loop.stops { tip(stop, gx: gx, top: top, radius: 7) } }
             }
         }
     }
@@ -135,10 +133,10 @@ final class OverviewCanvas: NSView {
                          font: Theme.sans(DesignTokens.TypeScale.small), color: theme.color(\.muted))
                 drawText("\(count)", in: NSRect(x: bounds.width - 60, y: top + 13, width: 40, height: 16),
                          font: Theme.mono(DesignTokens.TypeScale.caption), color: theme.color(\.faint), alignment: .right)
-            case .family(_, let family, let layout, let top):
-                let rect = NSRect(x: 0, y: top, width: bounds.width, height: CGFloat(layout.height))
-                guard dirtyRect.intersects(rect) else { continue }
-                draw(family: family, layout: layout, top: top)
+            case .family(let repo, let family, let top):
+                let rect = NSRect(x: 0, y: top, width: bounds.width, height: CGFloat(family.height))
+                guard dirtyRect.intersects(rect), repo < repos.count else { continue }
+                draw(family: family, metrics: repos[repo].metrics, top: top)
                 theme.color(\.border).setFill()
                 NSRect(x: 0, y: rect.maxY - 1, width: bounds.width, height: 1).fill()
             case .message(let text, let top):
@@ -148,20 +146,15 @@ final class OverviewCanvas: NSView {
         }
     }
 
-    private func stateColor(_ plan: AgentPlan) -> NSColor {
-        plan.isWaiting ? theme.color(\.amber) : theme.color(\.green)
-    }
-
-    private func draw(family: OverviewFamily, layout: FamilyLayout, top: CGFloat) {
+    private func draw(family: OverviewFamily, metrics: AgentOverviewJson.Metrics, top: CGFloat) {
         let gx = CGFloat(metrics.labelWidth)
         func p(_ x: Double, _ y: Double) -> NSPoint { NSPoint(x: gx + CGFloat(x), y: top + CGFloat(y)) }
 
-        for lane in layout.lanes where lane.index < family.lanes.count {
-            let plan = family.lanes[lane.index].plan
-            let state = stateColor(plan)
+        for lane in family.lanes {
+            let state = lane.waiting ? theme.color(\.amber) : theme.color(\.green)
 
             // the elbow from the parent's stop
-            if let b = lane.branch {
+            if let b = lane.elbow {
                 let path = NSBezierPath()
                 path.move(to: p(b.fromX, b.fromY))
                 path.line(to: p(b.fromX, b.toY - 12))
@@ -171,12 +164,13 @@ final class OverviewCanvas: NSView {
             }
 
             // the line: all of it as "to come", then the done part over it
-            if let from = lane.lineFromX, let to = lane.lineToX {
+            if let line = lane.line {
+                let from = line.fromX
                 let whole = NSBezierPath()
                 whole.move(to: p(from, lane.y))
-                whole.line(to: p(to, lane.y))
+                whole.line(to: p(line.toX, lane.y))
                 stroke(whole, theme.color(\.idle), width: 3)
-                if let done = lane.doneToX, done > from {
+                if let done = line.doneToX, done > from {
                     let part = NSBezierPath()
                     part.move(to: p(from, lane.y))
                     part.line(to: p(done, lane.y))
@@ -214,19 +208,19 @@ final class OverviewCanvas: NSView {
                              font: Theme.sans(Self.stopLabelSize, weight: .semibold), color: theme.color(\.text))
                 } else {
                     let w = CGFloat(metrics.stopSpacing) - 8
-                    let current = stop.kind == .current
+                    let current = stop.stopKind == .current
                     drawText(stop.label, in: NSRect(x: gx + CGFloat(stop.x) - w / 2, y: top + CGFloat(stop.y) - 29, width: w, height: 15),
                              font: Theme.sans(Self.stopLabelSize, weight: current ? .semibold : .regular),
                              color: current ? theme.color(\.text) : theme.color(\.faint), alignment: .center)
                 }
             }
 
-            drawLabel(plan: plan, lane: lane, top: top, state: state)
+            drawLabel(lane: lane, width: gx, top: top, state: state)
         }
     }
 
     /// A subagent's loop under the line, with its own small stops and its task under it.
-    private func draw(loop: LoopLayout, origin p: (Double, Double) -> NSPoint) {
+    private func draw(loop: OverviewLoop, origin p: (Double, Double) -> NSPoint) {
         func path(to endX: Double?) -> NSBezierPath {
             let path = NSBezierPath()
             path.move(to: p(loop.fromX, loop.lineY))
@@ -255,11 +249,11 @@ final class OverviewCanvas: NSView {
                  font: font, color: theme.color(\.muted), alignment: .center)
     }
 
-    private func draw(stop: StopLayout, at c: NSPoint, state: NSColor, small: Bool) {
+    private func draw(stop: OverviewStop, at c: NSPoint, state: NSColor, small: Bool) {
         func circle(_ r: CGFloat) -> NSBezierPath {
             NSBezierPath(ovalIn: NSRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
         }
-        switch stop.kind {
+        switch stop.stopKind {
         case .done:
             // opaque, so the dot is not darker where it lies over the line
             theme.color(\.bg).setFill()
@@ -281,19 +275,19 @@ final class OverviewCanvas: NSView {
         }
     }
 
-    /// The label column: status dot, name, branch and kind, and where the agent is.
-    private func drawLabel(plan: AgentPlan, lane: LaneLayout, top: CGFloat, state: NSColor) {
-        let x: CGFloat = lane.isChild ? 38 : 20
+    /// The label column: status dot and the three lines kunj wrote (title, place, status).
+    private func drawLabel(lane: OverviewLane, width labelWidth: CGFloat, top: CGFloat, state: NSColor) {
+        let x: CGFloat = lane.child ? 38 : 20
         let y = top + CGFloat(lane.y) - 21
-        let width = CGFloat(metrics.labelWidth) - x - 28
+        let width = labelWidth - x - 28
         state.setFill()
         NSBezierPath(ovalIn: NSRect(x: x, y: y + 5, width: 8, height: 8)).fill()
-        drawText(planTitle(plan), in: NSRect(x: x + 16, y: y, width: width, height: 18),
+        drawText(lane.title, in: NSRect(x: x + 16, y: y, width: width, height: 18),
                  font: Theme.sans(DesignTokens.TypeScale.body, weight: .semibold), color: theme.color(\.text))
-        drawText(planPlace(plan, isChild: lane.isChild), in: NSRect(x: x + 16, y: y + 19, width: width, height: 15),
+        drawText(lane.place, in: NSRect(x: x + 16, y: y + 19, width: width, height: 15),
                  font: Theme.mono(DesignTokens.TypeScale.caption), color: theme.color(\.muted), truncation: .byTruncatingMiddle)
-        drawText(planStatus(plan), in: NSRect(x: x + 16, y: y + 35, width: width, height: 15),
-                 font: Theme.sans(DesignTokens.TypeScale.caption), color: plan.isWaiting ? theme.color(\.amber) : theme.color(\.muted))
+        drawText(lane.status, in: NSRect(x: x + 16, y: y + 35, width: width, height: 15),
+                 font: Theme.sans(DesignTokens.TypeScale.caption), color: lane.waiting ? theme.color(\.amber) : theme.color(\.muted))
     }
 
     private func stroke(_ path: NSBezierPath, _ color: NSColor, width: CGFloat) {

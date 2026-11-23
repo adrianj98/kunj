@@ -904,9 +904,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showOverview(_ sender: Any?) {
         if overviewWindow == nil {
             let w = OverviewWindow()
-            w.repositories = { [weak self] in self?.store?.repos ?? [] }
-            w.onOpen = { [weak self] plan, repo in self?.openAgent(of: plan, in: repo) }
-            if demo { w.demoRepos = DemoPlans.repos }
+            w.repositories = { [weak self] in (self?.store?.repos ?? []).map { $0.repo } }
+            w.onOpen = { [weak self] lane, repo in self?.openAgent(of: lane, inRepository: repo.root) }
+            if demo { w.demoRepos = DemoPlans.overviews }
             overviewWindow = w
         }
         overviewWindow?.cli = kunj
@@ -915,17 +915,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The environment an Overview line belongs to: the container by its name, a worktree by its path.
-    private func openAgent(of plan: AgentPlan, in repo: OverviewRepo) {
-        guard !demo, let listed = (store?.repos ?? []).first(where: { $0.repo.root == repo.root }) else { return }
+    private func openAgent(of lane: OverviewLane, inRepository root: String) {
+        guard !demo, let listed = (store?.repos ?? []).first(where: { $0.repo.root == root }) else { return }
         let env: Environment?
-        if let container = plan.container {
-            env = listed.environments.first { $0.kind == .container && ($0.containerName == container || $0.branch == plan.branch) }
+        if let container = lane.container {
+            env = listed.environments.first { $0.kind == .container && ($0.containerName == container || $0.branch == lane.branch) }
         } else {
-            let path = (plan.worktree as NSString).standardizingPath
+            let path = (lane.worktree as NSString).standardizingPath
             env = listed.environments.first { $0.kind == .worktree && $0.path.map { ($0 as NSString).standardizingPath } == path }
         }
         guard let env else { return }
-        openHandedOffAgent(env: env, id: plan.id)
+        openHandedOffAgent(env: env, id: lane.id)
     }
 
     /// The kunj command changed in Settings: stop the event stream, drop the store and discover

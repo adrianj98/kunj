@@ -19,14 +19,20 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 | Probe: what the hooks really deliver | Done 2026-11-23, Claude Code 2.1.330 (see What the probe found) |
 | CLI: plan capture in the agent hooks, host and container (`agent.plan`) | Shipped |
 | CLI: `kunj agent plan [--all] --json` (`AgentPlanJson`), `kunj ct agent --plan`, `plan: true` on the `agent` event | Shipped |
+| CLI: `kunj agent overview [--containers] --json` (`AgentOverviewJson`): grouping, text and layout | Shipped; run against a recorded live session |
 | CLI: parent link for a start from inside another agent's session (handoff) | Shipped |
 | `kunj events` for a container's plan: `container` with `action: 'plan'` when the records' size in the status script changes | Shipped |
-| Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Written 2026-11-23. The Core half (model, geometry, events; `OverviewTests`) was compiled and its tests run with Swift 6.0.3 on Linux, and the geometry drawn as a picture that matches the mockup. The AppKit half (`OverviewWindow`, `OverviewCanvas`, the `AppDelegate` wiring) was only syntax-checked: **never compiled or run**. Left: build on a Mac, run `--demo --overview --screenshot` against the mockup, fix what the compiler and the picture show |
+| Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Written 2026-11-23. The Core half (the decoder of `AgentOverviewJson`, the filter, the events; `OverviewTests`) was compiled and its tests run with Swift 6.0.3 on Linux. The AppKit half (`OverviewWindow`, `OverviewCanvas`, the `AppDelegate` wiring) was only syntax-checked: **never compiled or run**. Left: build on a Mac, run `--demo --overview --screenshot` against the mockup, fix what the compiler and the picture show |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |
 | Rewind forks (needs the transcript) | Later, only if wanted |
 
 ## Decisions
 
+- **The CLI is the brain, the app only draws** (asked for by the user, 2026-11-23). `kunj agent
+  overview --json` decides which agents are shown, how they group, every text and every position.
+  A consumer decodes that and strokes it; the workspace app keeps only the filter buttons, the
+  total over several repositories and which lane a click is on. A second consumer (the VS Code
+  extension) gets the same picture for free, and the layout is tested where kunj's tests run.
 - **Steps come from the agent's own task list, read by hooks.** No skill, no MCP server and no Claude
   Code plugin: kunj already passes hooks to its agents with `claude --settings`
   (`claudeHookSettings()` in src/lib/agent-session.ts). The agent does nothing extra.
@@ -130,6 +136,21 @@ no current worktree. A session is listed while it runs (with no steps when nothi
 once ended, while its record exists. `kunj ct agent [branch] --plan [--session <id>] --json` gives the
 same for a branch container, with one exec (`CONTAINER_PLAN_SCRIPT`); nothing for a stopped one.
 
+`kunj agent overview [--containers] --json` → `AgentOverviewJson`: `repo`, `agents`, `waiting`,
+`summary`, `metrics { labelWidth, stopSpacing }`, `families[]` of `{ width, height, lanes[] }`, and with
+`--containers` `containers { available, message? }`. A lane carries its identity (`session`, `id`,
+`branch`, `worktree`, `container?`), its three label lines (`title`, `place`, `status`), `waiting`,
+`child`, and its drawing: `top`, `height`, `y`, `stops[]` (`x`, `y`, `kind` done/current/todo, `label`),
+`line?` (`fromX`, `toX`, `doneToX`), `loops[]`, `markers[]`, `elbow?`, `labelBeside`. Points, y down;
+inside a family x starts at the right edge of the label column and y at the family's top. It is built
+by `buildOverview()` in `src/lib/agent-overview.ts` (pure, tested): `activePlans()` drops ended
+sessions, `overviewFamilies()` puts a handed-off agent under its parent (one whose parent ended is a
+root), `layoutFamily()` places everything (stops 116 apart, a child half a stop after the stop it
+branched from, overlapping loops stacked in levels, a marker's label under the line). `--containers`
+lists the repository's containers across its backends (`ContainerCommand.listJson`), reads the plans
+of the running ones that have an agent (`agentPlansJson`, each on its own backend), and gives up on
+them after 8 s: Docker down or slow is `available: false`, never a failed overview.
+
 `kunj events`: an `agent` event with `plan: true` when a host record changes (the directory is
 watched like `agent-state`). The app then asks `kunj agent plan` again. For a container the status
 poll's script prints the records' size (`plan=<bytes>`, `ContainerStatus.planBytes`) and a change is a
@@ -146,19 +167,20 @@ stop's tooltip is its subject; a click on a lane opens that agent's tab (`openHa
 agent with no task list is one stop, so it is still on the map. All / Waiting / Running filter
 families (a family shows when any of its lanes passes).
 
-- **Model and geometry** are in `KunjWorkspaceCore/Overview` (Foundation only, unit tested in
-  `OverviewTests`): `AgentPlanJson` decoding, `activePlans()` (ended sessions are left out),
-  `overviewFamilies()` (parent links; an orphan is a root), `layoutFamily()` (every x and y: stops
-  116 apart, a child half a stop after the stop it branched from, loops stacked in levels when they
-  overlap, marker labels under the line). The canvas only strokes what `layoutFamily()` returns.
-- **Data:** per listed repository `kunj agent plan --all --json`, and per running container whose
-  listing shows an agent `kunj ct agent <branch> --plan --json` with its `remoteArguments`, all at
-  once (`withTaskGroup`). One read at a time; a request during a read runs one more after it.
+- **Everything shown comes from `kunj agent overview --containers --json`** (`AgentOverviewJson`),
+  one call per listed repository, all at once (`withTaskGroup`); one read at a time, and a request
+  during a read runs one more after it. `KunjWorkspaceCore/Overview/AgentOverview.swift` is the
+  decoder plus the three things the window does itself: `filterFamilies()` (a family shows when any
+  lane passes), `overviewSummary()` (kunj's line for one repository, the totals for several) and
+  `laneIndex(at:in:)` for a click. `OverviewCanvas` strokes the positions as given. No layout, no
+  grouping and no wording in Swift.
 - **Refresh:** `KunjEvent.agentPlan` (an `agent` event with `plan: true`, or a `container` event with
   action `plan`) → `EnvironmentStore.onPlanChanged`, which runs no listing; the store's `onChange`
   (an agent started, ended or began waiting); and every 10 s while the window is visible. Changes
   are gathered for 0.3 s.
-- **Checking it:** `--demo --overview --screenshot <png>` draws `DemoPlans` (the mockup's agents).
+- **Checking it:** `--demo --overview --screenshot <png>` draws `DemoPlans`, the mockup's agents as kunj lays
+  them out. That file and the test fixture are generated: `node workspace-app/scripts/gen-overview-demo.js`
+  after `npm run build`, again after any change to the layout or to `AgentOverviewJson`.
 - Not done: the pulse on the current stop, keyboard access to the lanes, plan steps for a kunj older
   than this command (`agent plan` is then read as a branch name and the window shows kunj's error).
 

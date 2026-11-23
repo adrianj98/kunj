@@ -916,17 +916,30 @@ export class ContainerCommand extends BaseCommand {
     process.exitCode = r.exitCode;
   }
 
-  // `kunj ct agent --plan`: the records in the container, one exec; none for a container that is not running
-  private async agentPlan(ctx: Context, branch: string, id: string | undefined): Promise<void> {
+  // The plan records in the container, one exec; none for a container that is not running
+  private async containerPlans(ctx: Context, branch: string, id: string | undefined): Promise<AgentPlanItemJson[]> {
     const main = await this.findMain(ctx, branch);
-    let plans: AgentPlanItemJson[] = [];
-    if (main?.state === 'running') {
-      const r = await ctx.backend.exec(main.id, ['sh', '-c', CONTAINER_PLAN_SCRIPT], { user: this.userOf(main) || undefined });
-      plans = parseContainerPlans(r.stdout).filter(p => id === undefined || p.id === id).map(p => {
-        const { branch: _branch, transcript: _transcript, ...plan } = reducePlan(p.text, ['/workspace']);
-        return { session: p.session, id: p.id, branch, worktree: '/workspace', container: main.name, running: p.running, state: p.running ? p.state : null, ...plan };
-      });
+    if (main?.state !== 'running') return [];
+    const r = await ctx.backend.exec(main.id, ['sh', '-c', CONTAINER_PLAN_SCRIPT], { user: this.userOf(main) || undefined });
+    return parseContainerPlans(r.stdout).filter(p => id === undefined || p.id === id).map(p => {
+      const { branch: _branch, transcript: _transcript, ...plan } = reducePlan(p.text, ['/workspace']);
+      return { session: p.session, id: p.id, branch, worktree: '/workspace', container: main.name, running: p.running, state: p.running ? p.state : null, ...plan };
+    });
+  }
+
+  /** The plans of a branch container's agents, for `kunj agent overview --containers` (one instance per call). */
+  async agentPlansJson(branch: string, options: { remote?: string; context?: string } = {}): Promise<AgentPlanItemJson[]> {
+    this.jsonMode = true;
+    try {
+      return await this.containerPlans(await this.context({ ...options, json: true } as ContainerOptions), branch, undefined);
+    } finally {
+      await this.closeBackends();
     }
+  }
+
+  // `kunj ct agent --plan`
+  private async agentPlan(ctx: Context, branch: string, id: string | undefined): Promise<void> {
+    const plans = await this.containerPlans(ctx, branch, id);
     if (this.jsonMode) {
       this.outputJSON({ plans } satisfies AgentPlanJson);
       return;

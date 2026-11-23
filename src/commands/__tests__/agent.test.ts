@@ -49,6 +49,17 @@ jest.mock('../../lib/secrets/host', () => ({
   hostSecrets: jest.fn(async () => ({ env: { FOO: 's3cret-value' }, files: [] })),
 }));
 
+// `kunj agent overview --containers` loads the container command lazily; the tests give it a listing
+const containerListJson = jest.fn();
+const containerPlansJson = jest.fn();
+jest.mock('../container', () => ({
+  ContainerCommand: class {
+    listJson = containerListJson;
+    agentPlansJson = containerPlansJson;
+    abortDockerCalls = jest.fn();
+  },
+}));
+
 jest.mock('../../lib/git', () => ({
   getCurrentBranch: jest.fn(async () => 'feature-a'),
 }));
@@ -432,6 +443,8 @@ describe('plan', () => {
     dir = realFs.mkdtempSync(nodePath.join(os.tmpdir(), 'kunj-agent-plan-'));
     realFs.mkdirSync(nodePath.join(dir, 'agent-plan'));
     getKunjDir.mockReturnValue(dir);
+    containerListJson.mockReset();
+    containerPlansJson.mockReset();
   });
   afterEach(() => {
     getKunjDir.mockReturnValue('/h/.kunj/app');
@@ -464,6 +477,48 @@ describe('plan', () => {
     await new AgentCommand().execute('plan', { json: true, all: true });
     expect(JSON.parse(stdout.join(''))).toEqual({ plans: [] });
     await expect(new AgentCommand().execute('plan', 'nope', { json: true })).rejects.toMatchObject({ jsonCode: 'no-worktree' });
+  });
+
+  test('overview --json groups and lays out the running agents; an ended one is left out', async () => {
+    tmuxSessions.mockResolvedValue([session, `${session}-a-two`]);
+    record(session, [create('1', 'Read the code'), create('2', 'Write the fix')]);
+    record(`${session}-a-two`, [{ kunj: { t: 1, parent: { session, step: 0 } } }, create('1', 'Child step')]);
+    record(`${session}-a-gone`, [create('1', 'Ended')]);
+    await new AgentCommand().execute('overview', { json: true });
+    const o = JSON.parse(stdout.join(''));
+    expect(o).toMatchObject({ repo: { name: 'app', root: '/wt' }, agents: 2, waiting: 0, summary: '2 agents', metrics: { labelWidth: 248, stopSpacing: 116 } });
+    expect(o).not.toHaveProperty('containers');
+    expect(o.families).toHaveLength(1);
+    expect(o.families[0].lanes.map((l: any) => [l.session, l.child, l.stops.map((s: any) => s.label)])).toEqual([
+      [session, false, ['Read the code', 'Write the fix']],
+      [`${session}-a-two`, true, ['Child step']],
+    ]);
+    expect(o.families[0].lanes[1].elbow).toMatchObject({ fromX: 56, toX: 114 });
+    expect(containerListJson).not.toHaveBeenCalled();
+  });
+
+  test('overview --containers adds the agents of running containers that have one, each on its own backend', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    const ct = (branch: string, state: string, running: boolean | null, remote?: string) => ({ branch, state, agent: { running }, ...(remote ? { remote } : {}) });
+    containerListJson.mockResolvedValue({ containers: [ct('feat/a', 'running', true), ct('feat/b', 'running', false), ct('feat/c', 'exited', true), ct('feat/d', 'running', true, 'box')] });
+    containerPlansJson.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/d') throw new Error('box is down');
+      return [{ session: 'agent', id: null, branch, worktree: '/workspace', container: 'kunj-app-a', title: 'In a container', running: true, state: 'waiting', steps: [], current: null, markers: [], subagents: [], updatedAt: null }];
+    });
+    await new AgentCommand().execute('overview', { json: true, containers: true });
+    const o = JSON.parse(stdout.join(''));
+    expect(containerPlansJson.mock.calls).toEqual([['feat/a', { remote: 'local' }], ['feat/d', { remote: 'box' }]]);
+    expect(o).toMatchObject({ agents: 1, waiting: 1, containers: { available: true } });
+    expect(o.families[0].lanes[0]).toMatchObject({ container: 'kunj-app-a', place: 'feat/a · container', status: 'Waiting for input', labelBeside: true });
+  });
+
+  test('overview --containers with Docker down still gives the host agents', async () => {
+    tmuxSessions.mockResolvedValue([session]);
+    containerListJson.mockRejectedValue(new Error('Cannot connect to the Docker daemon'));
+    await new AgentCommand().execute('overview', { json: true, containers: true });
+    const o = JSON.parse(stdout.join(''));
+    expect(o.agents).toBe(1);
+    expect(o.containers).toEqual({ available: false, message: 'Cannot connect to the Docker daemon' });
   });
 
   test('a start from inside another agent\'s session records that parent and its step', async () => {

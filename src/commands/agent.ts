@@ -11,8 +11,9 @@ import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
 import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import { activePlans, buildOverview } from '../lib/agent-overview';
 import { PLAN_ENV, agentPlanDir, agentPlanFile, parentLine, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
-import type { AgentForgetJson, AgentPlanItemJson, AgentPlanJson, AgentPlanStepJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
+import type { AgentForgetJson, AgentOverviewJson, AgentPlanItemJson, AgentPlanJson, AgentPlanStepJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
   json?: boolean;
@@ -25,12 +26,16 @@ interface AgentOptions {
   detach?: boolean;
   promptFile?: string;
   openInApp?: boolean;
+  containers?: boolean;
 }
 
 // The largest brief --prompt-file takes (it becomes one shell argument)
 const MAX_PROMPT_BYTES = 256 * 1024;
 
-const ACTIONS = ['start', 'status', 'stop', 'saved', 'forget', 'plan'];
+const ACTIONS = ['start', 'status', 'stop', 'saved', 'forget', 'plan', 'overview'];
+
+// `kunj agent overview --containers` stops waiting for the containers after this long
+const OVERVIEW_CONTAINERS_TIMEOUT_MS = 8000;
 
 export class AgentCommand extends BaseCommand {
   constructor() {
@@ -47,6 +52,7 @@ export class AgentCommand extends BaseCommand {
         { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs); [forget] forget every saved conversation of the worktree; [plan] the agents of every worktree of the repository' },
         { flags: '--detach', description: '[start] Start the tmux session without attaching to it (no terminal needed); a running one is left as it is' },
         { flags: '--prompt-file <file>', description: "[start] The agent's first prompt, read from a file (claude only; a new session only)" },
+        { flags: '--containers', description: "[overview] Also the agents in this repository's running branch containers" },
         { flags: '--open-in-app', description: '[start] Ask the workspace app to open, select and focus a tab for the new session' },
       ],
       helpText: [
@@ -57,6 +63,7 @@ export class AgentCommand extends BaseCommand {
         '  saved [branch]    saved Claude conversations of sessions that are not running (to resume)',
         '  forget [branch]   forget a saved conversation (--session <id>, or --all)',
         '  plan [branch]     where each agent is in its plan: its task list as steps, subagents, branch changes',
+        '  overview          the running agents of the repository, grouped and laid out as lines of stops (for the apps)',
         '',
         '[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with',
         '--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.',
@@ -76,6 +83,9 @@ export class AgentCommand extends BaseCommand {
         '',
         'plan: a Claude agent\'s hooks record its task list (agent.plan, default on); `plan` prints the',
         'steps with the current one marked, `plan --all` for every worktree, `--json` for the apps.',
+        '`overview --json` is what a window needs to draw them: the running agents of the repository',
+        '(with --containers also those in its branch containers), an agent that another one started',
+        'under its parent, their text and the position of every stop, loop and marker.',
         '',
         '--agent antigravity runs the Antigravity CLI (agy) instead of agent.command. Only Claude Code',
         'reports when it waits for input; another agent shows as running while its session lives.',
@@ -101,6 +111,7 @@ export class AgentCommand extends BaseCommand {
 
     const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
     if (verb === 'plan') return this.plan(listing, target, opts);
+    if (verb === 'overview') return this.overview(listing, opts);
     const name = target ?? (await getCurrentBranch());
     const wt = name ? findWorktreeIn(listing.worktrees, name) : null;
     if (!wt || !wt.branch || !wt.exists || wt.bare) {
@@ -308,8 +319,76 @@ export class AgentCommand extends BaseCommand {
     process.exitCode = await runTmux(directArgv(command), wt.path, { ...env, ...vars, ...secrets });
   }
 
+  // `kunj agent overview`: the repository's running agents, grouped and laid out (agent-overview.ts)
+  private async overview(listing: Awaited<ReturnType<typeof listWorktreesDetailed>>, opts: AgentOptions): Promise<void> {
+    const [host, inContainers] = await Promise.all([
+      this.collectPlans(listing, undefined, { all: true }),
+      opts.containers ? this.containerPlans() : Promise.resolve(undefined),
+    ]);
+    const plans = [...host, ...(inContainers?.plans ?? [])];
+    const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
+    const built = buildOverview(plans);
+    if (this.jsonMode) {
+      this.outputJSON({
+        repo: { name: repo.name, root: listing.repoRoot }, ...built,
+        ...(inContainers ? { containers: { available: inContainers.available, ...(inContainers.message ? { message: inContainers.message } : {}) } } : {}),
+      } satisfies AgentOverviewJson);
+      return;
+    }
+    console.log(chalk.bold(built.summary));
+    if (inContainers && !inContainers.available) console.log(chalk.gray(`containers unavailable: ${inContainers.message ?? 'Docker could not be asked'}`));
+    this.printPlans(activePlans(plans));
+  }
+
+  // The plans of the agents in this repository's running containers, across its backends. Docker
+  // being down, slow or missing is `available: false`, never a failed overview.
+  private async containerPlans(): Promise<{ available: boolean; message?: string; plans: AgentPlanItemJson[] }> {
+    let timer: NodeJS.Timeout | undefined;
+    const commands: Array<{ abortDockerCalls(): void }> = [];
+    try {
+      const { ContainerCommand } = await import('./container');
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          for (const c of commands) c.abortDockerCalls();
+          reject(new Error(`Docker did not answer within ${OVERVIEW_CONTAINERS_TIMEOUT_MS / 1000}s`));
+        }, OVERVIEW_CONTAINERS_TIMEOUT_MS);
+      });
+      const work = (async () => {
+        const lister = new ContainerCommand();
+        commands.push(lister);
+        const list = await lister.listJson({ status: true });
+        const withAgent = list.containers.filter(c => c.state === 'running' && c.agent.running === true);
+        const each = await Promise.all(withAgent.map(async c => {
+          const command = new ContainerCommand();
+          commands.push(command);
+          // one container that cannot be read keeps the others
+          try { return await command.agentPlansJson(c.branch, { remote: c.remote ?? 'local' }); } catch { return []; }
+        }));
+        return each.flat();
+      })();
+      return { available: true, plans: await Promise.race([work, timeout]) };
+    } catch (error) {
+      return { available: false, message: error instanceof Error ? error.message : String(error), plans: [] };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   // `kunj agent plan`: what the hooks recorded for each agent session of a worktree (or of all)
   private async plan(listing: Awaited<ReturnType<typeof listWorktreesDetailed>>, target: string | undefined, opts: AgentOptions): Promise<void> {
+    const plans = await this.collectPlans(listing, target, opts);
+    if (this.jsonMode) {
+      this.outputJSON({ plans } satisfies AgentPlanJson);
+      return;
+    }
+    if (plans.length === 0) {
+      console.log(chalk.dim(opts.all ? 'No agent has a plan recorded' : 'No agent of this worktree has a plan recorded'));
+      return;
+    }
+    this.printPlans(plans);
+  }
+
+  private async collectPlans(listing: Awaited<ReturnType<typeof listWorktreesDetailed>>, target: string | undefined, opts: AgentOptions): Promise<AgentPlanItemJson[]> {
     const usable = listing.worktrees.filter(w => w.branch && w.exists && !w.bare);
     let worktrees = usable;
     if (!opts.all) {
@@ -353,14 +432,10 @@ export class AgentCommand extends BaseCommand {
       }
     }
 
-    if (this.jsonMode) {
-      this.outputJSON({ plans } satisfies AgentPlanJson);
-      return;
-    }
-    if (plans.length === 0) {
-      console.log(chalk.dim(opts.all ? 'No agent has a plan recorded' : `No agent of ${worktrees[0].branch} has a plan recorded`));
-      return;
-    }
+    return plans;
+  }
+
+  private printPlans(plans: AgentPlanItemJson[]): void {
     const mark = (st: AgentPlanStepJson, current: boolean) => st.status === 'completed' ? chalk.green('✓') : current ? chalk.yellow('▶') : chalk.dim('○');
     for (const p of plans) {
       const state = p.running === false ? chalk.dim('not running') : p.state === 'waiting' ? chalk.yellow('waiting for input') : p.running ? chalk.green('running') : chalk.dim('unknown');

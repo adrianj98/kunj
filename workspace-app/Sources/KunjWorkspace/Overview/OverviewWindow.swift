@@ -3,19 +3,19 @@ import KunjWorkspaceCore
 
 /// Window ▸ Overview (⌘⇧O): every running agent as a line of its plan's steps, with the current one
 /// marked, subagents as loops, handed-off agents as branches and branch changes as markers
-/// (`kunj agent plan --all --json` per repository, `kunj ct agent <branch> --plan --json` per running
-/// container with an agent). Read again when kunj reports a plan change, when the listing changes and
-/// every 10 s while visible (a container's plan has no event yet). A click on a line opens that
+/// (`kunj agent overview --containers --json` per repository: kunj decides which agents, their
+/// grouping, text and every position; the window only draws that). Read again when kunj reports a
+/// plan change, when the listing changes and every 10 s while visible. A click on a line opens that
 /// agent's tab. Spec: docs/specs/agent-overview.md.
 @MainActor
 final class OverviewWindow: NSWindowController, NSWindowDelegate {
     var cli: KunjCLI?
-    /// The listed repositories with their environments (for the roots and the running containers).
-    var repositories: () -> [RepoEnvironments] = { [] }
+    /// The listed repositories: kunj is asked once in each.
+    var repositories: () -> [RepoRef] = { [] }
     /// A click on an agent's line.
-    var onOpen: ((AgentPlan, OverviewRepo) -> Void)?
+    var onOpen: ((OverviewLane, AgentOverviewJson.Repo) -> Void)?
     /// `--demo`: these instead of asking kunj.
-    var demoRepos: [OverviewRepo]?
+    var demoRepos: [AgentOverviewJson]?
     /// True once plans have been shown (a screenshot waits for it).
     private(set) var isSettled = false
 
@@ -30,7 +30,7 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
         "● done    ◎ where the agent is: green working, amber waiting for you    ○ to come    ◇ branch or worktree change    ⌣ subagent    Click a line to open its agent",
         font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
 
-    private var repos: [OverviewRepo] = []
+    private var repos: [AgentOverviewJson] = []
     private var timer: Timer?
     private var loading = false
     private var again = false
@@ -79,7 +79,7 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
         filterControl.target = self
         filterControl.action = #selector(filterChanged(_:))
         filterControl.setAccessibilityLabel("Show agents")
-        canvas.onOpen = { [weak self] plan, repo in self?.onOpen?(plan, repo) }
+        canvas.onOpen = { [weak self] lane, repo in self?.onOpen?(lane, repo) }
         canvas.setAccessibilityLabel("Agents and their plans")
         scroll.documentView = canvas
         scroll.hasVerticalScroller = true
@@ -183,43 +183,30 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
         }
     }
 
-    /// Every repository's plans, read at once: its host agents, and those of each running container
-    /// that has an agent. A repository that fails keeps the others; the first message is shown.
-    private nonisolated static func load(cli: KunjCLI, repos: [RepoEnvironments]) async -> ([OverviewRepo], String?) {
-        await withTaskGroup(of: (Int, [AgentPlan], String?).self) { group in
-            for (index, listed) in repos.enumerated() {
-                let root = listed.repo.root
-                let containers = listed.environments.filter { $0.kind == .container && $0.state == .running && $0.agent != .none }
+    /// Every repository's overview, asked at once. A repository that fails keeps the others; the first
+    /// message is shown (also when a repository's containers could not be asked).
+    private nonisolated static func load(cli: KunjCLI, repos: [RepoRef]) async -> ([AgentOverviewJson], String?) {
+        await withTaskGroup(of: (Int, AgentOverviewJson?, String?).self) { group in
+            for (index, repo) in repos.enumerated() {
                 group.addTask {
-                    var plans: [AgentPlan] = []
-                    var problem: String?
                     do {
-                        let json: AgentPlanJson = try await cli.run(agentPlanArguments(), cwd: root, timeout: 30)
-                        plans += json.plans
-                    } catch {
-                        problem = "\(listed.repo.name): \((error as? KunjCLIError)?.message ?? "\(error)")"
-                    }
-                    for env in containers {
-                        do {
-                            let json: AgentPlanJson = try await cli.run(
-                                containerAgentPlanArguments(branch: env.branch, remote: env.remoteArguments), cwd: root, timeout: 30)
-                            plans += json.plans
-                        } catch {
-                            if problem == nil { problem = "\(listed.repo.name) \(env.branch): \((error as? KunjCLIError)?.message ?? "\(error)")" }
+                        let json: AgentOverviewJson = try await cli.run(agentOverviewArguments(), cwd: repo.root, timeout: 30)
+                        let problem = json.containers.flatMap { c -> String? in
+                            c.available ? nil : "\(repo.name) containers: \(c.message ?? "Docker could not be asked")"
                         }
+                        return (index, json, problem)
+                    } catch {
+                        return (index, nil, "\(repo.name): \((error as? KunjCLIError)?.message ?? "\(error)")")
                     }
-                    return (index, plans, problem)
                 }
             }
-            var byIndex: [Int: [AgentPlan]] = [:]
+            var byIndex: [Int: AgentOverviewJson] = [:]
             var problems: [Int: String] = [:]
-            for await (index, plans, problem) in group {
-                byIndex[index] = plans
+            for await (index, json, problem) in group {
+                if let json { byIndex[index] = json }
                 if let problem { problems[index] = problem }
             }
-            let out = repos.enumerated().map { index, listed in
-                OverviewRepo(name: listed.repo.name, root: listed.repo.root, plans: activePlans(byIndex[index] ?? []))
-            }
+            let out = repos.indices.compactMap { byIndex[$0] }
             return (out, problems.keys.sorted().first.flatMap { problems[$0] })
         }
     }
