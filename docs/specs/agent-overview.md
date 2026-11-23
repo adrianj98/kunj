@@ -208,7 +208,9 @@ families (a family shows when any of its lanes passes).
   grouping and no wording in Swift.
 - **Refresh:** `KunjEvent.agentPlan` (a `plan` event, of a host session or of a container) → `EnvironmentStore.onPlanChanged`, which runs no listing; the store's `onChange`
   (an agent started, ended or began waiting); and every 10 s while the window is visible. Changes
-  are gathered for 0.3 s.
+  are gathered for 0.3 s. The event-driven reads run while the Overview is hidden too, from the first
+  listing after kunj connects, so opening it draws the plans already read at once and then brings
+  them up to date (a read with `--containers` takes seconds: it execs into every container).
 - **Checking it:** `--demo --overview --screenshot <png>` draws `DemoPlans`, the mockup's agents as kunj lays
   them out. That file and the test fixture are generated: `node workspace-app/scripts/gen-overview-demo.js`
   after `npm run build`, again after any change to the layout or to `AgentOverviewJson`.

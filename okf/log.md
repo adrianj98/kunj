@@ -179,3 +179,4 @@
 - Agent overview: marker labels move under a subagent loop they would cover. Page updated: none.
 - Workspace app Overview: pulse on working agents' current stops (Core Animation). Page updated: none.
 - Workspace app Overview: keyboard and VoiceOver access. Page updated: none.
+- Workspace app Overview preloads plans from session start and refreshes on events while hidden. Page updated: none.

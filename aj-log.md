@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — Overview loads at session start
+
+- The Overview panel now reads the plans as soon as kunj connects and again on every plan or listing
+  change, even while hidden; opening it draws what it has at once, then refreshes. Why: opening it
+  took seconds (`kunj agent overview --containers` execs into every container, ~5.7 s here) because
+  it only started reading when shown.
+
 ## 2026-11-23 — Plan history kept, agents keep task lists, ended agents stay
 
 - Closing the Overview left a row tall, and a read still out could grow it again ("closes and opens for

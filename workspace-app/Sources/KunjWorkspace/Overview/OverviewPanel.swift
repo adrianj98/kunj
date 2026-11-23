@@ -6,9 +6,10 @@ import KunjWorkspaceCore
 /// subagents as loops, handed-off agents as branches and branch changes as markers
 /// (`kunj agent overview --containers --json` per repository: kunj decides which agents, their
 /// grouping, text and every position; the panel only draws that). The drop-down at the top picks the
-/// repositories: those with an open session (the default), all of them, or one. Read again when kunj
-/// reports a plan change, when the listing changes and every 10 s while shown. A click on a line
-/// opens that agent's tab. Spec: docs/specs/agent-overview.md.
+/// repositories: those with an open session (the default), all of them, or one. Read once kunj is
+/// connected and again whenever kunj reports a plan change or the listing changes, shown or not, so
+/// opening the Overview draws the plans it already has at once; every 10 s as well while shown. A
+/// click on a line opens that agent's tab. Spec: docs/specs/agent-overview.md.
 @MainActor
 final class OverviewPanel: NSView {
     var cli: KunjCLI?
@@ -23,7 +24,7 @@ final class OverviewPanel: NSView {
     /// True once plans have been shown (a screenshot waits for it).
     private(set) var isSettled = false
     /// Shown in the window (the main window's middle panel is selected, or the Overview window is open):
-    /// reads and the 10 s timer run only then.
+    /// drawing and the 10 s timer run only then; reads on kunj's changes run always.
     var isShown = false {
         didSet {
             guard isShown != oldValue else { return }
@@ -87,6 +88,8 @@ final class OverviewPanel: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func start() {
+        // the plans read while hidden, drawn at once; the read below brings them up to date
+        if !repos.isEmpty { render() }
         refresh()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
@@ -99,7 +102,6 @@ final class OverviewPanel: NSView {
         beside?(nil)
         timer?.invalidate()
         timer = nil
-        pending?.cancel()
         canvas.setPulsing(false)
     }
 
@@ -255,7 +257,7 @@ final class OverviewPanel: NSView {
         emptyLabel.isHidden = emptyLabel.stringValue.isEmpty || demoRepos != nil
         // beside the sidebar there is no room in the middle: the summary says it
         if beside != nil, !emptyLabel.stringValue.isEmpty, demoRepos == nil { summary.stringValue = emptyLabel.stringValue }
-        isSettled = true
+        if isShown { isSettled = true }
     }
 
     private var isVisibleNow: Bool {
@@ -272,8 +274,9 @@ final class OverviewPanel: NSView {
     // MARK: data
 
     /// kunj said a plan changed, or the listing did: read again shortly (several changes come together).
+    /// Also while hidden, so the Overview has the plans before it is opened (the first listing after
+    /// kunj connects is the first read).
     func planChanged() {
-        guard isShown else { return }
         pending?.cancel()
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated { self?.refresh() }
