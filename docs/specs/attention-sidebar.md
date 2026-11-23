@@ -12,7 +12,7 @@ Paradev groups the same way (needs attention, working, needs review, idle, merge
 | --- | --- |
 | CLI: `waitingFor` on agent sessions (permission vs. input) | To do |
 | Core: `attentionBucket()`, seen tracking, ordering | To do |
-| App: View > Group Sidebar By, bucket headers, row subtitle with the repository | To do |
+| App: View > Group Sidebar By (Repository default, Attention opt-in), bucket headers, row subtitle with the repository | To do |
 | App: dock badge, notification, Next Needing Attention (⌘⌥↓) | To do |
 
 ## Buckets
@@ -110,14 +110,16 @@ The events poll compares `waitingFor` too, so a session going from `waiting inpu
   fixtures that cover each row of the bucket table.
 - **Model:** `Environment.agentWaitingFor` from the listing and events; `PullRequestInfo` already has
   `checks` and `reviewDecision`.
-- **Setting:** View > Group Sidebar By > Attention / Repository (`sidebarGrouping` default). New
-  installs start on **Attention**; an existing install keeps **Repository** until switched once (the
-  default is written on first launch of this version only if absent and the app has no saved layout).
+- **Setting:** View > Group Sidebar By > Repository / Attention (`sidebarGrouping` default,
+  `repository`). **Repository is always the default**, for new installs and existing ones; Attention is
+  opt-in and remembered once chosen.
 - **No extra calls:** every input is already in `worktree list --json`, `ct list --json` and the event
   stream. The bucket of an environment without PR data (`--no-pr`, gh missing) ignores the PR rows.
 
 ## Decisions
 
+- **Repository stays the default.** Attention is an opt-in view (decided 2026-11-23); the dock badge,
+  notifications and ⌘⌥↓ work in either grouping, since they only need the buckets.
 - **A grouping, not a filter.** Nothing is hidden that the repository view shows; it is reordered, and
   the rest is one `N more…` away.
 - **Finished agents fade after a look.** Without "seen", a session that finished yesterday would sit in
