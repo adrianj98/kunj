@@ -21,6 +21,9 @@ Changes made with Claude, and why.
   of starting them; agents that ended (a restart) come back suspended too. Why: the user wants to
   resume each session manually after reopening; and saved agent tabs whose agent had ended were
   being dropped on restore, so the earlier "restored tabs resume" never happened.
+- Review fixes: the quit prompt no longer counts suspended tabs as running sessions; suspending an
+  agent tab saved before session ids stops the branch's default agent session; Resume Session waits
+  for Suspend's kills to finish, so a quick Suspend then Resume is not ended by a late kill.
 
 ## 2026-11-19 — resume closed agents
 
