@@ -195,7 +195,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSApp.terminate(nil)
                     return
                 }
-                if self?.overviewArgument == true {
+                // -overviewInline YES: the main window with its Overview item selected (the usual screenshot below)
+                if self?.overviewArgument == true, UserDefaults.standard.bool(forKey: "overviewInline") {
+                    self?.windowController.showOverview()
+                    for _ in 0..<300 where self?.windowController.overview.isSettled != true {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
+                } else if self?.overviewArgument == true {
                     self?.showOverview(nil)
                     for _ in 0..<300 where self?.overviewWindow?.isSettled != true {
                         try? await Task.sleep(nanoseconds: 100_000_000)
@@ -282,7 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.startLanguageServers(cli: cli)
                 self.settings?.cli = cli
                 self.sessionsWindow?.cli = cli
-                self.overviewWindow?.cli = cli
+                self.windowController.overview.cli = cli
                 self.windowController.header.show(self.windowController.selectedEnvironment)
             }
             await loadEnvironments(cli: cli)
@@ -313,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // a selected environment that could not restore its tabs (stopped) may now
             keeper.selected(self.windowController.selectedEnvironment)
             // an agent started, ended, or began waiting: the Overview window, when open, follows
-            self.overviewWindow?.planChanged()
+            self.windowController.overview.planChanged()
         }
         // an agent checked out another branch in its worktree: the worktree's tabs (still running,
         // their tmux sessions found by kunj through the worktree tag), saved layout and selection
@@ -332,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // an agent handed off with /handoff (kunj agent start --open-in-app): its tab, selected and focused
         store.onOpenAgent = { [weak self] env, id in self?.openHandedOffAgent(env: env, id: id) }
         // an agent's plan record changed: the Overview window, when open, reads the plans again
-        store.onPlanChanged = { [weak self] _ in self?.overviewWindow?.planChanged() }
+        store.onPlanChanged = { [weak self] _ in self?.windowController.overview.planChanged() }
         // the Changes column follows git events and container status changes of its repository
         store.onRepoChanged = { [weak windowController] root in
             windowController?.changesColumn.repoChanged(root: root)
@@ -554,6 +560,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         runner.suspendSession = { [weak self] env in self?.suspendSession(env) }
         runner.resumeSession = { [weak self] env in self?.resumeSession(env) }
+        configure(windowController.overview)
         runner.resumeAgent = { [weak self] env in
             self?.windowController.select(env.id)
             self?.showSavedAgents(env)
@@ -768,6 +775,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.beginSheet(panel) { [weak self] _ in self?.cloneSheet = nil }
     }
 
+    /// File ▸ Open Repository… (⌥⌘O): pick a folder, register it with `kunj repos add`
+    /// (a folder inside a repository or a worktree adds that repository), reload, and select the
+    /// repository's first environment so it shows even when the sidebar hides repositories without sessions.
+    @objc func openRepository(_ sender: Any?) {
+        guard let cli = kunj, let window = windowController.window else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        panel.message = "Choose a git repository (or a folder inside one)"
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor [weak self] in
+                do {
+                    let added: ReposAddJson = try await cli.run(["repos", "add", url.path], cwd: url.path, timeout: 30)
+                    guard let self, let store = self.store else { return }
+                    await store.refreshAll()
+                    let listed = store.repos.first { $0.repo.root == added.repo.root }
+                    if let env = listed?.environments.first(where: { $0.kind == .worktree }) ?? listed?.environments.first {
+                        self.windowController.select(env.id)
+                    }
+                    log("opened repository \(added.repo.name) (\(added.repo.root))")
+                } catch {
+                    self?.inform("Could not open \(url.lastPathComponent)", detail: (error as? KunjCLIError)?.message ?? "\(error)")
+                }
+            }
+        }
+    }
+
     /// ⌘K: the sidebar's search field.
     @objc func focusSearch(_ sender: Any?) { windowController.sidebar.search.focus() }
 
@@ -927,16 +964,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Window > Overview (⌘⇧O): every running agent as a line of its plan's steps. A click on a line
     /// opens that agent's tab in the main window.
     @objc func showOverview(_ sender: Any?) {
-        if overviewWindow == nil {
-            let w = OverviewWindow()
-            w.repositories = { [weak self] in (self?.store?.repos ?? []).map { $0.repo } }
-            w.onOpen = { [weak self] lane, repo in self?.openAgent(of: lane, inRepository: repo.root) }
-            if demo { w.demoRepos = DemoPlans.overviews }
-            overviewWindow = w
+        let panel = windowController.overview
+        panel.cli = kunj
+        // --overview --screenshot: a window of its own that grows to every row
+        if overviewArgument && screenshotPath != nil && !UserDefaults.standard.bool(forKey: "overviewInline") {
+            if overviewWindow == nil {
+                let w = OverviewWindow()
+                configure(w.panel)
+                overviewWindow = w
+            }
+            overviewWindow?.panel.cli = kunj
+            overviewWindow?.showWindow(nil)
+            return
         }
-        overviewWindow?.cli = kunj
-        overviewWindow?.showWindow(nil)
-        overviewWindow?.window?.makeKeyAndOrderFront(nil)
+        windowController.showOverview()
+        windowController.showWindow(nil)
+    }
+
+    /// Wires an Overview panel to the store: the listed repositories, which have an open session
+    /// (the sidebar's rule: tabs open, or saved from an earlier run), and a click on a line.
+    private func configure(_ panel: OverviewPanel) {
+        panel.repositories = { [weak self] in (self?.store?.repos ?? []).map { $0.repo } }
+        panel.openRepositories = { [weak self] in
+            guard let self, let store = self.store else { return [] }
+            let registry = self.windowController.terminalColumn.registry
+            return Set(store.repos.filter { listed in
+                listed.environments.contains { env in
+                    !registry.tabs(for: env.id).isEmpty || self.layoutKeeper?.hasSavedTabs(env) == true
+                }
+            }.map(\.repo.root))
+        }
+        panel.onOpen = { [weak self] lane, repo in self?.openAgent(of: lane, inRepository: repo.root) }
+        if demo { panel.demoRepos = DemoPlans.overviews }
     }
 
     /// The environment an Overview line belongs to: the container by its name, a worktree by its path.
@@ -972,7 +1031,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.sidebar.lspMemory = [:]
         settings?.cli = nil
         sessionsWindow?.cli = nil
-        overviewWindow?.cli = nil
+        windowController.overview.cli = nil
         stopUsagePoll()
         windowController.render(repos: [])
         windowController.setKunjVersion("")
@@ -1178,6 +1237,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// File: Save ⌘S (the active editor tab; ⌘S inside the editor page posts the same save).
     private func fileMenu() -> NSMenu {
         let menu = NSMenu(title: "File")
+        let open = menu.addItem(withTitle: "Open Repository…", action: #selector(openRepository(_:)), keyEquivalent: "o")
+        open.keyEquivalentModifierMask = [.command, .option]
+        open.target = self
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Save", action: #selector(saveFile(_:)), keyEquivalent: "s").target = self
         return menu
     }
@@ -1513,6 +1576,8 @@ extension AppDelegate: NSMenuItemValidation {
             return kunj != nil && !(store?.repos.isEmpty ?? true) && newSessionSheet == nil
         case #selector(closeAllSessions(_:)):
             return kunj != nil && !(windowController?.terminalColumn.registry.allTabs.isEmpty ?? true)
+        case #selector(openRepository(_:)):
+            return kunj != nil
         case #selector(cloneFromGitHub(_:)):
             return kunj != nil && cloneSheet == nil && newSessionSheet == nil
         case #selector(switchSession(_:)):

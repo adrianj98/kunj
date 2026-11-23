@@ -23,6 +23,7 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 | CLI: parent link for a start from inside another agent's session (handoff) | Shipped |
 | `kunj events` for a container's plan: a `plan` event with `container` when the records' size in the status script changes | Shipped |
 | Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Shipped 2026-11-23: built and tested on a Mac (314 tests), `--demo --overview --screenshot` matches the mockup in both themes, and run against a live agent started by this kunj (steps, current step, branch change, subagent loop) |
+| Workspace app: the Overview in the main window's middle panel (sidebar item above the repositories), with a repository drop-down defaulting to repositories with an open session | Shipped 2026-11-23 (`OverviewPanel`, `OverviewScope`) |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |
 | Rewind forks (needs the transcript) | Later, only if wanted |
 

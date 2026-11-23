@@ -1,0 +1,306 @@
+import AppKit
+import KunjWorkspaceCore
+
+/// The Overview (the sidebar's Overview item, Window ▸ Overview ⌘⇧O), shown in the main window's
+/// middle panel: every running agent as a line of its plan's steps, with the current one marked,
+/// subagents as loops, handed-off agents as branches and branch changes as markers
+/// (`kunj agent overview --containers --json` per repository: kunj decides which agents, their
+/// grouping, text and every position; the panel only draws that). The drop-down at the top picks the
+/// repositories: those with an open session (the default), all of them, or one. Read again when kunj
+/// reports a plan change, when the listing changes and every 10 s while shown. A click on a line
+/// opens that agent's tab. Spec: docs/specs/agent-overview.md.
+@MainActor
+final class OverviewPanel: NSView {
+    var cli: KunjCLI?
+    /// The listed repositories, in the sidebar's order.
+    var repositories: () -> [RepoRef] = { [] }
+    /// The roots of the repositories with an open session (the default scope).
+    var openRepositories: () -> Set<String> = { [] }
+    /// A click on an agent's line.
+    var onOpen: ((OverviewLane, AgentOverviewJson.Repo) -> Void)?
+    /// `--demo`: these instead of asking kunj.
+    var demoRepos: [AgentOverviewJson]?
+    /// True once plans have been shown (a screenshot waits for it).
+    private(set) var isSettled = false
+    /// Shown in the window (the main window's middle panel is selected, or the Overview window is open):
+    /// reads and the 10 s timer run only then.
+    var isShown = false {
+        didSet {
+            guard isShown != oldValue else { return }
+            if isShown { start() } else { stop() }
+        }
+    }
+
+    let canvas = OverviewCanvas(frame: .zero)
+    let scroll = NSScrollView()
+    private let summary = makeLabel("", font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
+    private let scopePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let filterControl = NSSegmentedControl(labels: OverviewFilter.allCases.map { $0.title }, trackingMode: .selectOne,
+                                                   target: nil, action: nil)
+    private let errorLabel = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.caption), color: .clear)
+    private let emptyLabel = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.body), color: .clear)
+    private let legend = makeLabel(
+        "● done   ◎ now (amber: waiting for you)   ○ to come   ◇ branch or worktree change   ╰╯ subagent   Click a line to open its agent",
+        font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
+
+    private static let scopeKey = "overviewScope"
+    /// Remembered: `open`, `all` or a repository root.
+    private var scope: OverviewScope = {
+        switch UserDefaults.standard.string(forKey: OverviewPanel.scopeKey) {
+        case nil, "open"?: return .open
+        case "all"?: return .all
+        case let root?: return .repo(root)
+        }
+    }() {
+        didSet {
+            let raw: String
+            switch scope { case .open: raw = "open"; case .all: raw = "all"; case .repo(let r): raw = r }
+            UserDefaults.standard.set(raw, forKey: Self.scopeKey)
+        }
+    }
+
+    private var repos: [AgentOverviewJson] = []
+    private var timer: Timer?
+    private var loading = false
+    private var again = false
+    private var pending: DispatchWorkItem?
+    /// `topInset`: room above the bar (the main window's header height, so it lines up with the sidebar's search).
+    init(topInset: CGFloat = 10) {
+        super.init(frame: .zero)
+        build(topInset: topInset)
+        ThemeManager.shared.onChange.append { [weak self] t in self?.apply(t) }
+        apply(ThemeManager.shared.current)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func start() {
+        refresh()
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+        canvas.setPulsing(isVisibleNow)
+    }
+
+    private func stop() {
+        timer?.invalidate()
+        timer = nil
+        pending?.cancel()
+        canvas.setPulsing(false)
+    }
+
+    /// The window was hidden, shown or covered: the pulse only runs while the panel can be seen.
+    func visibilityChanged() { canvas.setPulsing(isVisibleNow) }
+
+    override func layout() {
+        super.layout()
+        canvas.rebuild()
+    }
+
+    // MARK: layout
+
+    private func build(topInset: CGFloat) {
+        filterControl.selectedSegment = 0
+        filterControl.target = self
+        filterControl.action = #selector(filterChanged(_:))
+        filterControl.setAccessibilityLabel("Show agents")
+        scopePopup.target = self
+        scopePopup.action = #selector(scopeChanged(_:))
+        scopePopup.controlSize = .small
+        scopePopup.font = Theme.sans(DesignTokens.TypeScale.caption)
+        scopePopup.setAccessibilityLabel("Repositories")
+        canvas.onOpen = { [weak self] lane, repo in self?.onOpen?(lane, repo) }
+        canvas.setAccessibilityLabel("Agents and their plans")
+        scroll.documentView = canvas
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+        errorLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        legend.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        summary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        emptyLabel.alignment = .center
+        emptyLabel.isHidden = true
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let bar = NSStackView(views: [scopePopup, summary, spacer, errorLabel, filterControl])
+        bar.orientation = .horizontal
+        bar.spacing = 10
+
+        for v in [bar, scroll, legend, emptyLabel] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            bar.centerYAnchor.constraint(equalTo: topAnchor, constant: topInset / 2 + 4),
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            scroll.topAnchor.constraint(equalTo: topAnchor, constant: topInset + 8),
+            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            legend.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 7),
+            legend.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            legend.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+            legend.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            emptyLabel.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
+            emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: scroll.widthAnchor, constant: -40),
+        ])
+    }
+
+    private func apply(_ t: Theme) {
+        appearance = t.appearance
+        summary.textColor = t.color(\.muted)
+        legend.textColor = t.color(\.muted)
+        emptyLabel.textColor = t.color(\.muted)
+        errorLabel.textColor = t.color(\.red)
+        canvas.apply(t)
+    }
+
+    private var filter: OverviewFilter {
+        let i = filterControl.selectedSegment
+        return i >= 0 && i < OverviewFilter.allCases.count ? OverviewFilter.allCases[i] : .all
+    }
+
+    /// The drop-down: the scopes, then every repository (a dot before those with an open session).
+    private func rebuildScopeMenu() {
+        let listed = repositories()
+        let open = openRepositories()
+        // a repository no longer listed: back to the default
+        if case .repo(let root) = scope, !listed.contains(where: { $0.root == root }) { scope = .open }
+        let menu = NSMenu()
+        func add(_ title: String, _ value: OverviewScope) {
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.representedObject = OverviewScopeBox(value)
+            menu.addItem(item)
+        }
+        add(overviewScopeTitle(.open, repos: listed, open: open), .open)
+        add("All repositories", .all)
+        if !listed.isEmpty { menu.addItem(.separator()) }
+        for repo in listed { add((open.contains(repo.root) ? "● " : "    ") + repo.name, .repo(repo.root)) }
+        scopePopup.menu = menu
+        if let i = menu.items.firstIndex(where: { ($0.representedObject as? OverviewScopeBox)?.value == scope }) {
+            scopePopup.selectItem(at: i)
+        }
+    }
+
+    @objc private func scopeChanged(_ sender: Any?) {
+        guard let box = scopePopup.selectedItem?.representedObject as? OverviewScopeBox else { return }
+        scope = box.value
+        repos = []
+        render()
+        refresh()
+    }
+
+    private func render() {
+        summary.stringValue = overviewSummary(repos)
+        canvas.show(repos, filter: filter)
+        canvas.setPulsing(isVisibleNow)
+        let asked = overviewRepos(repositories(), open: openRepositories(), scope: scope)
+        emptyLabel.stringValue = asked.isEmpty && scope == .open
+            ? "No repository has an open session. Pick one from the menu above, or All repositories."
+            : (repos.allSatisfy { $0.agents == 0 } && !loading ? "No agents running" : "")
+        emptyLabel.isHidden = emptyLabel.stringValue.isEmpty || demoRepos != nil
+        isSettled = true
+    }
+
+    private var isVisibleNow: Bool {
+        guard isShown, !isHiddenOrHasHiddenAncestor, let window else { return false }
+        return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+    }
+
+    @objc private func filterChanged(_ sender: Any?) {
+        canvas.show(repos, filter: filter)
+        canvas.setPulsing(isVisibleNow)
+    }
+
+    // MARK: data
+
+    /// kunj said a plan changed, or the listing did: read again shortly (several changes come together).
+    func planChanged() {
+        guard isShown else { return }
+        pending?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    func refresh() {
+        rebuildScopeMenu()
+        if let demoRepos {
+            repos = demoRepos
+            render()
+            return
+        }
+        guard let cli else {
+            errorLabel.stringValue = "kunj is not connected"
+            return
+        }
+        // one read at a time; a request that comes meanwhile runs one more when it is back
+        if loading {
+            again = true
+            return
+        }
+        let asked = overviewRepos(repositories(), open: openRepositories(), scope: scope)
+        guard !asked.isEmpty else {
+            repos = []
+            errorLabel.stringValue = ""
+            render()
+            return
+        }
+        loading = true
+        Task { [weak self] in
+            let (result, problem) = await OverviewPanel.load(cli: cli, repos: asked)
+            guard let self else { return }
+            self.loading = false
+            self.repos = result
+            self.errorLabel.stringValue = problem ?? ""
+            self.render()
+            if self.again {
+                self.again = false
+                self.refresh()
+            }
+        }
+    }
+
+    /// Every repository's overview, asked at once. A repository that fails keeps the others; the first
+    /// message is shown (also when a repository's containers could not be asked).
+    private nonisolated static func load(cli: KunjCLI, repos: [RepoRef]) async -> ([AgentOverviewJson], String?) {
+        await withTaskGroup(of: (Int, AgentOverviewJson?, String?).self) { group in
+            for (index, repo) in repos.enumerated() {
+                group.addTask {
+                    do {
+                        let json: AgentOverviewJson = try await cli.run(agentOverviewArguments(), cwd: repo.root, timeout: 30)
+                        let problem = json.containers.flatMap { c -> String? in
+                            if !c.available { return "\(repo.name) containers: \(c.message ?? "Docker could not be asked")" }
+                            guard let unreadable = c.unreadable, !unreadable.isEmpty else { return nil }
+                            return "\(repo.name): could not read the agents in \(unreadable.joined(separator: ", "))"
+                        }
+                        return (index, json, problem)
+                    } catch {
+                        return (index, nil, "\(repo.name): \((error as? KunjCLIError)?.message ?? "\(error)")")
+                    }
+                }
+            }
+            var byIndex: [Int: AgentOverviewJson] = [:]
+            var problems: [Int: String] = [:]
+            for await (index, json, problem) in group {
+                if let json { byIndex[index] = json }
+                if let problem { problems[index] = problem }
+            }
+            let out = repos.indices.compactMap { byIndex[$0] }
+            return (out, problems.keys.sorted().first.flatMap { problems[$0] })
+        }
+    }
+
+}
+
+/// A scope in a menu item's representedObject.
+private final class OverviewScopeBox: NSObject {
+    let value: OverviewScope
+    init(_ value: OverviewScope) { self.value = value }
+}

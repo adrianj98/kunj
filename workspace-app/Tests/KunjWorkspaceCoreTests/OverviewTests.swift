@@ -101,3 +101,25 @@ import Testing
         #expect(laneIndex(at: -1, in: family) == nil)
     }
 }
+
+@Suite struct OverviewScopeTests {
+    let a = RepoRef(name: "a", root: "/a", bare: false, dirName: "a")
+    let b = RepoRef(name: "b", root: "/b", bare: false, dirName: "b")
+    let c = RepoRef(name: "c", root: "/c", bare: false, dirName: "c")
+
+    @Test func scopePicksTheRepositories() {
+        let repos = [a, b, c]
+        #expect(overviewRepos(repos, open: ["/c", "/a"], scope: .open) == [a, c])
+        #expect(overviewRepos(repos, open: [], scope: .open).isEmpty)
+        #expect(overviewRepos(repos, open: ["/a"], scope: .all) == repos)
+        #expect(overviewRepos(repos, open: [], scope: .repo("/b")) == [b])
+        #expect(overviewRepos(repos, open: [], scope: .repo("/gone")).isEmpty)
+    }
+
+    @Test func scopeTitles() {
+        #expect(overviewScopeTitle(.open, repos: [a, b], open: ["/a"]) == "Open sessions (1 repository)")
+        #expect(overviewScopeTitle(.open, repos: [a, b], open: ["/a", "/b"]) == "Open sessions (2 repositories)")
+        #expect(overviewScopeTitle(.all, repos: [a], open: []) == "All repositories")
+        #expect(overviewScopeTitle(.repo("/b"), repos: [a, b], open: []) == "b")
+    }
+}

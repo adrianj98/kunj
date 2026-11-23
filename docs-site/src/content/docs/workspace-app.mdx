@@ -270,6 +270,9 @@ Claude conversations that are not running, newest first, by their first prompt; 
 opens in a new agent tab where it left off. **Forget These** clears the list. From a terminal,
 `kunj agent saved` lists the same conversations with the command that resumes each.
 
+**File > Open Repository…** (⌥⌘O) adds a repository from disk: pick its folder (or any folder
+inside it, or one of its worktrees) and it is listed and selected.
+
 **Session > Close All Sessions…** closes every environment that has tabs, like Close Session on
 each, after one confirmation.
 
@@ -280,8 +283,11 @@ tabs, or the branch changing), kept in the same file.
 
 ## Overview
 
-**Window > Overview** (⌘⇧O) shows every running agent as a line of the steps in its plan, so you can
-see where each one is without opening its terminal. Agents are grouped by repository.
+**Overview**, at the top of the sidebar (or **Window > Overview**, ⌘⇧O), shows every running agent
+as a line of the steps in its plan, in the middle of the window, so you can see where each one is
+without opening its terminal. Agents are grouped by repository. The menu at its top left picks the
+repositories: those with an open session (the default), all of them, or one. Click a session in the
+sidebar to leave the Overview.
 
 - A filled stop is a finished step, the ringed stop is where the agent is now, and hollow stops are
   still to come. The ring is green while the agent works and amber when it waits for you.

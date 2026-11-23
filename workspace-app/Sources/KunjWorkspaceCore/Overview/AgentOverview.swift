@@ -171,3 +171,34 @@ public func overviewSummary(_ repos: [AgentOverviewJson]) -> String {
 public func laneIndex(at y: Double, in family: OverviewFamily) -> Int? {
     family.lanes.firstIndex { y >= $0.top && y < $0.top + $0.height }
 }
+
+// ---- which repositories the Overview asks (its drop-down)
+
+/// The Overview's repository drop-down: the repositories with an open session (the default), every
+/// listed repository, or one.
+public enum OverviewScope: Equatable, Sendable {
+    case open, all
+    case repo(String)
+}
+
+/// The repositories to ask for `scope`, in the listing's order. `open` is the roots of the
+/// repositories with an open session (a tab, or tabs saved from an earlier run). A single repository
+/// no longer listed asks none.
+public func overviewRepos(_ repos: [RepoRef], open: Set<String>, scope: OverviewScope) -> [RepoRef] {
+    switch scope {
+    case .open: return repos.filter { open.contains($0.root) }
+    case .all: return repos
+    case .repo(let root): return repos.filter { $0.root == root }
+    }
+}
+
+/// The drop-down's title for `scope`.
+public func overviewScopeTitle(_ scope: OverviewScope, repos: [RepoRef], open: Set<String>) -> String {
+    switch scope {
+    case .open:
+        let n = repos.filter { open.contains($0.root) }.count
+        return "Open sessions (\(n) repositor\(n == 1 ? "y" : "ies"))"
+    case .all: return "All repositories"
+    case .repo(let root): return repos.first { $0.root == root }?.name ?? "Repository"
+    }
+}

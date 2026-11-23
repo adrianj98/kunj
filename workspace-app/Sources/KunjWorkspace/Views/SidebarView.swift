@@ -47,6 +47,12 @@ final class SidebarView: NSView {
     var theme: Theme { didSet { apply() } }
 
     let search: SearchField
+    /// The Overview item above the list: shows the agents' plans in the middle panel.
+    private let overviewRow: OverviewNavRow
+    /// The Overview item was pressed.
+    var onOverview: () -> Void = {}
+    /// The Overview is shown (its item is selected; no environment row is).
+    var overviewSelected = false { didSet { overviewRow.selected = overviewSelected } }
     private let scroll = NSScrollView()
     private let list: SidebarListView
     private let footerLine = FillView(.clear)
@@ -58,6 +64,7 @@ final class SidebarView: NSView {
     init(theme: Theme) {
         self.theme = theme
         search = SearchField(placeholder: "Search sessions", theme: theme)
+        overviewRow = OverviewNavRow(theme: theme)
         list = SidebarListView(theme: theme)
         newSession = ActionButton("New session", hint: "⌘N", icon: .plus, style: .wide, theme: theme)
         super.init(frame: .zero)
@@ -75,14 +82,21 @@ final class SidebarView: NSView {
         search.onChange = { [weak self] q in self?.query = q; self?.reload() }
         newSession.onPress = { [weak self] in self?.onNewSession() }
 
-        for v in [search, scroll, footerLine, newSession, agents, version] as [NSView] { addSubview(v) }
+        overviewRow.onPress = { [weak self] in self?.onOverview() }
+        overviewRow.translatesAutoresizingMaskIntoConstraints = false
+        for v in [search, overviewRow, scroll, footerLine, newSession, agents, version] as [NSView] { addSubview(v) }
         let pad: CGFloat = 12
         NSLayoutConstraint.activate([
             search.topAnchor.constraint(equalTo: topAnchor, constant: DesignTokens.Layout.headerHeight),
             search.leadingAnchor.constraint(equalTo: leadingAnchor, constant: pad),
             search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -pad),
 
-            scroll.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 12),
+            overviewRow.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 10),
+            overviewRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            overviewRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            overviewRow.heightAnchor.constraint(equalToConstant: 30),
+
+            scroll.topAnchor.constraint(equalTo: overviewRow.bottomAnchor, constant: 8),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: footerLine.topAnchor),
@@ -129,6 +143,7 @@ final class SidebarView: NSView {
     private func apply() {
         search.theme = theme
         list.theme = theme
+        overviewRow.theme = theme
         newSession.theme = theme
         footerLine.color = theme.color(\.border)
         agents.textColor = theme.color(\.faint)
@@ -163,6 +178,7 @@ final class SidebarView: NSView {
     private func reload() {
         let n = agentsRunning(repos)
         agents.stringValue = n == 1 ? "1 agent running" : "\(n) agents running"
+        overviewRow.count = n
         list.set(groups: groups(), selectedId: selectedId, time: timeText)
         list.rows.forEach { $0.usage = usageOf($0.environment); $0.showUsage = hovering; $0.suspended = isSuspended($0.environment) }
         list.frame.size.width = scroll.contentSize.width
@@ -323,5 +339,67 @@ private final class MoreRowView: NSView {
             .foregroundColor: theme.color(hovering ? \.text2 : \.faint)]
         let size = (text as NSString).size(withAttributes: attrs)
         (text as NSString).draw(at: NSPoint(x: 8, y: (bounds.midY - size.height / 2).rounded()), withAttributes: attrs)
+    }
+}
+
+/// The sidebar's Overview item: a small line of stops, "Overview" and the number of agents running.
+/// Styled like an environment row (radius 6; `raised` and `borderStrong` when selected, `raised` at 50 %
+/// on hover).
+private final class OverviewNavRow: NSView {
+    var theme: Theme { didSet { needsDisplay = true } }
+    var selected = false { didSet { needsDisplay = true; setAccessibilitySelected(selected) } }
+    var count = 0 { didSet { if count != oldValue { needsDisplay = true } } }
+    var onPress: (() -> Void)?
+    private var hovering = false { didSet { needsDisplay = true } }
+
+    init(theme: Theme) {
+        self.theme = theme
+        super.init(frame: .zero)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Overview of the agents' plans")
+        toolTip = "Every running agent's plan (⌘⇧O)"
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func mouseDown(with event: NSEvent) { onPress?() }
+    override func accessibilityPerformPress() -> Bool { onPress?(); return true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let radius = DesignTokens.Radius.card
+        let box = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
+        if selected {
+            theme.color(\.raised).setFill(); box.fill()
+            theme.color(\.borderStrong).setStroke(); box.lineWidth = 1; box.stroke()
+        } else if hovering {
+            theme.color(\.raised, alpha: 0.5).setFill(); box.fill()
+        }
+        // the glyph: three stops on a line, the last one open
+        let midY = bounds.midY, x0: CGFloat = 12
+        let line = NSBezierPath()
+        line.move(to: NSPoint(x: x0, y: midY)); line.line(to: NSPoint(x: x0 + 16, y: midY))
+        line.lineWidth = 1.5
+        theme.color(\.muted).setStroke(); line.stroke()
+        for (i, filled) in [true, true, false].enumerated() {
+            let c = NSPoint(x: x0 + CGFloat(i) * 8, y: midY)
+            let dot = NSBezierPath(ovalIn: NSRect(x: c.x - 2.5, y: c.y - 2.5, width: 5, height: 5))
+            if filled { theme.color(\.text2).setFill(); dot.fill() } else {
+                theme.color(\.bg).setFill(); dot.fill(); theme.color(\.text2).setStroke(); dot.lineWidth = 1.2; dot.stroke()
+            }
+        }
+        let title: [NSAttributedString.Key: Any] = [.font: Theme.sans(DesignTokens.TypeScale.body, weight: .medium),
+                                                    .foregroundColor: theme.color(\.text)]
+        let size = ("Overview" as NSString).size(withAttributes: title)
+        ("Overview" as NSString).draw(at: NSPoint(x: x0 + 28, y: (midY - size.height / 2).rounded()), withAttributes: title)
+        guard count > 0 else { return }
+        let badge: [NSAttributedString.Key: Any] = [.font: Theme.mono(DesignTokens.TypeScale.caption),
+                                                    .foregroundColor: theme.color(\.muted)]
+        let text = "\(count)" as NSString
+        let w = text.size(withAttributes: badge)
+        text.draw(at: NSPoint(x: bounds.maxX - 12 - w.width, y: (midY - w.height / 2).rounded()), withAttributes: badge)
     }
 }

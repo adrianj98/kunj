@@ -60,6 +60,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     let changesColumn: ChangesColumn
     let filesColumn: FilesColumn
     let statusBar: StatusBarView
+    /// The Overview, in place of the header and the columns while its sidebar item is selected.
+    let overview = OverviewPanel(topInset: DesignTokens.Layout.headerHeight)
+    /// The Overview item is selected (no environment is shown; `selectedId` is kept for when it closes).
+    private(set) var overviewSelected = false
     private let lines = (0..<4).map { _ in FillView(.clear) }
     private let mainArea = FillView(.clear)
     private let emptyState = NSStackView()
@@ -89,6 +93,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         buildLayout()
         sidebar.onSelect = { [weak self] id in self?.select(id) }
+        sidebar.onOverview = { [weak self] in self?.showOverview() }
         sidebar.onNewSession = { [weak self] in self?.onNewSession() }
         header.onAction = { [weak self] action in
             guard let self, let env = self.selectedEnvironment else { return }
@@ -108,6 +113,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    // the Overview's pulse only runs while it can be seen
+    func windowDidMiniaturize(_ notification: Notification) { overview.visibilityChanged() }
+    func windowDidDeminiaturize(_ notification: Notification) { overview.visibilityChanged() }
+    func windowDidChangeOcclusionState(_ notification: Notification) { overview.visibilityChanged() }
 
     // MARK: state
 
@@ -142,11 +152,32 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func select(_ id: String) {
-        guard id != selectedId else { return }
+        let leavingOverview = overviewSelected
+        if leavingOverview { setOverviewSelected(false) }
+        guard id != selectedId else {
+            if leavingOverview { renderSelection() }
+            return
+        }
         selectedId = id
         sidebar.selectedId = id
         renderSelection()
         onSelect(selectedEnvironment)
+    }
+
+    /// The sidebar's Overview item (or Window ▸ Overview): the Overview fills the middle panel and no
+    /// row is selected until one is picked again.
+    func showOverview() {
+        guard !overviewSelected else { overview.refresh(); return }
+        setOverviewSelected(true)
+        renderSelection()
+        window?.makeFirstResponder(overview.canvas)
+    }
+
+    private func setOverviewSelected(_ on: Bool) {
+        overviewSelected = on
+        sidebar.overviewSelected = on
+        sidebar.selectedId = on ? nil : selectedId
+        overview.isShown = on
     }
 
     /// Opens or closes the Files column at the right edge: closed, it is 0 wide and lists nothing.
@@ -235,11 +266,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         statusBar.show(env, environmentCount: environmentCount)
         terminalColumn.setChanges(count: env?.changedFiles ?? 0, open: changesVisible)
         terminalColumn.setFiles(open: filesVisible)
-        let showColumns = env != nil
+        overview.isHidden = !overviewSelected || discoveryError != nil
+        header.isHidden = !overview.isHidden
+        let showColumns = env != nil && overview.isHidden
         for v in [terminalColumn, lines[2]] as [NSView] { v.isHidden = !showColumns }
         for v in [changesColumn, lines[1], splitHandle] as [NSView] { v.isHidden = !showColumns || !changesVisible }
         for v in [filesColumn, filesLine, filesHandle] as [NSView] { v.isHidden = !showColumns || !filesVisible }
-        emptyState.isHidden = showColumns
+        emptyState.isHidden = showColumns || !overview.isHidden
         let text = emptyStateText(discoveryError: discoveryError, discoveryDetail: discoveryDetail,
                                   loading: loading, hasRepos: !repos.isEmpty)
         emptyTitle.stringValue = text.title
@@ -381,10 +414,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         let sidebarLine = lines[0], columnLine = lines[1], headerLine = lines[2], statusLine = lines[3]
         // the handles last, so they are hit before the terminal and the web views they overlap
         for v in [effect, sidebarLine, mainArea, header, headerLine, terminalColumn, columnLine, changesColumn,
-                  filesLine, filesColumn, statusLine, statusBar, emptyState,
+                  filesLine, filesColumn, statusLine, statusBar, emptyState, overview,
                   sidebarHandle, splitHandle, filesHandle] as [NSView] {
             root.addSubview(v)
         }
+        overview.translatesAutoresizingMaskIntoConstraints = false
+        overview.isHidden = true
         for (handle, line) in [(sidebarHandle, sidebarLine), (splitHandle, columnLine), (filesHandle, filesLine)] {
             NSLayoutConstraint.activate([
                 handle.centerXAnchor.constraint(equalTo: line.centerXAnchor),
@@ -402,6 +437,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             sidebarLine.topAnchor.constraint(equalTo: root.topAnchor),
             sidebarLine.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             sidebarLine.widthAnchor.constraint(equalToConstant: 1),
+
+            overview.leadingAnchor.constraint(equalTo: sidebarLine.trailingAnchor),
+            overview.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            overview.topAnchor.constraint(equalTo: root.topAnchor),
+            overview.bottomAnchor.constraint(equalTo: statusLine.topAnchor),
 
             mainArea.leadingAnchor.constraint(equalTo: sidebarLine.trailingAnchor),
             mainArea.trailingAnchor.constraint(equalTo: root.trailingAnchor),

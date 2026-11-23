@@ -26,6 +26,15 @@ public struct KnownRepo: Decodable, Equatable, Sendable {
     public var kunjDirName: String { kunjName ?? folderDirName(name) }
 }
 
+/// `kunj repos add <path> --json`: the repository that was added (or un-hidden).
+public struct ReposAddJson: Decodable, Equatable, Sendable {
+    public struct Added: Decodable, Equatable, Sendable {
+        public var root: String
+        public var name: String
+    }
+    public var repo: Added
+}
+
 func folderDirName(_ name: String) -> String {
     name.hasSuffix(".git") ? String(name.dropLast(4)) : name
 }

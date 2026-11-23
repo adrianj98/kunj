@@ -163,8 +163,14 @@ a line of its plan's steps. The CLI is the brain: `kunj agent overview --contain
 (`AgentOverviewJson`, built by `buildOverview()` in src/lib/agent-overview.ts) gives the agents, their
 grouping, text and every position. `KunjWorkspaceCore/Overview/AgentOverview.swift` only decodes it and
 adds `filterFamilies()`, `overviewSummary()` over several repositories and `laneIndex(at:in:)`;
-`KunjWorkspace/Overview/OverviewCanvas` strokes the positions as given; `OverviewWindow` asks every
-repository at once and again on `KunjEvent.agentPlan` (`EnvironmentStore.onPlanChanged`, no listing), on
+`KunjWorkspace/Overview/OverviewCanvas` strokes the positions as given. Since 2026-11-23 it is shown in the
+main window's middle panel, not a window: the sidebar's Overview item (above the repositories, with the
+running agents' count) or ⌘⇧O selects it (`MainWindowController.showOverview()`; picking a row leaves
+it), and `OverviewPanel` holds the bar, canvas and legend. Its drop-down picks the repositories
+(`OverviewScope`, `overviewRepos()`, remembered in `overviewScope`): those with an open session (the
+sidebar's rule: tabs open or saved; the default), all, or one. `OverviewWindow` remains only for
+`--overview --screenshot`; `-overviewInline YES` screenshots the main window with the Overview selected.
+`OverviewPanel` asks every repository of the scope at once and again on `KunjEvent.agentPlan` (`EnvironmentStore.onPlanChanged`, no listing), on
 the store's `onChange` and every 10 s. A click on a lane opens the agent's tab. `--demo --overview
 --screenshot` draws `DemoPlans`, generated with the test fixture by `scripts/gen-overview-demo.js`.
 Design: docs/specs/agent-overview.md, mockup docs/workspace-app/design/mockups/overview.html.

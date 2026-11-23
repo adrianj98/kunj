@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — Overview in the middle panel, Open Repository
+
+- The Overview is an item at the top of the sidebar and opens in the middle panel (⌘⇧O too); picking
+  a session row leaves it. Why: the user wants it inline with the sidebar, not a separate window.
+- A drop-down at its top picks the repositories: those with an open session (default), all, or one.
+  Why: the user wants only repos with open sessions, with the others a click away.
+- File ▸ Open Repository… (⌥⌘O): a folder picker, `kunj repos add`, then the repo is selected. Why: the
+  user asked for a simple way to open a repo.
+
 ## 2026-11-23 — kunj's skills load into every agent
 
 - `skills/` moved to `claude-plugin/skills/`, with `claude-plugin/.claude-plugin/plugin.json` making it

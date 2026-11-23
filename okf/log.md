@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-23 (overview in the middle panel)
+* `apps/workspace-app.md`: the Overview is a sidebar item shown in the middle panel, with a repository drop-down; File ▸ Open Repository….
+
 ## 2026-11-23 (skills as a plugin)
 * `features/worktree-agents.md`: the handoff skill lives in `claude-plugin/`, loaded into every kunj agent with `--plugin-dir`.
 
