@@ -4,7 +4,7 @@ import KunjWorkspaceCore
 /// The Overview in a window of its own, only for `--overview --screenshot` (the app shows it in the
 /// main window's middle panel, `OverviewPanel`). It grows to show every row.
 @MainActor
-final class OverviewWindow: NSWindowController {
+final class OverviewWindow: NSWindowController, NSWindowDelegate {
     let panel = OverviewPanel()
 
     init() {
@@ -15,6 +15,7 @@ final class OverviewWindow: NSWindowController {
         window.center()
         super.init(window: window)
         window.contentView = panel
+        window.delegate = self
         window.backgroundColor = ThemeManager.shared.current.color(\.bg)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -23,6 +24,8 @@ final class OverviewWindow: NSWindowController {
         super.showWindow(sender)
         panel.isShown = true
     }
+
+    func windowWillClose(_ notification: Notification) { panel.isShown = false }
 
     var isSettled: Bool { panel.isSettled }
 

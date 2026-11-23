@@ -60,6 +60,11 @@ final class OverviewPanel: NSView {
     }
 
     private var repos: [AgentOverviewJson] = []
+    /// Bumped on a scope change: a read started before it is dropped when it comes back.
+    private var generation = 0
+    /// What the drop-down lists now: it is rebuilt only when this changes (a tick must not swap the
+    /// menu out while it is open).
+    private var scopeMenuKey: [String] = []
     private var timer: Timer?
     private var loading = false
     private var again = false
@@ -170,6 +175,10 @@ final class OverviewPanel: NSView {
         let open = openRepositories()
         // a repository no longer listed: back to the default
         if case .repo(let root) = scope, !listed.contains(where: { $0.root == root }) { scope = .open }
+        let key = ["\(scope)", overviewScopeTitle(.open, repos: listed, open: open)]
+            + listed.map { (open.contains($0.root) ? "●" : "") + $0.root + "\t" + $0.name }
+        guard key != scopeMenuKey else { return }
+        scopeMenuKey = key
         let menu = NSMenu()
         func add(_ title: String, _ value: OverviewScope) {
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
@@ -189,6 +198,8 @@ final class OverviewPanel: NSView {
     @objc private func scopeChanged(_ sender: Any?) {
         guard let box = scopePopup.selectedItem?.representedObject as? OverviewScopeBox else { return }
         scope = box.value
+        generation += 1
+        scopeMenuKey = []
         repos = []
         render()
         refresh()
@@ -253,10 +264,17 @@ final class OverviewPanel: NSView {
             return
         }
         loading = true
+        let started = generation
         Task { [weak self] in
             let (result, problem) = await OverviewPanel.load(cli: cli, repos: asked)
             guard let self else { return }
             self.loading = false
+            // the scope changed meanwhile: these are another scope's agents; read again for this one
+            guard started == self.generation else {
+                self.again = false
+                self.refresh()
+                return
+            }
             self.repos = result
             self.errorLabel.stringValue = problem ?? ""
             self.render()
