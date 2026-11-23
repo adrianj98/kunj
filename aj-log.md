@@ -8,6 +8,8 @@ Changes made with Claude, and why.
   suspended sessions is hidden. A repositories menu beside the search picks Active or All
   repositories and pins any other repository to the list. Why: the user wanted inactive and
   suspended repositories out of the way, with a drop-down to bring others back.
+- The All/Active preference moved to a new key (`showAllRepos`). Why: the old `showEmptyRepos` was
+  on from before, so the sidebar still listed inactive repositories after the change.
 
 ## 2026-11-23 — Overview fills as it goes
 

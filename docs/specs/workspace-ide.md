@@ -65,10 +65,10 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   file, a running or waiting agent, and the selection; each repository ends in an `N more…` row
   (11 px `faint`) that lists the rest too (`Show fewer`), and a search lists every match, so any
   environment can be opened. A repository with no open session is left out (`hideEmpty`) unless
-  View > Show Repositories Without Sessions is on (`showEmptyRepos` default, off). A suspended
+  View > Show Repositories Without Sessions is on (`showAllRepos` default, off; the earlier `showEmptyRepos` is ignored so everyone starts on Active). A suspended
   session is not open: it waits under `N more…`, so a repository whose sessions are all suspended is
   not active and is left out. The repositories menu beside the search (a filter icon) picks Active
-  or All repositories (the same `showEmptyRepos`) and lists every repository, ticked when listed:
+  or All repositories (the same `showAllRepos`) and lists every repository, ticked when listed:
   picking one that is not active pins it to the list (`pinned`, the `shownRepos` default) until it
   is picked again; an active one is always listed. A click on a
   repository's header collapses it to the header (▸, the count is its open sessions) or opens it

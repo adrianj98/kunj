@@ -2,7 +2,7 @@ import AppKit
 import KunjWorkspaceCore
 
 extension Notification.Name {
-    /// A view preference (`showFiles`, `showChanges`, `showEmptyRepos`) changed, from the View menu
+    /// A view preference (`showFiles`, `showChanges`, `showAllRepos`) changed, from the View menu
     /// or from Settings; `object` is the UserDefaults key.
     static let viewPreferenceChanged = Notification.Name("kunjViewPreferenceChanged")
 }

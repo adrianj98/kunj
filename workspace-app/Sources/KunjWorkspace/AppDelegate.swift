@@ -56,7 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The app-wide Files column setting (default closed).
     static let showFilesKey = "showFiles"
     /// Off by default: the sidebar lists only repositories with an open session.
-    static let showEmptyReposKey = "showEmptyRepos"
+    /// `showAllRepos`, not the earlier `showEmptyRepos`: the sidebar started listing only active
+    /// repositories with the repositories menu, so everyone starts there (the old key is ignored).
+    static let showEmptyReposKey = "showAllRepos"
     /// The environment selected when the app last ran, selected again after the first listing.
     static let selectedEnvironmentKey = "selectedEnvironment"
     /// The widths the window's dividers were dragged to (`PaneSizes` as JSON).
