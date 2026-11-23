@@ -282,19 +282,26 @@ describe('planNudge', () => {
   const step = (subject: string, status: 'pending' | 'in_progress' | 'completed') => ({ id: subject, subject, status });
 
   test('no task list: asks for one when the prompt is work of several steps', () => {
-    const text = planNudge({ steps: [], current: null });
+    const text = planNudge({ steps: [], markers: [] });
     expect(text).toContain('has none yet');
     expect(text).toContain('TaskCreate');
   });
 
   test('a task list: how far, the step in progress, and to update it when the work moves on', () => {
-    const text = planNudge({ steps: [step('Read', 'completed'), step('Build', 'in_progress'), step('Test', 'pending')], current: 1 });
+    const text = planNudge({ steps: [step('Read', 'completed'), step('Build', 'in_progress'), step('Test', 'pending')], markers: [] });
     expect(text).toContain('1 of 3 done, now: Build');
     expect(text).toContain('update the list');
   });
 
+  test('after /clear the earlier conversation\'s steps are not its list: asks for a new one', () => {
+    const marker = { type: 'new' as const, afterStep: 1, at: '2026-11-23T00:00:00Z' };
+    expect(planNudge({ steps: [step('Old', 'completed'), step('Older', 'completed')], markers: [marker] })).toContain('has none yet');
+    expect(planNudge({ steps: [step('Old', 'completed'), step('Older', 'completed'), step('New', 'in_progress')], markers: [marker] }))
+      .toContain('0 of 1 done, now: New');
+  });
+
   test('nothing in progress: the next step, or every step done', () => {
-    expect(planNudge({ steps: [step('Read', 'completed'), step('Test', 'pending')], current: 0 })).toContain('next: Test');
-    expect(planNudge({ steps: [step('Read', 'completed')], current: 0 })).toContain('1 of 1 done, every step done');
+    expect(planNudge({ steps: [step('Read', 'completed'), step('Test', 'pending')], markers: [] })).toContain('next: Test');
+    expect(planNudge({ steps: [step('Read', 'completed')], markers: [] })).toContain('1 of 1 done, every step done');
   });
 });

@@ -9,6 +9,8 @@ Changes made with Claude, and why.
   now: X", and update the list when the prompt moves the work on. Why: the user wants agents to give
   a plan, like the work-band mod nudges for the topic on every prompt; the system prompt alone was
   not enough (this very session's record had no steps). Takes ~50 ms per prompt.
+- The nudge counts only the current conversation's steps: after /clear the earlier ones (kept as
+  history) made it say "every step done" instead of asking for a new list (adversary review).
 
 ## 2026-11-23 — Sidebar lists only active repositories
 

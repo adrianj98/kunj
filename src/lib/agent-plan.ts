@@ -43,8 +43,11 @@ export function planHookCommand(): string {
  * `kunj agent nudge`), like a band showing it its topic: the task list the user sees now, and to
  * update it before anything else when the prompt moves the work on. One line, no quotes needed.
  */
-export function planNudge(plan: Pick<ReducedPlan, 'steps' | 'current'>): string {
-  const steps = plan.steps;
+export function planNudge(plan: Pick<ReducedPlan, 'steps' | 'markers'>): string {
+  // only this conversation's steps: those of earlier ones (kept in front, behind a `new` marker after
+  // /clear or a fresh start) are not its task list
+  const fresh = plan.markers.filter(m => m.type === 'new').reduce((last, m) => Math.max(last, m.afterStep ?? -1), -1);
+  const steps = plan.steps.slice(fresh + 1);
   if (steps.length === 0) {
     return 'kunj shows the user your plan as a line of steps, and it has none yet. If this prompt is work with more '
       + 'than one step, create a task list (TaskCreate) before anything else and mark each task in progress and '
