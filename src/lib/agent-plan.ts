@@ -143,6 +143,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
   // in front of the current ones: the record keeps the agent's history
   let history: Task[] = [];
   let conversations = 0;
+  let parentFresh = false;
   const mainSteps = (): Task[] => [...history, ...order.map(id => tasks.get(id)!).filter(t => t.owner === null)];
   const setStatus = (task: Task, status: unknown, at: string) => {
     if (typeof status !== 'string' || !STATUSES.includes(status) || task.status === status) return;
@@ -162,6 +163,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
 
     if (meta.parent && typeof meta.parent.session === 'string') {
       parent = { session: meta.parent.session, step: typeof meta.parent.step === 'number' ? meta.parent.step : null };
+      parentFresh = true;
       continue;
     }
     const hook = line.hook;
@@ -174,6 +176,10 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
     // A new conversation in the same session goes on after the finished steps of the earlier ones,
     // behind a `new` marker (unfinished ones were left behind with it, and are not drawn)
     if (event === 'SessionStart' && (hook.source === 'startup' || hook.source === 'clear')) {
+      // the parent belongs to the conversation started right after its line (a handoff); a later
+      // fresh start or /clear is not handed off any more
+      if (!parentFresh) parent = undefined;
+      parentFresh = false;
       const n = conversations++;
       const done = mainSteps().filter(t => t.status === 'completed').map(t => ({ ...t, id: t.id.startsWith('h') ? t.id : `h${n}-${t.id}` }));
       history = done.slice(-HISTORY_STEPS);

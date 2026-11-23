@@ -93,6 +93,10 @@ describe('reducePlan', () => {
     expect(plan.steps.map(s => [s.id, s.subject, s.status])).toEqual([['h1-1', 'a', 'completed'], ['1', 'd', 'pending']]);
     expect(plan.markers).toMatchObject([{ type: 'new', afterStep: 0 }]);
     expect(plan.current).toBe(1);
+    // a handoff's parent goes with its own conversation: a later fresh start or /clear drops it
+    const handed = [parentLine('p', 1).trim(), line(start('startup')), line(create('1', 'a'))];
+    expect(reducePlan(handed.join('\n')).parent).toEqual({ session: 'p', step: 1 });
+    expect(reducePlan([...handed, line(start('clear'))].join('\n')).parent).toBeUndefined();
     // a first conversation has no marker
     expect(reducePlan([line(start('startup')), line(create('1', 'a'))].join('\n')).markers).toEqual([]);
   });

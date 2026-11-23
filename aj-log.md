@@ -13,6 +13,9 @@ Changes made with Claude, and why.
   running agents had never called the task tools, so the Overview had nothing to show.
 - An ended agent's last plan stays in the Overview, dimmed (newest per place, 3 days). Why: after a
   restart the lines vanished.
+- Review fixes: a handoff's parent now belongs only to the conversation started right after it (a later
+  fresh start or /clear drops it), and a record over 1 MB is cut to its last 512 KB at a fresh start,
+  since records are no longer emptied.
 
 ## 2026-11-23 — Overview lanes beside the sidebar's rows
 

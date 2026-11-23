@@ -281,6 +281,7 @@ export class AgentCommand extends BaseCommand {
           ? parentLine(path.basename(from, '.ndjson'), planPosition(reducePlan(readPlanFile(from)).steps)) : '';
         // a new conversation is appended too: the record keeps the agent's earlier steps (reducePlan
         // starts the new conversation after them)
+        if (!resumeId) trimPlanFile(planFile);
         if (parent) fs.appendFileSync(planFile, parent);
         else if (!fs.existsSync(planFile)) fs.writeFileSync(planFile, '');
       } catch { /* no record */ }
@@ -487,4 +488,18 @@ export class AgentCommand extends BaseCommand {
       for (const sub of p.subagents.filter(sub => sub.fromStep === null)) console.log(chalk.dim(`  ↳ ${subagentLabel(sub)}`));
     }
   }
+}
+
+/** A record past this many bytes is cut to its last ones at a fresh start (it is kept across conversations). */
+export const PLAN_FILE_MAX = 1024 * 1024;
+
+/** Keeps the last PLAN_FILE_MAX / 2 bytes of an oversized record, from a line start. */
+export function trimPlanFile(file: string): void {
+  let size: number;
+  try { size = fs.statSync(file).size; } catch { return; }
+  if (size <= PLAN_FILE_MAX) return;
+  const text = fs.readFileSync(file, 'utf8');
+  const tail = text.slice(text.length - PLAN_FILE_MAX / 2);
+  const cut = tail.indexOf('\n');
+  fs.writeFileSync(file, cut >= 0 ? tail.slice(cut + 1) : '');
 }
