@@ -62,7 +62,11 @@ import { resolveBaseRef } from '../lib/base-branch';
 import { recordRepo } from '../lib/repos';
 import { AgentError, agentArgv, checkShellSessionId, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, pickSession, readTaggedTmuxSessions, runTmux, shellSessionName, worktreeShellSessions } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
-import type { BranchContainerJson, ShellKillJson, WorktreeJson, WorktreeListContainersJson, WorktreeListJson } from '../lib/json-types';
+import type {
+  BranchContainerJson, PullRequestActionJson, PullRequestCheckJson, PullRequestDetailsJson, PullRequestFailedLogJson,
+  PullRequestJson, PullRequestResolveJson, ShellKillJson, WorktreeJson, WorktreeListContainersJson, WorktreeListJson,
+} from '../lib/json-types';
+import { DEFAULT_LOG_LINES, getFailedLogs, getPullRequestDetails, MAX_LOG_LINES, markReady, mergePullRequest, resolveThread } from '../lib/pr-details';
 import { describeError, formatError, UserError } from '../lib/errors';
 
 interface WorktreeOptions {
@@ -86,6 +90,16 @@ interface WorktreeOptions {
   hooks?: boolean;
   session?: string;
   kill?: boolean;
+  details?: boolean;
+  failedLog?: boolean;
+  check?: string;
+  lines?: string;
+  ready?: boolean;
+  merge?: boolean;
+  method?: string;
+  deleteBranch?: boolean;
+  subject?: string;
+  resolve?: string;
 }
 
 // `kunj worktree list --containers` stops waiting for Docker after this long
@@ -123,6 +137,16 @@ export class WorktreeCommand extends BaseCommand {
         { flags: '--containers', description: "[list] Also list this repository's branch containers (kunj ct)" },
         { flags: '--fresh', description: `[list|pr] Bypass the ${DEFAULT_PR_MAX_AGE_SECONDS}s pull request cache` },
         { flags: '-w, --web', description: '[pr] Open the pull request in the browser' },
+        { flags: '--details', description: '[pr] Checks, review threads, reviews and merge state (GitHub)' },
+        { flags: '--failed-log', description: '[pr] The end of the log of each failed Actions check (or of --check)' },
+        { flags: '--check <name>', description: '[pr --failed-log] Only this check' },
+        { flags: '--lines <n>', description: `[pr --failed-log] Lines of log per check (default ${DEFAULT_LOG_LINES}, max ${MAX_LOG_LINES})` },
+        { flags: '--ready', description: '[pr] Mark the draft pull request ready for review' },
+        { flags: '--merge', description: '[pr] Merge the pull request (only when GitHub says it is mergeable; never --admin)' },
+        { flags: '--method <method>', description: "[pr --merge] squash, merge or rebase (default: the repository's)" },
+        { flags: '--delete-branch', description: '[pr --merge] Delete the remote branch after merging (the worktree stays)' },
+        { flags: '--subject <text>', description: '[pr --merge] The merge commit title' },
+        { flags: '--resolve <threadId>', description: '[pr] Resolve a review thread (ids from --details --json)' },
         { flags: '-b, --new-branch', description: '[add] Create a new branch for the worktree' },
         { flags: '-c, --create', description: '[add] Create the branch if it does not exist' },
         { flags: '--base <ref>', description: '[add] Base for a new branch (default: preferences.defaultBaseBranch, else the repo default)' },
@@ -383,10 +407,48 @@ export class WorktreeCommand extends BaseCommand {
     if (!wt.branch) {
       throw new UserError(`The worktree at ${wt.path} is on a detached HEAD, so it has no pull request.`, 'Check out a branch there first.');
     }
+    const detailOpts = { branch: wt.branch, path: wt.path, cwd: wt.exists ? wt.path : undefined, fresh: !!options.fresh };
+    const actions = [options.details, options.failedLog, options.ready, options.merge, options.resolve !== undefined].filter(Boolean);
+    if (actions.length > 1) {
+      throw new UserError('Use one of --details, --failed-log, --ready, --merge and --resolve at a time.');
+    }
+    if (options.details) return this.prDetails(await getPullRequestDetails(detailOpts));
+    if (options.failedLog) {
+      const lines = options.lines === undefined ? undefined : Number(options.lines);
+      if (lines !== undefined && !(Number.isInteger(lines) && lines > 0)) {
+        throw new UserError(`--lines takes a positive whole number, not '${options.lines}'.`);
+      }
+      const result = await getFailedLogs({ ...detailOpts, check: options.check, lines });
+      if (this.jsonMode) return this.outputJSON(result satisfies PullRequestFailedLogJson);
+      if (result.checks.length === 0) console.log(chalk.green('No failed checks'));
+      for (const c of result.checks) {
+        console.log(chalk.red.bold(`✗ ${c.name}`) + (c.url ? chalk.gray(`  ${c.url}`) : ''));
+        if (c.log !== null) console.log((c.truncated ? chalk.gray('…\n') : '') + c.log);
+        else console.log(chalk.gray(c.error ? `  ${c.error}` : '  Not an Actions job: open its page for the log.'));
+      }
+      return;
+    }
+    if (options.ready || options.merge) {
+      const result = options.ready
+        ? await markReady(detailOpts)
+        : await mergePullRequest({ ...detailOpts, method: options.method, deleteBranch: !!options.deleteBranch, subject: options.subject });
+      if (this.jsonMode) return this.outputJSON(result satisfies PullRequestActionJson);
+      if (result.pullRequest) console.log(this.describePullRequest(result.pullRequest));
+      if (result.branchDeleted) console.log(chalk.gray(`Deleted the remote branch ${wt.branch}`));
+      if (result.branchDeleteError) console.log(chalk.yellow(`Kept the remote branch: ${result.branchDeleteError}`));
+      return;
+    }
+    if (options.resolve !== undefined) {
+      const result = await resolveThread({ ...detailOpts, threadId: options.resolve });
+      if (this.jsonMode) return this.outputJSON(result satisfies PullRequestResolveJson);
+      console.log(chalk.green(`Resolved ${result.thread.path}${result.thread.line ? `:${result.thread.line}` : ''}`));
+      return;
+    }
+
     const pr = await getPullRequestForBranch(wt.branch, wt.exists ? wt.path : undefined, options.fresh ? 0 : DEFAULT_PR_MAX_AGE_SECONDS);
 
     if (this.jsonMode) {
-      this.outputJSON({ branch: wt.branch, path: wt.path, pullRequest: pr });
+      this.outputJSON({ branch: wt.branch, path: wt.path, pullRequest: pr } satisfies PullRequestJson);
       return;
     }
 
@@ -402,6 +464,48 @@ export class WorktreeCommand extends BaseCommand {
     if (options.web) {
       const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start ""' : 'xdg-open';
       exec(`${openCmd} '${pr.url.replace(/'/g, "'\\''")}'`);
+    }
+  }
+
+  private prDetails(d: PullRequestDetailsJson): void {
+    if (this.jsonMode) return this.outputJSON(d);
+    const pr = d.pullRequest;
+    if (!pr) {
+      console.log(chalk.yellow(`No pull request found for '${d.branch}'`));
+      return;
+    }
+    console.log(this.describePullRequest(pr));
+    console.log(chalk.gray(`  ${pr.url}`));
+    const state = [d.mergeable && d.mergeable !== 'unknown' ? d.mergeable : null, d.mergeState && d.mergeState !== 'unknown' ? d.mergeState : null]
+      .filter(Boolean).join(', ');
+    if (state) console.log(chalk.gray(`  merge: ${state}`));
+    const icon: Record<PullRequestCheckJson['state'], string> = {
+      success: chalk.green('✓'), failure: chalk.red('✗'), pending: chalk.yellow('…'),
+      cancelled: chalk.gray('⊘'), skipped: chalk.gray('–'), neutral: chalk.gray('–'),
+    };
+    const checks = d.checks ?? [];
+    if (checks.length) {
+      console.log(chalk.bold('\nChecks'));
+      const passed = checks.filter(c => c.state === 'success').length;
+      for (const c of checks.filter(c => c.state !== 'success')) {
+        console.log(`  ${icon[c.state]} ${c.name}${c.workflow ? chalk.gray(` (${c.workflow})`) : ''}`);
+      }
+      if (passed) console.log(`  ${icon.success} ${passed} passed`);
+    }
+    if (d.reviews?.length) {
+      console.log(chalk.bold('\nReviews'));
+      console.log('  ' + d.reviews.map(r => `${r.author}: ${r.state.toLowerCase().replace(/_/g, ' ')}`).join(', '));
+    }
+    const open = (d.threads ?? []).filter(t => !t.resolved);
+    const resolved = (d.threads ?? []).length - open.length;
+    if (open.length || resolved) {
+      console.log(chalk.bold(`\nReview threads`) + chalk.gray(` (${open.length} unresolved, ${resolved} resolved)`));
+      for (const t of open) {
+        const first = t.comments[0];
+        const where = `${t.path}${t.line ? `:${t.line}` : ''}${t.outdated ? chalk.gray(' (outdated)') : ''}`;
+        const body = (first?.body || '').split('\n')[0].slice(0, 100);
+        console.log(`  ${chalk.cyan(where)} ${chalk.gray(first ? first.author + ':' : '')} ${body}`);
+      }
     }
   }
 

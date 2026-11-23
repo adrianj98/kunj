@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-23 (PR panel, CLI)
+* `features/pr-lookup-cache.md`: `kunj worktree pr --details` and its actions (`--failed-log`, `--ready`, `--merge`, `--resolve`), src/lib/pr-details.ts.
+
 ## 2026-11-20 (suspend and resume sessions)
 * `features/worktree-agents.md`: Suspend Session / Resume Session in the workspace app.
 

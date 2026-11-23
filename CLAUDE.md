@@ -185,7 +185,7 @@ worktree fast path uses it.
 New worktrees default to `${repoconfig}/kunj/worktrees/<branch>` (`worktree.baseDir`, default in
 src/lib/worktree-defaults.ts), which keeps them out of the working tree in a normal repo and inside
 the repository directory in a bare one. Bare repositories are supported throughout: `--show-toplevel`
-fatals there, so ask git for `--git-common-dir` first. Pull requests are fetched in one `gh pr list` (or `glab mr list`) call and cached for 60s in `~/.kunj/pr-cache.json`; pass `--no-pr` to skip or `--fresh` to bypass the cache.
+fatals there, so ask git for `--git-common-dir` first. Pull requests are fetched in one `gh pr list` (or `glab mr list`) call and cached for 60s in `~/.kunj/pr-cache.json`; pass `--no-pr` to skip or `--fresh` to bypass the cache. `kunj worktree pr --details` (src/lib/pr-details.ts, docs/specs/pr-panel.md) adds checks, review threads and merge state for the PR panel (GitHub only, cached 20 s / 5 s while a check runs in `~/.kunj/pr-details-cache.json`), and `--failed-log`, `--ready`, `--merge` (never `--admin`, `--match-head-commit`), `--resolve <thread>` act on it.
 `list --containers` adds the repository's branch containers (`containers: { available, message?, items }`,
 each a `kunj ct list --json` container plus its branch's `pullRequest` from the same `gh` call) for the
 extension and the macOS app, which show them as rows like worktrees (docs/specs/containers-in-apps.md).
@@ -201,7 +201,7 @@ being down gives `available: false`, never a failed listing.
 The VS Code extension in `vscode-extension/` is a separate npm package (own `package.json`, esbuild bundle) that shells out to `kunj … --json` for everything. Build it with `cd vscode-extension && npm install && npm run build`; package with `npm run package`. Keep the CLI's JSON output backwards compatible, the extension depends on it.
 
 **Workspace app contract:** the types in src/lib/json-types.ts (`WorktreeListJson`, `ContainerListJson`,
-`ReposJson`, `ErrorJson`, `AgentStatusJson`, `AgentStopJson`, `FileReadJson`, `FileWriteJson`, `EventJson`, `SearchJson`, `ConfigSchemaJson`, `ConfigSetJson`, `ConfigUnsetJson`) are the
+`ReposJson`, `ErrorJson`, `AgentStatusJson`, `AgentStopJson`, `FileReadJson`, `FileWriteJson`, `EventJson`, `SearchJson`, `ConfigSchemaJson`, `ConfigSetJson`, `ConfigUnsetJson`, `PullRequestDetailsJson` and the other `PullRequest*Json`) are the
 published, type-only JSON contract (`types` in package.json; consumers import `from 'kunj'`). Commands build their
 JSON against these types (`satisfies` or a type annotation) so the compiler checks it, and fields are only ever added, never renamed or
 removed. Consumers: the VS Code extension, the macOS app and the workspace app. Errors in `--json` mode are

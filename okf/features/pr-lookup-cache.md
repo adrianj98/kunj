@@ -1,7 +1,7 @@
 ---
 type: Feature
 title: PR Lookup Cache
-description: How the worktree listing finds each branch's pull request with one gh or glab call per repository, cached for 60 seconds in ~/.kunj/pr-cache.json.
+description: How the worktree listing finds each branch's pull request with one gh or glab call per repository, cached for 60 seconds in ~/.kunj/pr-cache.json, and the PR details and actions behind the PR panel (kunj worktree pr --details).
 resource: src/lib/worktree.ts
 tags: [feature, worktree, pull-request, github, gitlab, cache]
 timestamp: 2026-10-25T00:00:00Z
@@ -79,6 +79,28 @@ null, or `skipped`) and `pullRequestsFromCache`. Each worktree gets `pullRequest
 `--fresh`), prints `{ branch, path, pullRequest }` with `--json`, and `-w` opens the URL with
 `open`/`xdg-open`/`start`.
 
+# Pull request details (`--details`)
+
+`kunj worktree pr [branch] --details --json` (src/lib/pr-details.ts, `PullRequestDetailsJson`) is the
+data of the workspace app's PR panel (docs/specs/pr-panel.md). GitHub only (`pr-details-unsupported` on
+GitLab). The PR number comes from the listing cache above, so a branch without a PR costs no extra call;
+when that listing failed, `gh pr view <branch>` is asked instead so gh's own error (`gh-missing`,
+`gh-auth`) reaches the caller. Otherwise three gh calls run together: `gh pr view <n> --json`
+(checks, reviews, mergeable, mergeStateStatus, head sha), one `gh api graphql` for the review threads
+(first 100, 50 comments each; `{owner}`/`{repo}` filled in by gh), and `gh repo view` for the allowed
+merge methods (default first; optional, kept a day). Checks are sorted failed, running, rest; threads
+unresolved first.
+
+The result is cached in `~/.kunj/pr-details-cache.json` keyed by `<git common dir>#<number>`: 20 s, or
+5 s while a check is pending; `--fresh` skips both caches. The actions on the same command, which act
+on GitHub as the user and drop both caches afterwards: `--failed-log [--check] [--lines]`
+(`gh run view --job <id> --log-failed`, tail, at most 2000 lines; a non-Actions check gives its URL),
+`--ready` (`gh pr ready`), `--merge [--method] [--delete-branch] [--subject]` (`gh pr merge` with
+`--match-head-commit`, refused as `not-mergeable` unless open, not a draft and MERGEABLE; never
+`--admin`/`--auto`; the remote branch is deleted with the REST API, not gh's `--delete-branch`, which
+would also switch the worktree; a fork's branch is left alone) and `--resolve <threadId>` (GraphQL
+`resolveReviewThread`, the id checked against `[A-Za-z0-9_=-]`). Errors are `GitHubError` codes.
+
 # Related Concepts
 
 * [Worktrees](/features/worktrees.md) - the listing
@@ -94,3 +116,4 @@ null, or `skipped`) and `pullRequestsFromCache`. Each worktree gets `pullRequest
 [4] [src/commands/prompt-info.ts](/src/commands/prompt-info.ts)
 [5] [src/lib/json-types.ts](/src/lib/json-types.ts)
 [6] [CLAUDE.md](/CLAUDE.md)
+[7] [src/lib/pr-details.ts](/src/lib/pr-details.ts)

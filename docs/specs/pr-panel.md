@@ -1,6 +1,6 @@
 # PR panel: checks, review threads and merge in the workspace app
 
-*Proposed 2026-11-23, not started.* A panel in the workspace app that shows the environment's pull
+*Proposed 2026-11-23; CLI built 2026-11-23, app not started.* A panel in the workspace app that shows the environment's pull
 request the way GitHub's PR page would, minus the conversation: what CI says, which review threads are
 open, whether it can merge. Every problem it shows has a one-click **hand it to the agent** action. Today
 the app shows only `#123 open ✓` in the header and a Create PR button; everything after that happens in
@@ -10,8 +10,8 @@ the browser.
 
 | Part | State |
 | --- | --- |
-| CLI: `kunj worktree pr [branch] --details --json` (`PullRequestDetailsJson`) | To do |
-| CLI: `--failed-log`, `--merge`, `--ready`, `--resolve <thread>` | To do |
+| CLI: `kunj worktree pr [branch] --details --json` (`PullRequestDetailsJson`) | Done |
+| CLI: `--failed-log`, `--merge`, `--ready`, `--resolve <thread>` | Done |
 | App: PR mode of the right column, next-step banner, refresh policy | To do |
 | App: Fix with Agent / Send to Agent (uses `kunj agent send`, [review-comments.md](review-comments.md)) | To do |
 | GitLab | Later (`pr-details-unsupported`) |
@@ -178,6 +178,21 @@ worktree stays until the user deletes it from the banner. Each action invalidate
 - **Nothing automatic.** No auto-fix of failing checks, no auto-merge. Conductor's "fix failing checks"
   is also a button.
 
+## As built (CLI, 2026-11-23)
+
+- `PullRequestThreadJson` also has `originalLine` (the line an outdated thread was made on), and
+  `--failed-log` rows an optional `error` when gh could not read the log. New JSON types:
+  `PullRequestJson` (plain `worktree pr --json`), `PullRequestFailedLogJson`, `PullRequestActionJson`
+  (`branchDeleted`, `branchDeleteError` for `--merge --delete-branch`), `PullRequestResolveJson`.
+- `--merge` passes `--match-head-commit <headSha>`, so it merges only what kunj just read, and refuses a
+  draft as `not-mergeable`. `--delete-branch` is a REST `DELETE git/refs/heads/<branch>`, not gh's flag
+  (which also deletes the local branch and switches the worktree); a fork's branch is left alone.
+- The merge methods are optional: when `gh repo view` fails the details come back without them.
+- When the PR listing itself failed (gh missing or logged out), `--details` asks `gh pr view <branch>`
+  so gh's error comes back as `gh-missing` / `gh-auth` rather than "no PR".
+- Extra error codes: `check-not-found` (`--check` names no check), `bad-merge-method`, `bad-thread-id`.
+- Tests use an injected fake `gh` (`Exec`), not one on PATH (src/lib/__tests__/pr-details.test.ts).
+
 ## Open questions
 
 - GitHub threads as read-only zones in the Changes diff (they have `path`, `line`, `side`), so they can
@@ -197,7 +212,7 @@ worktree stays until the user deletes it from the banner. Each action invalidate
 
 | Piece | Where |
 | --- | --- |
-| Details, actions, cache | src/lib/pr-details.ts; flags in src/commands/worktree.ts (`pr`) |
+| Details, actions, cache | src/lib/pr-details.ts (built); flags in src/commands/worktree.ts (`pr`) |
 | JSON | `PullRequestDetailsJson`, `PullRequestCheckJson`, `PullRequestThreadJson` in src/lib/json-types.ts |
 | Model | workspace-app/Sources/KunjWorkspaceCore/PullRequest/ |
 | Panel | workspace-app/Sources/KunjWorkspace/Views/PullRequestPanel.swift, mode in ChangesColumn.swift |

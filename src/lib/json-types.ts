@@ -81,6 +81,92 @@ export type BranchContainerJson = ContainerJson & {
   prLabel: string | null;
 };
 
+// ---- kunj worktree pr --details --json (docs/specs/pr-panel.md) ------------------------------
+
+/** `kunj worktree pr [branch] --json` without --details */
+export interface PullRequestJson {
+  branch: string;
+  path: string;
+  pullRequest: PullRequestInfo | null;
+}
+
+export interface PullRequestDetailsJson {
+  branch: string;
+  path: string;
+  /** null when the branch has no PR; the other fields are then absent */
+  pullRequest: PullRequestInfo | null;
+  headSha?: string;
+  mergeable?: 'mergeable' | 'conflicting' | 'unknown';
+  /** GitHub's mergeStateStatus, lowercased: clean, behind, blocked, dirty, draft, has_hooks, unstable, unknown */
+  mergeState?: string;
+  mergedAt?: string | null;
+  /** Merge methods the repository allows; the first is its default */
+  mergeMethods?: PullRequestMergeMethod[];
+  checks?: PullRequestCheckJson[];
+  /** Each reviewer's latest review */
+  reviews?: Array<{ author: string; state: string; submittedAt: string }>;
+  threads?: PullRequestThreadJson[];
+  /** From the details cache (`~/.kunj/pr-details-cache.json`) */
+  fromCache: boolean;
+  fetchedAt: string;
+}
+
+export type PullRequestMergeMethod = 'squash' | 'merge' | 'rebase';
+
+export interface PullRequestCheckJson {
+  name: string;
+  workflow: string | null;
+  /** queued and in_progress are 'pending' */
+  state: 'success' | 'failure' | 'pending' | 'skipped' | 'neutral' | 'cancelled';
+  url: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  /** The Actions job id when it is one, for --failed-log */
+  jobId: number | null;
+}
+
+export interface PullRequestThreadJson {
+  id: string;
+  path: string;
+  /** The line on the PR's head; null when outdated */
+  line: number | null;
+  /** The line the comment was first made on */
+  originalLine: number | null;
+  side: 'LEFT' | 'RIGHT';
+  resolved: boolean;
+  outdated: boolean;
+  diffHunk: string;
+  comments: Array<{ author: string; body: string; createdAt: string; url: string }>;
+}
+
+/** `kunj worktree pr --failed-log --json` */
+export interface PullRequestFailedLogJson {
+  checks: Array<{
+    name: string;
+    jobId: number | null;
+    url: string | null;
+    /** The last lines of the job's failed steps; null for a check that is not an Actions job, or when gh could not read it */
+    log: string | null;
+    truncated: boolean;
+    /** Why the log could not be read */
+    error?: string;
+  }>;
+}
+
+/** `kunj worktree pr --ready|--merge --json` */
+export interface PullRequestActionJson {
+  pullRequest: PullRequestInfo | null;
+  /** --merge --delete-branch: whether the remote branch was deleted */
+  branchDeleted?: boolean;
+  /** --merge --delete-branch: why it was not */
+  branchDeleteError?: string;
+}
+
+/** `kunj worktree pr --resolve <thread> --json` */
+export interface PullRequestResolveJson {
+  thread: PullRequestThreadJson;
+}
+
 // ---- kunj repos --json -----------------------------------------------------------------------
 
 export interface RepoJson extends KnownRepoInfo {
