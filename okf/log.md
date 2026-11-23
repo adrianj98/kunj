@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-23 (skills as a plugin)
+* `features/worktree-agents.md`: the handoff skill lives in `claude-plugin/`, loaded into every kunj agent with `--plugin-dir`.
+
 ## 2026-11-20 (suspend and resume sessions)
 * `features/worktree-agents.md`: Suspend Session / Resume Session in the workspace app.
 

@@ -10,7 +10,8 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPlugin, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import { packagedPluginDir } from '../lib/skills';
 import { activePlans, buildOverview } from '../lib/agent-overview';
 import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, parentLine, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
 import type { AgentForgetJson, AgentOverviewJson, AgentPlanItemJson, AgentPlanJson, AgentPlanStepJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
@@ -282,7 +283,9 @@ export class AgentCommand extends BaseCommand {
         else if (parent && !fs.existsSync(planFile)) fs.writeFileSync(planFile, parent);
       } catch { /* no record */ }
     }
-    const command = withAgentPrompt(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false, withPlan), promptCopy);
+    // kunj's skills (claude-plugin/ in this install) in every claude agent, before the first prompt
+    const plugin = fs.existsSync(path.join(packagedPluginDir(), '.claude-plugin', 'plugin.json')) ? packagedPluginDir() : null;
+    const command = withAgentPrompt(withAgentPlugin(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false, withPlan), plugin), promptCopy);
     const vars = {
       KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile,
       ...(withPlan ? { KUNJ_AGENT_PLAN: planFile, ...PLAN_ENV } : {}),

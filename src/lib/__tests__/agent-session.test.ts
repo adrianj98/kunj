@@ -440,6 +440,14 @@ describe('resuming a Claude conversation', () => {
     fs.rmSync(dir, { recursive: true });
   });
 
+  test('only claude gets the kunj plugin, quoted for the shell', () => {
+    const { withAgentPlugin } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+    expect(withAgentPlugin('claude --resume x', '/opt/kunj/claude-plugin')).toBe("claude --resume x --plugin-dir '/opt/kunj/claude-plugin'");
+    expect(withAgentPlugin('claude', "/it's/claude-plugin")).toBe("claude --plugin-dir '/it'\\''s/claude-plugin'");
+    expect(withAgentPlugin('agy', '/p')).toBe('agy');
+    expect(withAgentPlugin('claude', null)).toBe('claude');
+  });
+
   test('only claude gets --resume', () => {
     expect(withAgentResume('claude --model opus', 'abc')).toBe('claude --model opus --resume abc');
     expect(withAgentResume('agy', 'abc')).toBe('agy');

@@ -74,6 +74,6 @@ describe('kunj install skill', () => {
   });
 
   it('the package ships the handoff skill', () => {
-    expect(fs.existsSync(path.join(__dirname, '..', '..', '..', 'skills', 'handoff', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(__dirname, '..', '..', '..', 'claude-plugin', 'skills', 'handoff', 'SKILL.md'))).toBe(true);
   });
 });

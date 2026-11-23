@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — kunj's skills load into every agent
+
+- `skills/` moved to `claude-plugin/skills/`, with `claude-plugin/.claude-plugin/plugin.json` making it
+  a Claude Code plugin named `kunj`; `kunj agent` adds `--plugin-dir <package>/claude-plugin` to every
+  claude it starts. Why: the user wants agents to get the app's skills automatically, without
+  `kunj install skill`. Agents see it as `/kunj:handoff`.
+- Removed the installed copy `~/.claude/skills/handoff` (kunj-installed, identical) so agents do not
+  list the skill twice; `kunj install skill` still installs it for a claude started by hand.
+
 ## 2026-11-20 — suspend and resume sessions in the workspace app
 
 - Sidebar row menu (and Environment > ⌘⇧U) shows Suspend Session or Resume Session by state.
@@ -12,6 +21,9 @@ Changes made with Claude, and why.
   of starting them; agents that ended (a restart) come back suspended too. Why: the user wants to
   resume each session manually after reopening; and saved agent tabs whose agent had ended were
   being dropped on restore, so the earlier "restored tabs resume" never happened.
+- Review fixes: the quit prompt no longer counts suspended tabs as running sessions; suspending an
+  agent tab saved before session ids stops the branch's default agent session; Resume Session waits
+  for Suspend's kills to finish, so a quick Suspend then Resume is not ended by a late kill.
 
 ## 2026-11-19 — resume closed agents
 

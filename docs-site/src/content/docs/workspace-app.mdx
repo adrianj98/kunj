@@ -219,14 +219,17 @@ the app quits. Containers always use tmux inside the container.
 
 ### Handing work off to a new agent
 
-`/handoff` is a Claude Code skill that kunj ships. Install it once:
+`/handoff` is a Claude Code skill that kunj ships. Every agent kunj starts (an agent tab, or
+`kunj agent`) has it already, as `/kunj:handoff`: kunj loads its skills into Claude with
+`--plugin-dir`, so they always match the installed kunj. To use it in a Claude you start yourself
+in a terminal, install a copy once:
 
 ```bash
 kunj install skill
 ```
 
-Then, in any Claude session (an agent tab or a terminal), after some research or planning, type
-`/handoff start that in a new worktree`. The skill writes a brief from the conversation (goal,
+Then, after some research or planning, type `/kunj:handoff start that in a new worktree` (or
+`/handoff` with the installed copy). The skill writes a brief from the conversation (goal,
 findings with file and line, decisions, constraints, first steps), creates a worktree for it with
 `kunj worktree add -c`, and starts a Claude agent there with the brief as its first prompt
 (`kunj agent start <branch> --session handoff --detach --open-in-app --prompt-file <brief>`). Within a

@@ -36,6 +36,9 @@ jest.mock('../../lib/agent-session', () => ({
   savedAgents: jest.fn(() => []),
 }));
 
+// No plugin unless a test points at one (the real claude-plugin/ would change every command)
+jest.mock('../../lib/skills', () => ({ packagedPluginDir: jest.fn(() => '/no/claude-plugin') }));
+
 jest.mock('../../lib/config', () => ({
   loadResolvedConfig: jest.fn(async () => ({ agent: { command: 'claude' } })),
   getKunjDir: jest.fn(() => '/h/.kunj/app'),
@@ -595,4 +598,14 @@ describe('plan', () => {
     expect(argv).not.toContain('KUNJ_AGENT_PLAN');
     expect(argv).not.toContain('CLAUDE_CODE_ENABLE_TODO_TOOLS');
   });
+});
+
+test('start loads the packaged plugin into claude when this install has one', async () => {
+  const { packagedPluginDir } = jest.requireMock<any>('../../lib/skills');
+  const real = require('path').resolve(__dirname, '..', '..', '..', 'claude-plugin');
+  packagedPluginDir.mockReturnValue(real);
+  tmuxSessions.mockResolvedValue([]);
+  await new AgentCommand().execute('start', 'feature-a', {});
+  expect(JSON.stringify((runTmux as jest.Mock).mock.calls[0][0])).toContain(`--plugin-dir '${real}'`);
+  packagedPluginDir.mockReturnValue('/no/claude-plugin');
 });

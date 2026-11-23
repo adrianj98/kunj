@@ -592,17 +592,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for case let tab as TerminalTab in registry.tabs(for: env.id)
         where (tab.kind == .shell || tab.kind == .agent) && !tab.suspended {
             guard let spec = tab.spec else { continue }
-            if let session = spec.session { kills.append(sessionKillArguments(env: env, kind: tab.kind, session: session)) }
+            if let session = spec.session {
+                kills.append(sessionKillArguments(env: env, kind: tab.kind, session: session))
+            } else if tab.kind == .agent {
+                // a tab saved before sessions: the branch's default agent session
+                kills.append(env.kind == .worktree ? ["agent", "stop", env.branch]
+                             : ["ct", "agent", env.branch, "--kill"] + env.remoteArguments)
+            }
             registry.replace(tab, env: env, spec: spec, start: false)
         }
         log("suspended \(env.id): \(kills.count) session(s)")
-        for args in kills { runQuietly(cli, args, in: env) }
+        let tasks = kills.map { runQuietly(cli, $0, in: env) }
+        // Resume waits for these: a session started before its kill lands would be ended by it
+        suspending[env.id] = Task { for t in tasks { await t.value } }
         windowController.sidebar.reloadRows()
     }
+
+    /// The kills of a Suspend Session still running, by environment id.
+    private var suspending: [String: Task<Void, Never>] = [:]
 
     /// Resume Session: every suspended tab of the environment starts again in its place, agents
     /// with `--resume` (restoring its tabs first when it was not opened yet in this run).
     private func resumeSession(_ env: Environment) {
+        if let pending = suspending.removeValue(forKey: env.id) {
+            Task { @MainActor [weak self] in
+                await pending.value
+                self?.resumeSession(env)
+            }
+            return
+        }
         guard let cli = kunj else { return }
         let column = windowController.terminalColumn
         windowController.select(env.id)
@@ -1030,7 +1048,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// A kunj call whose output nobody reads (ending tmux sessions); failures are only logged.
-    private func runQuietly(_ cli: KunjCLI, _ args: [String], in env: Environment) {
+    @discardableResult
+    private func runQuietly(_ cli: KunjCLI, _ args: [String], in env: Environment) -> Task<Void, Never> {
         Task.detached {
             do {
                 let r = try await cli.runRaw(args, cwd: env.repo.root, stdin: nil, timeout: 30)
@@ -1291,7 +1310,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func sessionTabs() -> [SessionTab] {
         guard let registry = windowController?.terminalColumn.registry else { return [] }
         return registry.allTerminals.compactMap { tab in
-            guard tab.kind == .shell || tab.kind == .agent, let session = tab.spec?.session,
+            // a suspended tab runs nothing: there is no session to leave running or end
+            guard tab.kind == .shell || tab.kind == .agent, !tab.suspended, let session = tab.spec?.session,
                   let env = store?.environment(id: tab.envId) else { return nil }
             return SessionTab(env: env, kind: tab.kind, session: session)
         }
