@@ -127,9 +127,9 @@ describe('agent state hooks', () => {
     const parsed = JSON.parse(json);
     expect(Object.keys(parsed.hooks).sort()).toEqual(['Notification', 'PreToolUse', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit']);
     expect(parsed.hooks.Notification[0].matcher).toBe('permission_prompt|idle_prompt|elicitation_dialog');
-    expect(parsed.hooks.Stop[0].hooks[0]).toEqual({ type: 'command', command: 'printf waiting > "$KUNJ_AGENT_STATE"' });
-    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].command).toBe('printf running > "$KUNJ_AGENT_STATE"');
-    expect(parsed.hooks.SessionEnd[0].hooks[0].command).toBe('rm -f "$KUNJ_AGENT_STATE"');
+    expect(parsed.hooks.Stop[0].hooks[0]).toEqual({ type: 'command', command: '(printf waiting > "$KUNJ_AGENT_STATE") 2>/dev/null; true' });
+    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].command).toBe('(printf running > "$KUNJ_AGENT_STATE") 2>/dev/null; true');
+    expect(parsed.hooks.SessionEnd[0].hooks[0].command).toBe('(rm -f "$KUNJ_AGENT_STATE") 2>/dev/null; true');
   });
 
   test('readAgentState reads running, waiting, else null', () => {
@@ -378,7 +378,7 @@ describe('resuming a Claude conversation', () => {
 
   test('the SessionStart hook saves its input only when KUNJ_AGENT_RESUME is set', () => {
     expect(JSON.parse(claudeHookSettings()).hooks.SessionStart[0].hooks[0].command)
-      .toBe('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"');
+      .toBe('([ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME") 2>/dev/null; true');
   });
 
   test('reads the saved session id, refusing anything that is not one', () => {

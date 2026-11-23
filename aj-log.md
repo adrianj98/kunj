@@ -1998,3 +1998,7 @@ The user asked to be able to choose a remote in the app when remotes are availab
   button. Why: the last open follow-up of the window besides the fork link, which Claude Code gives no parent for.
 - Adversarial review fix: the subagent tool-call hook now reads only the input before "tool_input", so a tool whose
   arguments contain agent_id or tool_name keys cannot name the wrong subagent or make a main-agent call count.
+- Adversarial review fix: every kunj Claude Code hook now runs through hookSafe() (a subshell with errors hidden,
+  then exit 0). Why: dash (/bin/sh in most Linux containers) exits 2 on a failed redirect, and Claude Code reads exit 2
+  from PreToolUse as "block the tool call" and from Stop as "do not stop"; a missing state or plan folder would have
+  blocked the agent. Tested in sh, dash and bash.

@@ -29,7 +29,17 @@ export function agentPlanFile(kunjDir: string, session: string): string {
 // quotes (the settings JSON is single-quoted on the command line). A branch name with a `"` makes
 // a line that does not parse; the reducer skips it.
 export function planHookCommand(): string {
-  return '[ -z "$KUNJ_AGENT_PLAN" ] || printf "%s\\n" "{\\"kunj\\":{\\"t\\":$(date +%s),\\"branch\\":\\"$(git branch --show-current 2>/dev/null)\\"},\\"hook\\":$(cat)}" >> "$KUNJ_AGENT_PLAN"';
+  return hookSafe('[ -z "$KUNJ_AGENT_PLAN" ] || printf "%s\\n" "{\\"kunj\\":{\\"t\\":$(date +%s),\\"branch\\":\\"$(git branch --show-current 2>/dev/null)\\"},\\"hook\\":$(cat)}" >> "$KUNJ_AGENT_PLAN"');
+}
+
+/**
+ * A hook command that can never stop the agent. Claude Code reads exit status 2 as "block": a
+ * PreToolUse hook refuses the tool call, a Stop hook keeps the agent from stopping. dash (`/bin/sh` on
+ * most Linux, so in containers) exits 2 when a redirect fails, e.g. a missing directory, where bash
+ * exits 1. So the command runs in a subshell whose errors are hidden, and the hook ends with status 0.
+ */
+export function hookSafe(command: string): string {
+  return `(${command}) 2>/dev/null; true`;
 }
 
 // A subagent's tool call, for the activity of a subagent that keeps no task list (a background one
@@ -43,9 +53,9 @@ export function planHookCommand(): string {
 export function subagentToolHookCommand(): string {
   const field = (name: string, chars: string) => String.raw`$(printf %s "$i" | sed -n "s/.*\"${name}\":\"\(${chars}*\)\".*/\1/p" | head -c 64)`;
   const line = String.raw`{\"kunj\":{\"t\":$(date +%s)},\"hook\":{\"hook_event_name\":\"SubagentTool\",\"agent_id\":\"$a\",\"tool_name\":\"$n\"}}`;
-  return String.raw`[ -z "$KUNJ_AGENT_PLAN" ] || { i=$(cat); i=${"${"}i%%\"tool_input\":*}; case "$i" in *\"agent_id\":\"*) `
+  return hookSafe(String.raw`[ -z "$KUNJ_AGENT_PLAN" ] || { i=$(cat); i=${"${"}i%%\"tool_input\":*}; case "$i" in *\"agent_id\":\"*) `
     + `a=${field('agent_id', '[A-Za-z0-9_-]')}; n=${field('tool_name', '[A-Za-z0-9_.-]')}; `
-    + String.raw`[ -z "$a" ] || printf "%s\n" "${line}" >> "$KUNJ_AGENT_PLAN";; esac; }`;
+    + String.raw`[ -z "$a" ] || printf "%s\n" "${line}" >> "$KUNJ_AGENT_PLAN";; esac; }`);
 }
 
 // The first line of a handed-off session's file: who started it and on which step

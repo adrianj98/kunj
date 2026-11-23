@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as os from 'os';
 import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planTitle, reducePlan } from '../agent-plan';
 
@@ -131,6 +131,23 @@ describe('reducePlan', () => {
     expect(reducePlan(line(exit)).title).toBe('Agent overview');
     expect(planTitle('just a line')).toBe('just a line');
     expect(planTitle('')).toBeNull();
+  });
+});
+
+describe('hook commands never block the agent', () => {
+  // dash exits 2 on a failed redirect, and Claude Code reads 2 as "block the tool call / the stop"
+  const shells = ['sh', 'dash', 'bash'].filter(sh => { try { execFileSync('which', [sh]); return true; } catch { return false; } });
+  it.each(shells)('every kunj hook exits 0 in %s when the file cannot be written', (sh) => {
+    const { claudeHookSettings } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+    const settings = JSON.parse(claudeHookSettings(true));
+    const commands: string[] = Object.values(settings.hooks).flatMap((list: any) => list.flatMap((h: any) => h.hooks.map((x: any) => x.command)));
+    expect(commands.length).toBeGreaterThan(8);
+    const env = { PATH: process.env.PATH!, KUNJ_AGENT_PLAN: '/nonexistent-kunj/p.ndjson', KUNJ_AGENT_STATE: '/nonexistent-kunj/s', KUNJ_AGENT_RESUME: '/nonexistent-kunj/r.json' };
+    const input = JSON.stringify({ agent_id: 'a1', hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: {} });
+    for (const command of commands) {
+      const r = spawnSync(sh, ['-c', command], { input, env, encoding: 'utf8' });
+      expect({ command, status: r.status, stderr: r.stderr }).toEqual({ command, status: 0, stderr: '' });
+    }
   });
 });
 

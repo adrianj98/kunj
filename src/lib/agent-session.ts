@@ -11,7 +11,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { containerNames } from './container/names';
 import { kunjEntry } from './self';
-import { PLAN_TOOL_MATCHER, planHookCommand, subagentToolHookCommand } from './agent-plan';
+import { PLAN_TOOL_MATCHER, hookSafe, planHookCommand, subagentToolHookCommand } from './agent-plan';
 
 const execFileAsync = promisify(execFile);
 
@@ -443,7 +443,8 @@ export function withAgentResume(command: string, id: string | null): string {
 // there replaces the creation instead of observing it.
 export function claudeHookSettings(plan = false): string {
   const hook = (command: string, matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] }];
-  const write = (state: AgentHookState) => `printf ${state} > "$KUNJ_AGENT_STATE"`;
+  // every command through hookSafe(): a failed write must never block a tool call or the agent's stop
+  const write = (state: AgentHookState) => hookSafe(`printf ${state} > "$KUNJ_AGENT_STATE"`);
   const record = planHookCommand();
   return JSON.stringify({
     hooks: {
@@ -451,9 +452,9 @@ export function claudeHookSettings(plan = false): string {
       PreToolUse: [...hook(write('running')), ...(plan ? [...hook(record, 'Agent|Task'), ...hook(subagentToolHookCommand())] : [])],
       Stop: hook(write('waiting')),
       Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),
-      SessionEnd: hook('rm -f "$KUNJ_AGENT_STATE"'),
+      SessionEnd: hook(hookSafe('rm -f "$KUNJ_AGENT_STATE"')),
       // Unset in containers (no resume there yet), where it does nothing
-      SessionStart: [...hook('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"'), ...(plan ? hook(record) : [])],
+      SessionStart: [...hook(hookSafe('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"')), ...(plan ? hook(record) : [])],
       ...(plan ? {
         PostToolUse: hook(record, PLAN_TOOL_MATCHER),
         SubagentStart: hook(record),
