@@ -1712,6 +1712,18 @@
     "sensitive": false
   },
   {
+    "key": "agent.taskList",
+    "type": "boolean",
+    "category": "agent",
+    "default": true,
+    "description": "Ask every Claude agent kunj starts to keep a task list (--append-system-prompt), so the Overview and `kunj agent plan` have its steps. Needs agent.plan",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "agent.hooks",
     "type": "boolean",
     "category": "agent",

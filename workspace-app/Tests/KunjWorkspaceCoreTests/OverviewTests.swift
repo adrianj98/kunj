@@ -164,6 +164,13 @@ import Testing
         #expect(a.rowHeights == [one.id: 154])
     }
 
+    @Test func anEndedLaneIsNotRunning() async throws {
+        var lane = try await fixture().families[0].lanes[0]
+        #expect(!lane.isEnded && OverviewFilter.running.includes(lane))
+        lane.ended = true
+        #expect(lane.isEnded && !OverviewFilter.running.includes(lane) && OverviewFilter.all.includes(lane))
+    }
+
     @Test func filterAndOtherRepositories() async throws {
         let o = try await fixture()
         let elsewhere = env("feat/vscode-search", path: "/Users/demo/src/feat/vscode-search", root: "/other")

@@ -505,6 +505,21 @@ export function withAgentHooks(command: string, _stateFile: string, enabled: boo
 
 // `command` with kunj's Claude Code plugin (its skills, e.g. /kunj:handoff) when it is claude and the
 // plugin is in this install. The path is single-quoted for the shell tmux runs the command through.
+/**
+ * What every claude kunj starts is told, so its work shows as steps in `kunj agent plan` and the
+ * workspace app's Overview (`agent.taskList`). No single quote: it goes in a shell word.
+ */
+export const TASK_LIST_PROMPT = 'This session runs under kunj, which shows your progress to the user as a line of steps built from '
+  + 'your task list. For any work with more than one step, first create a task list with your task tools (TaskCreate), '
+  + 'mark each task in progress when you start it and completed when it is done (TaskUpdate), and keep the list current '
+  + 'as the work changes. Skip it for a one-step answer.';
+
+/** Appends `--append-system-prompt` with TASK_LIST_PROMPT to a claude command. */
+export function withAgentTaskList(command: string, on: boolean): string {
+  if (!on || !isClaudeCommand(command)) return command;
+  return `${command.trim()} --append-system-prompt '${TASK_LIST_PROMPT.replace(/'/g, "'\\''")}'`;
+}
+
 export function withAgentPlugin(command: string, pluginDir: string | null): string {
   if (!pluginDir || !isClaudeCommand(command)) return command;
   return `${command.trim()} --plugin-dir '${pluginDir.replace(/'/g, "'\\''")}'`;

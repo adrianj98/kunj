@@ -85,13 +85,18 @@ final class SidebarView: NSView {
 
     /// Draws the agents' plans beside their rows (nil removes them): a row grows to hold its agents.
     func showPlans(_ data: (repos: [AgentOverviewJson], filter: OverviewFilter)?) {
+        // a read that comes back after the Overview closed draws nothing
+        let data = overviewColumn == nil ? nil : data
         planData = data
         if data == nil {
             plans.removeFromSuperview()
             list.plans = nil
+            list.onPlaced = nil
             list.rowHeights = [:]
             plans.show([], filter: .all)
             plans.setPulsing(false)
+            // the rows go back to their own height
+            list.layoutRows()
         } else {
             list.plans = plans
         }

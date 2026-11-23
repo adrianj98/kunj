@@ -25,6 +25,10 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 | Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Shipped 2026-11-23: built and tested on a Mac (314 tests), `--demo --overview --screenshot` matches the mockup in both themes, and run against a live agent started by this kunj (steps, current step, branch change, subagent loop) |
 | Workspace app: the Overview in the main window's middle panel (sidebar item above the repositories), with a repository drop-down defaulting to repositories with an open session | Shipped 2026-11-23 (`OverviewPanel`, `OverviewScope`) |
 | Workspace app: the sidebar spans the window while the Overview is shown, each lane beside its session's row (no label column, no repository headings; a row grows for several agents) | Shipped 2026-11-23 (`alignOverview`, `SidebarView.showPlans`) |
+| Plan history: a record is kept across conversations (/clear, a fresh start); a new conversation goes on after the earlier ones' finished steps (last 30) behind a `new` marker | Shipped 2026-11-23 (`reducePlan`, `HISTORY_STEPS`) |
+| Every claude kunj starts is asked to keep a task list (`agent.taskList`, `--append-system-prompt`, host agents) | Shipped 2026-11-23 (`withAgentTaskList`) |
+| An ended agent's last plan stays in the overview, dimmed (`ended` on the lane): the newest of a place with no running agent, with steps, changed in the last 3 days | Shipped 2026-11-23 (`endedPlans`) |
+| Workspace app: closing the Overview puts the rows back to their height; a read that comes back after it closed draws nothing | Shipped 2026-11-23 |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |
 | Rewind forks (needs the transcript) | Later, only if wanted |
 

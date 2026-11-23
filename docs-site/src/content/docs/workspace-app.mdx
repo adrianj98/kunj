@@ -287,7 +287,10 @@ tabs, or the branch changing), kept in the same file.
 as a line of the steps in its plan, so you can see where each one is without opening its terminal.
 The sidebar widens across the window and each agent's line is drawn beside its session's row, which
 already names the branch and its state; a row with several agents grows to hold their lines. Hover the
-start of a line to read the agent's conversation title. The menu at the top picks the repositories:
+start of a line to read the agent's conversation title. A line keeps its earlier steps when the agent
+starts a new conversation (`/clear`, or a fresh start), after a "new conversation" mark, and an agent
+that ended keeps its last line, faded, until another agent runs there. kunj asks every Claude agent it
+starts to keep a task list so there are steps to show; set `agent.taskList` to false to stop that. The menu at the top picks the repositories:
 those with an open session (the default), all of them, or one. Click a session in the sidebar to leave
 the Overview.
 

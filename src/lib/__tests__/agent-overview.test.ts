@@ -1,4 +1,4 @@
-import { OVERVIEW_METRICS as m, activePlans, buildOverview, layoutFamily, loopLevels, loopSpan, markerLabel, overviewFamilies, overviewSummary, planPlace, planStatus, planTitleText, subagentLabel } from '../agent-overview';
+import { OVERVIEW_METRICS as m, activePlans, buildOverview, endedPlans, layoutFamily, loopLevels, loopSpan, markerLabel, overviewFamilies, overviewSummary, planPlace, planStatus, planTitleText, subagentLabel } from '../agent-overview';
 import type { AgentPlanItemJson, AgentPlanStepJson, AgentPlanSubagentJson } from '../json-types';
 
 const step = (id: number, status: AgentPlanStepJson['status'] = 'pending'): AgentPlanStepJson => ({ id: String(id), subject: `step ${id}`, status });
@@ -13,6 +13,26 @@ const done = step(1, 'completed');
 describe('which agents, in which order', () => {
   it('an ended session is left out, an unknown one kept', () => {
     expect(activePlans([plan('a'), plan('b', { running: false }), plan('c', { running: null })]).map(p => p.session)).toEqual(['a', 'c']);
+  });
+
+  it("an ended agent's last plan stays: the newest of a place with no running agent, with steps, recent", () => {
+    const now = Date.parse('2026-11-23T12:00:00Z');
+    const ended = (session: string, worktree: string, at: string, steps = [done, step(2)]) =>
+      plan(session, { running: false, worktree, updatedAt: at, steps, current: 1 });
+    const plans = [
+      plan('live', { worktree: '/r/busy' }),
+      ended('old-busy', '/r/busy', '2026-11-23T11:00:00Z'),
+      ended('older', '/r/a', '2026-11-22T10:00:00Z'),
+      ended('newer', '/r/a', '2026-11-23T10:00:00Z'),
+      ended('stale', '/r/b', '2026-11-10T10:00:00Z'),
+      ended('empty', '/r/c', '2026-11-23T10:00:00Z', []),
+    ];
+    expect(endedPlans(plans, now).map(p => p.session)).toEqual(['newer']);
+    const built = buildOverview(plans, m, now);
+    // counted as running: only the live one; drawn: the live one, then the ended one dimmed
+    expect(built.agents).toBe(1);
+    expect(built.families.map(f => [f.lanes[0].session, f.lanes[0].ended ?? false, f.lanes[0].status]))
+      .toEqual([['live', false, 'Working'], ['newer', true, 'Ended at step 2 of 2']]);
   });
 
   it('a child follows its parent; one whose parent is not listed is a root', () => {

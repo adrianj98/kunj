@@ -39,9 +39,32 @@ export type OverviewMetrics = { [K in keyof typeof OVERVIEW_METRICS]: number };
 
 const isWaiting = (p: AgentPlanItemJson): boolean => p.running !== false && p.state === 'waiting';
 
-/** The agents shown: an ended session is left out, one whose state is unknown (no tmux) is kept. */
+/** The agents running: an ended session is left out, one whose state is unknown (no tmux) is kept. */
 export function activePlans(plans: AgentPlanItemJson[]): AgentPlanItemJson[] {
   return plans.filter(p => p.running !== false);
+}
+
+/** An ended agent's last plan is shown for this long after its last change. */
+export const ENDED_PLAN_DAYS = 3;
+
+const placeOf = (p: AgentPlanItemJson): string => p.container ? `c:${p.container}` : `w:${p.worktree}`;
+
+/**
+ * The ended agents whose last plan is still shown (dimmed): the newest of each place (worktree or
+ * container) that has no running agent, with steps, changed in the last ENDED_PLAN_DAYS. So a restart
+ * or a suspended session keeps its line, and old conversations do not pile up.
+ */
+export function endedPlans(plans: AgentPlanItemJson[], now: number = Date.now()): AgentPlanItemJson[] {
+  const busy = new Set(activePlans(plans).map(placeOf));
+  const newest = new Map<string, AgentPlanItemJson>();
+  for (const p of plans) {
+    if (p.running !== false || !p.steps.length || busy.has(placeOf(p))) continue;
+    const at = p.updatedAt ? Date.parse(p.updatedAt) : NaN;
+    if (!(at >= now - ENDED_PLAN_DAYS * 86_400_000)) continue;
+    const seen = newest.get(placeOf(p));
+    if (!seen || (seen.updatedAt ?? '') < (p.updatedAt ?? '')) newest.set(placeOf(p), p);
+  }
+  return plans.filter(p => [...newest.values()].includes(p));
 }
 
 export interface OverviewFamily {
@@ -97,13 +120,14 @@ export function planPlace(plan: AgentPlanItemJson, child: boolean): string {
   return child ? `handoff${extra} · ${plan.branch}` : `${plan.branch} · ${plan.container ? 'container' : 'worktree'}${extra}`;
 }
 
-/** "Waiting for input", "Step 3 of 5", "All 5 steps done", "Working" (no task list) */
+/** "Waiting for input", "Step 3 of 5", "All 5 steps done", "Working" (no task list); "Ended at step 3 of 5" */
 export function planStatus(plan: AgentPlanItemJson): string {
   if (isWaiting(plan)) return 'Waiting for input';
   const n = plan.steps.length;
-  if (n === 0) return 'Working';
-  if (plan.current === null || plan.current >= n) return `All ${n} step${n === 1 ? '' : 's'} done`;
-  return `Step ${plan.current + 1} of ${n}`;
+  const ended = plan.running === false;
+  if (n === 0) return ended ? 'Ended' : 'Working';
+  if (plan.current === null || plan.current >= n) return `${ended ? 'Ended, all' : 'All'} ${n} step${n === 1 ? '' : 's'} done`;
+  return `${ended ? 'Ended at step' : 'Step'} ${plan.current + 1} of ${n}`;
 }
 
 export function overviewSummary(agents: number, waiting: number): string {
@@ -120,6 +144,7 @@ export function markerLabel(marker: AgentPlanMarkerJson): string | null {
     case 'branch': return `${marker.from ?? '?'} → ${marker.to ?? '?'}`;
     case 'worktree': return `${folder(marker.from)} → ${folder(marker.to)}`;
     case 'fork': return 'fork';
+    case 'new': return 'new conversation';
     default: return null;
   }
 }
@@ -258,6 +283,7 @@ export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVI
       ...(plan.container ? { container: plan.container } : {}),
       title: planTitleText(plan), place: planPlace(plan, lane.parent !== null), status: planStatus(plan), waiting: isWaiting(plan),
       child: lane.parent !== null, top, height, y, stops, ...(line ? { line } : {}), loops, markers, ...(elbow ? { elbow } : {}), labelBeside,
+      ...(plan.running === false ? { ended: true } : {}),
     });
     top += height;
     right = Math.max(right, lastX);
@@ -266,7 +292,7 @@ export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVI
 }
 
 /** Everything `kunj agent overview` prints about the plans: the running agents, grouped and laid out. */
-export function buildOverview(plans: AgentPlanItemJson[], m: OverviewMetrics = OVERVIEW_METRICS): {
+export function buildOverview(plans: AgentPlanItemJson[], m: OverviewMetrics = OVERVIEW_METRICS, now: number = Date.now()): {
   agents: number; waiting: number; summary: string; metrics: { labelWidth: number; stopSpacing: number }; families: AgentOverviewFamilyJson[];
 } {
   const active = activePlans(plans);
@@ -274,6 +300,7 @@ export function buildOverview(plans: AgentPlanItemJson[], m: OverviewMetrics = O
   return {
     agents: active.length, waiting, summary: overviewSummary(active.length, waiting),
     metrics: { labelWidth: m.labelWidth, stopSpacing: m.stopSpacing },
-    families: overviewFamilies(active).map(f => layoutFamily(f, m)),
+    // the running agents, then the ended ones still shown; the counts are the running ones only
+    families: [...overviewFamilies(active), ...overviewFamilies(endedPlans(plans, now))].map(f => layoutFamily(f, m)),
   };
 }

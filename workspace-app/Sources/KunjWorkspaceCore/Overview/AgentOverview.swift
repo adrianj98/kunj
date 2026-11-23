@@ -66,6 +66,9 @@ public struct OverviewLane: Decodable, Equatable, Sendable {
     public var elbow: OverviewElbow?
     /// No task list: the one stop's label goes right of it
     public var labelBeside: Bool
+    /// The agent ended: its last plan, drawn dimmed (nil from a kunj that does not say)
+    public var ended: Bool?
+    public var isEnded: Bool { ended == true }
 }
 
 public enum OverviewStopKind: Equatable, Sendable {
@@ -146,7 +149,7 @@ public enum OverviewFilter: String, CaseIterable, Sendable {
         switch self {
         case .all: return true
         case .waiting: return lane.waiting
-        case .running: return !lane.waiting
+        case .running: return !lane.waiting && !lane.isEnded
         }
     }
 }

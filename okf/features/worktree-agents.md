@@ -101,7 +101,11 @@ src/lib/agent-overview.ts) is the same agents ready to draw: grouped, with their
 A background subagent has no task tools at all, so each of a subagent's tool calls is recorded too
 (`subagentToolHookCommand()`: id and tool name only) and its loop shows "N tool calls, now <tool>".
 The agent is started with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`: newer models have no
-task tools without it.
+task tools without it. With `agent.taskList` (default true) it is also told to keep a task list
+(`withAgentTaskList()`, `--append-system-prompt TASK_LIST_PROMPT`): most agents never used the task tools
+unasked, so the Overview had nothing to draw. The record is never emptied: a new conversation (/clear, a
+fresh start) goes on after the earlier conversations' finished steps (`HISTORY_STEPS`, 30) behind a `new`
+marker, and the overview keeps an ended agent's last plan (`endedPlans()`, lane `ended`, drawn dimmed).
 
 `kunj agent start --resume` reads it with `readAgentResume()` when the tmux session is not running and
 runs `claude --resume <id>` (`withAgentResume()`). The workspace app passes `--resume` for restored agent
@@ -144,6 +148,7 @@ same: without `--session`, `running` is any session; `sessions` lists `{ session
 | `agent.tmux` | `true` | false runs directly, like `--no-tmux` |
 | `agent.tmuxStatus` | `false` | Show tmux's status line |
 | `agent.hooks` | `true` | Pass the Claude Code state hooks |
+| `agent.taskList` | `true` | Ask claude to keep a task list (needs `agent.plan`) |
 
 `AgentError` codes (`jsonCode` in `--json`, printed without a stack trace): `tmux-missing`, `no-tty`,
 `not-running`, `no-worktree`, `bad-session-id`.

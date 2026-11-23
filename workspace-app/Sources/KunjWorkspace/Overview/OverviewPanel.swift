@@ -245,7 +245,8 @@ final class OverviewPanel: NSView {
 
     private func render() {
         summary.stringValue = overviewSummary(repos)
-        if let beside { beside((repos, filter)) } else { canvas.show(repos, filter: filter) }
+        // closed meanwhile (a read was still out): the sidebar must not get its lanes back
+        if let beside { if isShown { beside((repos, filter)) } } else { canvas.show(repos, filter: filter) }
         canvas.setPulsing(isVisibleNow)
         let asked = overviewRepos(repositories(), open: openRepositories(), scope: scope)
         emptyLabel.stringValue = asked.isEmpty && scope == .open
@@ -263,7 +264,8 @@ final class OverviewPanel: NSView {
     }
 
     @objc private func filterChanged(_ sender: Any?) {
-        if let beside { beside((repos, filter)) } else { canvas.show(repos, filter: filter) }
+        // closed meanwhile (a read was still out): the sidebar must not get its lanes back
+        if let beside { if isShown { beside((repos, filter)) } } else { canvas.show(repos, filter: filter) }
         canvas.setPulsing(isVisibleNow)
     }
 

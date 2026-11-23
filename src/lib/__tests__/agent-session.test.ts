@@ -440,6 +440,14 @@ describe('resuming a Claude conversation', () => {
     fs.rmSync(dir, { recursive: true });
   });
 
+  test('only claude is asked to keep a task list, in one shell word', () => {
+    const { withAgentTaskList, TASK_LIST_PROMPT } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+    expect(withAgentTaskList('claude --resume x', true)).toBe(`claude --resume x --append-system-prompt '${TASK_LIST_PROMPT}'`);
+    expect(TASK_LIST_PROMPT).not.toContain("'");
+    expect(withAgentTaskList('claude', false)).toBe('claude');
+    expect(withAgentTaskList('agy', true)).toBe('agy');
+  });
+
   test('only claude gets the kunj plugin, quoted for the shell', () => {
     const { withAgentPlugin } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
     expect(withAgentPlugin('claude --resume x', '/opt/kunj/claude-plugin')).toBe("claude --resume x --plugin-dir '/opt/kunj/claude-plugin'");

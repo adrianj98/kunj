@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { AgentCommand } from '../agent';
-import { AgentError, killTmuxSessionIfExists, agentArgv, agentSessionName, agentStateFile, hasTmuxSession, hostRunArgv, loginShell, readTmuxSessions, runTmux, killTmuxSession, withAgentHooks } from '../../lib/agent-session';
+import { AgentError, killTmuxSessionIfExists, agentArgv, agentSessionName, agentStateFile, hasTmuxSession, hostRunArgv, loginShell, readTmuxSessions, runTmux, killTmuxSession, withAgentHooks, withAgentTaskList } from '../../lib/agent-session';
 import { loadResolvedConfig } from '../../lib/config';
 import { hostSecrets } from '../../lib/secrets/host';
 
@@ -69,7 +69,7 @@ jest.mock('../../lib/git', () => ({
 
 const session = agentSessionName('app', 'github.com/acme/app', 'feature-a');
 const stateFile = agentStateFile('/h/.kunj/app', session);
-const claudeWithHooks = withAgentHooks('claude', stateFile, true, true);
+const claudeWithHooks = withAgentTaskList(withAgentHooks('claude', stateFile, true, true), true);
 // What a claude agent gets on top of the KUNJ_* variables: its plan record and Claude Code's task tools
 const planVars = (session: string) => ({ KUNJ_AGENT_PLAN: `/h/.kunj/app/agent-plan/${session}.ndjson`, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' });
 // The tmux client's own environment carries the KUNJ_* variables but never the plan ones: a client
@@ -318,7 +318,7 @@ describe('--session: several agents per worktree', () => {
     await new AgentCommand().execute('start', 'feature-a', { session: 'two' } as any);
     const file = agentStateFile('/h/.kunj/app', two);
     const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: file, KUNJ_AGENT_RESUME: `/h/.kunj/app/agent-resume/${two}.json`, ...planVars(two) };
-    expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', underRun('feature-a', withAgentHooks('claude', file, true, true)), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(clientEnv(vars)));
+    expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', underRun('feature-a', withAgentTaskList(withAgentHooks('claude', file, true, true), true)), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(clientEnv(vars)));
     expect(two).toBe(session + '-a-two');
   });
 
@@ -586,11 +586,11 @@ describe('plan', () => {
     expect(first.kunj.parent).toEqual({ session: parent, step: 0 });
   });
 
-  test('a new conversation empties an old record; agent.plan false records nothing and leaves the task tools alone', async () => {
+  test('a new conversation keeps the old record (its history); agent.plan false records nothing and leaves the task tools alone', async () => {
     tmuxSessions.mockResolvedValue([]);
     record(session, [create('1', 'old')]);
     await new AgentCommand().execute('start', 'feature-a', { detach: true });
-    expect(realFs.readFileSync(nodePath.join(dir, 'agent-plan', `${session}.ndjson`), 'utf8')).toBe('');
+    expect(realFs.readFileSync(nodePath.join(dir, 'agent-plan', `${session}.ndjson`), 'utf8')).toContain('"old"');
     (runTmux as jest.Mock).mockClear();
     (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'claude', plan: false } });
     await new AgentCommand().execute('start', 'feature-a', { detach: true });
@@ -598,6 +598,16 @@ describe('plan', () => {
     expect(argv).not.toContain('KUNJ_AGENT_PLAN');
     expect(argv).not.toContain('CLAUDE_CODE_ENABLE_TODO_TOOLS');
   });
+});
+
+test('claude is asked to keep a task list unless agent.taskList is false', async () => {
+  tmuxSessions.mockResolvedValue([]);
+  await new AgentCommand().execute('start', 'feature-a', {});
+  expect((runTmux as jest.Mock).mock.calls[0][0].join(' ')).toContain('--append-system-prompt');
+  (runTmux as jest.Mock).mockClear();
+  (loadResolvedConfig as jest.Mock).mockResolvedValueOnce({ agent: { command: 'claude', taskList: false } });
+  await new AgentCommand().execute('start', 'feature-a', {});
+  expect((runTmux as jest.Mock).mock.calls[0][0].join(' ')).not.toContain('--append-system-prompt');
 });
 
 test('start loads the packaged plugin into claude when this install has one', async () => {

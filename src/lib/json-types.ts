@@ -726,7 +726,8 @@ export interface AgentPlanStepJson {
 
 /** Something that happened between two stops. `afterStep` indexes `steps`; null: before any step. */
 export interface AgentPlanMarkerJson {
-  type: 'branch' | 'worktree' | 'fork' | 'compact';
+  /** `new`: a new conversation (/clear or a fresh start) begins after `afterStep` */
+  type: 'branch' | 'worktree' | 'fork' | 'compact' | 'new';
   afterStep: number | null;
   from?: string;
   to?: string;
@@ -848,6 +849,8 @@ export interface AgentOverviewLaneJson {
   elbow?: { fromX: number; fromY: number; toX: number; toY: number };
   /** No task list: the one stop's label goes right of it */
   labelBeside: boolean;
+  /** The agent ended: its last plan, drawn dimmed (only the newest of a place that has no running agent) */
+  ended?: boolean;
 }
 
 /** An agent with the agents it handed work to: `lanes[0]` is the root. */

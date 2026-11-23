@@ -82,6 +82,21 @@ describe('reducePlan', () => {
     expect(again).toMatchObject({ steps: [], markers: [], parent: { session: 'p', step: null } });
   });
 
+  it('a new conversation goes on after the finished steps of the earlier ones, behind a new marker', () => {
+    const start = (source: string) => ({ hook_event_name: 'SessionStart', source });
+    const plan = reducePlan([
+      line(start('startup')), line(create('1', 'a')), line(create('2', 'b')), line(update('1', 'completed')), line(update('2', 'in_progress')),
+      line(start('clear')), line(create('1', 'c')), line(update('1', 'in_progress')),
+      line(start('startup')), line(create('1', 'd')),
+    ].join('\n'));
+    // b was left unfinished: not kept; ids of the earlier conversations do not clash with the new ones
+    expect(plan.steps.map(s => [s.id, s.subject, s.status])).toEqual([['h1-1', 'a', 'completed'], ['1', 'd', 'pending']]);
+    expect(plan.markers).toMatchObject([{ type: 'new', afterStep: 0 }]);
+    expect(plan.current).toBe(1);
+    // a first conversation has no marker
+    expect(reducePlan([line(start('startup')), line(create('1', 'a'))].join('\n')).markers).toEqual([]);
+  });
+
   it('a running subagent has no end; its task comes from the Agent call of the same type', () => {
     const plan = reducePlan([
       line({ hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { description: 'explore', subagent_type: 'Explore' } }),

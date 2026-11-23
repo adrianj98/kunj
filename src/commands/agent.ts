@@ -10,7 +10,7 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPlugin, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
 import { packagedPluginDir } from '../lib/skills';
 import { activePlans, buildOverview, subagentLabel } from '../lib/agent-overview';
 import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, parentLine, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
@@ -271,21 +271,25 @@ export class AgentCommand extends BaseCommand {
     // the record of an agent that is about to be reattached
     const recordInUse = alreadyRunning || (withPlan && tmux === 'failed' && !opts.detach && await hasTmuxSession(session));
     if (withPlan && !recordInUse) {
-      // A new conversation starts a new record; a resumed one continues its own. Started from inside
-      // another agent's session (the /handoff skill), the record begins with that parent and its step.
+      // The record is kept across conversations (history); a new one is told apart by its SessionStart.
+      // Started from inside another agent's session (the /handoff skill), that parent and its step are added.
       // The record is an extra: failing to prepare it never stops the agent.
       try {
         fs.mkdirSync(agentPlanDir(kunjDir), { recursive: true });
         const from = process.env.KUNJ_AGENT_PLAN;
         const parent = from && path.resolve(from) !== planFile && from.endsWith('.ndjson')
           ? parentLine(path.basename(from, '.ndjson'), planPosition(reducePlan(readPlanFile(from)).steps)) : '';
-        if (!resumeId) fs.writeFileSync(planFile, parent);
-        else if (parent && !fs.existsSync(planFile)) fs.writeFileSync(planFile, parent);
+        // a new conversation is appended too: the record keeps the agent's earlier steps (reducePlan
+        // starts the new conversation after them)
+        if (parent) fs.appendFileSync(planFile, parent);
+        else if (!fs.existsSync(planFile)) fs.writeFileSync(planFile, '');
       } catch { /* no record */ }
     }
     // kunj's skills (claude-plugin/ in this install) in every claude agent, before the first prompt
     const plugin = fs.existsSync(path.join(packagedPluginDir(), '.claude-plugin', 'plugin.json')) ? packagedPluginDir() : null;
-    const command = withAgentPrompt(withAgentPlugin(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false, withPlan), plugin), promptCopy);
+    // the plan is only worth recording when the agent keeps a task list: ask it to (agent.taskList)
+    const taskList = withPlan && config.agent?.taskList !== false;
+    const command = withAgentPrompt(withAgentPlugin(withAgentTaskList(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false, withPlan), taskList), plugin), promptCopy);
     const vars = {
       KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile,
       ...(withPlan ? { KUNJ_AGENT_PLAN: planFile, ...PLAN_ENV } : {}),

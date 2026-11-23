@@ -2,6 +2,18 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — Plan history kept, agents keep task lists, ended agents stay
+
+- Closing the Overview left a row tall, and a read still out could grow it again ("closes and opens for
+  no reason"): closing now resets row heights and drops late reads.
+- A plan record is no longer emptied on a fresh start, and /clear no longer starts the line over: the
+  new conversation follows the finished steps of earlier ones behind a "new conversation" marker. Why:
+  the user wants previous history shown even after clearing the agent.
+- `agent.taskList` (default on): every claude kunj starts is asked to keep a task list. Why: the
+  running agents had never called the task tools, so the Overview had nothing to show.
+- An ended agent's last plan stays in the Overview, dimmed (newest per place, 3 days). Why: after a
+  restart the lines vanished.
+
 ## 2026-11-23 — Overview lanes beside the sidebar's rows
 
 - With the Overview selected the sidebar spans the window; its rows keep their width and each agent's

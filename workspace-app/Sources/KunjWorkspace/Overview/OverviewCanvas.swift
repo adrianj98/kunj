@@ -127,7 +127,7 @@ final class OverviewCanvas: NSView {
                           frame: NSRect(x: 0, y: slot, width: bounds.width, height: CGFloat(a.height)))
         }
         pulsing = (aligned ?? []).flatMap { p -> [NSPoint] in
-            guard !p.lane.waiting else { return [] }
+            guard !p.lane.waiting, !p.lane.isEnded else { return [] }
             return p.lane.stops.filter { $0.stopKind == .current }.map { NSPoint(x: Self.alignedGx + CGFloat($0.x), y: p.dy + CGFloat($0.y)) }
         }
         rebuildToolTips()
@@ -174,7 +174,7 @@ final class OverviewCanvas: NSView {
             for family in families {
                 rows.append(.family(repo: index, family: family, top: y))
                 let gx = CGFloat(repo.metrics.labelWidth)
-                for lane in family.lanes where !lane.waiting {
+                for lane in family.lanes where !lane.waiting && !lane.isEnded {
                     for stop in lane.stops where stop.stopKind == .current {
                         pulsing.append(NSPoint(x: gx + CGFloat(stop.x), y: y + CGFloat(stop.y)))
                     }
@@ -424,8 +424,12 @@ final class OverviewCanvas: NSView {
     /// branched from is (in this view), nil when that is not shown.
     private func draw(lane: OverviewLane, gx: CGFloat, dy top: CGFloat, stopSpacing: CGFloat, elbowFromY: CGFloat?, label: Bool) {
         func p(_ x: Double, _ y: Double) -> NSPoint { NSPoint(x: gx + CGFloat(x), y: top + CGFloat(y)) }
+        // an ended agent's last plan: the same drawing, faded, its current stop grey
+        let context = NSGraphicsContext.current?.cgContext
+        if lane.isEnded { context?.saveGState(); context?.setAlpha(0.4) }
+        defer { if lane.isEnded { context?.restoreGState() } }
         do {
-            let state = lane.waiting ? theme.color(\.amber) : theme.color(\.green)
+            let state = lane.isEnded ? theme.color(\.idle) : lane.waiting ? theme.color(\.amber) : theme.color(\.green)
 
             // the elbow from the parent's stop (down to it, or up when the child's row is above)
             if let b = lane.elbow, let fromY = elbowFromY {

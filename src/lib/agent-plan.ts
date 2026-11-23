@@ -82,6 +82,8 @@ interface Task extends AgentPlanStepJson {
 }
 
 const STATUSES = ['pending', 'in_progress', 'completed'];
+/** How many finished steps of earlier conversations a plan keeps in front of the current ones */
+export const HISTORY_STEPS = 30;
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
 
 export function currentStep(steps: AgentPlanStepJson[]): number | null {
@@ -137,7 +139,11 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
   let branch: string | null = null;
   let transcript: string | null = null;
 
-  const mainSteps = (): Task[] => order.map(id => tasks.get(id)!).filter(t => t.owner === null);
+  // the finished steps of earlier conversations in this session (after /clear or a fresh start),
+  // in front of the current ones: the record keeps the agent's history
+  let history: Task[] = [];
+  let conversations = 0;
+  const mainSteps = (): Task[] => [...history, ...order.map(id => tasks.get(id)!).filter(t => t.owner === null)];
   const setStatus = (task: Task, status: unknown, at: string) => {
     if (typeof status !== 'string' || !STATUSES.includes(status) || task.status === status) return;
     task.status = status as Task['status'];
@@ -165,9 +171,14 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
     const event = hook.hook_event_name;
     const input = hook.tool_input && typeof hook.tool_input === 'object' ? hook.tool_input : {};
 
-    // A new conversation in the same session starts a new line
+    // A new conversation in the same session goes on after the finished steps of the earlier ones,
+    // behind a `new` marker (unfinished ones were left behind with it, and are not drawn)
     if (event === 'SessionStart' && (hook.source === 'startup' || hook.source === 'clear')) {
-      tasks = new Map(); order = []; title = null; markers = []; subagents = new Map(); pendingTasks = [];
+      const n = conversations++;
+      const done = mainSteps().filter(t => t.status === 'completed').map(t => ({ ...t, id: t.id.startsWith('h') ? t.id : `h${n}-${t.id}` }));
+      history = done.slice(-HISTORY_STEPS);
+      tasks = new Map(); order = []; title = null; subagents = new Map(); pendingTasks = [];
+      markers = history.length ? [{ type: 'new', afterStep: history.length - 1, at }] : [];
     }
 
     let moved = false;
@@ -258,7 +269,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
     return out;
   };
   const all = order.map(id => tasks.get(id)!);
-  const steps = all.filter(t => t.owner === null).map(clean);
+  const steps = [...history, ...all.filter(t => t.owner === null)].map(clean);
   for (const sub of subagents.values()) sub.steps = all.filter(t => t.owner === sub.id).map(clean);
   return { title, steps, current: currentStep(steps), markers, subagents: [...subagents.values()], ...(parent ? { parent } : {}), updatedAt, branch, transcript };
 }

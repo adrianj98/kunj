@@ -42,6 +42,13 @@ export function registerAgentSettings(): void {
       category: 'agent',
     },
     {
+      key: 'agent.taskList',
+      description: "Ask every Claude agent kunj starts to keep a task list (--append-system-prompt), so the Overview and `kunj agent plan` have its steps. Needs agent.plan",
+      type: 'boolean',
+      defaultValue: true,
+      category: 'agent',
+    },
+    {
       key: 'agent.hooks',
       description: 'Pass Claude Code hooks to the agent that report when it waits for input (agent.state in worktree list and ct list)',
       type: 'boolean',
