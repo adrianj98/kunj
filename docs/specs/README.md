@@ -35,6 +35,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
+| Workspace app Overview fills as it goes: a quick host-only read and the full read per repository, each drawn as it arrives | [agent-overview.md](agent-overview.md#the-window) | this commit |
 | Workspace app Overview opens at once: plans are read from session start on kunj's changes, shown or not, and drawn from that on open | [agent-overview.md](agent-overview.md#the-window) | this commit |
 | Agent overview: keyboard (↑ ↓ Home End, Return opens the agent's tab) and VoiceOver (a button per agent with where it is) | [agent-overview.md](agent-overview.md#the-window) | this commit |
 | Agent overview: the pulse on a working agent's current stop (Core Animation, no redraw; off when hidden or with Reduce motion); `--overview` opens the window without a screenshot | [agent-overview.md](agent-overview.md#the-window) | this commit |

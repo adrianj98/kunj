@@ -13,6 +13,21 @@ import Testing
         #expect(agentOverviewArguments() == ["agent", "overview", "--containers"])
     }
 
+    @Test func quickArguments() {
+        #expect(agentOverviewArguments(containers: false) == ["agent", "overview"])
+    }
+
+    /// The quick read (no containers) is drawn over nothing, or over a read with no container agent,
+    /// never over one whose container lanes it would drop.
+    @Test func quickReadShowsOnlyWhereNoContainerLaneIsLost() async throws {
+        var o = try await fixture()
+        #expect(overviewQuickReadShows(over: nil))
+        for f in o.families.indices { for l in o.families[f].lanes.indices { o.families[f].lanes[l].container = nil } }
+        #expect(overviewQuickReadShows(over: o))
+        o.families[0].lanes[0].container = "kunj-kunj-feat-x-1a2b"
+        #expect(!overviewQuickReadShows(over: o))
+    }
+
     @Test func decodesWhatKunjLaidOut() async throws {
         let o = try await fixture()
         #expect(o.repo.name == "kunj")

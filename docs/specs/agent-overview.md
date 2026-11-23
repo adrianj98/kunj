@@ -211,6 +211,10 @@ families (a family shows when any of its lanes passes).
   are gathered for 0.3 s. The event-driven reads run while the Overview is hidden too, from the first
   listing after kunj connects, so opening it draws the plans already read at once and then brings
   them up to date (a read with `--containers` takes seconds: it execs into every container).
+  Every read asks each repository twice at once, `kunj agent overview` (host agents, ~0.1 s) and
+  `--containers`, and draws each answer as it arrives; a quick answer is drawn only while that
+  repository's full one is out and only over nothing or a read without container agents
+  (`overviewQuickReadShows`), so a refresh never drops a container's lane.
 - **Checking it:** `--demo --overview --screenshot <png>` draws `DemoPlans`, the mockup's agents as kunj lays
   them out. That file and the test fixture are generated: `node workspace-app/scripts/gen-overview-demo.js`
   after `npm run build`, again after any change to the layout or to `AgentOverviewJson`.

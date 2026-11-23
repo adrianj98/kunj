@@ -130,7 +130,19 @@ public struct OverviewElbow: Decodable, Equatable, Sendable {
 // ---- arguments
 
 /// The running agents of the repository kunj runs in, its branch containers' included.
-public func agentOverviewArguments() -> [String] { ["agent", "overview", "--containers"] }
+/// `containers: false` is the quick read (the host's agents only, well under a second); with them
+/// kunj execs into every running container, which takes seconds.
+public func agentOverviewArguments(containers: Bool = true) -> [String] {
+    containers ? ["agent", "overview", "--containers"] : ["agent", "overview"]
+}
+
+/// Whether a quick read (no containers) of a repository may be shown in place of `previous`, while
+/// the full read is still out: only when nothing is shown for it yet or what is shown has no
+/// container agent, so a refresh never drops a container's lane for the seconds the full read takes.
+public func overviewQuickReadShows(over previous: AgentOverviewJson?) -> Bool {
+    guard let previous else { return true }
+    return !previous.families.contains { $0.lanes.contains { $0.container != nil } }
+}
 
 // ---- what the window does itself: the filter, the total, and which lane a click is on
 

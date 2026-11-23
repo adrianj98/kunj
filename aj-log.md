@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — Overview fills as it goes
+
+- Each Overview read now runs a quick host-only `kunj agent overview` next to the `--containers` one
+  for every repository and draws each answer as it arrives. A quick answer never replaces one that
+  shows container agents. Why: the user asked to get it as it goes instead of waiting ~6 s for
+  every container to be read.
+
 ## 2026-11-23 — Overview loads at session start
 
 - The Overview panel now reads the plans as soon as kunj connects and again on every plan or listing

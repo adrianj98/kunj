@@ -311,18 +311,15 @@ final class OverviewPanel: NSView {
         loading = true
         let started = generation
         Task { [weak self] in
-            let (result, problem) = await OverviewPanel.load(cli: cli, repos: asked)
+            await self?.load(asked, generation: started)
             guard let self else { return }
             self.loading = false
-            // the scope changed meanwhile: these are another scope's agents; read again for this one
+            // the scope changed meanwhile: these were another scope's agents; read again for this one
             guard started == self.generation else {
                 self.again = false
                 self.refresh()
                 return
             }
-            self.repos = result
-            self.errorLabel.stringValue = problem ?? ""
-            self.render()
             if self.again {
                 self.again = false
                 self.refresh()
@@ -330,36 +327,58 @@ final class OverviewPanel: NSView {
         }
     }
 
-    /// Every repository's overview, asked at once. A repository that fails keeps the others; the first
-    /// message is shown (also when a repository's containers could not be asked).
-    private nonisolated static func load(cli: KunjCLI, repos: [RepoRef]) async -> ([AgentOverviewJson], String?) {
-        await withTaskGroup(of: (Int, AgentOverviewJson?, String?).self) { group in
-            for (index, repo) in repos.enumerated() {
-                group.addTask {
-                    do {
-                        let json: AgentOverviewJson = try await cli.run(agentOverviewArguments(), cwd: repo.root, timeout: 30)
-                        let problem = json.containers.flatMap { c -> String? in
-                            if !c.available { return "\(repo.name) containers: \(c.message ?? "Docker could not be asked")" }
-                            guard let unreadable = c.unreadable, !unreadable.isEmpty else { return nil }
-                            return "\(repo.name): could not read the agents in \(unreadable.joined(separator: ", "))"
-                        }
-                        return (index, json, problem)
-                    } catch {
-                        return (index, nil, "\(repo.name): \((error as? KunjCLIError)?.message ?? "\(error)")")
-                    }
+    /// Every repository asked at once, twice: the quick read (host agents only) and the full one
+    /// (containers too, seconds). Each answer is drawn as it comes, so the Overview fills as it goes;
+    /// a quick answer only where `overviewQuickReadShows` allows and its full one is not back yet. A
+    /// repository that fails keeps the others; the first full read's message is shown.
+    private func load(_ asked: [RepoRef], generation started: Int) async {
+        let roots = asked.map(\.root)
+        var byRoot: [String: AgentOverviewJson] = [:]
+        for json in repos where roots.contains(json.repo.root) { byRoot[json.repo.root] = json }
+        var fullBack = Set<Int>()
+        var problems: [Int: String] = [:]
+        let cli = self.cli
+        await withTaskGroup(of: (Int, Bool, AgentOverviewJson?, String?).self) { group in
+            for (index, repo) in asked.enumerated() {
+                for full in [false, true] {
+                    group.addTask { await OverviewPanel.read(cli: cli, repo: repo, index: index, full: full) }
                 }
             }
-            var byIndex: [Int: AgentOverviewJson] = [:]
-            var problems: [Int: String] = [:]
-            for await (index, json, problem) in group {
-                if let json { byIndex[index] = json }
-                if let problem { problems[index] = problem }
+            for await (index, full, json, problem) in group {
+                guard started == generation else { continue }
+                let root = asked[index].root
+                if full {
+                    fullBack.insert(index)
+                    if let problem { problems[index] = problem }
+                    if let json { byRoot[root] = json } else { byRoot[root] = nil }
+                } else {
+                    guard let json, !fullBack.contains(index), overviewQuickReadShows(over: byRoot[root]) else { continue }
+                    byRoot[root] = json
+                }
+                repos = roots.compactMap { byRoot[$0] }
+                // the message only once every full read is back, so a slow repository's is not lost
+                errorLabel.stringValue = fullBack.count == asked.count
+                    ? problems.keys.sorted().first.flatMap { problems[$0] } ?? "" : errorLabel.stringValue
+                render()
             }
-            let out = repos.indices.compactMap { byIndex[$0] }
-            return (out, problems.keys.sorted().first.flatMap { problems[$0] })
         }
     }
 
+    private nonisolated static func read(cli: KunjCLI?, repo: RepoRef, index: Int, full: Bool)
+        async -> (Int, Bool, AgentOverviewJson?, String?) {
+        guard let cli else { return (index, full, nil, nil) }
+        do {
+            let json: AgentOverviewJson = try await cli.run(agentOverviewArguments(containers: full), cwd: repo.root, timeout: 30)
+            let problem = json.containers.flatMap { c -> String? in
+                if !c.available { return "\(repo.name) containers: \(c.message ?? "Docker could not be asked")" }
+                guard let unreadable = c.unreadable, !unreadable.isEmpty else { return nil }
+                return "\(repo.name): could not read the agents in \(unreadable.joined(separator: ", "))"
+            }
+            return (index, full, json, problem)
+        } catch {
+            return (index, full, nil, "\(repo.name): \((error as? KunjCLIError)?.message ?? "\(error)")")
+        }
+    }
 }
 
 /// A scope in a menu item's representedObject.
