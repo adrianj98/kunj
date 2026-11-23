@@ -40,7 +40,9 @@ const repos = [
       { id: 'two', container: 'alertd-core-feat-llm-insights', worktree: '/workspace', parent: { session: 'agent', step: 3 } }),
     plan('kunj-alertd-core-fix-alert-dedupe', 'Dedupe alert fan-out', 'fix/alert-dedupe',
       [['d', 'Reproduce'], ['d', 'Failing test'], ['c', 'Fix the fan-out'], ['t', 'Run the suite'], ['t', 'Open the PR']],
-      { subagents: [sub('s2', 'find fan-out callers', 0, 1, false, [['d', 'Grep callers'], ['d', 'Read queue code']])] }),
+      { subagents: [sub('s2', 'find fan-out callers', 0, 1, false, [['d', 'Grep callers'], ['d', 'Read queue code']])],
+        // a branch change under the subagent's loop: its label goes under the loop
+        markers: [{ type: 'branch', afterStep: 0, from: 'main', to: 'fix/alert-dedupe', at: '2026-11-23T04:30:00.000Z' }] }),
   ] },
 ];
 

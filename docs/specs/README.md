@@ -35,6 +35,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
+| Agent overview: a branch-change label that would cover a subagent loop goes under the loop (seen in the first live screenshot); the demo covers the case | [agent-overview.md](agent-overview.md#cli-contract-additive) | this commit |
 | Background subagents' activity in the agent overview: their tool calls counted by a hook (they have no task tools), shown as "12 tool calls, now Read" on their loop; `toolCalls`/`lastTool` on `AgentPlanSubagentJson` | [agent-overview.md](agent-overview.md#what-the-probe-found) | this commit |
 | Workspace app Overview window (Window ▸ Overview, ⌘⇧O): built and run on a Mac against the demo data (both themes, matches the mockup) and a live agent; the place line keeps the agent id ahead of the branch; the legend fits; the screenshot grows to every row | [agent-overview.md](agent-overview.md#the-window) | this commit |
 | Agent plan review fixes: out-of-order tasks, a session listed under two worktrees, plan variables leaking through the tmux server, cloud machines woken by `--plan`, a record emptied on reattach, `plan` as its own event type, records cleaned up with `forget --all` and worktree removal | [agent-overview.md](agent-overview.md#review-fixes-2026-11-23) | this commit |
@@ -141,7 +142,7 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Agent overview follow-ups: a link for forked conversations, the pulse on the current stop, keyboard access to the lines, a marker label that sits on a subagent loop | [agent-overview.md](agent-overview.md#status) | — |
+| Agent overview follow-ups: a link for forked conversations, the pulse on the current stop, keyboard access to the lines | [agent-overview.md](agent-overview.md#status) | — |
 | Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
 | Cloud machines review follow-ups (plausible, not run): `machine.bootTimeoutMs` (300 s) starts before the bootstrap has installed anything, so a slow first boot may time out; a serve restart between a lost pairing reply and its retry still strands the machine; `--idle-exit` is reset by unauthorized requests; `coordinator stop` trusts a pid; the local coordinator's start lock has a three-command window while a stale lock is taken over | [cloud-machines.md](cloud-machines.md#the-coordinator) | From the adversarial reviews and the real runs |
 | Cloud machines, what is left: the registry copy (`machine.registry`: snapshot push and pull, needs image push/pull in `ContainerBackend`); `Ec2Provider` on a real AWS account; machine rows in the VS Code extension and the menu bar app; the golden image in `kunj ct blueprint status`; containers on machines in the `kunj events` container stream; `SshFleetProvider`; the opt-in `*.gce.test.ts` suite; the machine-side idle timer seen firing on a real machine (needs no coordinator running for 45 minutes) | [cloud-machines.md](cloud-machines.md#plan) | `kunj ct start --remote machines` works end to end on `kunj-dev` |

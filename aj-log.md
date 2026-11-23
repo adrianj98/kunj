@@ -1989,3 +1989,5 @@ The user asked to be able to choose a remote in the app when remotes are availab
   input), the reducer counts them, and the overview's loop says "12 tool calls, now Read". Why: background subagents
   have no task tools at all, so they could never show steps, and the user asked for subagents with their progress.
   Checked live: a background subagent's 3 Reads and a Glob were counted; its hand-back call is left out.
+- Agent overview layout: a marker label that would cover a subagent loop's legs now goes under the loop. Why: the live
+  screenshot showed "main → feat/after" drawn over a loop. The demo data has the case now.

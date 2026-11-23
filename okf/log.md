@@ -173,3 +173,4 @@
 - Review fixes on the agent plan: `plan` is its own event type, plan variables stay out of the tmux client's environment, no machine wake for `--plan`, records cleaned with their worktree. Page updated: features/worktree-agents.md.
 - Overview window built and run on a Mac; background subagents found to have no task tools. Page updated: apps/workspace-app.md.
 - Background subagents' activity (tool-call count, latest tool) in the agent plan and overview. Page updated: features/worktree-agents.md.
+- Agent overview: marker labels move under a subagent loop they would cover. Page updated: none.

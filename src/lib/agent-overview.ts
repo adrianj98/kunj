@@ -24,8 +24,11 @@ export const OVERVIEW_METRICS = {
   loopSpacing: 38,
   /** Room under a loop's bottom for its label */
   loopLabelHeight: 24,
-  /** What a marker's label takes before the loops of its lane */
+  /** What a marker's label takes when it goes under the loops of its lane */
   markerLabelHeight: 22,
+  /** A character's width in a marker's label (mono 10), and the label's padding, to tell when it would cover a loop */
+  markerCharWidth: 6.2,
+  markerLabelPadding: 16,
   /** Space right of the last stop */
   trailing: 150,
   /** A character's width in the label of a lane with no steps, to make room for it */
@@ -212,14 +215,13 @@ export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVI
       markers.push({ x: mx, y, labelY: y + 13, label });
       lastX = Math.max(lastX, mx);
     }
-    const markerRoom = markers.length ? m.markerLabelHeight : 0;
 
     const spans = plan.subagents.map(sub => loopSpan(sub, plan.current, n));
     const levels = loopLevels(spans);
     const loops: AgentOverviewLoopJson[] = plan.subagents.map((sub, k) => {
       const a = x(spans[k].from);
       const b = x(spans[k].to);
-      const ly = y + markerRoom + m.loopDrop + levels[k] * m.loopSpacing;
+      const ly = y + m.loopDrop + levels[k] * m.loopSpacing;
       const count = sub.steps.length;
       const sx = (i: number) => (count <= 1 ? (a + b) / 2 : a + 24 + (i * (b - a - 48)) / (count - 1));
       const currentSub = sub.running ? sub.steps.findIndex(s => s.status === 'in_progress') : -1;
@@ -237,8 +239,20 @@ export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVI
 
     const levelCount = levels.length ? Math.max(...levels) + 1 : 0;
     const loopRoom = levelCount === 0 ? 0 : m.loopDrop + (levelCount - 1) * m.loopSpacing + m.loopLabelHeight - (m.laneHeight - m.lineOffset) + 12;
-    // a marker's label fits under the line on its own; it only needs room when loops follow it
-    const height = m.laneHeight + (levelCount === 0 ? 0 : markerRoom) + Math.max(0, loopRoom);
+    // A marker's label sits just under the line, where a loop's legs go down: one that would cover a
+    // loop goes under the deepest loop's label instead (the diamond stays on the line)
+    let moved = false;
+    if (loops.length) {
+      const bottom = Math.max(...loops.map(l => l.y)) + m.loopLabelHeight;
+      for (const marker of markers) {
+        const half = (marker.label.length * m.markerCharWidth + m.markerLabelPadding) / 2;
+        if (loops.some(l => marker.x + half >= l.fromX - 8 && marker.x - half <= l.toX + 8)) {
+          marker.labelY = bottom;
+          moved = true;
+        }
+      }
+    }
+    const height = m.laneHeight + Math.max(0, loopRoom) + (moved ? m.markerLabelHeight : 0);
     lanes.push({
       session: plan.session, id: plan.id, branch: plan.branch, worktree: plan.worktree,
       ...(plan.container ? { container: plan.container } : {}),

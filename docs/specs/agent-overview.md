@@ -153,7 +153,8 @@ inside a family x starts at the right edge of the label column and y at the fami
 by `buildOverview()` in `src/lib/agent-overview.ts` (pure, tested): `activePlans()` drops ended
 sessions, `overviewFamilies()` puts a handed-off agent under its parent (one whose parent ended is a
 root), `layoutFamily()` places everything (stops 116 apart, a child half a stop after the stop it
-branched from, overlapping loops stacked in levels, a marker's label under the line). `--containers`
+branched from, overlapping loops stacked in levels, a marker's label under the line, or under the
+loops when it would cover one's legs). `--containers`
 lists the repository's containers across its backends (`ContainerCommand.listJson`), reads the plans
 of the running ones that have an agent (`agentPlansJson`, each on its own backend), and gives up on
 them after 8 s: Docker down or slow is `available: false`, never a failed overview.

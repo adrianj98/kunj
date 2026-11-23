@@ -166,9 +166,17 @@ describe('geometry', () => {
     const lane = one(plan('a', { steps, current: 1, markers }));
     expect(lane.markers).toEqual([{ x: 56 + m.stopSpacing / 2, y: 40, labelY: 53, label: 'main → feat/x' }]);
     expect(lane.height).toBe(m.laneHeight);
+    // a loop under the same steps: the label would cover its legs, so it goes under the loop's label
     const withLoop = one(plan('a', { steps, current: 1, markers, subagents: [sub()] }));
-    expect(withLoop.loops[0].y).toBe(40 + m.markerLabelHeight + m.loopDrop);
-    expect(withLoop.height).toBeGreaterThan(m.laneHeight + m.markerLabelHeight);
+    expect(withLoop.loops[0].y).toBe(40 + m.loopDrop);
+    expect(withLoop.markers[0]).toMatchObject({ x: 56 + m.stopSpacing / 2, y: 40, labelY: withLoop.loops[0].y + m.loopLabelHeight });
+    const loopOnly = one(plan('a', { steps, current: 1, subagents: [sub()] }));
+    expect(withLoop.height).toBe(loopOnly.height + m.markerLabelHeight);
+    // a loop elsewhere on the line leaves the label where it is
+    const longer = [done, step(2, 'completed'), step(3, 'completed'), step(4, 'completed'), step(5, 'in_progress')];
+    const apart = one(plan('a', { steps: longer, current: 4, markers, subagents: [sub({ fromStep: 3, toStep: 4 })] }));
+    expect(apart.markers[0].labelY).toBe(53);
+    expect(apart.height).toBe(one(plan('a', { steps: longer, current: 4, subagents: [sub({ fromStep: 3, toStep: 4 })] })).height);
     expect(one(plan('a', { steps: [step(1)], markers: [{ type: 'fork', afterStep: null, at }] })).markers[0].x).toBeLessThan(56);
     expect(one(plan('a', { steps: [step(1)], markers: [{ type: 'compact', afterStep: 0, at }] })).markers).toEqual([]);
   });
