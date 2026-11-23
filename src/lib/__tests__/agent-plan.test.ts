@@ -158,6 +158,17 @@ describe('subagentToolHookCommand', () => {
     fs.rmSync(dir, { recursive: true });
   });
 
+  it('a tool whose arguments hold agent_id or tool_name keys neither names the subagent nor makes a main call look like one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-subtool-'));
+    const file = path.join(dir, 'p.ndjson');
+    // the shape Claude Code sends: agent_id and tool_name ahead of tool_input
+    run(JSON.stringify({ session_id: 's', agent_id: 'a1', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'x', agent_id: 'evil', tool_name: 'WRONG' } }), { KUNJ_AGENT_PLAN: file });
+    run(JSON.stringify({ session_id: 's', hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { agent_id: 'a1' } }), { KUNJ_AGENT_PLAN: file });
+    const hooks = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l).hook);
+    expect(hooks).toEqual([{ hook_event_name: 'SubagentTool', agent_id: 'a1', tool_name: 'Bash' }]);
+    fs.rmSync(dir, { recursive: true });
+  });
+
   it('an id with a character outside the safe set records nothing; a tool name outside it is left empty', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-subtool-'));
     const file = path.join(dir, 'p.ndjson');

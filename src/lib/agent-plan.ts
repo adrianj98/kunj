@@ -35,13 +35,15 @@ export function planHookCommand(): string {
 // A subagent's tool call, for the activity of a subagent that keeps no task list (a background one
 // has no task tools at all). Every PreToolUse runs it; the main agent's calls (no agent_id) cost one
 // cat and a case. It never copies the hook input: only the subagent id and the tool name, each cut to
-// a safe set of characters, so the record stays small and a value cannot break the line. `.*` is
-// greedy, but inside a JSON string a quote is escaped, so the only "agent_id":" is the top-level key.
+// a safe set of characters, so the record stays small and a value cannot break the line. It looks only
+// at the input before its first "tool_input": (Claude Code writes agent_id and tool_name ahead of it),
+// so a tool whose own arguments hold an agent_id or tool_name key neither names the subagent nor makes
+// a main-agent call look like one. An input that put them after tool_input would record nothing.
 // No single quotes (the settings JSON is single-quoted on the command line).
 export function subagentToolHookCommand(): string {
   const field = (name: string, chars: string) => String.raw`$(printf %s "$i" | sed -n "s/.*\"${name}\":\"\(${chars}*\)\".*/\1/p" | head -c 64)`;
   const line = String.raw`{\"kunj\":{\"t\":$(date +%s)},\"hook\":{\"hook_event_name\":\"SubagentTool\",\"agent_id\":\"$a\",\"tool_name\":\"$n\"}}`;
-  return String.raw`[ -z "$KUNJ_AGENT_PLAN" ] || { i=$(cat); case "$i" in *\"agent_id\":\"*) `
+  return String.raw`[ -z "$KUNJ_AGENT_PLAN" ] || { i=$(cat); i=${"${"}i%%\"tool_input\":*}; case "$i" in *\"agent_id\":\"*) `
     + `a=${field('agent_id', '[A-Za-z0-9_-]')}; n=${field('tool_name', '[A-Za-z0-9_.-]')}; `
     + String.raw`[ -z "$a" ] || printf "%s\n" "${line}" >> "$KUNJ_AGENT_PLAN";; esac; }`;
 }

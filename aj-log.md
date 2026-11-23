@@ -1996,3 +1996,5 @@ The user asked to be able to choose a remote in the app when remotes are availab
   the window without `--screenshot` too, for trying it by hand.
 - Overview keyboard and VoiceOver access: arrows choose an agent, Return opens its tab, each lane is an accessibility
   button. Why: the last open follow-up of the window besides the fork link, which Claude Code gives no parent for.
+- Adversarial review fix: the subagent tool-call hook now reads only the input before "tool_input", so a tool whose
+  arguments contain agent_id or tool_name keys cannot name the wrong subagent or make a main-agent call count.
