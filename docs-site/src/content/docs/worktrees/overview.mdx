@@ -250,6 +250,25 @@ It uses the same 60-second cache as the listing; add `--fresh` for an up-to-the-
 there is no pull request yet, create one from inside the worktree with
 [`kunj pr`](../../reference/commands/).
 
+### Checks, review threads and merging
+
+`--details` shows what GitHub's PR page shows apart from the conversation: every check, each
+reviewer's latest verdict, the review threads and whether it can merge. It is what the workspace
+app's PR panel reads (`--json`).
+
+```bash
+kunj worktree pr --details                  # checks, reviews, unresolved threads
+kunj worktree pr --failed-log               # the end of each failed Actions job's log
+kunj worktree pr --failed-log --check test --lines 400
+kunj worktree pr --ready                    # draft → ready for review
+kunj worktree pr --merge --method squash --delete-branch
+kunj worktree pr --resolve <thread id>      # ids from --details --json
+```
+
+`--merge` merges only when GitHub says the pull request can be merged, and only the head commit kunj
+just read; it never uses admin rights or auto-merge. `--delete-branch` deletes the branch on GitHub
+and leaves your worktree where it is. These work on GitHub only.
+
 ## Remove and prune
 
 ```bash

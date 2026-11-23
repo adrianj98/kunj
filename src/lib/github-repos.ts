@@ -15,7 +15,10 @@ import { readOriginUrl } from './repo-identity';
 import { DEFAULT_CLONE_DIR } from './clone-defaults';
 import { gitErrorLine } from './errors';
 
-export type GitHubErrorCode = 'gh-missing' | 'gh-auth' | 'gh-failed' | 'bad-repo' | 'clone-exists' | 'clone-failed';
+export type GitHubErrorCode =
+  | 'gh-missing' | 'gh-auth' | 'gh-failed' | 'bad-repo' | 'clone-exists' | 'clone-failed'
+  // kunj worktree pr --details and its actions (src/lib/pr-details.ts)
+  | 'pr-details-unsupported' | 'no-pull-request' | 'not-mergeable' | 'bad-merge-method' | 'check-not-found' | 'bad-thread-id';
 
 export class GitHubError extends Error {
   constructor(public code: GitHubErrorCode, message: string) {
@@ -54,7 +57,7 @@ export const execFileAsync: Exec = (file, args, opts = {}) =>
   });
 
 // What a failed gh call means: not installed, not logged in, or anything else (its stderr)
-function ghError(error: unknown, what: string): GitHubError {
+export function ghError(error: unknown, what: string): GitHubError {
   const e = error as { code?: unknown; stderr?: string; message?: string };
   if (e.code === 'ENOENT') {
     return new GitHubError('gh-missing', 'The GitHub CLI (gh) is not installed. Install it from https://cli.github.com and run `gh auth login`.');

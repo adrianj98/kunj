@@ -1599,6 +1599,56 @@
         "default": null
       },
       {
+        "flags": "--details",
+        "description": "[pr] Checks, review threads, reviews and merge state (GitHub)",
+        "default": null
+      },
+      {
+        "flags": "--failed-log",
+        "description": "[pr] The end of the log of each failed Actions check (or of --check)",
+        "default": null
+      },
+      {
+        "flags": "--check <name>",
+        "description": "[pr --failed-log] Only this check",
+        "default": null
+      },
+      {
+        "flags": "--lines <n>",
+        "description": "[pr --failed-log] Lines of log per check (default 150, max 2000)",
+        "default": null
+      },
+      {
+        "flags": "--ready",
+        "description": "[pr] Mark the draft pull request ready for review",
+        "default": null
+      },
+      {
+        "flags": "--merge",
+        "description": "[pr] Merge the pull request (only when GitHub says it is mergeable; never --admin)",
+        "default": null
+      },
+      {
+        "flags": "--method <method>",
+        "description": "[pr --merge] squash, merge or rebase (default: the repository's)",
+        "default": null
+      },
+      {
+        "flags": "--delete-branch",
+        "description": "[pr --merge] Delete the remote branch after merging (the worktree stays)",
+        "default": null
+      },
+      {
+        "flags": "--subject <text>",
+        "description": "[pr --merge] The merge commit title",
+        "default": null
+      },
+      {
+        "flags": "--resolve <threadId>",
+        "description": "[pr] Resolve a review thread (ids from --details --json)",
+        "default": null
+      },
+      {
         "flags": "-b, --new-branch",
         "description": "[add] Create a new branch for the worktree",
         "default": null

@@ -416,7 +416,24 @@ export function pickPullRequest(prs: PullRequestInfo[], branch: string): PullReq
   return forBranch.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))[0];
 }
 
-const GH_FIELDS = 'number,title,state,url,isDraft,headRefName,baseRefName,reviewDecision,statusCheckRollup,updatedAt';
+export const GH_FIELDS = 'number,title,state,url,isDraft,headRefName,baseRefName,reviewDecision,statusCheckRollup,updatedAt';
+
+// One row of `gh pr list/view --json` (GH_FIELDS) as kunj's PullRequestInfo
+export function githubPullRequestInfo(r: any): PullRequestInfo {
+  return {
+    provider: 'github',
+    number: r.number,
+    title: r.title || '',
+    state: String(r.state || '').toLowerCase() as PullRequestState,
+    url: r.url,
+    draft: !!r.isDraft,
+    baseBranch: r.baseRefName || null,
+    headBranch: r.headRefName,
+    reviewDecision: r.reviewDecision || null,
+    checks: summarizeChecks(r.statusCheckRollup),
+    updatedAt: r.updatedAt || null,
+  };
+}
 
 async function fetchGitHubPullRequests(cwd: string): Promise<PullRequestInfo[] | null> {
   try {
@@ -427,19 +444,7 @@ async function fetchGitHubPullRequests(cwd: string): Promise<PullRequestInfo[] |
     });
     const rows = JSON.parse(stdout || '[]');
     if (!Array.isArray(rows)) return null;
-    return rows.map((r: any) => ({
-      provider: 'github' as const,
-      number: r.number,
-      title: r.title || '',
-      state: String(r.state || '').toLowerCase() as PullRequestState,
-      url: r.url,
-      draft: !!r.isDraft,
-      baseBranch: r.baseRefName || null,
-      headBranch: r.headRefName,
-      reviewDecision: r.reviewDecision || null,
-      checks: summarizeChecks(r.statusCheckRollup),
-      updatedAt: r.updatedAt || null,
-    }));
+    return rows.map(githubPullRequestInfo);
   } catch {
     return null; // gh missing, not authenticated, or not a GitHub remote
   }
@@ -546,7 +551,7 @@ function writePullRequestCache(cache: Record<string, PullRequestCacheEntry>): vo
   }
 }
 
-async function pullRequestCacheKey(cwd: string): Promise<string> {
+export async function pullRequestCacheKey(cwd: string): Promise<string> {
   try {
     const { stdout } = await execAsync('git rev-parse --path-format=absolute --git-common-dir', { cwd });
     return normalizePath(stdout.trim());
@@ -582,6 +587,14 @@ export async function fetchPullRequestsCached(
   pruned[key] = { fetchedAt: Date.now(), provider: result.provider, pullRequests: result.pullRequests };
   writePullRequestCache(pruned);
   return result;
+}
+
+// Drop a repository's cached PR list (after kunj changed a PR), keyed as pullRequestCacheKey()
+export function invalidatePullRequestCache(key: string): void {
+  const cache = readPullRequestCache();
+  if (!(key in cache)) return;
+  delete cache[key];
+  writePullRequestCache(cache);
 }
 
 // Look up the PR for a single branch

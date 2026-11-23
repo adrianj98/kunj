@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-23 (PR panel, CLI)
+* `features/pr-lookup-cache.md`: `kunj worktree pr --details` and its actions (`--failed-log`, `--ready`, `--merge`, `--resolve`), src/lib/pr-details.ts.
+
 ## 2026-11-20 (suspend and resume sessions)
 * `features/worktree-agents.md`: Suspend Session / Resume Session in the workspace app.
 
@@ -163,3 +166,4 @@
 - `kunj resources` and the workspace app's Resources window. Pages updated: containers/cloud-machines.md.
 - `container.claude` copies the user's Claude skills, agents, commands and CLAUDE.md into containers; remote exec stdin no longer ends on an empty chunk. Page updated: containers/lifecycle.md.
 - `container.files` is applied on every start; the short-lived `container.claude` setting is removed. Page updated: containers/lifecycle.md.
+- Specs proposed (not built): review comments sent to the agent (docs/specs/review-comments.md), the PR panel (docs/specs/pr-panel.md), the attention sidebar (docs/specs/attention-sidebar.md). Page updated: none (no code yet).
