@@ -462,3 +462,25 @@ describe('resuming a Claude conversation', () => {
     expect(withAgentResume('claude', null)).toBe('claude');
   });
 });
+
+describe('planNudgeHookCommand', () => {
+  const { planNudgeHookCommand, claudeHookSettings } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+
+  test('runs this kunj with agent nudge only when the agent has a plan record', () => {
+    const cmd = planNudgeHookCommand(['/usr/bin/node', '/opt/kunj/dist/index.js'])!;
+    expect(cmd).toContain('[ -z "$KUNJ_AGENT_PLAN" ] || "/usr/bin/node" "/opt/kunj/dist/index.js" agent nudge');
+    expect(cmd).toMatch(/; true$/);
+  });
+
+  test('a path with a quote gets no nudge (the settings are single-quoted)', () => {
+    expect(planNudgeHookCommand(['/usr/bin/node', "/opt/it's/index.js"])).toBeUndefined();
+    expect(planNudgeHookCommand(['/usr/bin/node', '/opt/"x"/index.js'])).toBeUndefined();
+  });
+
+  test('claudeHookSettings adds it to UserPromptSubmit after the state write, and only when given', () => {
+    expect(JSON.parse(claudeHookSettings(true)).hooks.UserPromptSubmit).toHaveLength(1);
+    const hooks = JSON.parse(claudeHookSettings(true, 'NUDGE')).hooks.UserPromptSubmit;
+    expect(hooks).toHaveLength(2);
+    expect(hooks[1].hooks[0].command).toBe('NUDGE');
+  });
+});

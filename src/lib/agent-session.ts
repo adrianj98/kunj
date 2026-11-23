@@ -263,6 +263,14 @@ export function kunjSelf(): string[] {
   return [process.execPath, kunjEntry()];
 }
 
+// The UserPromptSubmit hook that tells a host agent where its task list is (`kunj agent nudge`, this
+// kunj), or undefined when a path holds a quote (the settings JSON is single-quoted, the command
+// double-quotes the paths).
+export function planNudgeHookCommand(self: string[] = kunjSelf()): string | undefined {
+  if (self.some(p => /["'`$\\]/.test(p))) return undefined;
+  return hookSafe(`[ -z "$KUNJ_AGENT_PLAN" ] || ${self.map(p => `"${p}"`).join(' ')} agent nudge`);
+}
+
 // `argv` under `kunj run`, which unlocks the vault and puts the host secrets in argv's environment.
 // tmux sessions start agents and shells this way: `new-session -e` would put the values in argv.
 // Without a branch, run resolves with the branch checked out where it runs (the session's -c).
@@ -441,14 +449,16 @@ export function withAgentResume(command: string, id: string | null): string {
 // With `plan`, the hooks that record the agent's plan into KUNJ_AGENT_PLAN (agent-plan.ts) are added:
 // a few events per step, never one per tool call. WorktreeCreate is left alone on purpose: a hook
 // there replaces the creation instead of observing it.
-export function claudeHookSettings(plan = false): string {
+// `nudge`: the command that prints planNudge() for the agent's record (a host agent that is asked to
+// keep a task list), run with every prompt the user sends; its output is added to the prompt.
+export function claudeHookSettings(plan = false, nudge?: string): string {
   const hook = (command: string, matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] }];
   // every command through hookSafe(): a failed write must never block a tool call or the agent's stop
   const write = (state: AgentHookState) => hookSafe(`printf ${state} > "$KUNJ_AGENT_STATE"`);
   const record = planHookCommand();
   return JSON.stringify({
     hooks: {
-      UserPromptSubmit: hook(write('running')),
+      UserPromptSubmit: [...hook(write('running')), ...(nudge ? hook(nudge) : [])],
       PreToolUse: [...hook(write('running')), ...(plan ? [...hook(record, 'Agent|Task'), ...hook(subagentToolHookCommand())] : [])],
       Stop: hook(write('waiting')),
       Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),
@@ -496,11 +506,11 @@ export function agentPromptFile(kunjDir: string, session: string): string {
 }
 
 // `command` with the hooks appended when it is claude (the setting agent.hooks, default on)
-export function withAgentHooks(command: string, _stateFile: string, enabled: boolean, plan = false): string {
+export function withAgentHooks(command: string, _stateFile: string, enabled: boolean, plan = false, nudge?: string): string {
   if (!enabled) return command;
   const first = command.trim().split(/\s+/)[0] ?? '';
   if (path.basename(first) !== 'claude') return command;
-  return `${command.trim()} --settings '${claudeHookSettings(plan).replace(/'/g, "'\\''")}'`;
+  return `${command.trim()} --settings '${claudeHookSettings(plan, nudge).replace(/'/g, "'\\''")}'`;
 }
 
 // `command` with kunj's Claude Code plugin (its skills, e.g. /kunj:handoff) when it is claude and the

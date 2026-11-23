@@ -38,6 +38,26 @@ export function planHookCommand(): string {
  * most Linux, so in containers) exits 2 when a redirect fails, e.g. a missing directory, where bash
  * exits 1. So the command runs in a subshell whose errors are hidden, and the hook ends with status 0.
  */
+/**
+ * What a kunj agent is told with every prompt the user sends (a `UserPromptSubmit` hook running
+ * `kunj agent nudge`), like a band showing it its topic: the task list the user sees now, and to
+ * update it before anything else when the prompt moves the work on. One line, no quotes needed.
+ */
+export function planNudge(plan: Pick<ReducedPlan, 'steps' | 'current'>): string {
+  const steps = plan.steps;
+  if (steps.length === 0) {
+    return 'kunj shows the user your plan as a line of steps, and it has none yet. If this prompt is work with more '
+      + 'than one step, create a task list (TaskCreate) before anything else and mark each task in progress and '
+      + 'completed as you go (TaskUpdate); for a one-step answer, skip it.';
+  }
+  const done = steps.filter(s => s.status === 'completed').length;
+  const now = steps.find(s => s.status === 'in_progress');
+  const next = steps.find(s => s.status === 'pending');
+  const where = now ? `now: ${now.subject}` : next ? `next: ${next.subject}` : 'every step done';
+  return `kunj shows the user your task list: ${done} of ${steps.length} done, ${where}. If this prompt changes or `
+    + 'adds work, update the list (TaskCreate, TaskUpdate) before anything else; if it continues the same step, leave it.';
+}
+
 export function hookSafe(command: string): string {
   return `(${command}) 2>/dev/null; true`;
 }

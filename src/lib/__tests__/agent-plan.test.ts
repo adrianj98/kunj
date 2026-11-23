@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import * as os from 'os';
-import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planTitle, reducePlan } from '../agent-plan';
+import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, reducePlan } from '../agent-plan';
 
 const line = (hook: any, t = 100, branch = 'main') => JSON.stringify({ kunj: { t, branch }, hook });
 const create = (id: string, subject: string, extra: any = {}) => ({ hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: { task: { id, subject } }, ...extra });
@@ -275,5 +275,26 @@ describe('container plans', () => {
     expect(records.map(r => [r.session, r.running, r.state])).toEqual([['agent', false, null], ['agent-x1', false, 'waiting']]);
     expect(reducePlan(records[1].text).steps[0].subject).toBe('b');
     fs.rmSync(dir, { recursive: true });
+  });
+});
+
+describe('planNudge', () => {
+  const step = (subject: string, status: 'pending' | 'in_progress' | 'completed') => ({ id: subject, subject, status });
+
+  test('no task list: asks for one when the prompt is work of several steps', () => {
+    const text = planNudge({ steps: [], current: null });
+    expect(text).toContain('has none yet');
+    expect(text).toContain('TaskCreate');
+  });
+
+  test('a task list: how far, the step in progress, and to update it when the work moves on', () => {
+    const text = planNudge({ steps: [step('Read', 'completed'), step('Build', 'in_progress'), step('Test', 'pending')], current: 1 });
+    expect(text).toContain('1 of 3 done, now: Build');
+    expect(text).toContain('update the list');
+  });
+
+  test('nothing in progress: the next step, or every step done', () => {
+    expect(planNudge({ steps: [step('Read', 'completed'), step('Test', 'pending')], current: 0 })).toContain('next: Test');
+    expect(planNudge({ steps: [step('Read', 'completed')], current: 0 })).toContain('1 of 1 done, every step done');
   });
 });

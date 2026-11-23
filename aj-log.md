@@ -2,6 +2,14 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — Agents nudged to keep a plan
+
+- Every prompt sent to a kunj Claude agent now carries a line from `kunj agent nudge` (a
+  `UserPromptSubmit` hook): no task list yet, make one for multi-step work; otherwise "N of M done,
+  now: X", and update the list when the prompt moves the work on. Why: the user wants agents to give
+  a plan, like the work-band mod nudges for the topic on every prompt; the system prompt alone was
+  not enough (this very session's record had no steps). Takes ~50 ms per prompt.
+
 ## 2026-11-23 — Sidebar lists only active repositories
 
 - Suspended sessions no longer count as open: they go under `N more…`, and a repository with only
