@@ -171,7 +171,7 @@ import Testing
         let lane = layout.lanes[1]
         #expect(lane.isChild)
         #expect(lane.top == layout.lanes[0].height)
-        #expect(lane.branch == BranchLayout(fromX: 172, fromY: 40, toX: 230, toY: lane.top + 40))
+        #expect(lane.branch == ElbowLayout(fromX: 172, fromY: 40, toX: 230, toY: lane.top + 40))
         #expect(lane.stops.map { $0.x } == [230, 346])
         // a step the parent no longer has is clamped to its last stop
         let far = plan("c", steps: [step(1)], parent: PlanParent(session: "p", step: 9))
@@ -235,7 +235,13 @@ import Testing
         // the compact marker is not drawn
         #expect(lane.markers.map { $0.label } == ["main → feat/vscode-search"])
         #expect(lane.markers[0].x == 56 + m.stopSpacing / 2)
-        #expect(lane.height == m.laneHeight + m.markerLabelHeight)
+        // its label fits under the line; only loops after it need more room
+        #expect(lane.height == m.laneHeight)
+        var withLoop = searching
+        withLoop.subagents = [PlanSubagent(id: "s", type: "t", task: nil, fromStep: 0, toStep: 1, running: false)]
+        let both = layoutFamily(OverviewFamily(lanes: [.init(plan: withLoop, parent: nil)]), metrics: m).lanes[0]
+        #expect(both.loops[0].y == 40 + m.markerLabelHeight + m.loopDrop)
+        #expect(both.height > m.laneHeight + m.markerLabelHeight)
         let before = plan("a", steps: [step(1)], markers: [PlanMarker(type: "fork", afterStep: nil)])
         #expect(layoutFamily(OverviewFamily(lanes: [.init(plan: before, parent: nil)]), metrics: m).lanes[0].markers[0].x < 56)
         let onlyCompact = plan("a", steps: [step(1)], markers: [PlanMarker(type: "compact", afterStep: 0)])

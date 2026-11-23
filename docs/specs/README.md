@@ -130,7 +130,7 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Workspace app Overview window (Window ▸ Overview, ⌘⇧O): written, never compiled or run. Left: build on a Mac, compare `--demo --overview --screenshot` with the mockup, fix what shows; then why a subagent of an interactive session has no task tools, a link for forked conversations, the pulse on the current stop | [agent-overview.md](agent-overview.md#the-window) | CLI side shipped 2026-11-23 |
+| Workspace app Overview window (Window ▸ Overview, ⌘⇧O): written; its Core half is compiled and tested (on Linux), its AppKit half only syntax-checked, never run. Left: build on a Mac, compare `--demo --overview --screenshot` with the mockup, fix what shows; then why a subagent of an interactive session has no task tools, a link for forked conversations, the pulse on the current stop | [agent-overview.md](agent-overview.md#the-window) | CLI side shipped 2026-11-23 |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
 
 ## To do

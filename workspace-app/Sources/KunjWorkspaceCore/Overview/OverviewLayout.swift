@@ -67,7 +67,7 @@ public struct MarkerLayout: Equatable, Sendable {
 }
 
 /// The elbow from a parent's stop down to a child's line.
-public struct BranchLayout: Equatable, Sendable {
+public struct ElbowLayout: Equatable, Sendable {
     public var fromX: Double
     public var fromY: Double
     public var toX: Double
@@ -90,7 +90,7 @@ public struct LaneLayout: Equatable, Sendable {
     public var doneToX: Double?
     public var loops: [LoopLayout]
     public var markers: [MarkerLayout]
-    public var branch: BranchLayout?
+    public var branch: ElbowLayout?
     /// A lane with no steps: its one stop's text goes right of it, not above
     public var labelBeside: Bool
 }
@@ -147,13 +147,13 @@ public func layoutFamily(_ family: OverviewFamily, metrics m: OverviewMetrics = 
 
         // Where the lane starts: a child half a stop after the stop it branched from
         var x0 = m.firstStop
-        var branch: BranchLayout?
+        var branch: ElbowLayout?
         if let p = lane.parent, p < lanes.count {
             let parentPlan = family.lanes[p].plan
             let at = min(max(0, plan.parent?.step ?? 0), max(0, parentPlan.steps.count - 1))
             let fromX = firstX[p] + Double(at) * m.stopSpacing
             x0 = fromX + m.stopSpacing / 2
-            branch = BranchLayout(fromX: fromX, fromY: lanes[p].y, toX: x0, toY: y)
+            branch = ElbowLayout(fromX: fromX, fromY: lanes[p].y, toX: x0, toY: y)
         }
         firstX.append(x0)
         let x: (Int) -> Double = { x0 + Double($0) * m.stopSpacing }
@@ -220,7 +220,8 @@ public func layoutFamily(_ family: OverviewFamily, metrics m: OverviewMetrics = 
 
         let levelCount = (levels.max() ?? -1) + 1
         let loopRoom = levelCount == 0 ? 0 : m.loopDrop + Double(levelCount - 1) * m.loopSpacing + m.loopLabelHeight - (m.laneHeight - m.lineOffset) + 12
-        let height = m.laneHeight + markerRoom + max(0, loopRoom)
+        // a marker's label fits under the line on its own; it only needs room when loops follow it
+        let height = m.laneHeight + (levelCount == 0 ? 0 : markerRoom) + max(0, loopRoom)
         lanes.append(LaneLayout(index: index, top: top, height: height, y: y, isChild: lane.parent != nil, stops: stops,
                                 lineFromX: n > 1 ? x(0) : nil, lineToX: n > 1 ? x(n - 1) : nil, doneToX: doneTo,
                                 loops: loops, markers: markers, branch: branch, labelBeside: labelBeside))

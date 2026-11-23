@@ -21,7 +21,7 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 | CLI: `kunj agent plan [--all] --json` (`AgentPlanJson`), `kunj ct agent --plan`, `plan: true` on the `agent` event | Shipped |
 | CLI: parent link for a start from inside another agent's session (handoff) | Shipped |
 | `kunj events` for a container's plan: `container` with `action: 'plan'` when the records' size in the status script changes | Shipped |
-| Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Written 2026-11-23, **not built or run yet** (no macOS toolchain where it was written): build it, run `--demo --overview --screenshot` against the mockup, fix what the compiler and the picture show |
+| Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Written 2026-11-23. The Core half (model, geometry, events; `OverviewTests`) was compiled and its tests run with Swift 6.0.3 on Linux, and the geometry drawn as a picture that matches the mockup. The AppKit half (`OverviewWindow`, `OverviewCanvas`, the `AppDelegate` wiring) was only syntax-checked: **never compiled or run**. Left: build on a Mac, run `--demo --overview --screenshot` against the mockup, fix what the compiler and the picture show |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |
 | Rewind forks (needs the transcript) | Later, only if wanted |
 
