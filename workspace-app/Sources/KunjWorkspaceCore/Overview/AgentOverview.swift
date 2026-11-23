@@ -20,6 +20,8 @@ public struct AgentOverviewJson: Decodable, Equatable, Sendable {
     public struct Containers: Decodable, Equatable, Sendable {
         public var available: Bool
         public var message: String?
+        /// Branches whose running container has an agent that could not be read
+        public var unreadable: [String]?
     }
 
     public var repo: Repo

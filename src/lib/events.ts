@@ -268,7 +268,8 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
     if (watcher) stateWatchers.set(dir, watcher);
   };
   // The plan records the same hooks append to (agent-plan.ts): a change says only that
-  // `kunj agent plan` has something new for that session
+  // `kunj agent plan` has something new for that session. Its own event type (`plan`), never an
+  // `agent` event: there are several per step of work, and it says nothing about what runs
   const planWatchers = new Map<string, fs.FSWatcher>();
   const syncPlanWatch = (repo: KnownRepoInfo) => {
     const dir = agentPlanDir(path.join(kunjDir, kunjDirName(repo)));
@@ -277,7 +278,7 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
       if (!file || !file.startsWith('kunj-') || !file.endsWith('.ndjson')) return;
       debounce(`agent-plan:${dir}/${file}`, () => {
         if (!fs.existsSync(path.join(dir, file))) return;
-        emit({ type: 'agent', session: file.slice(0, -'.ndjson'.length), running: true, plan: true, repo: { name: repo.name, root: repo.root }, at: at() });
+        emit({ type: 'plan', session: file.slice(0, -'.ndjson'.length), repo: { name: repo.name, root: repo.root }, at: at() });
       });
     }, () => planWatchers.delete(dir));
     if (watcher) planWatchers.set(dir, watcher);
@@ -452,12 +453,12 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
         if (before !== undefined && before !== h) {
           emit({ type: 'container', repo: byId.get(c.labels[LABEL.repo]) ?? null, branch: c.labels[LABEL.branch] ?? null, container: c.name, action: 'status', at: at() });
         }
-        // the agents' plan records grew (or a new conversation emptied them): its own action, so a
-        // consumer that draws plans reads them again without listing the containers
+        // the agents' plan records grew (or a new conversation emptied them): a `plan` event, not a
+        // `container` one, so no consumer lists the containers for it
         const planBefore = containerPlans.get(c.name);
         if (status.planBytes !== undefined) containerPlans.set(c.name, status.planBytes);
         if (planBefore !== undefined && status.planBytes !== undefined && planBefore !== status.planBytes) {
-          emit({ type: 'container', repo: byId.get(c.labels[LABEL.repo]) ?? null, branch: c.labels[LABEL.branch] ?? null, container: c.name, action: 'plan', at: at() });
+          emit({ type: 'plan', repo: byId.get(c.labels[LABEL.repo]) ?? null, branch: c.labels[LABEL.branch] ?? null, container: c.name, at: at() });
         }
       }));
       for (const name of [...containerHashes.keys()]) if (!seen.has(name)) containerHashes.delete(name);

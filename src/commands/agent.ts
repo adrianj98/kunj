@@ -12,7 +12,7 @@ import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
 import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
 import { activePlans, buildOverview } from '../lib/agent-overview';
-import { PLAN_ENV, agentPlanDir, agentPlanFile, parentLine, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
+import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, parentLine, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
 import type { AgentForgetJson, AgentOverviewJson, AgentPlanItemJson, AgentPlanJson, AgentPlanStepJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
@@ -172,19 +172,27 @@ export class AgentCommand extends BaseCommand {
       if (!opts.all && sessions?.includes(session)) {
         throw new AgentError('bad-option', `${session} is running; its conversation is kept so it can be resumed later. Stop it first.`);
       }
-      const targets = opts.all ? savedAgents(kunjDir, base, sessions).map(s => s.session) : [session];
+      // --all: every session of the worktree that is not running and left something behind, a saved
+      // conversation or only a plan record (an agent ended before its conversation was saved)
+      const recorded = recordedPlanSessions(kunjDir).filter(s => agentSessionId(s, base) !== undefined && !sessions?.includes(s));
+      const targets = opts.all ? [...new Set([...savedAgents(kunjDir, base, sessions).map(s => s.session), ...recorded])] : [session];
       const forgotten: string[] = [];
       for (const t of targets) {
+        let gone = false;
         try {
           fs.unlinkSync(agentResumeFile(kunjDir, t));
-          forgotten.push(t);
+          gone = true;
         } catch { /* nothing saved */ }
-        try { fs.unlinkSync(agentPlanFile(kunjDir, t)); } catch { /* no plan recorded */ }
+        try {
+          fs.unlinkSync(agentPlanFile(kunjDir, t));
+          gone = true;
+        } catch { /* no plan recorded */ }
+        if (gone) forgotten.push(t);
       }
       if (this.jsonMode) {
         this.outputJSON({ branch: wt.branch, forgotten } satisfies AgentForgetJson);
       } else {
-        console.log(forgotten.length ? chalk.green(`✓ Forgot ${forgotten.length} saved conversation${forgotten.length === 1 ? '' : 's'}`) : chalk.dim('Nothing saved to forget'));
+        console.log(forgotten.length ? chalk.green(`✓ Forgot ${forgotten.length} session${forgotten.length === 1 ? '' : 's'} (saved conversation, plan record)`) : chalk.dim('Nothing saved to forget'));
       }
       return;
     }
@@ -258,7 +266,10 @@ export class AgentCommand extends BaseCommand {
     // The plan record (agent-plan.ts): only Claude has the hooks and the task tools they read
     const withPlan = config.agent?.hooks !== false && config.agent?.plan !== false && isClaudeCommand(agentCmd);
     const planFile = agentPlanFile(kunjDir, session);
-    if (withPlan && !alreadyRunning) {
+    // A failed listing does not mean the session is not running: ask about this one before emptying
+    // the record of an agent that is about to be reattached
+    const recordInUse = alreadyRunning || (withPlan && tmux === 'failed' && !opts.detach && await hasTmuxSession(session));
+    if (withPlan && !recordInUse) {
       // A new conversation starts a new record; a resumed one continues its own. Started from inside
       // another agent's session (the /handoff skill), the record begins with that parent and its step.
       // The record is an extra: failing to prepare it never stops the agent.
@@ -278,6 +289,11 @@ export class AgentCommand extends BaseCommand {
     };
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;
+    // What the tmux client itself runs with. A client that starts the tmux server gives it its
+    // environment, and every later session inherits that: the plan variables go to this session only
+    // (new-session -e), or another agent started from any tmux pane would look handed off by this one.
+    const planNames = ['KUNJ_AGENT_PLAN', ...Object.keys(PLAN_ENV)];
+    const tmuxEnv = Object.fromEntries(Object.entries({ ...env, ...vars }).filter(([name]) => !planNames.includes(name)));
     // Like kunj ct agent in an image without tmux: the agent runs here and ends with the terminal
     // agent.tmux false: direct, like --no-tmux (no hint: the user chose it), except that an agent still
     // running in this worktree's session is reattached rather than joined by a second one. The
@@ -296,7 +312,7 @@ export class AgentCommand extends BaseCommand {
       if (!alreadyRunning) {
         const argv = agentArgv(session, wt.path, hostRunArgv(wt.branch, [loginShell(), '-lc', command]), vars,
           { status: config.agent?.tmuxStatus === true, worktree: wt.path, detach: true, openInApp: opts.openInApp });
-        const code = await runTmux(argv, wt.path, { ...env, ...vars });
+        const code = await runTmux(argv, wt.path, tmuxEnv);
         if (code !== 0) throw new AgentError('start-failed', `tmux could not start ${session} (exit ${code}).`);
       }
       if (this.jsonMode) {
@@ -312,7 +328,7 @@ export class AgentCommand extends BaseCommand {
     // the values in argv; KUNJ_* stay there); directly, the same resolution in-process.
     if (!direct) {
       const argv = agentArgv(session, wt.path, hostRunArgv(wt.branch, [loginShell(), '-lc', command]), vars, { status: config.agent?.tmuxStatus === true, worktree: wt.path, openInApp: opts.openInApp });
-      process.exitCode = await runTmux(argv, wt.path, { ...env, ...vars });
+      process.exitCode = await runTmux(argv, wt.path, tmuxEnv);
       return;
     }
     const secrets = await hostSecretEnv(wt.branch, wt.path);
@@ -331,18 +347,19 @@ export class AgentCommand extends BaseCommand {
     if (this.jsonMode) {
       this.outputJSON({
         repo: { name: repo.name, root: listing.repoRoot }, ...built,
-        ...(inContainers ? { containers: { available: inContainers.available, ...(inContainers.message ? { message: inContainers.message } : {}) } } : {}),
+        ...(inContainers ? { containers: { available: inContainers.available, ...(inContainers.message ? { message: inContainers.message } : {}), ...(inContainers.unreadable ? { unreadable: inContainers.unreadable } : {}) } } : {}),
       } satisfies AgentOverviewJson);
       return;
     }
     console.log(chalk.bold(built.summary));
     if (inContainers && !inContainers.available) console.log(chalk.gray(`containers unavailable: ${inContainers.message ?? 'Docker could not be asked'}`));
+    if (inContainers?.unreadable) console.log(chalk.gray(`could not read the agents in the container${inContainers.unreadable.length === 1 ? '' : 's'} of ${inContainers.unreadable.join(', ')}`));
     this.printPlans(activePlans(plans));
   }
 
   // The plans of the agents in this repository's running containers, across its backends. Docker
   // being down, slow or missing is `available: false`, never a failed overview.
-  private async containerPlans(): Promise<{ available: boolean; message?: string; plans: AgentPlanItemJson[] }> {
+  private async containerPlans(): Promise<{ available: boolean; message?: string; unreadable?: string[]; plans: AgentPlanItemJson[] }> {
     let timer: NodeJS.Timeout | undefined;
     const commands: Array<{ abortDockerCalls(): void }> = [];
     try {
@@ -361,12 +378,14 @@ export class AgentCommand extends BaseCommand {
         const each = await Promise.all(withAgent.map(async c => {
           const command = new ContainerCommand();
           commands.push(command);
-          // one container that cannot be read keeps the others
-          try { return await command.agentPlansJson(c.branch, { remote: c.remote ?? 'local' }); } catch { return []; }
+          // one container that cannot be read keeps the others, and is named
+          try { return await command.agentPlansJson(c.branch, { remote: c.remote ?? 'local' }); } catch { return c.branch; }
         }));
-        return each.flat();
+        const unreadable = each.filter((e): e is string => typeof e === 'string');
+        return { plans: each.flatMap(e => (typeof e === 'string' ? [] : e)), unreadable };
       })();
-      return { available: true, plans: await Promise.race([work, timeout]) };
+      const done = await Promise.race([work, timeout]);
+      return { available: true, plans: done.plans, ...(done.unreadable.length ? { unreadable: done.unreadable } : {}) };
     } catch (error) {
       return { available: false, message: error instanceof Error ? error.message : String(error), plans: [] };
     } finally {
@@ -404,10 +423,15 @@ export class AgentCommand extends BaseCommand {
     const tmux = await readTaggedTmuxSessions();
     const running = Array.isArray(tmux) ? tmux.map(s => s.name) : null;
     const kunjDir = getKunjDir();
-    let recorded: string[] = [];
-    try {
-      recorded = fs.readdirSync(agentPlanDir(kunjDir)).filter(f => f.endsWith('.ndjson')).map(f => f.slice(0, -'.ndjson'.length));
-    } catch { /* nothing recorded yet */ }
+    const recorded = recordedPlanSessions(kunjDir);
+    // A running session belongs to the worktree it is tagged with, whatever branch its name was made
+    // from: a record is matched by name only for a session that is not tagged with another worktree
+    const tagOf = new Map((Array.isArray(tmux) ? tmux : []).map(s => [s.name, s.worktree] as const));
+    const elsewhere = (session: string, worktree: string): boolean => {
+      const tag = tagOf.get(session);
+      return !!tag && path.resolve(tag) !== path.resolve(worktree);
+    };
+    const listed = new Set<string>();
     const roots = listing.worktrees.map(w => w.path);
 
     const plans: AgentPlanItemJson[] = [];
@@ -416,10 +440,13 @@ export class AgentCommand extends BaseCommand {
       const sessions = Array.isArray(tmux) ? worktreeAgentSessions(tmux, base, wt.path) : [];
       for (const session of recorded) {
         const sid = agentSessionId(session, base);
-        if (sid !== undefined && !sessions.some(s => s.session === session)) sessions.push({ session, id: sid });
+        if (sid !== undefined && !elsewhere(session, wt.path) && !sessions.some(s => s.session === session)) sessions.push({ session, id: sid });
       }
       for (const s of sessions) {
         if (id !== undefined && s.id !== id) continue;
+        // one item per session, even if two worktrees could claim it
+        if (listed.has(s.session)) continue;
+        listed.add(s.session);
         const isRunning = running ? running.includes(s.session) : null;
         const text = readPlanFile(agentPlanFile(kunjDir, s.session));
         if (!text.trim() && isRunning !== true) continue;

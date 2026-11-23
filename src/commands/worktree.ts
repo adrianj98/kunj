@@ -23,7 +23,8 @@ import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { BaseCommand } from '../lib/command';
-import { loadConfig, loadResolvedConfig } from '../lib/config';
+import { getKunjDir, loadConfig, loadResolvedConfig } from '../lib/config';
+import { removePlanRecords } from '../lib/agent-plan';
 import { repoVariables } from '../lib/config-vars';
 import { HookRunResult, runHook, warnHookFailures, worktreeHookContext } from '../lib/hooks';
 import {
@@ -60,7 +61,7 @@ import {
 } from '../lib/keep';
 import { resolveBaseRef } from '../lib/base-branch';
 import { recordRepo } from '../lib/repos';
-import { AgentError, agentArgv, checkShellSessionId, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, pickSession, readTaggedTmuxSessions, runTmux, shellSessionName, worktreeShellSessions } from '../lib/agent-session';
+import { AgentError, agentArgv, agentSessionName, checkShellSessionId, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, pickSession, readTaggedTmuxSessions, runTmux, shellSessionName, worktreeShellSessions } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
 import type { BranchContainerJson, ShellKillJson, WorktreeJson, WorktreeListContainersJson, WorktreeListJson } from '../lib/json-types';
 import { describeError, formatError, UserError } from '../lib/errors';
@@ -576,6 +577,13 @@ export class WorktreeCommand extends BaseCommand {
     }
 
     unregisterSession({ path: wt.path });
+    // its agents' plan records would otherwise be listed as ended sessions for ever (fs only)
+    if (wt.branch) {
+      try {
+        const id = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
+        removePlanRecords(getKunjDir(), agentSessionName(id.name, id.id, wt.branch));
+      } catch { /* the records are an extra */ }
+    }
 
     // The directory is gone, so this runs from the main worktree
     const post = await runHook('post-worktree-delete', worktreeHookContext(repo, wt.path, wt.branch), hookOptions);

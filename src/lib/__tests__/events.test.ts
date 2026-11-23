@@ -306,6 +306,17 @@ describe('watchEvents', () => {
     expect(ofType('agent')[0]).toEqual({ type: 'agent', session: 'kunj-app-x-abc123', running: true, state: 'waiting', repo: { name: 'app', root: repo.root }, at: expect.any(String) });
   });
 
+  it('a write to agent-plan/<session>.ndjson is a plan event, never an agent one', async () => {
+    const planDir = path.join(kunjDir, 'app', 'agent-plan');
+    fs.mkdirSync(planDir, { recursive: true });
+    start();
+    await prime('plan', () => fs.writeFileSync(path.join(planDir, 'kunj-app-x-abc123.ndjson'), '{}\n'));
+    fs.appendFileSync(path.join(planDir, 'kunj-app-x-abc123.ndjson'), '{}\n');
+    await waitFor(() => ofType('plan').length > 0);
+    expect(ofType('plan')[0]).toEqual({ type: 'plan', session: 'kunj-app-x-abc123', repo: { name: 'app', root: repo.root }, at: expect.any(String) });
+    expect(ofType('agent')).toEqual([]);
+  });
+
   it('agent state is watched in the directory kunj names after origin, not the folder', async () => {
     // A bare clone or a folder named differently: kunj agent writes ~/.kunj/<origin name>
     fs.writeFileSync(path.join(repo.gitCommonDir, 'config'), '[remote "origin"]\n\turl = git@github.com:acme/app.git\n');

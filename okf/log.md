@@ -167,3 +167,4 @@
 - Agent plan, CLI side: plan hooks and record, `reducePlan()`, `kunj agent plan`, `kunj ct agent --plan`, `agent.plan`. Page updated: features/worktree-agents.md.
 - Workspace app Overview window written (not built yet); a container's plan change in `kunj events` (`container` action `plan`). Pages updated: apps/workspace-app.md.
 - `kunj agent overview`: the Overview's grouping, text and layout moved from the workspace app into the CLI (`AgentOverviewJson`). Pages updated: apps/workspace-app.md, features/worktree-agents.md.
+- Review fixes on the agent plan: `plan` is its own event type, plan variables stay out of the tmux client's environment, no machine wake for `--plan`, records cleaned with their worktree. Page updated: features/worktree-agents.md.

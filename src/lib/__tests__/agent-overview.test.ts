@@ -74,6 +74,13 @@ describe('geometry', () => {
     expect(layout.width).toBe(m.labelWidth + 404 + m.trailing);
   });
 
+  it('tasks finished out of order do not read as all done', () => {
+    const lane = one(plan('a', { steps: [done, step(2), step(3, 'completed')], current: 1 }));
+    expect(lane.status).toBe('Step 2 of 3');
+    expect(lane.line!.doneToX).toBe(172);
+    expect(lane.stops.map(s => s.kind)).toEqual(['done', 'current', 'done']);
+  });
+
   it('a finished line is done to its end and a fresh one not at all', () => {
     expect(one(plan('a', { steps: [done, step(2, 'completed')] })).line!.doneToX).toBe(172);
     expect(one(plan('a', { steps: [step(1, 'in_progress'), step(2)], current: 0 })).line!.doneToX).toBeNull();

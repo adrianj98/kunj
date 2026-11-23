@@ -63,8 +63,11 @@ export function currentStep(steps: AgentPlanStepJson[]): number | null {
   if (active >= 0) return active;
   let last = -1;
   steps.forEach((s, i) => { if (s.status === 'completed') last = i; });
+  // the next one after the last finished; tasks done out of order leave an earlier one, which is then it
   const next = steps.findIndex((s, i) => i > last && s.status === 'pending');
-  return next >= 0 ? next : null;
+  if (next >= 0) return next;
+  const earlier = steps.findIndex(s => s.status === 'pending');
+  return earlier >= 0 ? earlier : null;
 }
 
 // Where a marker or a subagent attaches: the step in progress, else the last one finished
@@ -192,14 +195,17 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       }
     } else if (event === 'PostToolUse' && hook.tool_name === 'TodoWrite' && Array.isArray(input.todos)) {
       // The legacy tool rewrites the whole list: keep the times of entries that are still there
-      const before = [...tasks.values()].filter(t => t.owner === agent);
+      // the same owner for what is replaced and what replaces it: a subagent whose start was not
+      // recorded (a cut record) writes to the session's own list both times
+      const owner = agent && subagents.has(agent) ? agent : null;
+      const before = [...tasks.values()].filter(t => t.owner === owner);
       for (const t of before) { tasks.delete(t.id); order = order.filter(o => o !== t.id); }
       input.todos.forEach((todo: any, i: number) => {
         const subject = str(todo?.content);
         if (!subject) return;
-        const id = `${agent ?? 'todo'}-${i}`;
+        const id = `${owner ?? 'todo'}-${i}`;
         const old = before.find(t => t.subject === subject);
-        const task: Task = { id, subject, status: 'pending', owner: agent && subagents.has(agent) ? agent : null, startedAt: old?.startedAt, completedAt: old?.completedAt };
+        const task: Task = { id, subject, status: 'pending', owner, startedAt: old?.startedAt, completedAt: old?.completedAt };
         if (old) task.status = old.status;
         setStatus(task, todo.status, at);
         if (task.status !== 'completed') delete task.completedAt;
@@ -220,6 +226,29 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
   const steps = all.filter(t => t.owner === null).map(clean);
   for (const sub of subagents.values()) sub.steps = all.filter(t => t.owner === sub.id).map(clean);
   return { title, steps, current: currentStep(steps), markers, subagents: [...subagents.values()], ...(parent ? { parent } : {}), updatedAt, branch, transcript };
+}
+
+// The recorded session names of a repository (the files of its agent-plan directory)
+export function recordedPlanSessions(kunjDir: string): string[] {
+  try {
+    return fs.readdirSync(agentPlanDir(kunjDir)).filter(f => f.endsWith('.ndjson')).map(f => f.slice(0, -'.ndjson'.length));
+  } catch {
+    return [];
+  }
+}
+
+// Removes the records of a branch's sessions (`base` and `base-a-<id>`), e.g. when its worktree is
+// removed; returns the sessions whose record went. Never throws.
+export function removePlanRecords(kunjDir: string, base: string): string[] {
+  const removed: string[] = [];
+  for (const session of recordedPlanSessions(kunjDir)) {
+    if (session !== base && !session.startsWith(`${base}-a-`)) continue;
+    try {
+      fs.unlinkSync(agentPlanFile(kunjDir, session));
+      removed.push(session);
+    } catch { /* already gone */ }
+  }
+  return removed;
 }
 
 // A plan file's text; '' when there is none. Past `maxBytes` only the end is read (a first partial

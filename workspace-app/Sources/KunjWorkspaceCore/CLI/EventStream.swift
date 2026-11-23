@@ -12,8 +12,8 @@ public enum KunjEvent: Equatable, Sendable {
     /// A new agent session `kunj agent start --open-in-app` made (the /handoff skill): the app opens,
     /// selects and focuses its tab once `worktree` is listed.
     case openAgent(session: String, id: String?, worktree: String)
-    /// An agent's plan record changed (`plan: true`): `kunj agent plan` has something new. No listing
-    /// is needed for it; the Overview window reads the plans again.
+    /// An agent's plan record changed (a `plan` event; `session` is the host session or the container):
+    /// `kunj agent overview` has something new. No listing is needed for it.
     case agentPlan(session: String, repoRoot: String?)
     case backend(available: Bool, message: String?)
     case error(code: String?, message: String)
@@ -41,8 +41,6 @@ public func parseEventLine(_ line: String) -> KunjEvent? {
         return .registry(kind: kind, repoRoot: root)
     case "container":
         guard let container = object["container"] as? String, let action = object["action"] as? String else { return nil }
-        // the agents' plan records in the container changed: the Overview reads them again; no listing
-        if action == "plan" { return .agentPlan(session: container, repoRoot: root) }
         return .container(repoRoot: root, branch: object["branch"] as? String, container: container, action: action)
     case "machine":
         // A cloud machine changed state: what the container listing shows for its branch changed too,
@@ -54,8 +52,11 @@ public func parseEventLine(_ line: String) -> KunjEvent? {
         if running, object["open"] as? String == "app", let worktree = object["worktree"] as? String, !worktree.isEmpty {
             return .openAgent(session: session, id: object["id"] as? String, worktree: worktree)
         }
-        if object["plan"] as? Bool == true { return .agentPlan(session: session, repoRoot: root) }
         return .agent(session: session, running: running, state: object["state"] as? String, repoRoot: root)
+    case "plan":
+        // an agent's plan record changed, on the host (`session`) or in a branch container (`container`)
+        guard let name = (object["session"] as? String) ?? (object["container"] as? String) else { return nil }
+        return .agentPlan(session: name, repoRoot: root)
     case "backend":
         guard let status = object["status"] as? String else { return nil }
         return .backend(available: status == "available", message: object["message"] as? String)

@@ -69,6 +69,9 @@ const stateFile = agentStateFile('/h/.kunj/app', session);
 const claudeWithHooks = withAgentHooks('claude', stateFile, true, true);
 // What a claude agent gets on top of the KUNJ_* variables: its plan record and Claude Code's task tools
 const planVars = (session: string) => ({ KUNJ_AGENT_PLAN: `/h/.kunj/app/agent-plan/${session}.ndjson`, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' });
+// The tmux client's own environment carries the KUNJ_* variables but never the plan ones: a client
+// that starts the tmux server would hand them to every later session
+const clientEnv = (vars: Record<string, string>) => Object.fromEntries(Object.entries(vars).filter(([k]) => k !== 'KUNJ_AGENT_PLAN' && k !== 'CLAUDE_CODE_ENABLE_TODO_TOOLS'));
 const tmuxSessions = readTmuxSessions as jest.Mock;
 // tmux runs the agent under `kunj run --branch <b>`, which unlocks the vault inside the session
 const underRun = (branch: string, command: string) => hostRunArgv(branch, [loginShell(), '-lc', command]);
@@ -111,7 +114,7 @@ test('start runs tmux in the worktree with agent.command', async () => {
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('start', 'feature-a', {});
   const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: `/h/.kunj/app/agent-resume/${session}.json`, ...planVars(session) };
-  expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', underRun('feature-a', claudeWithHooks), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(vars));
+  expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', underRun('feature-a', claudeWithHooks), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(clientEnv(vars)));
   // tmux takes a new session's environment from its server, not this client: the values go in argv
   expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(expect.arrayContaining(['-e', 'KUNJ_BRANCH=feature-a', '-e', 'KUNJ_WORKTREE=/wt/feature-a']));
 });
@@ -312,7 +315,7 @@ describe('--session: several agents per worktree', () => {
     await new AgentCommand().execute('start', 'feature-a', { session: 'two' } as any);
     const file = agentStateFile('/h/.kunj/app', two);
     const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: file, KUNJ_AGENT_RESUME: `/h/.kunj/app/agent-resume/${two}.json`, ...planVars(two) };
-    expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', underRun('feature-a', withAgentHooks('claude', file, true, true)), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(vars));
+    expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', underRun('feature-a', withAgentHooks('claude', file, true, true)), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(clientEnv(vars)));
     expect(two).toBe(session + '-a-two');
   });
 
@@ -508,7 +511,8 @@ describe('plan', () => {
     await new AgentCommand().execute('overview', { json: true, containers: true });
     const o = JSON.parse(stdout.join(''));
     expect(containerPlansJson.mock.calls).toEqual([['feat/a', { remote: 'local' }], ['feat/d', { remote: 'box' }]]);
-    expect(o).toMatchObject({ agents: 1, waiting: 1, containers: { available: true } });
+    // the container that could not be read is named, not passed over in silence
+    expect(o).toMatchObject({ agents: 1, waiting: 1, containers: { available: true, unreadable: ['feat/d'] } });
     expect(o.families[0].lanes[0]).toMatchObject({ container: 'kunj-app-a', place: 'feat/a · container', status: 'Waiting for input', labelBeside: true });
   });
 
@@ -519,6 +523,54 @@ describe('plan', () => {
     const o = JSON.parse(stdout.join(''));
     expect(o.agents).toBe(1);
     expect(o.containers).toEqual({ available: false, message: 'Cannot connect to the Docker daemon' });
+  });
+
+  test('the plan variables reach the session (-e) but not the tmux client, even when inherited', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    process.env.KUNJ_AGENT_PLAN = nodePath.join(dir, 'agent-plan', 'kunj-app-main-123abc.ndjson');
+    await new AgentCommand().execute('start', 'feature-a', {});
+    const [argv, , env] = (runTmux as jest.Mock).mock.calls[0];
+    expect(argv).toContain(`KUNJ_AGENT_PLAN=${nodePath.join(dir, 'agent-plan', `${session}.ndjson`)}`);
+    expect(argv).toContain('CLAUDE_CODE_ENABLE_TODO_TOOLS=1');
+    expect(env).not.toHaveProperty('KUNJ_AGENT_PLAN');
+    expect(env).not.toHaveProperty('CLAUDE_CODE_ENABLE_TODO_TOOLS');
+    expect(env.KUNJ_BRANCH).toBe('feature-a');
+  });
+
+  test('a session tagged with another worktree is not listed here by its name, even with a record', async () => {
+    const { readTaggedTmuxSessions } = jest.requireMock<any>('../../lib/agent-session');
+    readTaggedTmuxSessions.mockResolvedValueOnce([{ name: session, worktree: '/wt/moved-away' }]);
+    record(session, [create('1', 'Belongs to the worktree that moved')]);
+    await new AgentCommand().execute('plan', 'feature-a', { json: true });
+    expect(JSON.parse(stdout.join('')).plans).toEqual([]);
+    // tagged with this worktree, it is listed once
+    stdout.length = 0;
+    readTaggedTmuxSessions.mockResolvedValueOnce([{ name: session, worktree: '/wt/feature-a' }]);
+    await new AgentCommand().execute('plan', 'feature-a', { json: true });
+    expect(JSON.parse(stdout.join('')).plans.map((p: any) => p.session)).toEqual([session]);
+  });
+
+  test('a reattach after a failed tmux listing keeps the running agent\'s record', async () => {
+    tmuxSessions.mockResolvedValue('failed');
+    (hasTmuxSession as jest.Mock).mockResolvedValue(true);
+    record(session, [create('1', 'Still working')]);
+    await new AgentCommand().execute('start', 'feature-a', {});
+    expect(realFs.readFileSync(nodePath.join(dir, 'agent-plan', `${session}.ndjson`), 'utf8')).toContain('Still working');
+    (hasTmuxSession as jest.Mock).mockResolvedValue(false);
+  });
+
+  test('forget --all also removes the record of an ended session that saved no conversation', async () => {
+    tmuxSessions.mockResolvedValue([session]);
+    record(session, [create('1', 'running, kept')]);
+    record(`${session}-a-dead`, [create('1', 'ended')]);
+    record('kunj-app-other-abcdef', [create('1', 'another branch')]);
+    const unlink = jest.requireMock<any>('fs').unlinkSync as jest.Mock;
+    unlink.mockClear();
+    unlink.mockImplementation((file: string) => { if (!String(file).includes(`${session}-a-dead.ndjson`)) throw new Error('ENOENT'); });
+    await new AgentCommand().execute('forget', 'feature-a', { json: true, all: true } as any);
+    expect(JSON.parse(stdout.join('')).forgotten).toEqual([`${session}-a-dead`]);
+    expect(unlink.mock.calls.map(c => nodePath.basename(c[0]))).toEqual([`${session}-a-dead.json`, `${session}-a-dead.ndjson`]);
+    unlink.mockReset();
   });
 
   test('a start from inside another agent\'s session records that parent and its step', async () => {

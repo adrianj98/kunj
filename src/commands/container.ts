@@ -364,8 +364,10 @@ export class ContainerCommand extends BaseCommand {
       case 'start':
         return { branch: target, wake: true, create: true };
       case 'exec':
-      case 'agent':
         return { branch: this.splitCommand(target, rest).branch, wake: true, create: false };
+      case 'agent':
+        // --plan only reads: a sleeping machine has nothing new to say and is left asleep
+        return { branch: this.splitCommand(target, rest).branch, wake: !options.plan, create: false };
       case 'forward':
         return { branch: !options.auto && isForwardSpec(target) ? undefined : target, wake: true, create: false };
       case 'shell':
@@ -930,6 +932,8 @@ export class ContainerCommand extends BaseCommand {
   /** The plans of a branch container's agents, for `kunj agent overview --containers` (one instance per call). */
   async agentPlansJson(branch: string, options: { remote?: string; context?: string } = {}): Promise<AgentPlanItemJson[]> {
     this.jsonMode = true;
+    // a coordinator remote needs the branch to find its machine; reading a plan never wakes one
+    this.machineIntent = { branch, wake: false, create: false };
     try {
       return await this.containerPlans(await this.context({ ...options, json: true } as ContainerOptions), branch, undefined);
     } finally {

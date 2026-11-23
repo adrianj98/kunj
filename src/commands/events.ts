@@ -73,6 +73,9 @@ export function formatEvent(e: EventJson): string {
     case 'agent':
       rest = `${e.session} ${e.running ? 'started' : 'ended'}`;
       break;
+    case 'plan':
+      rest = `${e.repo?.name ?? '-'} ${e.session ?? e.container ?? ''}`.trimEnd();
+      break;
     case 'machine':
       rest = `${e.repo?.name ?? '-'} ${e.branch} ${e.state} ${e.machine}`;
       break;

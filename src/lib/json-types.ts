@@ -490,9 +490,13 @@ export type EventJson = { at: string } & (
       /** A new session's worktree (its @kunj_worktree tag), from the tmux poll */
       worktree?: string;
       /** `app` when `kunj agent start --open-in-app` started it: the workspace app opens and focuses it */
-      open?: 'app';
-      /** true when the session's plan record changed (`kunj agent plan`), from the hooks */
-      plan?: true }
+      open?: 'app' }
+  /**
+   * An agent's plan record changed (`kunj agent plan` and `kunj agent overview` have something new).
+   * `session` for a host agent, `container` (with `branch`) for the agents of a branch container.
+   * Its own type, so a consumer that does not draw plans ignores it and runs no listing.
+   */
+  | { type: 'plan'; repo?: { name: string; root: string } | null; session?: string; container?: string; branch?: string | null }
   | { type: 'backend'; status: 'available' | 'unavailable'; message?: string }
   /** A cloud machine appeared, changed state or went away (`state: 'deleted'`), as its coordinator lists it */
   | { type: 'machine'; repo: { name: string; root: string } | null; branch: string; machine: string; state: MachineJson['state'] | 'deleted' }
@@ -769,7 +773,7 @@ export interface AgentPlanItemJson {
 
 /**
  * `kunj agent plan [branch] --json`: where each agent session of the worktree is in its plan
- * (`--all-worktrees`: of every worktree of the repository). Sessions that are not running are
+ * (`--all`: of every worktree of the repository). Sessions that are not running are
  * listed too while their record exists.
  */
 export interface AgentPlanJson {
@@ -861,5 +865,5 @@ export interface AgentOverviewJson {
   summary: string;
   metrics: { labelWidth: number; stopSpacing: number };
   families: AgentOverviewFamilyJson[];
-  containers?: { available: boolean; message?: string };
+  containers?: { available: boolean; message?: string; /** Branches whose running container has an agent but could not be read */ unreadable?: string[] };
 }

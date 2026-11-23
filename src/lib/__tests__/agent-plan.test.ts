@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
-import { CONTAINER_PLAN_SCRIPT, currentStep, parentLine, parseContainerPlans, planHookCommand, planTitle, reducePlan } from '../agent-plan';
+import { CONTAINER_PLAN_SCRIPT, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planTitle, reducePlan } from '../agent-plan';
 
 const line = (hook: any, t = 100, branch = 'main') => JSON.stringify({ kunj: { t, branch }, hook });
 const create = (id: string, subject: string, extra: any = {}) => ({ hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: { task: { id, subject } }, ...extra });
@@ -39,6 +39,10 @@ describe('reducePlan', () => {
     expect(reducePlan(text.join('\n')).current).toBe(1);
     expect(reducePlan([...text, line(update('3', 'in_progress'))].join('\n')).current).toBe(2);
     expect(currentStep([])).toBeNull();
+    // done out of order: the one left behind is the current step, not "all done"
+    const outOfOrder = [line(create('1', 'a')), line(create('2', 'b')), line(create('3', 'c')), line(update('1', 'completed')), line(update('3', 'completed'))];
+    expect(reducePlan(outOfOrder.join('\n')).current).toBe(1);
+    expect(reducePlan([...outOfOrder, line(update('2', 'completed'))].join('\n')).current).toBeNull();
   });
 
   it('a failed update changes nothing; a rename is kept', () => {
@@ -102,11 +106,32 @@ describe('reducePlan', () => {
     expect(plan.current).toBe(1);
   });
 
+  it('a TodoWrite from a subagent whose start was not recorded replaces its list instead of doubling it', () => {
+    const todo = (todos: any[]) => ({ hook_event_name: 'PostToolUse', tool_name: 'TodoWrite', agent_id: 'unknown', tool_input: { todos } });
+    const plan = reducePlan([
+      line(todo([{ content: 'a', status: 'in_progress' }, { content: 'b', status: 'pending' }]), 1),
+      line(todo([{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }]), 2),
+    ].join('\n'));
+    expect(plan.steps.map(s => [s.subject, s.status])).toEqual([['a', 'completed'], ['b', 'in_progress']]);
+  });
+
   it('the title is the first heading of the plan from plan mode', () => {
     const exit = { hook_event_name: 'PostToolUse', tool_name: 'ExitPlanMode', tool_input: { plan: 'intro\n\n# Plan: Agent overview\n\n## Steps' } };
     expect(reducePlan(line(exit)).title).toBe('Agent overview');
     expect(planTitle('just a line')).toBe('just a line');
     expect(planTitle('')).toBeNull();
+  });
+});
+
+describe('removePlanRecords', () => {
+  it('removes the records of a branch\'s sessions and no other', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-plan-rm-'));
+    fs.mkdirSync(agentPlanDir(dir));
+    for (const s of ['kunj-r-x-abc123', 'kunj-r-x-abc123-a-two', 'kunj-r-x-abc1234', 'kunj-r-y-def456']) fs.writeFileSync(agentPlanFile(dir, s), '');
+    expect(removePlanRecords(dir, 'kunj-r-x-abc123').sort()).toEqual(['kunj-r-x-abc123', 'kunj-r-x-abc123-a-two']);
+    expect(recordedPlanSessions(dir).sort()).toEqual(['kunj-r-x-abc1234', 'kunj-r-y-def456']);
+    expect(removePlanRecords(path.join(dir, 'nowhere'), 'x')).toEqual([]);
+    fs.rmSync(dir, { recursive: true });
   });
 });
 

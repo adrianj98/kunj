@@ -522,6 +522,12 @@ describe('ContainerCommand', () => {
       expect(JSON.parse(stdout.join('')).plans.map((p: any) => p.session)).toEqual(['agent-two']);
     });
 
+    it('--plan never wakes a cloud machine, a plain agent does', () => {
+      const intentOf = (options: object) => (new ContainerCommand() as any).intentOf('agent', 'feat', [], options);
+      expect(intentOf({ plan: true })).toEqual({ branch: 'feat', wake: false, create: false });
+      expect(intentOf({})).toEqual({ branch: 'feat', wake: true, create: false });
+    });
+
     it('refuses a bad id', async () => {
       backend.existing = [mainContainer('feat')];
       await new ContainerCommand().execute('agent', 'feat', [], { session: '../x' } as any);

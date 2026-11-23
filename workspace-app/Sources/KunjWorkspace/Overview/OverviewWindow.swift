@@ -192,7 +192,9 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
                     do {
                         let json: AgentOverviewJson = try await cli.run(agentOverviewArguments(), cwd: repo.root, timeout: 30)
                         let problem = json.containers.flatMap { c -> String? in
-                            c.available ? nil : "\(repo.name) containers: \(c.message ?? "Docker could not be asked")"
+                            if !c.available { return "\(repo.name) containers: \(c.message ?? "Docker could not be asked")" }
+                            guard let unreadable = c.unreadable, !unreadable.isEmpty else { return nil }
+                            return "\(repo.name): could not read the agents in \(unreadable.joined(separator: ", "))"
                         }
                         return (index, json, problem)
                     } catch {

@@ -18,10 +18,10 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 | --- | --- |
 | Probe: what the hooks really deliver | Done 2026-11-23, Claude Code 2.1.330 (see What the probe found) |
 | CLI: plan capture in the agent hooks, host and container (`agent.plan`) | Shipped |
-| CLI: `kunj agent plan [--all] --json` (`AgentPlanJson`), `kunj ct agent --plan`, `plan: true` on the `agent` event | Shipped |
+| CLI: `kunj agent plan [--all] --json` (`AgentPlanJson`), `kunj ct agent --plan`, the `plan` event | Shipped |
 | CLI: `kunj agent overview [--containers] --json` (`AgentOverviewJson`): grouping, text and layout | Shipped; run against a recorded live session |
 | CLI: parent link for a start from inside another agent's session (handoff) | Shipped |
-| `kunj events` for a container's plan: `container` with `action: 'plan'` when the records' size in the status script changes | Shipped |
+| `kunj events` for a container's plan: a `plan` event with `container` when the records' size in the status script changes | Shipped |
 | Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Written 2026-11-23. The Core half (the decoder of `AgentOverviewJson`, the filter, the events; `OverviewTests`) was compiled and its tests run with Swift 6.0.3 on Linux. The AppKit half (`OverviewWindow`, `OverviewCanvas`, the `AppDelegate` wiring) was only syntax-checked: **never compiled or run**. Left: build on a Mac, run `--demo --overview --screenshot` against the mockup, fix what the compiler and the picture show |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |
 | Rewind forks (needs the transcript) | Later, only if wanted |
@@ -151,10 +151,28 @@ lists the repository's containers across its backends (`ContainerCommand.listJso
 of the running ones that have an agent (`agentPlansJson`, each on its own backend), and gives up on
 them after 8 s: Docker down or slow is `available: false`, never a failed overview.
 
-`kunj events`: an `agent` event with `plan: true` when a host record changes (the directory is
-watched like `agent-state`). The app then asks `kunj agent plan` again. For a container the status
-poll's script prints the records' size (`plan=<bytes>`, `ContainerStatus.planBytes`) and a change is a
-`container` event with `action: 'plan'`, separate from `status` so it costs no listing.
+`kunj events`: `{ type: 'plan', session, repo }` when a host record changes (the directory is watched
+like `agent-state`), and `{ type: 'plan', container, branch, repo }` when a container's records change
+(the status poll's script prints their size, `plan=<bytes>`, `ContainerStatus.planBytes`). It is a type
+of its own on purpose: there are several per step of work, an `agent` or `container` event would make
+every consumer that does not draw plans run a listing, and it says nothing about what runs.
+
+## Review fixes (2026-11-23)
+
+From a code review of the CLI side, each with a test:
+
+- `currentStep()`: tasks finished out of order no longer read as "all done" while one is pending.
+- `kunj agent plan`: a session tagged with another worktree is not also listed, by its name, under the
+  worktree that now has its branch; one item per session.
+- The plan variables go to the agent's session only (`new-session -e`), never to the tmux client's
+  environment: a client that starts the tmux server would hand them to every later session, and an
+  agent started from any pane would look handed off.
+- `kunj ct agent --plan` and the overview never wake a cloud machine, and find a branch's machine
+  through a coordinator; a container that could not be read is named in `containers.unreadable`.
+- A reattach after a failed tmux listing no longer empties the running agent's record.
+- `TodoWrite` from a subagent whose start was not recorded replaces its list instead of doubling it.
+- `kunj agent forget --all` also removes the record of an ended session with no saved conversation,
+  and removing a worktree removes its branch's records.
 
 ## The window
 
@@ -174,8 +192,7 @@ families (a family shows when any of its lanes passes).
   lane passes), `overviewSummary()` (kunj's line for one repository, the totals for several) and
   `laneIndex(at:in:)` for a click. `OverviewCanvas` strokes the positions as given. No layout, no
   grouping and no wording in Swift.
-- **Refresh:** `KunjEvent.agentPlan` (an `agent` event with `plan: true`, or a `container` event with
-  action `plan`) → `EnvironmentStore.onPlanChanged`, which runs no listing; the store's `onChange`
+- **Refresh:** `KunjEvent.agentPlan` (a `plan` event, of a host session or of a container) → `EnvironmentStore.onPlanChanged`, which runs no listing; the store's `onChange`
   (an agent started, ended or began waiting); and every 10 s while the window is visible. Changes
   are gathered for 0.3 s.
 - **Checking it:** `--demo --overview --screenshot <png>` draws `DemoPlans`, the mockup's agents as kunj lays

@@ -95,8 +95,8 @@ app's Resume Agent… (⌘⇧R) shows that list and opens the picked one with `-
 list), the current step, subagents with their own steps (a subagent's calls carry `agent_id`; it shares the
 session's task list), branch/worktree/fork/compact markers and the parent of a handed-off agent
 (`parentLine()`, written by a start from inside another agent's session). `kunj agent plan [--all] --json`
-and `kunj ct agent --plan` print it as `AgentPlanJson`; `kunj events` sends `agent` with `plan: true` when a
-host record changes. `kunj agent overview [--containers] --json` (`AgentOverviewJson`, `buildOverview()` in
+and `kunj ct agent --plan` print it as `AgentPlanJson`; `kunj events` sends a `plan` event (its own type,
+with `session`, or `container` for a branch container) when a record changes. `kunj agent overview [--containers] --json` (`AgentOverviewJson`, `buildOverview()` in
 src/lib/agent-overview.ts) is the same agents ready to draw: grouped, with their text and positions.
 The agent is started with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`: newer models have no
 task tools without it.
