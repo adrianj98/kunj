@@ -2,6 +2,15 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — Overview lanes beside the sidebar's rows
+
+- With the Overview selected the sidebar spans the window; its rows keep their width and each agent's
+  line (the "subway") is drawn to the right of its session's row, scrolling with the list. A row with
+  several agents grows to hold them. Why: the user wants the lines to line up with the left list.
+- Dropped the label column (title, place, status) and the repository headings beside the rows; the
+  conversation title is a tooltip on the line's start. Why: the row already says them ("remove the
+  redundant titles").
+
 ## 2026-11-23 — Overview in the middle panel, Open Repository
 
 - The Overview is an item at the top of the sidebar and opens in the middle panel (⌘⇧O too); picking

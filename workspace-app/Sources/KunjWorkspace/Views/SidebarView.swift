@@ -55,6 +55,61 @@ final class SidebarView: NSView {
     var overviewSelected = false { didSet { overviewRow.selected = overviewSelected } }
     private let scroll = NSScrollView()
     private let list: SidebarListView
+    /// The rows' column: the whole sidebar, or its usual width while the Overview spans the window.
+    private let column = NSLayoutGuide()
+    private var columnFull: NSLayoutConstraint!
+    private var columnWidth: NSLayoutConstraint!
+    /// The agents' plans right of the rows while the Overview is shown (`showPlans`).
+    let plans = OverviewCanvas(frame: .zero)
+    private var planData: (repos: [AgentOverviewJson], filter: OverviewFilter)?
+    /// Where the list starts: the Overview's bar sits above it, right of the search.
+    var listTopAnchor: NSLayoutYAxisAnchor { scroll.topAnchor }
+
+    /// The rows' width while the Overview spans the window (the sidebar's usual width); nil: the
+    /// sidebar is the rows' column.
+    var overviewColumn: CGFloat? {
+        didSet {
+            guard overviewColumn != oldValue else { return }
+            if let w = overviewColumn {
+                columnFull.isActive = false
+                columnWidth.constant = w
+                columnWidth.isActive = true
+            } else {
+                columnWidth.isActive = false
+                columnFull.isActive = true
+            }
+            list.columnWidth = overviewColumn
+            if overviewColumn == nil { showPlans(nil) } else { list.needsLayout = true }
+        }
+    }
+
+    /// Draws the agents' plans beside their rows (nil removes them): a row grows to hold its agents.
+    func showPlans(_ data: (repos: [AgentOverviewJson], filter: OverviewFilter)?) {
+        planData = data
+        if data == nil {
+            plans.removeFromSuperview()
+            list.plans = nil
+            list.rowHeights = [:]
+            plans.show([], filter: .all)
+            plans.setPulsing(false)
+        } else {
+            list.plans = plans
+        }
+        placePlans()
+    }
+
+    /// Which row each lane is beside and how tall the rows get, then the lanes at the rows' tops.
+    private func placePlans() {
+        guard let data = planData else { return }
+        let alignment = alignOverview(data.repos, filter: data.filter, environments: list.rows.map(\.environment),
+                                      rowHeight: Double(SidebarRowView.height))
+        list.rowHeights = alignment.rowHeights.mapValues { CGFloat($0) }
+        list.onPlaced = { [weak self] tops in
+            guard let self, let data = self.planData else { return }
+            self.plans.showAligned(data.repos, filter: data.filter, lanes: alignment.lanes, rowTops: tops)
+        }
+        list.layoutRows()
+    }
     private let footerLine = FillView(.clear)
     private let newSession: ActionButton
     private let agents = makeLabel("", font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
@@ -85,15 +140,22 @@ final class SidebarView: NSView {
         overviewRow.onPress = { [weak self] in self?.onOverview() }
         overviewRow.translatesAutoresizingMaskIntoConstraints = false
         for v in [search, overviewRow, scroll, footerLine, newSession, agents, version] as [NSView] { addSubview(v) }
+        addLayoutGuide(column)
+        columnFull = column.trailingAnchor.constraint(equalTo: trailingAnchor)
+        columnWidth = column.widthAnchor.constraint(equalToConstant: 272)
         let pad: CGFloat = 12
         NSLayoutConstraint.activate([
+            column.leadingAnchor.constraint(equalTo: leadingAnchor),
+            column.topAnchor.constraint(equalTo: topAnchor),
+            column.bottomAnchor.constraint(equalTo: bottomAnchor),
+            columnFull,
             search.topAnchor.constraint(equalTo: topAnchor, constant: DesignTokens.Layout.headerHeight),
             search.leadingAnchor.constraint(equalTo: leadingAnchor, constant: pad),
-            search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -pad),
+            search.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -pad),
 
             overviewRow.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 10),
             overviewRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            overviewRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            overviewRow.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -8),
             overviewRow.heightAnchor.constraint(equalToConstant: 30),
 
             scroll.topAnchor.constraint(equalTo: overviewRow.bottomAnchor, constant: 8),
@@ -102,18 +164,18 @@ final class SidebarView: NSView {
             scroll.bottomAnchor.constraint(equalTo: footerLine.topAnchor),
 
             footerLine.leadingAnchor.constraint(equalTo: leadingAnchor),
-            footerLine.trailingAnchor.constraint(equalTo: trailingAnchor),
+            footerLine.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             footerLine.heightAnchor.constraint(equalToConstant: 1),
             footerLine.bottomAnchor.constraint(equalTo: newSession.topAnchor, constant: -10),
 
             newSession.leadingAnchor.constraint(equalTo: leadingAnchor, constant: pad),
-            newSession.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -pad),
+            newSession.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -pad),
             newSession.heightAnchor.constraint(equalToConstant: 34),
             newSession.bottomAnchor.constraint(equalTo: agents.topAnchor, constant: -8),
 
             agents.leadingAnchor.constraint(equalTo: leadingAnchor, constant: pad + 4),
             agents.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -pad),
-            version.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(pad + 4)),
+            version.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -(pad + 4)),
             version.firstBaselineAnchor.constraint(equalTo: agents.firstBaselineAnchor),
             version.leadingAnchor.constraint(greaterThanOrEqualTo: agents.trailingAnchor, constant: 8),
         ])
@@ -183,6 +245,8 @@ final class SidebarView: NSView {
         list.rows.forEach { $0.usage = usageOf($0.environment); $0.showUsage = hovering; $0.suspended = isSuspended($0.environment) }
         list.frame.size.width = scroll.contentSize.width
         list.needsLayout = true
+        // other rows: the lanes go beside them again
+        placePlans()
     }
 }
 
@@ -204,6 +268,20 @@ private final class SidebarListView: NSView {
     private var model: [SidebarGroup] = []
     private static let headerHeight: CGFloat = 19, rowGap: CGFloat = 2, groupGap: CGFloat = 18, side: CGFloat = 8
     private static let moreHeight: CGFloat = 26
+    /// The rows' column width while the Overview spans the window; nil: the whole width.
+    var columnWidth: CGFloat? { didSet { needsLayout = true } }
+    /// Rows taller than `SidebarRowView.height`, to hold their agents' lanes (by environment id).
+    var rowHeights: [String: CGFloat] = [:]
+    /// The plans' view, laid right of the rows (nil: none).
+    var plans: NSView? {
+        didSet {
+            guard plans !== oldValue else { return }
+            oldValue?.removeFromSuperview()
+            if let plans { addSubview(plans) }
+        }
+    }
+    /// After a layout: each row's top, by environment id, in the plans' view.
+    var onPlaced: (([String: CGFloat]) -> Void)?
 
     init(theme: Theme) {
         self.theme = theme
@@ -243,11 +321,11 @@ private final class SidebarListView: NSView {
         layoutRows()
     }
 
-    private func layoutRows() {
+    func layoutRows() {
         var y: CGFloat = 0
         var i = 0
         groups = []
-        let width = max(0, bounds.width - Self.side * 2)
+        let width = max(0, (columnWidth ?? bounds.width) - Self.side * 2)
         for (gi, g) in model.enumerated() {
             if gi > 0 { y += Self.groupGap }
             groups.append(Group(root: g.repo.root, name: g.repo.name,
@@ -255,8 +333,9 @@ private final class SidebarListView: NSView {
             y += Self.headerHeight
             for _ in g.environments {
                 y += Self.rowGap
-                rows[i].frame = NSRect(x: Self.side, y: y, width: width, height: SidebarRowView.height)
-                y += SidebarRowView.height
+                let height = rowHeights[rows[i].environment.id] ?? SidebarRowView.height
+                rows[i].frame = NSRect(x: Self.side, y: y, width: width, height: height)
+                y += height
                 i += 1
             }
             if let more = moreRows[g.repo.root] {
@@ -267,6 +346,13 @@ private final class SidebarListView: NSView {
         }
         let height = max(y + 8, superview?.bounds.height ?? 0)
         if frame.height != height { frame.size.height = height }
+        if let plans, let column = columnWidth {
+            let frame = NSRect(x: column, y: 0, width: max(0, bounds.width - column), height: height)
+            if plans.frame != frame { plans.frame = frame }
+            var tops: [String: CGFloat] = [:]
+            for row in rows { tops[row.environment.id] = row.frame.minY }
+            onPlaced?(tops)
+        }
         needsDisplay = true
     }
 
@@ -289,7 +375,7 @@ private final class SidebarListView: NSView {
                                       withAttributes: nameAttrs)
             let count = "\(g.count)" as NSString
             let countSize = count.size(withAttributes: countAttrs)
-            count.draw(at: NSPoint(x: bounds.width - Self.side * 2 - ceil(countSize.width),
+            count.draw(at: NSPoint(x: (columnWidth ?? bounds.width) - Self.side * 2 - ceil(countSize.width),
                                    y: (mid - countSize.height / 2).rounded()), withAttributes: countAttrs)
         }
     }

@@ -31,7 +31,10 @@ final class OverviewPanel: NSView {
         }
     }
 
-    let canvas = OverviewCanvas(frame: .zero)
+    /// Where the plans are drawn: the panel's own (the Overview window) or the sidebar's, beside its rows.
+    let canvas: OverviewCanvas
+    /// Set: the plans are drawn by the sidebar (the main window), and the panel is only the bar over them.
+    private let beside: (((repos: [AgentOverviewJson], filter: OverviewFilter)?) -> Void)?
     let scroll = NSScrollView()
     private let summary = makeLabel("", font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
     private let scopePopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -70,7 +73,12 @@ final class OverviewPanel: NSView {
     private var again = false
     private var pending: DispatchWorkItem?
     /// `topInset`: room above the bar (the main window's header height, so it lines up with the sidebar's search).
-    init(topInset: CGFloat = 10) {
+    /// `canvas` and `beside`: the plans go to that canvas through `beside` (the sidebar places them by its
+    /// rows); the panel is then only its bar and legend.
+    init(topInset: CGFloat = 10, canvas: OverviewCanvas? = nil,
+         beside: (((repos: [AgentOverviewJson], filter: OverviewFilter)?) -> Void)? = nil) {
+        self.canvas = canvas ?? OverviewCanvas(frame: .zero)
+        self.beside = beside
         super.init(frame: .zero)
         build(topInset: topInset)
         ThemeManager.shared.onChange.append { [weak self] t in self?.apply(t) }
@@ -88,6 +96,7 @@ final class OverviewPanel: NSView {
     }
 
     private func stop() {
+        beside?(nil)
         timer?.invalidate()
         timer = nil
         pending?.cancel()
@@ -99,7 +108,7 @@ final class OverviewPanel: NSView {
 
     override func layout() {
         super.layout()
-        canvas.rebuild()
+        if beside == nil { canvas.rebuild() }
     }
 
     // MARK: layout
@@ -116,6 +125,10 @@ final class OverviewPanel: NSView {
         scopePopup.setAccessibilityLabel("Repositories")
         canvas.onOpen = { [weak self] lane, repo in self?.onOpen?(lane, repo) }
         canvas.setAccessibilityLabel("Agents and their plans")
+        if beside != nil {
+            buildBar(topInset: topInset)
+            return
+        }
         scroll.documentView = canvas
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = true
@@ -152,6 +165,31 @@ final class OverviewPanel: NSView {
             emptyLabel.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
             emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: scroll.widthAnchor, constant: -40),
+        ])
+    }
+
+    /// Beside the sidebar: the bar on the search's line and the legend on the Overview item's, the
+    /// empty message in the summary.
+    private func buildBar(topInset: CGFloat) {
+        errorLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        legend.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        summary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let bar = NSStackView(views: [scopePopup, summary, spacer, errorLabel, filterControl])
+        bar.orientation = .horizontal
+        bar.spacing = 10
+        for v in [bar, legend] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            bar.centerYAnchor.constraint(equalTo: topAnchor, constant: topInset + 15),
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            legend.centerYAnchor.constraint(equalTo: topAnchor, constant: topInset + 55),
+            legend.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            legend.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
         ])
     }
 
@@ -207,13 +245,15 @@ final class OverviewPanel: NSView {
 
     private func render() {
         summary.stringValue = overviewSummary(repos)
-        canvas.show(repos, filter: filter)
+        if let beside { beside((repos, filter)) } else { canvas.show(repos, filter: filter) }
         canvas.setPulsing(isVisibleNow)
         let asked = overviewRepos(repositories(), open: openRepositories(), scope: scope)
         emptyLabel.stringValue = asked.isEmpty && scope == .open
             ? "No repository has an open session. Pick one from the menu above, or All repositories."
             : (repos.allSatisfy { $0.agents == 0 } && !loading ? "No agents running" : "")
         emptyLabel.isHidden = emptyLabel.stringValue.isEmpty || demoRepos != nil
+        // beside the sidebar there is no room in the middle: the summary says it
+        if beside != nil, !emptyLabel.stringValue.isEmpty, demoRepos == nil { summary.stringValue = emptyLabel.stringValue }
         isSettled = true
     }
 
@@ -223,7 +263,7 @@ final class OverviewPanel: NSView {
     }
 
     @objc private func filterChanged(_ sender: Any?) {
-        canvas.show(repos, filter: filter)
+        if let beside { beside((repos, filter)) } else { canvas.show(repos, filter: filter) }
         canvas.setPulsing(isVisibleNow)
     }
 

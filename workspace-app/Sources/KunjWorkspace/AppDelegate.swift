@@ -1001,14 +1001,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The environment an Overview line belongs to: the container by its name, a worktree by its path.
     private func openAgent(of lane: OverviewLane, inRepository root: String) {
         guard !demo, let listed = (store?.repos ?? []).first(where: { $0.repo.root == root }) else { return }
-        let env: Environment?
-        if let container = lane.container {
-            env = listed.environments.first { $0.kind == .container && ($0.containerName == container || $0.branch == lane.branch) }
-        } else {
-            let path = (lane.worktree as NSString).standardizingPath
-            env = listed.environments.first { $0.kind == .worktree && $0.path.map { ($0 as NSString).standardizingPath } == path }
-        }
-        guard let env else { return }
+        guard let env = overviewEnvironment(of: lane, in: listed.environments) else { return }
         openHandedOffAgent(env: env, id: lane.id)
     }
 

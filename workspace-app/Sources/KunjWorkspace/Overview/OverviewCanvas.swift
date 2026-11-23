@@ -92,7 +92,53 @@ final class OverviewCanvas: NSView {
     func show(_ repos: [AgentOverviewJson], filter: OverviewFilter) {
         self.repos = repos
         self.filter = filter
+        aligned = nil
         rebuild()
+    }
+
+    // MARK: beside the sidebar's rows
+    //
+    // The main window's Overview: the sidebar spans the window and this view lies right of its rows,
+    // inside the sidebar's list (so it scrolls with it). The rows say branch, place and state, so the
+    // lanes have no label column and there are no headings; `alignOverview` (Core) says which row each
+    // lane is beside, and the sidebar gives the rows' frames.
+
+    /// A lane beside its row: its own coordinates plus `dy` (and `gx` across) are this view's.
+    private struct Placed {
+        var repo: Int
+        var family: Int
+        var lane: OverviewLane
+        var dy: CGFloat
+        var frame: NSRect
+    }
+    /// Set: the lanes are beside the sidebar's rows (nil: the standalone window's rows and headings).
+    private var aligned: [Placed]?
+    private static let alignedGx: CGFloat = 8
+
+    /// Places the lanes beside the rows: `rowTops` are the rows' tops in this view, by environment id.
+    func showAligned(_ repos: [AgentOverviewJson], filter: OverviewFilter, lanes: [AlignedLane], rowTops: [String: CGFloat]) {
+        self.repos = repos
+        self.filter = filter
+        rows = []
+        aligned = lanes.compactMap { a in
+            guard let top = rowTops[a.environmentId] else { return nil }
+            let slot = top + CGFloat(a.offset)
+            return Placed(repo: a.repo, family: a.family, lane: a.lane, dy: top + CGFloat(a.dy),
+                          frame: NSRect(x: 0, y: slot, width: bounds.width, height: CGFloat(a.height)))
+        }
+        pulsing = (aligned ?? []).flatMap { p -> [NSPoint] in
+            guard !p.lane.waiting else { return [] }
+            return p.lane.stops.filter { $0.stopKind == .current }.map { NSPoint(x: Self.alignedGx + CGFloat($0.x), y: p.dy + CGFloat($0.y)) }
+        }
+        rebuildToolTips()
+        window?.invalidateCursorRects(for: self)
+        needsDisplay = true
+    }
+
+    /// The line's y of the lane a child branched from, when it is shown: where its elbow starts.
+    private func parentLineY(of p: Placed) -> CGFloat? {
+        guard let b = p.lane.elbow else { return nil }
+        return aligned?.first { $0.repo == p.repo && $0.family == p.family && $0.lane.y == b.fromY }.map { $0.dy + CGFloat($0.lane.y) }
     }
 
     func apply(_ t: Theme) {
@@ -115,6 +161,7 @@ final class OverviewCanvas: NSView {
 
     /// Lays the rows out again and resizes to them (also called when the window's width changes).
     func rebuild() {
+        guard aligned == nil else { return }
         rows = []
         pulsing = []
         var y: CGFloat = 0
@@ -163,7 +210,12 @@ final class OverviewCanvas: NSView {
 
     /// Every lane shown, top to bottom
     private var laneRefs: [LaneRef] {
-        rows.flatMap { row -> [LaneRef] in
+        if let aligned {
+            return aligned.compactMap { p in
+                p.repo < repos.count ? LaneRef(lane: p.lane, repo: repos[p.repo].repo, frame: p.frame) : nil
+            }
+        }
+        return rows.flatMap { row -> [LaneRef] in
             guard case .family(let repo, let family, let top) = row, repo < repos.count else { return [] }
             return family.lanes.map {
                 LaneRef(lane: $0, repo: repos[repo].repo,
@@ -236,6 +288,9 @@ final class OverviewCanvas: NSView {
     }
 
     private func lane(at point: NSPoint) -> (OverviewLane, AgentOverviewJson.Repo)? {
+        if aligned != nil {
+            return laneRefs.first { point.y >= $0.frame.minY && point.y < $0.frame.maxY }.map { ($0.lane, $0.repo) }
+        }
         for row in rows {
             guard case .family(let repo, let family, let top) = row else { continue }
             guard point.y >= top, point.y < top + CGFloat(family.height) else { continue }
@@ -255,6 +310,10 @@ final class OverviewCanvas: NSView {
     }
 
     override func resetCursorRects() {
+        if aligned != nil {
+            for ref in laneRefs { addCursorRect(NSRect(x: 0, y: ref.frame.minY, width: bounds.width, height: ref.frame.height), cursor: .pointingHand) }
+            return
+        }
         for row in rows {
             if case .family(_, let family, let top) = row {
                 addCursorRect(NSRect(x: 0, y: top, width: bounds.width, height: CGFloat(family.height)), cursor: .pointingHand)
@@ -271,6 +330,19 @@ final class OverviewCanvas: NSView {
             addToolTip(NSRect(x: gx + CGFloat(stop.x) - radius, y: top + CGFloat(stop.y) - radius, width: radius * 2, height: radius * 2),
                        owner: owner, userData: nil)
         }
+        if let aligned {
+            for p in aligned {
+                // the lane's own text, which the row beside it does not say, over the lane's empty start
+                let owner = "\(p.lane.title) · \(p.lane.status)" as NSString
+                tipOwners.append(owner)
+                addToolTip(NSRect(x: 0, y: p.frame.minY, width: Self.alignedGx + 40, height: p.frame.height), owner: owner, userData: nil)
+                for stop in p.lane.stops where !p.lane.labelBeside {
+                    tip(stop, gx: Self.alignedGx, top: p.dy, radius: 9)
+                }
+                for loop in p.lane.loops { for stop in loop.stops { tip(stop, gx: Self.alignedGx, top: p.dy, radius: 7) } }
+            }
+            return
+        }
         for row in rows {
             guard case .family(let repo, let family, let top) = row, repo < repos.count else { continue }
             let gx = CGFloat(repos[repo].metrics.labelWidth)
@@ -286,6 +358,25 @@ final class OverviewCanvas: NSView {
     private var lineColor: NSColor { theme.color(\.text2, alpha: 0.75) }
 
     override func draw(_ dirtyRect: NSRect) {
+        if let aligned {
+            // over the sidebar's own background, as its rows are
+            for p in aligned where p.repo < repos.count && dirtyRect.intersects(p.frame.insetBy(dx: 0, dy: -60)) {
+                if let selected, selected.root == repos[p.repo].repo.root, selected.session == p.lane.session {
+                    let box = NSRect(x: 0, y: p.frame.minY + 2, width: bounds.width - 8, height: p.frame.height - 4)
+                    let path = NSBezierPath(roundedRect: box, xRadius: CGFloat(DesignTokens.Radius.card), yRadius: CGFloat(DesignTokens.Radius.card))
+                    theme.color(\.raised, alpha: 0.6).setFill()
+                    path.fill()
+                    if window?.firstResponder === self {
+                        theme.color(\.borderStrong).setStroke()
+                        path.lineWidth = 1
+                        path.stroke()
+                    }
+                }
+                draw(lane: p.lane, gx: Self.alignedGx, dy: p.dy, stopSpacing: CGFloat(repos[p.repo].metrics.stopSpacing),
+                     elbowFromY: parentLineY(of: p), label: false)
+            }
+            return
+        }
         theme.color(\.bg).setFill()
         dirtyRect.intersection(bounds).fill(using: .sourceOver)
         for row in rows {
@@ -323,19 +414,34 @@ final class OverviewCanvas: NSView {
     }
 
     private func draw(family: OverviewFamily, metrics: AgentOverviewJson.Metrics, top: CGFloat) {
-        let gx = CGFloat(metrics.labelWidth)
-        func p(_ x: Double, _ y: Double) -> NSPoint { NSPoint(x: gx + CGFloat(x), y: top + CGFloat(y)) }
-
         for lane in family.lanes {
+            draw(lane: lane, gx: CGFloat(metrics.labelWidth), dy: top, stopSpacing: CGFloat(metrics.stopSpacing),
+                 elbowFromY: lane.elbow.map { top + CGFloat($0.fromY) }, label: true)
+        }
+    }
+
+    /// One lane, its coordinates shifted by `gx` across and `dy` down; `elbowFromY` is where the line it
+    /// branched from is (in this view), nil when that is not shown.
+    private func draw(lane: OverviewLane, gx: CGFloat, dy top: CGFloat, stopSpacing: CGFloat, elbowFromY: CGFloat?, label: Bool) {
+        func p(_ x: Double, _ y: Double) -> NSPoint { NSPoint(x: gx + CGFloat(x), y: top + CGFloat(y)) }
+        do {
             let state = lane.waiting ? theme.color(\.amber) : theme.color(\.green)
 
-            // the elbow from the parent's stop
-            if let b = lane.elbow {
+            // the elbow from the parent's stop (down to it, or up when the child's row is above)
+            if let b = lane.elbow, let fromY = elbowFromY {
+                let from = NSPoint(x: gx + CGFloat(b.fromX), y: fromY)
+                let to = p(b.toX, b.toY)
+                let s: CGFloat = to.y >= from.y ? 1 : -1
                 let path = NSBezierPath()
-                path.move(to: p(b.fromX, b.fromY))
-                path.line(to: p(b.fromX, b.toY - 12))
-                path.curve(to: p(b.fromX + 12, b.toY), controlPoint1: p(b.fromX, b.toY - 5), controlPoint2: p(b.fromX + 5, b.toY))
-                path.line(to: p(b.toX, b.toY))
+                path.move(to: from)
+                if abs(to.y - from.y) < 12 {
+                    path.line(to: NSPoint(x: from.x, y: to.y))
+                } else {
+                    path.line(to: NSPoint(x: from.x, y: to.y - 12 * s))
+                    path.curve(to: NSPoint(x: from.x + 12, y: to.y), controlPoint1: NSPoint(x: from.x, y: to.y - 5 * s),
+                               controlPoint2: NSPoint(x: from.x + 5, y: to.y))
+                }
+                path.line(to: to)
                 stroke(path, lineColor, width: 3)
             }
 
@@ -383,7 +489,7 @@ final class OverviewCanvas: NSView {
                     drawText(stop.label, in: NSRect(x: gx + CGFloat(stop.x) + 14, y: top + CGFloat(stop.y) - 8, width: 400, height: 16),
                              font: Theme.sans(Self.stopLabelSize, weight: .semibold), color: theme.color(\.text))
                 } else {
-                    let w = CGFloat(metrics.stopSpacing) - 8
+                    let w = stopSpacing - 8
                     let current = stop.stopKind == .current
                     drawText(stop.label, in: NSRect(x: gx + CGFloat(stop.x) - w / 2, y: top + CGFloat(stop.y) - 29, width: w, height: 15),
                              font: Theme.sans(Self.stopLabelSize, weight: current ? .semibold : .regular),
@@ -391,7 +497,7 @@ final class OverviewCanvas: NSView {
                 }
             }
 
-            drawLabel(lane: lane, width: gx, top: top, state: state)
+            if label { drawLabel(lane: lane, width: gx, top: top, state: state) }
         }
     }
 

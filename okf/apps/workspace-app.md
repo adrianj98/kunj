@@ -168,7 +168,14 @@ main window's middle panel, not a window: the sidebar's Overview item (above the
 running agents' count) or ⌘⇧O selects it (`MainWindowController.showOverview()`; picking a row leaves
 it), and `OverviewPanel` holds the bar, canvas and legend. Its drop-down picks the repositories
 (`OverviewScope`, `overviewRepos()`, remembered in `overviewScope`): those with an open session (the
-sidebar's rule: tabs open or saved; the default), all, or one. `OverviewWindow` remains only for
+sidebar's rule: tabs open or saved; the default), all, or one. Since 2026-11-23 (later) the sidebar spans the window while the Overview is selected
+(`MainWindowController.setOverviewSelected`: `sidebarFill`, `SidebarView.overviewColumn` keeps the rows at
+their width) and each lane is drawn right of its row in the sidebar's own list, so it scrolls with it
+(`SidebarView.plans`, an `OverviewCanvas` in `showAligned` mode with no label column or headings).
+`alignOverview()` in Core says which row a lane is beside (`overviewEnvironment(of:in:)`, also used by a
+click) and how tall each row gets; kunj's positions are kept, a lane only moves up by `alignedLaneRaise`.
+`OverviewPanel` is then only the bar (scope, summary, filter) and legend right of the search.
+`OverviewWindow` remains only for
 `--overview --screenshot`; `-overviewInline YES` screenshots the main window with the Overview selected.
 `OverviewPanel` asks every repository of the scope at once and again on `KunjEvent.agentPlan` (`EnvironmentStore.onPlanChanged`, no listing), on
 the store's `onChange` and every 10 s. A click on a lane opens the agent's tab. `--demo --overview

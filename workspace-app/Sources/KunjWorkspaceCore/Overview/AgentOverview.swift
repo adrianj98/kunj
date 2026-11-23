@@ -202,3 +202,71 @@ public func overviewScopeTitle(_ scope: OverviewScope, repos: [RepoRef], open: S
     case .repo(let root): return repos.first { $0.root == root }?.name ?? "Repository"
     }
 }
+
+// ---- the Overview beside the sidebar's rows
+//
+// With the Overview selected the sidebar spans the window and each row's agents are drawn to its
+// right, on the row's own line: the row already says the branch, the place and the state, so the
+// lanes have no label column and no repository headings. kunj's positions are kept; a lane is only
+// moved up and down to its row (and lanes of one row stacked), never laid out again.
+
+/// Which environment a lane belongs to: a container by its name (or branch), a worktree by its path.
+public func overviewEnvironment(of lane: OverviewLane, in environments: [Environment]) -> Environment? {
+    if let container = lane.container {
+        return environments.first { $0.kind == .container && ($0.containerName == container || $0.branch == lane.branch) }
+    }
+    let path = (lane.worktree as NSString).standardizingPath
+    return environments.first { $0.kind == .worktree && $0.path.map { ($0 as NSString).standardizingPath } == path }
+}
+
+/// A lane beside its row.
+public struct AlignedLane: Equatable, Sendable {
+    /// Index into the overviews given
+    public var repo: Int
+    public var family: Int
+    public var lane: OverviewLane
+    public var environmentId: String
+    /// The lane's top inside its row (lanes of one row stack)
+    public var offset: Double
+    public var height: Double
+    /// Added to the lane's own y values (measured from its family's top) to get y inside the row
+    public var dy: Double { offset - lane.top - alignedLaneRaise }
+}
+
+/// A lane sits this much higher than kunj draws it, so a plain lane's line meets the row's middle.
+public let alignedLaneRaise: Double = 6
+
+/// The height a lane takes beside a row: kunj's height less the raise, and less the room under the line
+/// that only a loop or a marker's label uses.
+public func alignedLaneHeight(_ lane: OverviewLane) -> Double {
+    let spare: Double = lane.loops.isEmpty && lane.markers.isEmpty ? 14 : 0
+    return max(0, lane.height - alignedLaneRaise - spare)
+}
+
+public struct OverviewAlignment: Equatable, Sendable {
+    /// The rows that need more than `rowHeight`, by environment id
+    public var rowHeights: [String: Double]
+    public var lanes: [AlignedLane]
+}
+
+/// Places every lane that passes `filter` beside its environment's row. `environments` are the rows
+/// shown, any repository; a lane whose environment is not among them (a collapsed repository, a
+/// search) is left out. A row grows to fit its lanes, never below `rowHeight`.
+public func alignOverview(_ repos: [AgentOverviewJson], filter: OverviewFilter, environments: [Environment],
+                          rowHeight: Double) -> OverviewAlignment {
+    var lanes: [AlignedLane] = []
+    var used: [String: Double] = [:]
+    for (r, overview) in repos.enumerated() {
+        let shown = environments.filter { $0.repo.root == overview.repo.root }
+        for (f, family) in overview.families.enumerated() where family.lanes.contains(where: { filter.includes($0) }) {
+            for lane in family.lanes {
+                guard let env = overviewEnvironment(of: lane, in: shown) else { continue }
+                let height = alignedLaneHeight(lane)
+                let offset = used[env.id] ?? 0
+                lanes.append(AlignedLane(repo: r, family: f, lane: lane, environmentId: env.id, offset: offset, height: height))
+                used[env.id] = offset + height
+            }
+        }
+    }
+    return OverviewAlignment(rowHeights: used.filter { $0.value > rowHeight }, lanes: lanes)
+}

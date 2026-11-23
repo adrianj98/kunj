@@ -284,10 +284,12 @@ tabs, or the branch changing), kept in the same file.
 ## Overview
 
 **Overview**, at the top of the sidebar (or **Window > Overview**, ⌘⇧O), shows every running agent
-as a line of the steps in its plan, in the middle of the window, so you can see where each one is
-without opening its terminal. Agents are grouped by repository. The menu at its top left picks the
-repositories: those with an open session (the default), all of them, or one. Click a session in the
-sidebar to leave the Overview.
+as a line of the steps in its plan, so you can see where each one is without opening its terminal.
+The sidebar widens across the window and each agent's line is drawn beside its session's row, which
+already names the branch and its state; a row with several agents grows to hold their lines. Hover the
+start of a line to read the agent's conversation title. The menu at the top picks the repositories:
+those with an open session (the default), all of them, or one. Click a session in the sidebar to leave
+the Overview.
 
 - A filled stop is a finished step, the ringed stop is where the agent is now, and hollow stops are
   still to come. The ring is green while the agent works and amber when it waits for you.

@@ -123,3 +123,53 @@ import Testing
         #expect(overviewScopeTitle(.repo("/b"), repos: [a, b], open: []) == "b")
     }
 }
+
+@Suite struct OverviewAlignmentTests {
+    func env(_ branch: String, path: String?, kind: EnvironmentKind = .worktree, container: String? = nil,
+             root: String = "/Users/demo/src/kunj") -> Environment {
+        Environment(id: "\(kind)-\(branch)", kind: kind, repo: RepoRef(name: "kunj", root: root, bare: false), branch: branch,
+                    path: path, containerName: container, state: .running, agent: .running, agentSession: nil, dirty: nil,
+                    changedFiles: nil, ahead: nil, behind: nil, upstream: nil, pullRequest: nil, ports: [], services: [],
+                    createdAt: nil, exists: true, isMain: false)
+    }
+
+    func fixture() async throws -> AgentOverviewJson {
+        try await fakeKunjCLI().run(agentOverviewArguments(), cwd: "/")
+    }
+
+    @Test func lanesGoBesideTheirRows() async throws {
+        let o = try await fixture()
+        let envs = [env("feat/agent-overview", path: "/Users/demo/src/feat/agent-overview/"),
+                    env("feat/agent-overview-app", path: "/Users/demo/src/feat/agent-overview-app"),
+                    env("fix/remote-pty", path: nil, kind: .container, container: "kunj-kunj-fix-remote-pty")]
+        let a = alignOverview([o], filter: .all, environments: envs, rowHeight: 54)
+        // feat/vscode-search has no row: left out
+        #expect(a.lanes.map(\.environmentId) == ["worktree-feat/agent-overview", "worktree-feat/agent-overview-app", "container-fix/remote-pty"])
+        // the root's loop needs room under its line; a plain lane fits the row
+        #expect(a.lanes.map(\.height) == [100, 54, 54])
+        #expect(a.rowHeights == ["worktree-feat/agent-overview": 100])
+        // each starts at its row's top, raised so the line meets the row's middle
+        #expect(a.lanes.map(\.offset) == [0, 0, 0])
+        #expect(a.lanes[1].dy + a.lanes[1].lane.y == 34)
+    }
+
+    @Test func lanesOfOneRowStack() async throws {
+        let o = try await fixture()
+        // both agents of the family in one worktree
+        let one = env("feat/agent-overview", path: "/Users/demo/src/feat/agent-overview")
+        var family = o
+        family.families[0].lanes[1].worktree = "/Users/demo/src/feat/agent-overview"
+        let a = alignOverview([family], filter: .all, environments: [one], rowHeight: 54)
+        #expect(a.lanes.map(\.offset) == [0, 100])
+        #expect(a.rowHeights == [one.id: 154])
+    }
+
+    @Test func filterAndOtherRepositories() async throws {
+        let o = try await fixture()
+        let elsewhere = env("feat/vscode-search", path: "/Users/demo/src/feat/vscode-search", root: "/other")
+        #expect(alignOverview([o], filter: .all, environments: [elsewhere], rowHeight: 54).lanes.isEmpty)
+        let here = env("feat/vscode-search", path: "/Users/demo/src/feat/vscode-search")
+        #expect(alignOverview([o], filter: .running, environments: [here], rowHeight: 54).lanes.isEmpty)
+        #expect(alignOverview([o], filter: .waiting, environments: [here], rowHeight: 54).lanes.count == 1)
+    }
+}

@@ -39,6 +39,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private var splitWidth: NSLayoutConstraint!
     private var fullWidth: NSLayoutConstraint!
     private var sidebarWidth: NSLayoutConstraint!
+    /// The sidebar spans the window (the Overview is selected).
+    private var sidebarFill: NSLayoutConstraint!
+    /// The Overview's bar starts where the rows' column ends.
+    private var overviewLeading: NSLayoutConstraint!
     /// The widths the dividers were dragged to (the standard ones until then); what is shown is
     /// these fitted to the window (`PaneSizes.fitted`).
     var paneSizes = PaneSizes.standard { didSet { applyPaneSizes() } }
@@ -60,8 +64,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     let changesColumn: ChangesColumn
     let filesColumn: FilesColumn
     let statusBar: StatusBarView
-    /// The Overview, in place of the header and the columns while its sidebar item is selected.
-    let overview = OverviewPanel(topInset: DesignTokens.Layout.headerHeight)
+    /// The Overview's bar while its sidebar item is selected: the sidebar then spans the window and
+    /// draws each row's agents beside it (`SidebarView.showPlans`); the bar sits right of the search.
+    let overview: OverviewPanel
     /// The Overview item is selected (no environment is shown; `selectedId` is kept for when it closes).
     private(set) var overviewSelected = false
     private let lines = (0..<4).map { _ in FillView(.clear) }
@@ -75,6 +80,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     init() {
         let t = ThemeManager.shared.current
         sidebar = SidebarView(theme: t)
+        let plansSidebar = sidebar
+        overview = OverviewPanel(topInset: DesignTokens.Layout.headerHeight, canvas: sidebar.plans,
+                                 beside: { [weak plansSidebar] data in plansSidebar?.showPlans(data) })
         header = HeaderView(theme: t)
         terminalColumn = TerminalColumn(theme: t)
         changesColumn = ChangesColumn(theme: t)
@@ -177,6 +185,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         overviewSelected = on
         sidebar.overviewSelected = on
         sidebar.selectedId = on ? nil : selectedId
+        // the sidebar spans the window, its rows keep their width and the plans go right of them
+        if on { sidebarWidth.isActive = false; sidebarFill.isActive = true } else { sidebarFill.isActive = false; sidebarWidth.isActive = true }
+        sidebar.overviewColumn = on ? fittedSizes.sidebar : nil
+        for v in [lines[0], sidebarHandle, mainArea] as [NSView] { v.isHidden = on }
         overview.isShown = on
     }
 
@@ -268,6 +280,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         terminalColumn.setFiles(open: filesVisible)
         overview.isHidden = !overviewSelected || discoveryError != nil
         header.isHidden = !overview.isHidden
+        // beside the plans the sidebar reaches the bottom
+        for v in [statusBar, lines[3]] as [NSView] { v.isHidden = overviewSelected }
         let showColumns = env != nil && overview.isHidden
         for v in [terminalColumn, lines[2]] as [NSView] { v.isHidden = !showColumns }
         for v in [changesColumn, lines[1], splitHandle] as [NSView] { v.isHidden = !showColumns || !changesVisible }
@@ -302,6 +316,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         guard sidebarWidth != nil else { return }
         let f = fittedSizes
         sidebarWidth.constant = f.sidebar
+        overviewLeading.constant = f.sidebar
+        if overviewSelected { sidebar.overviewColumn = f.sidebar }
         filesWidth.constant = filesVisible ? f.files : 0
         changesColumn.fileListWidth = f.fileList
         let share = f.changesShare
@@ -438,10 +454,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             sidebarLine.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             sidebarLine.widthAnchor.constraint(equalToConstant: 1),
 
-            overview.leadingAnchor.constraint(equalTo: sidebarLine.trailingAnchor),
             overview.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             overview.topAnchor.constraint(equalTo: root.topAnchor),
-            overview.bottomAnchor.constraint(equalTo: statusLine.topAnchor),
+            overview.bottomAnchor.constraint(equalTo: sidebar.listTopAnchor),
 
             mainArea.leadingAnchor.constraint(equalTo: sidebarLine.trailingAnchor),
             mainArea.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -496,6 +511,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         ])
         sidebarWidth = effect.widthAnchor.constraint(equalToConstant: paneSizes.sidebar)
         sidebarWidth.isActive = true
+        sidebarFill = effect.trailingAnchor.constraint(equalTo: root.trailingAnchor)
+        overviewLeading = overview.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: paneSizes.sidebar)
+        overviewLeading.isActive = true
         // 11:9 of the width left of the Files column by default (`paneSizes.changesShare`)
         let share = paneSizes.changesShare
         splitWidth = terminalColumn.widthAnchor.constraint(equalTo: changesColumn.widthAnchor, multiplier: (1 - share) / share)
