@@ -206,7 +206,12 @@ families (a family shows when any of its lanes passes).
 - **Checking it:** `--demo --overview --screenshot <png>` draws `DemoPlans`, the mockup's agents as kunj lays
   them out. That file and the test fixture are generated: `node workspace-app/scripts/gen-overview-demo.js`
   after `npm run build`, again after any change to the layout or to `AgentOverviewJson`.
-- Not done: the pulse on the current stop, keyboard access to the lanes, plan steps for a kunj older
+- **Pulse:** the current stop of a working agent (not a waiting one) has a ring that grows and fades,
+  as in the mockup: a `CAShapeLayer` per stop animated by Core Animation, so the view is never redrawn
+  for it (a redraw per frame cost 15-20% CPU; the layers cost nothing measurable). Off while the window
+  is closed, minimised or hidden, and with Reduce motion. `--overview` without `--screenshot` opens the
+  window after launch, to try it by hand.
+- Not done: keyboard access to the lanes, plan steps for a kunj older
   than this command (`agent plan` is then read as a branch name and the window shows kunj's error).
 
 ## Later

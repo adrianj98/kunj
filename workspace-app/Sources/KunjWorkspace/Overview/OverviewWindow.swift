@@ -65,6 +65,14 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
         timer?.invalidate()
         timer = nil
         pending?.cancel()
+        canvas.setPulsing(false)
+    }
+
+    // the pulse only runs while the window can be seen
+    func windowDidMiniaturize(_ notification: Notification) { canvas.setPulsing(false) }
+    func windowDidDeminiaturize(_ notification: Notification) { canvas.setPulsing(true) }
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        canvas.setPulsing(window?.occlusionState.contains(.visible) == true)
     }
 
     func windowDidResize(_ notification: Notification) {
@@ -132,11 +140,17 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
     private func render() {
         summary.stringValue = overviewSummary(repos)
         canvas.show(repos, filter: filter)
+        canvas.setPulsing(isVisibleNow)
         isSettled = true
+    }
+
+    private var isVisibleNow: Bool {
+        window?.isVisible == true && window?.isMiniaturized == false && window?.occlusionState.contains(.visible) == true
     }
 
     @objc private func filterChanged(_ sender: Any?) {
         canvas.show(repos, filter: filter)
+        canvas.setPulsing(isVisibleNow)
     }
 
     // MARK: data

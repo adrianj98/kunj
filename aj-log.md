@@ -1991,3 +1991,6 @@ The user asked to be able to choose a remote in the app when remotes are availab
   Checked live: a background subagent's 3 Reads and a Glob were counted; its hand-back call is left out.
 - Agent overview layout: a marker label that would cover a subagent loop's legs now goes under the loop. Why: the live
   screenshot showed "main → feat/after" drawn over a loop. The demo data has the case now.
+- Overview pulse: a fading ring on each working agent's current stop. First drawn by redrawing the view 30 times a
+  second, which cost 15-20% CPU; moved to Core Animation layers, which cost nothing measurable. `--overview` now opens
+  the window without `--screenshot` too, for trying it by hand.

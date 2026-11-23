@@ -141,6 +141,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             discovery = Task { await self.discoverKunj() }
         }
+        // --overview without --screenshot: open the window once kunj answered, to try it by hand
+        if overviewArgument && screenshotPath == nil {
+            Task { @MainActor [weak self] in
+                await self?.discovery?.value
+                self?.showOverview(nil)
+            }
+        }
 
         if let screenshotPath {
             // After discovery (so the sidebar shows the kunj version and the list) and the next layout pass

@@ -30,8 +30,64 @@ final class OverviewCanvas: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        // a layer of its own, for the pulse's ring layers
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    // MARK: the pulse
+    //
+    // A ring that grows and fades around the current stop of an agent that is working (not one that
+    // waits: amber is still), as in the mockup. Core Animation runs it: one small layer per stop and
+    // no redraw of the view, so it costs next to nothing. It starts just outside the stop's own ring,
+    // which it never covers. Off while the window cannot be seen and when Reduce motion is on.
+
+    private static let pulsePeriod: CFTimeInterval = 1.8
+    private static let pulseRadius: (from: CGFloat, to: CGFloat) = (9, 17)
+    private var pulseOn = false
+    private var pulseLayers: [CAShapeLayer] = []
+    /// Where the pulsing stops are, in view coordinates
+    private var pulsing: [NSPoint] = []
+    private var pulsingShown: [NSPoint] = []
+
+    /// Starts or stops the pulse: on while the window is visible, there is a working agent to pulse,
+    /// and Reduce motion is off.
+    func setPulsing(_ on: Bool) {
+        let wanted = on && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if wanted == pulseOn && pulsing == pulsingShown && !(wanted && pulseLayers.isEmpty && !pulsing.isEmpty) { return }
+        pulseOn = wanted
+        pulseLayers.forEach { $0.removeFromSuperlayer() }
+        pulseLayers = []
+        pulsingShown = pulsing
+        guard wanted, let host = layer else { return }
+        let r = Self.pulseRadius.to
+        for c in pulsing {
+            let ring = CAShapeLayer()
+            ring.bounds = CGRect(x: 0, y: 0, width: r * 2 + 4, height: r * 2 + 4)
+            ring.position = c
+            ring.path = CGPath(ellipseIn: CGRect(x: 2, y: 2, width: r * 2, height: r * 2), transform: nil)
+            ring.fillColor = nil
+            ring.strokeColor = theme.color(\.green).cgColor
+            ring.lineWidth = 1.5
+            ring.opacity = 0
+            let grow = CABasicAnimation(keyPath: "transform.scale")
+            grow.fromValue = Self.pulseRadius.from / r
+            grow.toValue = 1
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0.55
+            fade.toValue = 0
+            let group = CAAnimationGroup()
+            group.animations = [grow, fade]
+            group.duration = Self.pulsePeriod
+            group.repeatCount = .infinity
+            group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ring.add(group, forKey: "pulse")
+            host.addSublayer(ring)
+            pulseLayers.append(ring)
+        }
+        if !pulseLayers.isEmpty { log("overview: pulsing \(pulseLayers.count) stop\(pulseLayers.count == 1 ? "" : "s")") }
+    }
 
     func show(_ repos: [AgentOverviewJson], filter: OverviewFilter) {
         self.repos = repos
@@ -42,6 +98,8 @@ final class OverviewCanvas: NSView {
     func apply(_ t: Theme) {
         theme = t
         needsDisplay = true
+        // the rings take the theme's green
+        for ring in pulseLayers { ring.strokeColor = t.color(\.green).cgColor }
     }
 
     /// The height everything takes, for sizing the window to it (the screenshot).
@@ -58,6 +116,7 @@ final class OverviewCanvas: NSView {
     /// Lays the rows out again and resizes to them (also called when the window's width changes).
     func rebuild() {
         rows = []
+        pulsing = []
         var y: CGFloat = 0
         var width: CGFloat = 0
         for (index, repo) in repos.enumerated() {
@@ -67,6 +126,12 @@ final class OverviewCanvas: NSView {
             y += Self.headingHeight
             for family in families {
                 rows.append(.family(repo: index, family: family, top: y))
+                let gx = CGFloat(repo.metrics.labelWidth)
+                for lane in family.lanes where !lane.waiting {
+                    for stop in lane.stops where stop.stopKind == .current {
+                        pulsing.append(NSPoint(x: gx + CGFloat(stop.x), y: y + CGFloat(stop.y)))
+                    }
+                }
                 y += CGFloat(family.height)
                 width = max(width, CGFloat(family.width))
             }
