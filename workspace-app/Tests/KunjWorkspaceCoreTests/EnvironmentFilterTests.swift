@@ -48,6 +48,10 @@ import Testing
         let hidden = sidebarGroups(rs, query: "", isOpen: { _ in false }, expanded: [], hideEmpty: true)
         #expect(hidden.map(\.repo.root) == [rs[0].repo.root])
         #expect(sidebarGroups(rs, query: "old", isOpen: { _ in false }, expanded: [], hideEmpty: true).count == 1)
+        // a repository picked in the repositories menu stays listed with nothing open, its rows under "more"
+        let picked = sidebarGroups(rs, query: "", isOpen: { _ in false }, expanded: [], hideEmpty: true, pinned: [rs[1].repo.root])
+        #expect(picked.map(\.repo.root) == [rs[0].repo.root, rs[1].repo.root])
+        #expect(picked[1].environments.isEmpty && picked[1].more == 2)
 
         // a collapsed repository keeps only its header, with its open count; search ignores it
         let folded = sidebarGroups(rs, query: "", isOpen: { open.contains($0.id) }, expanded: ["/r/k"], collapsed: ["/r/k"])

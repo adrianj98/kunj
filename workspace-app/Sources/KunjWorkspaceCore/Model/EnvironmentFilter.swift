@@ -43,10 +43,11 @@ public struct SidebarGroup: Equatable, Sendable {
 /// `N more…` row for the rest; a repository in `expanded` lists them all. A search lists every
 /// environment that matches, open or not, so any one can be opened. With `hideEmpty` a repository
 /// with no open session is left out (search and New Session still reach it). A repository in
-/// `collapsed` shows only its header; a search ignores that.
+/// `collapsed` shows only its header; a search ignores that. A repository in `pinned` (picked in the
+/// sidebar's repositories menu) is listed even with no open session.
 public func sidebarGroups(_ repos: [RepoEnvironments], query: String, isOpen: (Environment) -> Bool,
                           expanded: Set<String>, hideEmpty: Bool = false,
-                          collapsed: Set<String> = []) -> [SidebarGroup] {
+                          collapsed: Set<String> = [], pinned: Set<String> = []) -> [SidebarGroup] {
     if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         return filterEnvironments(repos, query: query).map {
             SidebarGroup(repo: $0.repo, environments: $0.environments, more: 0, expanded: false,
@@ -55,7 +56,7 @@ public func sidebarGroups(_ repos: [RepoEnvironments], query: String, isOpen: (E
     }
     return repos.compactMap { g in
         let open = g.environments.filter { isOpen($0) || $0.agent == .running || $0.agent == .waiting }
-        if hideEmpty && open.isEmpty { return nil }
+        if hideEmpty && open.isEmpty && !pinned.contains(g.repo.root) { return nil }
         let more = g.environments.count - open.count
         if collapsed.contains(g.repo.root) {
             return SidebarGroup(repo: g.repo, environments: [], more: 0, expanded: false, collapsed: true,

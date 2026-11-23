@@ -417,6 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.windowController.sidebar.reloadRows()
         }
         windowController.sidebar.hideEmptyRepos = !UserDefaults.standard.bool(forKey: Self.showEmptyReposKey)
+        windowController.sidebar.onShowAllRepos = { [weak self] on in self?.setViewPreference(Self.showEmptyReposKey, on) }
         windowController.sidebar.isSuspended = { [weak keeper] env in keeper?.isSuspended(env) ?? false }
         windowController.sidebar.isOpen = { [weak keeper, weak registry] env in
             !(registry?.tabs(for: env.id).isEmpty ?? true) || keeper?.hasSavedTabs(env) == true

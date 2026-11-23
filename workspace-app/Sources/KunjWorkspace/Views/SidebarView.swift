@@ -25,8 +25,18 @@ final class SidebarView: NSView {
         didSet { UserDefaults.standard.set(collapsed.sorted(), forKey: Self.collapsedKey) }
     }
     static let collapsedKey = "collapsedRepos"
-    /// Leave out repositories with no open session (View > Show Repositories Without Sessions off).
+    /// Leave out repositories with no open session (View > Show Repositories Without Sessions off,
+    /// or "Active repositories" in the repositories menu).
     var hideEmptyRepos = false { didSet { reload() } }
+    /// "All repositories" or "Active repositories" was picked in the repositories menu.
+    var onShowAllRepos: (Bool) -> Void = { _ in }
+    /// Repositories picked in the repositories menu: listed even with no open session; remembered.
+    private var pinned = Set(UserDefaults.standard.stringArray(forKey: SidebarView.pinnedKey) ?? []) {
+        didSet { UserDefaults.standard.set(pinned.sorted(), forKey: Self.pinnedKey) }
+    }
+    static let pinnedKey = "shownRepos"
+    /// Beside the search: which repositories the list shows (active ones, all, or picked ones).
+    private let reposButton = NSPopUpButton(frame: .zero, pullsDown: true)
     /// The summed CPU and memory of each worktree's kunj sessions, by standardized path.
     var usage: [String: SessionUsage] = [:] { didSet { list.rows.forEach { $0.usage = usageOf($0.environment) } } }
     /// Each worktree's language server memory in bytes (by standardized path), added to its sessions' memory.
@@ -144,7 +154,15 @@ final class SidebarView: NSView {
 
         overviewRow.onPress = { [weak self] in self?.onOverview() }
         overviewRow.translatesAutoresizingMaskIntoConstraints = false
-        for v in [search, overviewRow, scroll, footerLine, newSession, agents, version] as [NSView] { addSubview(v) }
+        reposButton.isBordered = false
+        reposButton.controlSize = .small
+        (reposButton.cell as? NSPopUpButtonCell)?.arrowPosition = .noArrow
+        reposButton.menu = NSMenu()
+        reposButton.menu?.delegate = self
+        reposButton.setAccessibilityLabel("Repositories shown")
+        reposButton.toolTip = "Repositories shown"
+        reposButton.translatesAutoresizingMaskIntoConstraints = false
+        for v in [search, reposButton, overviewRow, scroll, footerLine, newSession, agents, version] as [NSView] { addSubview(v) }
         addLayoutGuide(column)
         columnFull = column.trailingAnchor.constraint(equalTo: trailingAnchor)
         columnWidth = column.widthAnchor.constraint(equalToConstant: 272)
@@ -156,7 +174,10 @@ final class SidebarView: NSView {
             columnFull,
             search.topAnchor.constraint(equalTo: topAnchor, constant: DesignTokens.Layout.headerHeight),
             search.leadingAnchor.constraint(equalTo: leadingAnchor, constant: pad),
-            search.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -pad),
+            search.trailingAnchor.constraint(equalTo: reposButton.leadingAnchor, constant: -6),
+            reposButton.centerYAnchor.constraint(equalTo: search.centerYAnchor),
+            reposButton.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -pad + 2),
+            reposButton.widthAnchor.constraint(equalToConstant: 24),
 
             overviewRow.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 10),
             overviewRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
@@ -226,8 +247,11 @@ final class SidebarView: NSView {
     var visibleIds: [String] { groups().flatMap { $0.environments.map(\.id) } }
 
     private func groups() -> [SidebarGroup] {
-        sidebarGroups(repos, query: query, isOpen: { [selectedId, isOpen] in $0.id == selectedId || isOpen($0) },
-                      expanded: expanded, hideEmpty: hideEmptyRepos, collapsed: collapsed)
+        // a suspended session is not open: it waits under `N more…`, and a repository with nothing
+        // else open is not active
+        sidebarGroups(repos, query: query,
+                      isOpen: { [selectedId, isOpen, isSuspended] in $0.id == selectedId || (isOpen($0) && !isSuspended($0)) },
+                      expanded: expanded, hideEmpty: hideEmptyRepos, collapsed: collapsed, pinned: pinned)
     }
 
     /// Lists again (a tab opened or closed changes which sessions are open).
@@ -492,5 +516,51 @@ private final class OverviewNavRow: NSView {
         let text = "\(count)" as NSString
         let w = text.size(withAttributes: badge)
         text.draw(at: NSPoint(x: bounds.maxX - 12 - w.width, y: (midY - w.height / 2).rounded()), withAttributes: badge)
+    }
+}
+
+// MARK: the repositories menu
+
+extension SidebarView: NSMenuDelegate {
+    /// Built each time it opens: Active / All repositories, then every repository, ticked when it is
+    /// listed. An active one (an open session or a running agent) is always listed; picking another
+    /// pins it to the list, picking it again unpins it.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        // a pull-down shows its first item as the button's face
+        let face = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        face.image = NSImage(systemSymbolName: "line.3.horizontal.decrease.circle", accessibilityDescription: "Repositories shown")
+        menu.addItem(face)
+        let active = NSMenuItem(title: "Active repositories", action: #selector(showActive(_:)), keyEquivalent: "")
+        active.state = hideEmptyRepos ? .on : .off
+        let all = NSMenuItem(title: "All repositories", action: #selector(showAll(_:)), keyEquivalent: "")
+        all.state = hideEmptyRepos ? .off : .on
+        for item in [active, all] { item.target = self; menu.addItem(item) }
+        guard !repos.isEmpty else { return }
+        menu.addItem(.separator())
+        let listed = Set(sidebarGroups(repos, query: "", isOpen: { [selectedId, isOpen, isSuspended] in
+            $0.id == selectedId || (isOpen($0) && !isSuspended($0))
+        }, expanded: [], hideEmpty: true).map(\.repo.root))
+        for g in repos {
+            let item = NSMenuItem(title: g.repo.name, action: #selector(togglePinned(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = g.repo.root
+            let isActive = listed.contains(g.repo.root)
+            item.state = isActive || pinned.contains(g.repo.root) || !hideEmptyRepos ? .on : .off
+            // an active repository is listed whatever is picked
+            if isActive { item.action = nil; item.toolTip = "Has an open session" }
+            menu.addItem(item)
+        }
+    }
+
+    @objc private func showActive(_ sender: Any?) { onShowAllRepos(false) }
+    @objc private func showAll(_ sender: Any?) { onShowAllRepos(true) }
+
+    @objc private func togglePinned(_ sender: NSMenuItem) {
+        guard let root = sender.representedObject as? String else { return }
+        if pinned.contains(root) { pinned.remove(root) } else { pinned.insert(root) }
+        // picking a repository while all are listed means: list the active ones and this one
+        if !hideEmptyRepos && pinned.contains(root) { onShowAllRepos(false) }
+        reload()
     }
 }

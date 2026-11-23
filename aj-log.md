@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — Sidebar lists only active repositories
+
+- Suspended sessions no longer count as open: they go under `N more…`, and a repository with only
+  suspended sessions is hidden. A repositories menu beside the search picks Active or All
+  repositories and pins any other repository to the list. Why: the user wanted inactive and
+  suspended repositories out of the way, with a drop-down to bring others back.
+
 ## 2026-11-23 — Overview fills as it goes
 
 - Each Overview read now runs a quick host-only `kunj agent overview` next to the `--containers` one
