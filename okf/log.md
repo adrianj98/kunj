@@ -175,3 +175,4 @@
 - Background subagents' activity (tool-call count, latest tool) in the agent plan and overview. Page updated: features/worktree-agents.md.
 - Agent overview: marker labels move under a subagent loop they would cover. Page updated: none.
 - Workspace app Overview: pulse on working agents' current stops (Core Animation). Page updated: none.
+- Workspace app Overview: keyboard and VoiceOver access. Page updated: none.

@@ -211,7 +211,12 @@ families (a family shows when any of its lanes passes).
   for it (a redraw per frame cost 15-20% CPU; the layers cost nothing measurable). Off while the window
   is closed, minimised or hidden, and with Reduce motion. `--overview` without `--screenshot` opens the
   window after launch, to try it by hand.
-- Not done: keyboard access to the lanes, plan steps for a kunj older
+- **Keyboard and VoiceOver:** the canvas takes the keys when the window opens; ↑ ↓ choose an agent (Home,
+  End), Return or Space opens its tab, a click chooses and opens. The chosen lane has the sidebar's
+  selected-row fill, with its border while the keys are there; it is kept by session and repository
+  across refreshes. Each lane is an accessibility button named "title, place, status: current step".
+  `-overviewSelect <n>` chooses lane n for a screenshot.
+- Not done: plan steps for a kunj older
   than this command (`agent plan` is then read as a branch name and the window shows kunj's error).
 
 ## Later

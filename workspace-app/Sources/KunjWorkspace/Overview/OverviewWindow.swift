@@ -88,6 +88,8 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
         filterControl.action = #selector(filterChanged(_:))
         filterControl.setAccessibilityLabel("Show agents")
         canvas.onOpen = { [weak self] lane, repo in self?.onOpen?(lane, repo) }
+        // ↑ ↓ and Return work as soon as the window opens
+        window.initialFirstResponder = canvas
         canvas.setAccessibilityLabel("Agents and their plans")
         scroll.documentView = canvas
         scroll.hasVerticalScroller = true
@@ -232,6 +234,11 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
         guard let window, let root = window.contentView else { return nil }
         root.layoutSubtreeIfNeeded()
         canvas.rebuild()
+        // -overviewSelect <n>: the screenshot shows lane n chosen, with the keys on it
+        if UserDefaults.standard.object(forKey: "overviewSelect") != nil {
+            window.makeFirstResponder(canvas)
+            canvas.selectLane(at: UserDefaults.standard.integer(forKey: "overviewSelect"))
+        }
         let chrome = root.bounds.height - scroll.frame.height
         let wanted = min(canvas.contentHeight + chrome + 8, (window.screen?.visibleFrame.height ?? 1200) - 40)
         if wanted > root.bounds.height {

@@ -152,6 +152,89 @@ final class OverviewCanvas: NSView {
 
     // MARK: hit testing
 
+    // MARK: lanes as things to choose (keyboard, VoiceOver)
+
+    private struct LaneRef {
+        var lane: OverviewLane
+        var repo: AgentOverviewJson.Repo
+        /// In view coordinates
+        var frame: NSRect
+    }
+
+    /// Every lane shown, top to bottom
+    private var laneRefs: [LaneRef] {
+        rows.flatMap { row -> [LaneRef] in
+            guard case .family(let repo, let family, let top) = row, repo < repos.count else { return [] }
+            return family.lanes.map {
+                LaneRef(lane: $0, repo: repos[repo].repo,
+                        frame: NSRect(x: 0, y: top + CGFloat($0.top), width: bounds.width, height: CGFloat($0.height)))
+            }
+        }
+    }
+
+    /// The chosen lane, by session and repository (an index would move when the list changes)
+    private var selected: (session: String, root: String)?
+
+    private var selectedIndex: Int? {
+        guard let selected else { return nil }
+        return laneRefs.firstIndex { $0.lane.session == selected.session && $0.repo.root == selected.root }
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+    override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
+    override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
+
+    /// Chooses the lane at `index` (top to bottom), as ↓ would; `-overviewSelect <n>` uses it for a screenshot.
+    func selectLane(at index: Int) { select(index) }
+
+    private func select(_ index: Int) {
+        let refs = laneRefs
+        guard refs.indices.contains(index) else { return }
+        selected = (refs[index].lane.session, refs[index].repo.root)
+        scrollToVisible(refs[index].frame.insetBy(dx: 0, dy: -8))
+        needsDisplay = true
+        NSAccessibility.post(element: self, notification: .focusedUIElementChanged)
+    }
+
+    /// ↑ ↓ move between agents (Home and End to the ends), Return or Space opens the chosen one's tab.
+    override func keyDown(with event: NSEvent) {
+        let count = laneRefs.count
+        guard count > 0 else { return super.keyDown(with: event) }
+        let current = selectedIndex
+        switch event.keyCode {
+        case 125: select(current.map { min($0 + 1, count - 1) } ?? 0)       // down
+        case 126: select(current.map { max($0 - 1, 0) } ?? count - 1)      // up
+        case 115: select(0)                                                // home
+        case 119: select(count - 1)                                        // end
+        case 36, 76, 49:                                                   // return, enter, space
+            if let i = current { open(laneRefs[i]) } else { select(0) }
+        default: super.keyDown(with: event)
+        }
+    }
+
+    private func open(_ ref: LaneRef) {
+        onOpen?(ref.lane, ref.repo)
+    }
+
+    // VoiceOver: each lane is a button named after its agent and where it is
+    override func isAccessibilityElement() -> Bool { false }
+    override func accessibilityChildren() -> [Any]? {
+        laneRefs.map { ref in
+            let element = NSAccessibilityElement()
+            element.setAccessibilityRole(.button)
+            element.setAccessibilityParent(self)
+            element.setAccessibilityLabel(laneDescription(ref.lane))
+            element.setAccessibilityFrameInParentSpace(ref.frame)
+            return element
+        }
+    }
+
+    /// "Agent overview window, feat/x · worktree, Step 4 of 6: agent plan --json"
+    private func laneDescription(_ lane: OverviewLane) -> String {
+        let current = lane.stops.first { $0.stopKind == .current && !lane.labelBeside }?.label
+        return "\(lane.title), \(lane.place), \(lane.status)\(current.map { ": \($0)" } ?? "")"
+    }
+
     private func lane(at point: NSPoint) -> (OverviewLane, AgentOverviewJson.Repo)? {
         for row in rows {
             guard case .family(let repo, let family, let top) = row else { continue }
@@ -164,7 +247,11 @@ final class OverviewCanvas: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if let (lane, repo) = lane(at: point) { onOpen?(lane, repo) }
+        window?.makeFirstResponder(self)
+        guard let (lane, repo) = lane(at: point) else { return }
+        selected = (lane.session, repo.root)
+        needsDisplay = true
+        onOpen?(lane, repo)
     }
 
     override func resetCursorRects() {
@@ -212,6 +299,19 @@ final class OverviewCanvas: NSView {
             case .family(let repo, let family, let top):
                 let rect = NSRect(x: 0, y: top, width: bounds.width, height: CGFloat(family.height))
                 guard dirtyRect.intersects(rect), repo < repos.count else { continue }
+                // the chosen lane: the sidebar's selected-row fill, its border only while keys come here
+                if let selected, selected.root == repos[repo].repo.root,
+                   let lane = family.lanes.first(where: { $0.session == selected.session }) {
+                    let box = NSRect(x: 6, y: top + CGFloat(lane.top) + 3, width: bounds.width - 12, height: CGFloat(lane.height) - 6)
+                    let path = NSBezierPath(roundedRect: box, xRadius: CGFloat(DesignTokens.Radius.card), yRadius: CGFloat(DesignTokens.Radius.card))
+                    theme.color(\.raised, alpha: 0.6).setFill()
+                    path.fill()
+                    if window?.firstResponder === self {
+                        theme.color(\.borderStrong).setStroke()
+                        path.lineWidth = 1
+                        path.stroke()
+                    }
+                }
                 draw(family: family, metrics: repos[repo].metrics, top: top)
                 theme.color(\.border).setFill()
                 NSRect(x: 0, y: rect.maxY - 1, width: bounds.width, height: 1).fill()

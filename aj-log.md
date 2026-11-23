@@ -1994,3 +1994,5 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - Overview pulse: a fading ring on each working agent's current stop. First drawn by redrawing the view 30 times a
   second, which cost 15-20% CPU; moved to Core Animation layers, which cost nothing measurable. `--overview` now opens
   the window without `--screenshot` too, for trying it by hand.
+- Overview keyboard and VoiceOver access: arrows choose an agent, Return opens its tab, each lane is an accessibility
+  button. Why: the last open follow-up of the window besides the fork link, which Claude Code gives no parent for.
