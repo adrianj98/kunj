@@ -73,13 +73,15 @@ describe('reducePlan', () => {
     expect(reducePlan(line(cwd), ['/r']).markers).toEqual([]);
   });
 
-  it('fork and compact are markers; startup and clear start the line again but keep the parent', () => {
+  it('fork and compact are markers; startup and clear start a new conversation, which a used-up parent does not follow', () => {
     const start = (source: string) => ({ hook_event_name: 'SessionStart', source });
     const plan = reducePlan([parentLine('kunj-r-main-1', 2).trim(), line(create('1', 'a')), line(start('fork')), line(start('compact'))].join('\n'));
     expect(plan.markers.map(m => m.type)).toEqual(['fork', 'compact']);
     expect(plan.parent).toEqual({ session: 'kunj-r-main-1', step: 2 });
     const again = reducePlan([parentLine('p', null).trim(), line(create('1', 'a')), line(start('fork')), line(start('clear'))].join('\n'));
-    expect(again).toMatchObject({ steps: [], markers: [], parent: { session: 'p', step: null } });
+    // the fork was the handed-off conversation's start: the /clear after it is not handed off
+    expect(again).toMatchObject({ steps: [], markers: [] });
+    expect(again.parent).toBeUndefined();
   });
 
   it('a new conversation goes on after the finished steps of the earlier ones, behind a new marker', () => {
