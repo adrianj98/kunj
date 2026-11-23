@@ -68,7 +68,7 @@ export function currentStep(steps: AgentPlanStepJson[]): number | null {
 }
 
 // Where a marker or a subagent attaches: the step in progress, else the last one finished
-function position(steps: AgentPlanStepJson[]): number | null {
+export function planPosition(steps: AgentPlanStepJson[]): number | null {
   const active = steps.findIndex(s => s.status === 'in_progress');
   if (active >= 0) return active;
   let last: number | null = null;
@@ -146,27 +146,27 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       const from = worktreeOf(str(hook.old_cwd), worktrees);
       const to = worktreeOf(str(hook.new_cwd), worktrees);
       if (from && to && from !== to) {
-        markers.push({ type: 'worktree', afterStep: position(mainSteps()), from, to, at });
+        markers.push({ type: 'worktree', afterStep: planPosition(mainSteps()), from, to, at });
         moved = true;
       }
     }
     const now = str(meta.branch);
     if (now && agent === null) {
-      if (branch && now !== branch && !moved) markers.push({ type: 'branch', afterStep: position(mainSteps()), from: branch, to: now, at });
+      if (branch && now !== branch && !moved) markers.push({ type: 'branch', afterStep: planPosition(mainSteps()), from: branch, to: now, at });
       branch = now;
     }
 
     if (event === 'SessionStart') {
-      if (hook.source === 'fork' || hook.source === 'compact') markers.push({ type: hook.source, afterStep: position(mainSteps()), at });
+      if (hook.source === 'fork' || hook.source === 'compact') markers.push({ type: hook.source, afterStep: planPosition(mainSteps()), at });
     } else if (event === 'SubagentStart' && agent) {
       const type = str(hook.agent_type) ?? 'agent';
       let i = pendingTasks.findIndex(p => p.type === type);
       if (i < 0) i = pendingTasks.length ? 0 : -1;
       const task = i >= 0 ? pendingTasks.splice(i, 1)[0].task : null;
-      subagents.set(agent, { id: agent, type, task, fromStep: position(mainSteps()), toStep: null, running: true, steps: [] });
+      subagents.set(agent, { id: agent, type, task, fromStep: planPosition(mainSteps()), toStep: null, running: true, steps: [] });
     } else if (event === 'SubagentStop' && agent) {
       const sub = subagents.get(agent);
-      if (sub) { sub.running = false; sub.toStep = position(mainSteps()); }
+      if (sub) { sub.running = false; sub.toStep = planPosition(mainSteps()); }
     } else if (event === 'PreToolUse' && (hook.tool_name === 'Agent' || hook.tool_name === 'Task')) {
       const task = str(input.description);
       if (task) pendingTasks.push({ type: str(input.subagent_type), task });
@@ -238,4 +238,39 @@ export function readPlanFile(file: string, maxBytes = 16 * 1024 * 1024): string 
   } catch {
     return '';
   }
+}
+
+// ---------------------------------------------------------------------------
+// In a branch container: the records are /tmp/kunj-agent-plan (session `agent`) and
+// /tmp/kunj-agent-plan-<id> (`agent-<id>`). One exec prints them all, each after a header line
+// `#kunj-plan <session> <1|0 tmux session exists> <state>`; a record line starts with `{`.
+// ---------------------------------------------------------------------------
+
+export const CONTAINER_PLAN_SCRIPT = `for f in ${CONTAINER_AGENT_PLAN_FILE} ${CONTAINER_AGENT_PLAN_FILE}-*; do [ -f "$f" ] || continue; i=\${f#${CONTAINER_AGENT_PLAN_FILE}}; r=0; tmux has-session -t "=agent$i" 2>/dev/null && r=1; echo "#kunj-plan agent$i $r $(head -c 16 /tmp/kunj-agent-state$i 2>/dev/null)"; cat "$f"; echo; done`;
+
+const CONTAINER_PLAN_HEADER = /^#kunj-plan (agent(?:-([A-Za-z0-9_-]{1,32}))?) ([01])(?: (\S*))?$/;
+
+export interface ContainerPlanRecord {
+  session: string;
+  id: string | null;
+  running: boolean;
+  state: 'running' | 'waiting' | null;
+  text: string;
+}
+
+export function parseContainerPlans(stdout: string): ContainerPlanRecord[] {
+  const records: Array<ContainerPlanRecord & { lines: string[] }> = [];
+  let current: string[] | null = null;
+  for (const line of stdout.split('\n')) {
+    const m = CONTAINER_PLAN_HEADER.exec(line);
+    if (m) {
+      current = [];
+      records.push({ session: m[1], id: m[2] ?? null, running: m[3] === '1', state: m[4] === 'running' || m[4] === 'waiting' ? m[4] : null, text: '', lines: current });
+    } else if (line.startsWith('#kunj-plan ')) {
+      current = null; // a name kunj does not give: skip its record
+    } else if (current) {
+      current.push(line);
+    }
+  }
+  return records.map(({ lines, ...r }) => ({ ...r, text: lines.join('\n') }));
 }

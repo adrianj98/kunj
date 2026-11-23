@@ -180,7 +180,9 @@ import { readRemotes } from '../../lib/remotes';
 import { CONTAINER_AGENT_STATE_FILE, inDirectory, withAgentHooks } from '../../lib/agent-session';
 
 // The agent command as ct agent runs it: the state file in the env and the Claude Code hooks appended
-const agentShell = (command: string) => `KUNJ_AGENT_STATE=${CONTAINER_AGENT_STATE_FILE} ` + withAgentHooks(command, CONTAINER_AGENT_STATE_FILE, true);
+// A claude agent also gets its plan record and Claude Code's task tools (agent-plan.ts)
+const planPrefix = (suffix = '') => `KUNJ_AGENT_PLAN=/tmp/kunj-agent-plan${suffix} CLAUDE_CODE_ENABLE_TODO_TOOLS=1 `;
+const agentShell = (command: string) => `KUNJ_AGENT_STATE=${CONTAINER_AGENT_STATE_FILE} ${planPrefix()}` + withAgentHooks(command, CONTAINER_AGENT_STATE_FILE, true, true);
 import * as lifecycle from '../../lib/container/lifecycle';
 import * as snapshot from '../../lib/container/snapshot';
 import { inferBlueprint } from '../../lib/container/infer';
@@ -490,7 +492,7 @@ describe('ContainerCommand', () => {
 
   describe('agent --session', () => {
     const stateTwo = '/tmp/kunj-agent-state-two';
-    const shellTwo = (command: string) => `KUNJ_AGENT_STATE=${stateTwo} ` + withAgentHooks(command, stateTwo, true);
+    const shellTwo = (command: string) => `KUNJ_AGENT_STATE=${stateTwo} ${planPrefix('-two')}` + withAgentHooks(command, stateTwo, true, true);
 
     it('runs the agent in tmux session agent-<id> with its own state file', async () => {
       backend.existing = [mainContainer('feat')];
@@ -499,6 +501,25 @@ describe('ContainerCommand', () => {
         'tmux', '-u', 'new-session', '-A', '-s', 'agent-two', shellTwo(agentCommandLine(undefined, [])),
         ';', 'set-option', '-t', 'agent-two', 'window-size', 'latest', ';', 'set-option', '-t', 'agent-two', 'status', 'off',
       ]);
+    });
+
+    it('--plan reads the records with one exec as the user and runs no agent; none for a stopped container', async () => {
+      const { CONTAINER_PLAN_SCRIPT } = jest.requireActual<any>('../../lib/agent-plan');
+      const task = JSON.stringify({ kunj: { t: 5, branch: 'feat' }, hook: { hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject: 'Read' }, tool_response: { task: { id: '1', subject: 'Read' } } } });
+      backend.existing = [mainContainer('feat')];
+      backend.execResults.set(`sh -c ${CONTAINER_PLAN_SCRIPT}`, { exitCode: 0, stdout: `#kunj-plan agent 1 waiting\n${task}\n\n#kunj-plan agent-two 0 \n${task}\n` });
+      await new ContainerCommand().execute('agent', 'feat', [], { plan: true, json: true } as any);
+      const execs = backend.callsOf('exec');
+      expect(execs.map(c => c[1])).toEqual([['sh', '-c', CONTAINER_PLAN_SCRIPT]]);
+      expect((execs[0][2] as any).user).toBe('dev');
+      const { plans } = JSON.parse(stdout.join(''));
+      expect(plans.map((p: any) => [p.session, p.id, p.running, p.state, p.branch, p.worktree, p.steps[0].subject, typeof p.container])).toEqual([
+        ['agent', null, true, 'waiting', 'feat', '/workspace', 'Read', 'string'],
+        ['agent-two', 'two', false, null, 'feat', '/workspace', 'Read', 'string'],
+      ]);
+      stdout.length = 0;
+      await new ContainerCommand().execute('agent', 'feat', [], { plan: true, json: true, session: 'two' } as any);
+      expect(JSON.parse(stdout.join('')).plans.map((p: any) => p.session)).toEqual(['agent-two']);
     });
 
     it('refuses a bad id', async () => {

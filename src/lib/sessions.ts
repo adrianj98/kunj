@@ -26,8 +26,8 @@ const T = '\t';
 export const SESSIONS_SCRIPT = [
   `if ! command -v tmux >/dev/null 2>&1; then echo tmux=missing; exit 0; fi`,
   `echo tmux=ok`,
-  `echo '#sessions'; tmux list-sessions -F '#{session_name}${T}#{session_created}${T}#{session_activity}${T}#{${SESSION_WORKTREE_OPTION}}' 2>/dev/null`,
-  `echo '#panes'; tmux list-panes -a -F '#{session_name}${T}#{pane_pid}${T}#{pane_current_command}${T}#{pane_current_path}' 2>/dev/null`,
+  `echo '#sessions'; tmux -u list-sessions -F '#{session_name}${T}#{session_created}${T}#{session_activity}${T}#{${SESSION_WORKTREE_OPTION}}' 2>/dev/null`,
+  `echo '#panes'; tmux -u list-panes -a -F '#{session_name}${T}#{pane_pid}${T}#{pane_current_command}${T}#{pane_current_path}' 2>/dev/null`,
   `echo '#clients'; tmux list-clients -F '#{session_name}${T}#{client_tty}${T}#{client_pid}' 2>/dev/null`,
   `echo '#ps'; ps -axo pid=,ppid=,pcpu=,rss=,comm= 2>/dev/null`,
   `true`,

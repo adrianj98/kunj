@@ -490,7 +490,9 @@ export type EventJson = { at: string } & (
       /** A new session's worktree (its @kunj_worktree tag), from the tmux poll */
       worktree?: string;
       /** `app` when `kunj agent start --open-in-app` started it: the workspace app opens and focuses it */
-      open?: 'app' }
+      open?: 'app';
+      /** true when the session's plan record changed (`kunj agent plan`), from the hooks */
+      plan?: true }
   | { type: 'backend'; status: 'available' | 'unavailable'; message?: string }
   /** A cloud machine appeared, changed state or went away (`state: 'deleted'`), as its coordinator lists it */
   | { type: 'machine'; repo: { name: string; root: string } | null; branch: string; machine: string; state: MachineJson['state'] | 'deleted' }

@@ -10,8 +10,9 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
-import type { AgentForgetJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import { PLAN_ENV, agentPlanDir, agentPlanFile, parentLine, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
+import type { AgentForgetJson, AgentPlanItemJson, AgentPlanJson, AgentPlanStepJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
   json?: boolean;
@@ -29,7 +30,7 @@ interface AgentOptions {
 // The largest brief --prompt-file takes (it becomes one shell argument)
 const MAX_PROMPT_BYTES = 256 * 1024;
 
-const ACTIONS = ['start', 'status', 'stop', 'saved', 'forget'];
+const ACTIONS = ['start', 'status', 'stop', 'saved', 'forget', 'plan'];
 
 export class AgentCommand extends BaseCommand {
   constructor() {
@@ -43,7 +44,7 @@ export class AgentCommand extends BaseCommand {
         { flags: '--no-tmux', description: 'Run the agent directly in this terminal, without a tmux session' },
         { flags: '--session <id>', description: "One of several agents of the worktree: its own tmux session (<agent session>-a-<id>; letters, digits, _ and -, up to 32)" },
         { flags: '--resume', description: "[start] When the session is not running, resume its agent's last Claude conversation (saved by a hook)" },
-        { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs); [forget] forget every saved conversation of the worktree' },
+        { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs); [forget] forget every saved conversation of the worktree; [plan] the agents of every worktree of the repository' },
         { flags: '--detach', description: '[start] Start the tmux session without attaching to it (no terminal needed); a running one is left as it is' },
         { flags: '--prompt-file <file>', description: "[start] The agent's first prompt, read from a file (claude only; a new session only)" },
         { flags: '--open-in-app', description: '[start] Ask the workspace app to open, select and focus a tab for the new session' },
@@ -55,6 +56,7 @@ export class AgentCommand extends BaseCommand {
         '  stop [branch]     kill the session',
         '  saved [branch]    saved Claude conversations of sessions that are not running (to resume)',
         '  forget [branch]   forget a saved conversation (--session <id>, or --all)',
+        '  plan [branch]     where each agent is in its plan: its task list as steps, subagents, branch changes',
         '',
         '[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with',
         '--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.',
@@ -71,6 +73,9 @@ export class AgentCommand extends BaseCommand {
         '--detach starts the session in the background and returns (with --json: branch, worktree,',
         'session, id, started). --prompt-file gives a new claude agent its first prompt; --open-in-app',
         'has the workspace app switch to it. The /handoff skill (kunj install skill) uses all three.',
+        '',
+        'plan: a Claude agent\'s hooks record its task list (agent.plan, default on); `plan` prints the',
+        'steps with the current one marked, `plan --all` for every worktree, `--json` for the apps.',
         '',
         '--agent antigravity runs the Antigravity CLI (agy) instead of agent.command. Only Claude Code',
         'reports when it waits for input; another agent shows as running while its session lives.',
@@ -95,6 +100,7 @@ export class AgentCommand extends BaseCommand {
     }
 
     const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
+    if (verb === 'plan') return this.plan(listing, target, opts);
     const name = target ?? (await getCurrentBranch());
     const wt = name ? findWorktreeIn(listing.worktrees, name) : null;
     if (!wt || !wt.branch || !wt.exists || wt.bare) {
@@ -162,6 +168,7 @@ export class AgentCommand extends BaseCommand {
           fs.unlinkSync(agentResumeFile(kunjDir, t));
           forgotten.push(t);
         } catch { /* nothing saved */ }
+        try { fs.unlinkSync(agentPlanFile(kunjDir, t)); } catch { /* no plan recorded */ }
       }
       if (this.jsonMode) {
         this.outputJSON({ branch: wt.branch, forgotten } satisfies AgentForgetJson);
@@ -237,8 +244,27 @@ export class AgentCommand extends BaseCommand {
         fs.chmodSync(promptCopy, 0o600);
       }
     }
-    const command = withAgentPrompt(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false), promptCopy);
-    const vars = { KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile };
+    // The plan record (agent-plan.ts): only Claude has the hooks and the task tools they read
+    const withPlan = config.agent?.hooks !== false && config.agent?.plan !== false && isClaudeCommand(agentCmd);
+    const planFile = agentPlanFile(kunjDir, session);
+    if (withPlan && !alreadyRunning) {
+      // A new conversation starts a new record; a resumed one continues its own. Started from inside
+      // another agent's session (the /handoff skill), the record begins with that parent and its step.
+      // The record is an extra: failing to prepare it never stops the agent.
+      try {
+        fs.mkdirSync(agentPlanDir(kunjDir), { recursive: true });
+        const from = process.env.KUNJ_AGENT_PLAN;
+        const parent = from && path.resolve(from) !== planFile && from.endsWith('.ndjson')
+          ? parentLine(path.basename(from, '.ndjson'), planPosition(reducePlan(readPlanFile(from)).steps)) : '';
+        if (!resumeId) fs.writeFileSync(planFile, parent);
+        else if (parent && !fs.existsSync(planFile)) fs.writeFileSync(planFile, parent);
+      } catch { /* no record */ }
+    }
+    const command = withAgentPrompt(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false, withPlan), promptCopy);
+    const vars = {
+      KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile,
+      ...(withPlan ? { KUNJ_AGENT_PLAN: planFile, ...PLAN_ENV } : {}),
+    };
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
     const { TMUX: _tmux, ...env } = process.env;
     // Like kunj ct agent in an image without tmux: the agent runs here and ends with the terminal
@@ -280,5 +306,76 @@ export class AgentCommand extends BaseCommand {
     }
     const secrets = await hostSecretEnv(wt.branch, wt.path);
     process.exitCode = await runTmux(directArgv(command), wt.path, { ...env, ...vars, ...secrets });
+  }
+
+  // `kunj agent plan`: what the hooks recorded for each agent session of a worktree (or of all)
+  private async plan(listing: Awaited<ReturnType<typeof listWorktreesDetailed>>, target: string | undefined, opts: AgentOptions): Promise<void> {
+    const usable = listing.worktrees.filter(w => w.branch && w.exists && !w.bare);
+    let worktrees = usable;
+    if (!opts.all) {
+      const name = target ?? (await getCurrentBranch());
+      const wt = name ? findWorktreeIn(listing.worktrees, name) : null;
+      if (!wt || !wt.branch || !wt.exists || wt.bare) {
+        throw new AgentError('no-worktree', `No worktree for ${name || 'the current directory'}. See \`kunj worktree list\`, or use \`kunj agent plan --all\`.`);
+      }
+      worktrees = [wt];
+    }
+    const id = opts.session !== undefined ? checkShellSessionId(opts.session) : undefined;
+    const repo = repoIdentity({ commonDir: listing.gitCommonDir, repoRoot: listing.repoRoot });
+    const tmux = await readTaggedTmuxSessions();
+    const running = Array.isArray(tmux) ? tmux.map(s => s.name) : null;
+    const kunjDir = getKunjDir();
+    let recorded: string[] = [];
+    try {
+      recorded = fs.readdirSync(agentPlanDir(kunjDir)).filter(f => f.endsWith('.ndjson')).map(f => f.slice(0, -'.ndjson'.length));
+    } catch { /* nothing recorded yet */ }
+    const roots = listing.worktrees.map(w => w.path);
+
+    const plans: AgentPlanItemJson[] = [];
+    for (const wt of worktrees) {
+      const base = agentSessionName(repo.name, repo.id, wt.branch!);
+      const sessions = Array.isArray(tmux) ? worktreeAgentSessions(tmux, base, wt.path) : [];
+      for (const session of recorded) {
+        const sid = agentSessionId(session, base);
+        if (sid !== undefined && !sessions.some(s => s.session === session)) sessions.push({ session, id: sid });
+      }
+      for (const s of sessions) {
+        if (id !== undefined && s.id !== id) continue;
+        const isRunning = running ? running.includes(s.session) : null;
+        const text = readPlanFile(agentPlanFile(kunjDir, s.session));
+        if (!text.trim() && isRunning !== true) continue;
+        const { branch: _branch, transcript, ...plan } = reducePlan(text, roots);
+        plans.push({
+          session: s.session, id: s.id, branch: wt.branch!, worktree: wt.path,
+          running: isRunning, state: isRunning === false ? null : readAgentState(agentStateFile(kunjDir, s.session)),
+          ...plan, title: plan.title ?? conversationTitle(transcript),
+        });
+      }
+    }
+
+    if (this.jsonMode) {
+      this.outputJSON({ plans } satisfies AgentPlanJson);
+      return;
+    }
+    if (plans.length === 0) {
+      console.log(chalk.dim(opts.all ? 'No agent has a plan recorded' : `No agent of ${worktrees[0].branch} has a plan recorded`));
+      return;
+    }
+    const mark = (st: AgentPlanStepJson, current: boolean) => st.status === 'completed' ? chalk.green('✓') : current ? chalk.yellow('▶') : chalk.dim('○');
+    for (const p of plans) {
+      const state = p.running === false ? chalk.dim('not running') : p.state === 'waiting' ? chalk.yellow('waiting for input') : p.running ? chalk.green('running') : chalk.dim('unknown');
+      console.log(`${chalk.bold(p.title ?? p.branch)}  ${chalk.dim(`${p.branch}${p.id ? ` · ${p.id}` : ''}`)}  ${state}`);
+      if (p.parent) console.log(chalk.dim(`  started by ${p.parent.session}${p.parent.step === null ? '' : ` at its step ${p.parent.step + 1}`}`));
+      if (p.steps.length === 0) console.log(chalk.dim('  no task list yet'));
+      p.steps.forEach((st, i) => {
+        console.log(`  ${mark(st, i === p.current)} ${st.status === 'pending' && i !== p.current ? chalk.dim(st.subject) : st.subject}`);
+        for (const m of p.markers.filter(m => m.afterStep === i)) console.log(chalk.dim(`    ◇ ${m.type}${m.to ? ` ${m.from} → ${m.to}` : ''}`));
+        for (const sub of p.subagents.filter(sub => sub.fromStep === i)) {
+          console.log(chalk.dim(`    ↳ subagent ${sub.task ?? sub.type}${sub.running ? '' : ' (done)'}`));
+          sub.steps.forEach((ss, k) => console.log(`      ${mark(ss, sub.running && ss.status === 'in_progress')} ${chalk.dim(ss.subject)}`));
+        }
+      });
+      for (const sub of p.subagents.filter(sub => sub.fromStep === null)) console.log(chalk.dim(`  ↳ subagent ${sub.task ?? sub.type}${sub.running ? '' : ' (done)'}`));
+    }
   }
 }

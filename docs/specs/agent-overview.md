@@ -1,6 +1,6 @@
 # Agent overview: where every agent is in its plan
 
-*Design, 2026-11-23. Nothing built yet.* An Overview window in the workspace app with one row per
+*Designed 2026-11-23. The CLI side is built; the window is not.* An Overview window in the workspace app with one row per
 running agent. Each row is a horizontal subway line: the stops are the steps of the plan the agent is
 working through, with the current one marked. Forks, handoffs, subagents and branch changes are drawn
 on the line.
@@ -16,10 +16,11 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 
 | Part | State |
 | --- | --- |
-| Probe: what the hooks really deliver (see Unknowns) | To do, first |
-| CLI: plan capture in the agent hooks, host and container | To do |
-| CLI: `kunj agent plan --json` (`AgentPlanJson`), `plan` action on the `agent` event | To do |
-| CLI: parent link for handoffs and `--resume` forks | To do |
+| Probe: what the hooks really deliver | Done 2026-11-23, Claude Code 2.1.330 (see What the probe found) |
+| CLI: plan capture in the agent hooks, host and container (`agent.plan`) | Shipped |
+| CLI: `kunj agent plan [--all] --json` (`AgentPlanJson`), `kunj ct agent --plan`, `plan: true` on the `agent` event | Shipped |
+| CLI: parent link for a start from inside another agent's session (handoff) | Shipped |
+| `kunj events` for a container's plan (the record's size in the status script) | To do |
 | Workspace app: Overview window | To do |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |
 | Rewind forks (needs the transcript) | Later, only if wanted |
@@ -52,39 +53,52 @@ From the hooks reference (code.claude.com/docs/en/hooks), checked 2026-11-23:
   hook it just to observe. A worktree entered with `EnterWorktree` is seen through `PostToolUse` and
   `CwdChanged`; `git worktree add` in Bash fires neither, but `kunj events` reports the worktree.
 
-## Unknowns the probe settles
+## What the probe found
 
-A throwaway script: start `claude -p` with a hook that appends its stdin to a file, ask it to make
-three tasks, start a subagent that makes two, enter plan mode. Then read the file.
+Run against Claude Code 2.1.330; the recording is `src/lib/__tests__/fixtures/agent-plan-probe.ndjson`.
 
-1. The `tool_input` of `TaskCreate` / `TaskUpdate` (the docs give no shape) and whether
-   `TaskCreated` / `TaskCompleted` alone are enough (they have no "in progress").
-2. Whether hooks given with `--settings` run inside subagents (the docs say "settings files").
-   If not: write them to a settings file kunj owns and pass its path.
-3. Whether `agent_id` is absent on the main agent's calls.
-4. Whether a subagent's task ids can collide with the main agent's.
+1. **Newer models have no task tools by default.** The tools reference keeps `TaskCreate` and friends
+   for older models only; `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` gives them to every model. `kunj agent`
+   sets it together with the plan hooks (`PLAN_ENV`), so `agent.plan` costs the agent the tools'
+   definitions in its context. Without it there is nothing to record.
+2. `TaskCreate`: `tool_input { subject, description }`, `tool_response.task { id, subject }`.
+   `TaskUpdate`: `tool_input { taskId, status?, subject? }`, status `in_progress`, `completed` or
+   `deleted`; `tool_response { success, statusChange }`.
+3. Hooks given with `--settings` do run inside subagents; their calls carry `agent_id` and
+   `agent_type`, the main agent's calls carry neither.
+4. A subagent shares the session's task list (its first task got id 2 after the main agent's 1), so
+   ids never collide and a task belongs to whoever created it.
+5. `SubagentStop` also fires for helper agents that never had a `SubagentStart`; they are ignored.
+6. The `Agent` call's `PostToolUse` comes after the subagent ended, so its description is taken from
+   `PreToolUse` and matched to the next `SubagentStart` of that type.
+7. **A subagent does not always get the task tools.** In `claude -p` it did; in an interactive session
+   started by `kunj agent` it searched for `TaskCreate` and did not find it. Such a subagent is a loop
+   with its task text and no stops. Not understood yet.
+8. tmux outside a UTF-8 locale prints the tabs of `list-sessions -F` as underscores, so the tagged
+   listing found no session; it now passes `-u` (also in `kunj sessions`).
 
 ## Capture
 
-The hooks stay dumb, as today (a printf into `KUNJ_AGENT_STATE`): the plan hooks **append the hook's
-input, one JSON line, to `KUNJ_AGENT_PLAN`** and kunj does all the reading. A change in Claude Code's
-shapes is then a fix in one TypeScript reducer, not in shell.
+The hooks stay dumb, as today (a printf into `KUNJ_AGENT_STATE`): each plan hook **appends one JSON
+line to `KUNJ_AGENT_PLAN`**, `{"kunj":{"t":<unix s>,"branch":"<current branch>"},"hook":<its input>}`
+(`planHookCommand()`), and kunj does all the reading. A change in Claude Code's shapes is then a fix
+in one TypeScript reducer, not in shell. One printf per event, so two agents appending at once do not
+interleave.
 
 - File: host `~/.kunj/<repo>/agent-plan/<session>.ndjson`; container `/tmp/kunj-agent-plan` (or
   `-<id>`), next to the state file.
-- Hooks added: `PostToolUse` matching `TaskCreate|TaskUpdate|TodoWrite|ExitPlanMode|EnterWorktree|Agent`,
-  `SubagentStart`, `SubagentStop`, `CwdChanged`, `SessionStart` (already there for resume; `source`
-  is what marks a fork or a compaction).
-- Each appended line is followed by one more with the time and `git branch --show-current` in the
-  hook's `cwd`. These hooks fire a few times per step, not per tool call, so the git call is cheap.
-  `PreToolUse` for every tool stays the printf it is.
-- No single quotes in the hook commands (the settings JSON is single-quoted on the command line).
-- `SessionEnd` leaves the file: a finished line stays readable. `kunj agent forget` and a new
-  `startup` in the same session name truncate it. Size is capped when reading (last 2 MB).
+- Hooks added (`claudeHookSettings(true)`): `PostToolUse` matching
+  `TaskCreate|TaskUpdate|TodoWrite|ExitPlanMode`, `PreToolUse` matching `Agent|Task`, `SubagentStart`,
+  `SubagentStop`, `CwdChanged`, and a second `SessionStart` hook. A few events per step, never one
+  per tool call.
+- No single quotes in the hook command (the settings JSON is single-quoted on the command line).
+- `kunj agent start` empties the record for a new conversation and keeps it for `--resume`;
+  `kunj agent forget` removes it. `SessionEnd` leaves it, so a finished line stays readable.
+- `agent.plan` (default true) turns the hooks, the variable and the task tools off together.
 
 ## The reducer
 
-`src/lib/agent-plan.ts`, pure: NDJSON in, one `AgentPlan` out. Unit tested from recorded files.
+`reducePlan()` in `src/lib/agent-plan.ts`, pure: the record's text in, one plan out. Unit tested from the probe's recording.
 
 - **Steps:** tasks in creation order; status `pending` / `in_progress` / `completed`; the current
   step is the first `in_progress`, else the first `pending` after the last completed one.
@@ -102,39 +116,23 @@ shapes is then a fix in one TypeScript reducer, not in shell.
 ## Parent links
 
 `kunj agent start` run from inside an agent's session (the `/handoff` skill) sees the parent's
-`KUNJ_AGENT_PLAN` in its environment and writes a first line `{ kunj: 'parent', session, step }` into
-the new session's file. `--resume` of a saved conversation into a new session name does the same. The
-app draws the child as a branch off the parent's line at that step, in its own row.
+`KUNJ_AGENT_PLAN` in its environment and writes a first line `{ kunj: { parent: { session, step } } }`
+into the new session's record (`parentLine()`), which a new conversation in that session keeps. The
+app draws the child as a branch off the parent's line at that step, in its own row. A fork of one
+conversation into a second session is not linked yet: `SessionStart` names no parent.
 
 ## CLI contract (additive)
 
-`kunj agent plan [branch] [--session <id>] [--all] --json` → `AgentPlanJson`, on the fast path like
-the rest of `kunj agent`; for a container, `kunj ct agent --plan --json` reads the file with one exec.
+`kunj agent plan [branch] [--session <id>] [--all] --json` → `AgentPlanJson` (json-types.ts):
+`plans[]` of `{ session, id, branch, worktree, container?, title, running, state, steps[], current,
+markers[], subagents[], parent?, updatedAt }`. `--all` is every worktree of the repository and needs
+no current worktree. A session is listed while it runs (with no steps when nothing is recorded) and,
+once ended, while its record exists. `kunj ct agent [branch] --plan [--session <id>] --json` gives the
+same for a branch container, with one exec (`CONTAINER_PLAN_SCRIPT`); nothing for a stopped one.
 
-```ts
-interface AgentPlanJson { plans: AgentPlan[] }
-interface AgentPlan {
-  session: string; branch: string; worktree: string; container?: string;
-  title: string | null;
-  state: 'running' | 'waiting' | null;
-  steps: PlanStep[];
-  current: number | null;               // index into steps
-  markers: PlanMarker[];                // branch, worktree, fork, compact
-  subagents: PlanSubagent[];
-  parent?: { session: string; step: number | null };
-  updatedAt: string;
-}
-interface PlanStep { id: string; subject: string; status: 'pending' | 'in_progress' | 'completed';
-  startedAt?: string; completedAt?: string }
-interface PlanMarker { type: 'branch' | 'worktree' | 'fork' | 'compact'; afterStep: number | null;
-  from?: string; to?: string; at: string }
-interface PlanSubagent { id: string; type: string; task: string | null; fromStep: number | null;
-  toStep: number | null; running: boolean; steps: PlanStep[] }
-```
-
-`kunj events`: the `agent` event gains `action: 'plan'` when a plan file changes (the host directory
-is watched like `agent-state`; in a container the status script prints the file's size, which joins
-the polled status). The app then asks `kunj agent plan` for that session only.
+`kunj events`: an `agent` event with `plan: true` when a host record changes (the directory is
+watched like `agent-state`). The app then asks `kunj agent plan` again. A container's record is not
+in the events yet; the app re-reads it on the container's status events.
 
 ## The window
 

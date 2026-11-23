@@ -22,6 +22,7 @@ import { stripUserinfo } from './container/seed';
 import { forwardsFile } from './container/autoforward';
 import { WORKTREE_SESSIONS_FILE } from './worktree';
 import { REPOS_FILE } from './repos';
+import { agentPlanDir } from './agent-plan';
 import { agentIdOf, agentStateDir, listTmuxSessions, readAgentState, readTaggedTmuxSessions } from './agent-session';
 import { kunjDirName } from './repo-identity';
 import type { AgentHookState } from './agent-session';
@@ -266,8 +267,23 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
     }, () => stateWatchers.delete(dir));
     if (watcher) stateWatchers.set(dir, watcher);
   };
-  for (const repo of repos) syncStateWatch(repo);
-  resyncs.push(() => repos.forEach(syncStateWatch));
+  // The plan records the same hooks append to (agent-plan.ts): a change says only that
+  // `kunj agent plan` has something new for that session
+  const planWatchers = new Map<string, fs.FSWatcher>();
+  const syncPlanWatch = (repo: KnownRepoInfo) => {
+    const dir = agentPlanDir(path.join(kunjDir, kunjDirName(repo)));
+    if (planWatchers.has(dir) || !fs.existsSync(dir)) return;
+    const watcher = watch(dir, false, file => {
+      if (!file || !file.startsWith('kunj-') || !file.endsWith('.ndjson')) return;
+      debounce(`agent-plan:${dir}/${file}`, () => {
+        if (!fs.existsSync(path.join(dir, file))) return;
+        emit({ type: 'agent', session: file.slice(0, -'.ndjson'.length), running: true, plan: true, repo: { name: repo.name, root: repo.root }, at: at() });
+      });
+    }, () => planWatchers.delete(dir));
+    if (watcher) planWatchers.set(dir, watcher);
+  };
+  for (const repo of repos) { syncStateWatch(repo); syncPlanWatch(repo); }
+  resyncs.push(() => repos.forEach(repo => { syncStateWatch(repo); syncPlanWatch(repo); }));
 
   const registryFiles: Record<string, 'sessions' | 'forwards' | 'repos'> = {
     [WORKTREE_SESSIONS_FILE]: 'sessions',

@@ -1700,6 +1700,18 @@
     "sensitive": false
   },
   {
+    "key": "agent.plan",
+    "type": "boolean",
+    "category": "agent",
+    "default": true,
+    "description": "Record where a Claude agent is in its plan (its task list, subagents, branch changes) for `kunj agent plan` and the workspace app's Overview; turns Claude Code's task tools on for the agent (CLAUDE_CODE_ENABLE_TODO_TOOLS). Needs agent.hooks",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "agent.hooks",
     "type": "boolean",
     "category": "agent",

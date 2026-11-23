@@ -68,7 +68,8 @@ import {
   stopContainer,
 } from '../lib/container/lifecycle';
 import { CONTAINER_AGENT_COMMAND_DEFAULT } from '../lib/container/defaults';
-import { CONTAINER_AGENT_STATE_FILE, agentArgv, checkShellSessionId, withAgentHooks } from '../lib/agent-session';
+import { CONTAINER_AGENT_STATE_FILE, agentArgv, checkShellSessionId, isClaudeCommand, withAgentHooks } from '../lib/agent-session';
+import { CONTAINER_AGENT_PLAN_FILE, CONTAINER_PLAN_SCRIPT, PLAN_ENV, parseContainerPlans, reducePlan } from '../lib/agent-plan';
 import { parseOrigin, stripUserinfo } from '../lib/container/seed';
 import { BLUEPRINT_PATH, Blueprint, ResolvedBlueprint, SANDBOX_IMAGE_KEYWORD, ToolValue, parseBlueprint, resolveBlueprint } from '../lib/container/blueprint';
 import { inferBlueprint } from '../lib/container/infer';
@@ -78,7 +79,7 @@ import { PrunePlan, applyPrune, findOrphans, mergePlans, planPrune, removalCount
 import { KunjConfig } from '../types';
 import type { LoadSecretsOptions } from '../lib/secrets/resolve';
 import { vaultFiles, vaultStamp } from '../lib/secrets/vault';
-import type { MachineJson } from '../lib/json-types';
+import type { AgentPlanItemJson, AgentPlanJson, MachineJson } from '../lib/json-types';
 import type { ContainerCacheJson, ContainerCacheSyncJson, ContainerJson, ContainerListJson, ContainerTokenCheckJson, ContainerTokenStatusJson, FileReadJson, FileWriteJson, SearchSourceJson, ShellKillJson } from '../lib/json-types';
 
 interface ContainerOptions {
@@ -116,6 +117,7 @@ interface ContainerOptions {
   dryRun?: boolean;
   session?: string;
   kill?: boolean;
+  plan?: boolean;
 }
 
 interface Context {
@@ -224,6 +226,7 @@ export class ContainerCommand extends BaseCommand {
         { flags: '--blueprint <path>', description: '[blueprint snapshot|status] Use this blueprint file instead of the resolved one' },
         { flags: '--session <id>', description: "[shell] Keep the shell in the container's tmux session sh-<id>; [agent|attach] one of several agents, tmux session agent-<id> (letters, digits, _ and -; up to 32)" },
         { flags: '--kill', description: '[shell|agent] End the --session tmux session, or without --session every shell (sh-*) or agent (agent, agent-*) session; exit 0 whether or not one existed or the container runs' },
+        { flags: '--plan', description: '[agent] Print where the agent is in its plan (its task list as steps, subagents, branch changes) instead of running it; --session for one of several' },
         { flags: '--context <name>', description: 'Docker context (default: container.dockerContext)' },
         { flags: '--size <size>', description: '[start] On cloud machines: the size of a new machine (small, medium, large or a provider shape; default machine.size)' },
         { flags: '--machine <branch>', description: '[blueprint snapshot] On cloud machines: build on this branch\'s machine (default: the current branch\'s)' },
@@ -870,6 +873,7 @@ export class ContainerCommand extends BaseCommand {
     const ctx = await this.context(options);
     const branch = await this.resolveBranch(ctx, target);
     if (options.kill) return this.killSessions(ctx, branch, id !== undefined ? `agent-${id}` : null, 'agent|agent-*');
+    if (options.plan) return this.agentPlan(ctx, branch, id);
     const session = id !== undefined ? `agent-${id}` : 'agent';
     const stateFile = id !== undefined ? `${CONTAINER_AGENT_STATE_FILE}-${id}` : CONTAINER_AGENT_STATE_FILE;
     const main = await this.requireRunning(ctx, branch);
@@ -889,7 +893,11 @@ export class ContainerCommand extends BaseCommand {
     await this.ensureBridge(ctx, branch, main);
     const user = this.userOf(main) || undefined;
     // The Claude Code hooks write the agent's state into the container's state file (read by STATUS_SCRIPT)
-    const command = `KUNJ_AGENT_STATE=${stateFile} ` + withAgentHooks(agentCommandLine(ctx.config.container?.agentCommand, args), stateFile, ctx.config.agent?.hooks !== false);
+    const agentLine = agentCommandLine(ctx.config.container?.agentCommand, args);
+    // The plan record (agent-plan.ts), read back by `kunj ct agent --plan`
+    const withPlan = ctx.config.agent?.hooks !== false && ctx.config.agent?.plan !== false && isClaudeCommand(agentLine);
+    const planVars = withPlan ? `KUNJ_AGENT_PLAN=${CONTAINER_AGENT_PLAN_FILE}${id !== undefined ? `-${id}` : ''} ${Object.entries(PLAN_ENV).map(([k, v]) => `${k}=${v}`).join(' ')} ` : '';
+    const command = `KUNJ_AGENT_STATE=${stateFile} ${planVars}` + withAgentHooks(agentLine, stateFile, ctx.config.agent?.hooks !== false, withPlan);
     // agent.tmux false: run the agent directly, as when the image has no tmux (no warning), unless an
     // agent session from before the setting changed still runs: reattach rather than start a second agent
     const wantTmux = ctx.config.agent?.tmux !== false || await this.agentSessionRunning(ctx, main.id, user, session);
@@ -906,6 +914,29 @@ export class ContainerCommand extends BaseCommand {
       : ['sh', '-lc', command];
     const r = await ctx.backend.exec(main.id, argv, this.interactive(main, true));
     process.exitCode = r.exitCode;
+  }
+
+  // `kunj ct agent --plan`: the records in the container, one exec; none for a container that is not running
+  private async agentPlan(ctx: Context, branch: string, id: string | undefined): Promise<void> {
+    const main = await this.findMain(ctx, branch);
+    let plans: AgentPlanItemJson[] = [];
+    if (main?.state === 'running') {
+      const r = await ctx.backend.exec(main.id, ['sh', '-c', CONTAINER_PLAN_SCRIPT], { user: this.userOf(main) || undefined });
+      plans = parseContainerPlans(r.stdout).filter(p => id === undefined || p.id === id).map(p => {
+        const { branch: _branch, transcript: _transcript, ...plan } = reducePlan(p.text, ['/workspace']);
+        return { session: p.session, id: p.id, branch, worktree: '/workspace', container: main.name, running: p.running, state: p.running ? p.state : null, ...plan };
+      });
+    }
+    if (this.jsonMode) {
+      this.outputJSON({ plans } satisfies AgentPlanJson);
+      return;
+    }
+    if (plans.length === 0) console.log(chalk.dim(`No agent of ${branch} has a plan recorded`));
+    for (const p of plans) {
+      console.log(`${chalk.bold(p.title ?? branch)}  ${chalk.dim(p.session)}  ${p.running ? (p.state === 'waiting' ? chalk.yellow('waiting for input') : chalk.green('running')) : chalk.dim('not running')}`);
+      if (p.steps.length === 0) console.log(chalk.dim('  no task list yet'));
+      p.steps.forEach((st, i) => console.log(`  ${st.status === 'completed' ? chalk.green('✓') : i === p.current ? chalk.yellow('▶') : chalk.dim('○')} ${st.subject}`));
+    }
   }
 
   // session is `agent` or `agent-<checked id>`, so it needs no quoting

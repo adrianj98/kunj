@@ -11,6 +11,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { containerNames } from './container/names';
 import { kunjEntry } from './self';
+import { PLAN_TOOL_MATCHER, planHookCommand } from './agent-plan';
 
 const execFileAsync = promisify(execFile);
 
@@ -128,7 +129,8 @@ export interface TaggedTmuxSession {
 // a literal tab (tmux does not expand `\t` in a format).
 export async function readTaggedTmuxSessions(): Promise<TaggedTmuxSession[] | 'missing' | 'failed'> {
   try {
-    const { stdout } = await execFileAsync('tmux', ['list-sessions', '-F', `#{session_name}\t#{${SESSION_WORKTREE_OPTION}}\t#{${SESSION_OPEN_OPTION}}`]);
+    // -u: outside a UTF-8 locale tmux prints the tabs between the fields as underscores
+    const { stdout } = await execFileAsync('tmux', ['-u', 'list-sessions', '-F', `#{session_name}\t#{${SESSION_WORKTREE_OPTION}}\t#{${SESSION_OPEN_OPTION}}`]);
     return stdout.split('\n').filter(l => l.trim()).map(parseTaggedSessionLine);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
@@ -436,18 +438,28 @@ export function withAgentResume(command: string, id: string | null): string {
 
 // The hooks as `claude --settings` takes them. No single quotes anywhere, so the JSON can be
 // single-quoted for the shell tmux runs the command through.
-export function claudeHookSettings(): string {
+// With `plan`, the hooks that record the agent's plan into KUNJ_AGENT_PLAN (agent-plan.ts) are added:
+// a few events per step, never one per tool call. WorktreeCreate is left alone on purpose: a hook
+// there replaces the creation instead of observing it.
+export function claudeHookSettings(plan = false): string {
   const hook = (command: string, matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] }];
   const write = (state: AgentHookState) => `printf ${state} > "$KUNJ_AGENT_STATE"`;
+  const record = planHookCommand();
   return JSON.stringify({
     hooks: {
       UserPromptSubmit: hook(write('running')),
-      PreToolUse: hook(write('running')),
+      PreToolUse: [...hook(write('running')), ...(plan ? hook(record, 'Agent|Task') : [])],
       Stop: hook(write('waiting')),
       Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),
       SessionEnd: hook('rm -f "$KUNJ_AGENT_STATE"'),
       // Unset in containers (no resume there yet), where it does nothing
-      SessionStart: hook('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"'),
+      SessionStart: [...hook('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"'), ...(plan ? hook(record) : [])],
+      ...(plan ? {
+        PostToolUse: hook(record, PLAN_TOOL_MATCHER),
+        SubagentStart: hook(record),
+        SubagentStop: hook(record),
+        CwdChanged: hook(record),
+      } : {}),
     },
   });
 }
@@ -483,11 +495,11 @@ export function agentPromptFile(kunjDir: string, session: string): string {
 }
 
 // `command` with the hooks appended when it is claude (the setting agent.hooks, default on)
-export function withAgentHooks(command: string, _stateFile: string, enabled: boolean): string {
+export function withAgentHooks(command: string, _stateFile: string, enabled: boolean, plan = false): string {
   if (!enabled) return command;
   const first = command.trim().split(/\s+/)[0] ?? '';
   if (path.basename(first) !== 'claude') return command;
-  return `${command.trim()} --settings '${claudeHookSettings().replace(/'/g, "'\\''")}'`;
+  return `${command.trim()} --settings '${claudeHookSettings(plan).replace(/'/g, "'\\''")}'`;
 }
 
 export function readAgentState(stateFile: string): AgentHookState | null {

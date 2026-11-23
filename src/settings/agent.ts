@@ -35,6 +35,13 @@ export function registerAgentSettings(): void {
       category: 'agent',
     },
     {
+      key: 'agent.plan',
+      description: "Record where a Claude agent is in its plan (its task list, subagents, branch changes) for `kunj agent plan` and the workspace app's Overview; turns Claude Code's task tools on for the agent (CLAUDE_CODE_ENABLE_TODO_TOOLS). Needs agent.hooks",
+      type: 'boolean',
+      defaultValue: true,
+      category: 'agent',
+    },
+    {
       key: 'agent.hooks',
       description: 'Pass Claude Code hooks to the agent that report when it waits for input (agent.state in worktree list and ct list)',
       type: 'boolean',

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
-import { currentStep, parentLine, planHookCommand, planTitle, reducePlan } from '../agent-plan';
+import { CONTAINER_PLAN_SCRIPT, currentStep, parentLine, parseContainerPlans, planHookCommand, planTitle, reducePlan } from '../agent-plan';
 
 const line = (hook: any, t = 100, branch = 'main') => JSON.stringify({ kunj: { t, branch }, hook });
 const create = (id: string, subject: string, extra: any = {}) => ({ hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: { task: { id, subject } }, ...extra });
@@ -124,6 +124,29 @@ describe('planHookCommand', () => {
     const text = fs.readFileSync(file, 'utf8');
     expect(text.split('\n').filter(Boolean)).toHaveLength(1);
     expect(reducePlan(text).steps[0].subject).toBe('with "quotes" and $HOME');
+    fs.rmSync(dir, { recursive: true });
+  });
+});
+
+describe('container plans', () => {
+  it('splits the script output into one record per session and skips names kunj does not give', () => {
+    const out = ['#kunj-plan agent 1 waiting', line(create('1', 'a')), '', '#kunj-plan agent-two 0 ', line(create('1', 'b')), '#kunj-plan evil;name 1 running', line(create('1', 'c'))].join('\n');
+    const records = parseContainerPlans(out);
+    expect(records.map(r => [r.session, r.id, r.running, r.state])).toEqual([['agent', null, true, 'waiting'], ['agent-two', 'two', false, null]]);
+    expect(records.map(r => reducePlan(r.text).steps[0].subject)).toEqual(['a', 'b']);
+    expect(parseContainerPlans('')).toEqual([]);
+  });
+
+  it('the script prints the records of a directory as the parser reads them', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-cplan-'));
+    fs.writeFileSync(path.join(dir, 'kunj-agent-plan'), line(create('1', 'a')) + '\n');
+    fs.writeFileSync(path.join(dir, 'kunj-agent-plan-x1'), line(create('1', 'b')) + '\n');
+    fs.writeFileSync(path.join(dir, 'kunj-agent-state-x1'), 'waiting');
+    const script = CONTAINER_PLAN_SCRIPT.split('/tmp/').join(`${dir}/`);
+    const out = execFileSync('sh', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH, TMUX_TMPDIR: dir } });
+    const records = parseContainerPlans(out);
+    expect(records.map(r => [r.session, r.running, r.state])).toEqual([['agent', false, null], ['agent-x1', false, 'waiting']]);
+    expect(reducePlan(records[1].text).steps[0].subject).toBe('b');
     fs.rmSync(dir, { recursive: true });
   });
 });

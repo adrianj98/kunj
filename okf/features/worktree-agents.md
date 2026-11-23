@@ -87,6 +87,18 @@ sidebar row (`BranchLayout.suspended`, `restorePlan()`'s suspended indexes).
 `kunj agent saved [branch]` (`savedAgents()`, `AgentSavedJson`) lists the saved conversations whose session
 is not running, newest first, titled by their first prompt; `kunj agent forget` removes them. The workspace
 app's Resume Agent… (⌘⇧R) shows that list and opens the picked one with `--session <id> --resume`.
+**Plan record** (`agent.plan`, default on; src/lib/agent-plan.ts, docs/specs/agent-overview.md): the same
+`--settings` carry hooks (`PostToolUse` on `TaskCreate|TaskUpdate|TodoWrite|ExitPlanMode`, `PreToolUse` on
+`Agent|Task`, `SubagentStart`, `SubagentStop`, `CwdChanged`, `SessionStart`) that append one line
+`{"kunj":{"t","branch"},"hook":<input>}` to `KUNJ_AGENT_PLAN` = `~/.kunj/<repo>/agent-plan/<session>.ndjson`
+(`/tmp/kunj-agent-plan[-<id>]` in a container). `reducePlan()` turns the record into steps (Claude's task
+list), the current step, subagents with their own steps (a subagent's calls carry `agent_id`; it shares the
+session's task list), branch/worktree/fork/compact markers and the parent of a handed-off agent
+(`parentLine()`, written by a start from inside another agent's session). `kunj agent plan [--all] --json`
+and `kunj ct agent --plan` print it as `AgentPlanJson`; `kunj events` sends `agent` with `plan: true` when a
+host record changes. The agent is started with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`: newer models have no
+task tools without it.
+
 `kunj agent start --resume` reads it with `readAgentResume()` when the tmux session is not running and
 runs `claude --resume <id>` (`withAgentResume()`). The workspace app passes `--resume` for restored agent
 tabs (docs/specs/tmux-sessions.md#quitting-and-resuming).

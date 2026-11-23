@@ -120,6 +120,35 @@ and `state` is `waiting` when any of them waits for you. `sessions` lists the ru
 null for the default agent). `running` is `null`, and `sessions` absent, when tmux is not installed. The listing asks tmux once, not once per worktree,
 and skips it with `--no-status`.
 
+## Where an agent is in its plan
+
+A Claude agent keeps a task list while it works. kunj records it, so you can see which step each
+agent is on without opening its terminal:
+
+```bash
+kunj agent plan              # the agents of the current worktree
+kunj agent plan --all        # every worktree of the repository
+kunj ct agent my-branch --plan   # an agent in a branch container
+```
+
+```text
+Add a usage rollup endpoint  feat/llm-insights  waiting for input
+  ✓ Read the spend tables
+  ✓ Add the route
+    ↳ subagent write the tests (done)
+  ▶ OpenAPI
+  ○ Pagination
+```
+
+`--json` gives the same as data: each agent's steps with their status, the current step, its
+subagents, the points where it changed branch or worktree, and, for an agent that another agent
+started, that parent and the step it was on.
+
+The steps are the agent's own task list, so a short job may show none. To record it, kunj turns
+Claude Code's task tools on for the agent, which newer models do not have by default. Set
+`agent.plan` to `false` to leave the agent as Claude Code starts it; nothing is recorded then.
+Only Claude agents are recorded.
+
 ## Setting
 
 <SettingsTable category="agent" />
