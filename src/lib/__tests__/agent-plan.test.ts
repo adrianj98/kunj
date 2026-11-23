@@ -97,6 +97,10 @@ describe('reducePlan', () => {
     const handed = [parentLine('p', 1).trim(), line(start('startup')), line(create('1', 'a'))];
     expect(reducePlan(handed.join('\n')).parent).toEqual({ session: 'p', step: 1 });
     expect(reducePlan([...handed, line(start('clear'))].join('\n')).parent).toBeUndefined();
+    // a handoff that resumed keeps it until a /clear
+    const resumed = [parentLine('p', 1).trim(), line(start('resume'))];
+    expect(reducePlan(resumed.join('\n')).parent).toEqual({ session: 'p', step: 1 });
+    expect(reducePlan([...resumed, line(start('clear'))].join('\n')).parent).toBeUndefined();
     // a first conversation has no marker
     expect(reducePlan([line(start('startup')), line(create('1', 'a'))].join('\n')).markers).toEqual([]);
   });

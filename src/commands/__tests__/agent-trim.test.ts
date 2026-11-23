@@ -14,6 +14,11 @@ test('an oversized plan record keeps its last lines whole; a small one is left a
   expect(fs.statSync(file).size).toBeLessThanOrEqual(PLAN_FILE_MAX / 2);
   expect(kept.every(l => JSON.parse(l).kunj)).toBe(true);
   expect(kept[kept.length - 1]).toBe(lines[lines.length - 1]);
+  // wide characters: the cap is in bytes
+  fs.writeFileSync(file, Array.from({ length: 4000 }, (_, i) => JSON.stringify({ kunj: { t: i }, pad: '😀'.repeat(100) })).join('\n') + '\n');
+  trimPlanFile(file);
+  expect(fs.statSync(file).size).toBeLessThanOrEqual(PLAN_FILE_MAX / 2);
+  expect(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).every(l => JSON.parse(l).kunj)).toBe(true);
   fs.writeFileSync(file, 'small\n');
   trimPlanFile(file);
   expect(fs.readFileSync(file, 'utf8')).toBe('small\n');

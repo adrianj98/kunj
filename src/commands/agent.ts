@@ -498,8 +498,9 @@ export function trimPlanFile(file: string): void {
   let size: number;
   try { size = fs.statSync(file).size; } catch { return; }
   if (size <= PLAN_FILE_MAX) return;
-  const text = fs.readFileSync(file, 'utf8');
-  const tail = text.slice(text.length - PLAN_FILE_MAX / 2);
-  const cut = tail.indexOf('\n');
-  fs.writeFileSync(file, cut >= 0 ? tail.slice(cut + 1) : '');
+  // bytes, not characters: a record of wide characters must still end up under the cap
+  const bytes = fs.readFileSync(file);
+  const tail = bytes.subarray(bytes.length - PLAN_FILE_MAX / 2);
+  const cut = tail.indexOf(0x0a);
+  fs.writeFileSync(file, cut >= 0 ? tail.subarray(cut + 1) : Buffer.alloc(0));
 }

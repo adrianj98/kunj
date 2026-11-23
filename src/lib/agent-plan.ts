@@ -202,6 +202,8 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       branch = now;
     }
 
+    // any start uses up a parent line: after a resume (which keeps it) a later /clear drops it
+    if (event === 'SessionStart') parentFresh = false;
     if (event === 'SessionStart') {
       if (hook.source === 'fork' || hook.source === 'compact') markers.push({ type: hook.source, afterStep: planPosition(mainSteps()), at });
     } else if (event === 'SubagentStart' && agent) {
