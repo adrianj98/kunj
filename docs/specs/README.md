@@ -29,6 +29,9 @@ page only says where each thing stands.
 | [github-clone.md](github-clone.md) | `kunj repos github` / `kunj repos clone`, `repos.cloneDir`/`repos.cloneBare`, the workspace app's Clone from GitHub sheet | Shipped (CLI, workspace app) |
 | [cloud-machines.md](cloud-machines.md) | A small VM per session behind a coordinator (`kunj serve --machines`, auto-started locally or always-on in the cloud for several clients) from a pluggable `MachineProvider` (Google Cloud first): lifecycle, labels as state, wake on act, idle loop, token pairing, proxy, golden image, `container.caches`, `kunj machine`, phases | Phases 0–2 shipped and run on a real project (`kunj ct` on a branch's machine through the coordinator, wake on act, idle loop); golden image and `container.caches` shipped; listings, prune, hooks and phase 4 to do |
 | [google-cloud-containers.md](google-cloud-containers.md) | Google Cloud notes for the first provider: machine shape, IAP tunnel, suspend/resume, caching, cost | Notes written |
+| [review-comments.md](review-comments.md) | Comments on lines of the workspace app's Changes diff, sent to the environment's agent as one prompt; `kunj agent send`, `kunj ct agent --send` | Proposed |
+| [pr-panel.md](pr-panel.md) | The workspace app's PR mode: checks, review threads, next-step banner, merge; Fix with Agent / Send to Agent; `kunj worktree pr --details/--failed-log/--ready/--merge/--resolve` | Proposed |
+| [attention-sidebar.md](attention-sidebar.md) | Sidebar grouped by what each session needs (Needs you, Working, Your review, Waiting on others, Ready to merge, Done), seen tracking, dock badge and notifications; `waitingFor` on agent sessions | Proposed |
 
 ## Done
 
@@ -133,6 +136,9 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
+| Review comments on the diff, sent to the agent | [review-comments.md](review-comments.md) | Spec written 2026-11-23; CLI verb first |
+| PR panel: checks, review threads, merge, hand failures to the agent | [pr-panel.md](pr-panel.md) | Spec written 2026-11-23; uses `kunj agent send` from review-comments |
+| Attention sidebar | [attention-sidebar.md](attention-sidebar.md) | Spec written 2026-11-23; `waitingFor` in the CLI first |
 | Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
 | Cloud machines review follow-ups (plausible, not run): `machine.bootTimeoutMs` (300 s) starts before the bootstrap has installed anything, so a slow first boot may time out; a serve restart between a lost pairing reply and its retry still strands the machine; `--idle-exit` is reset by unauthorized requests; `coordinator stop` trusts a pid; the local coordinator's start lock has a three-command window while a stale lock is taken over | [cloud-machines.md](cloud-machines.md#the-coordinator) | From the adversarial reviews and the real runs |
 | Cloud machines, what is left: the registry copy (`machine.registry`: snapshot push and pull, needs image push/pull in `ContainerBackend`); `Ec2Provider` on a real AWS account; machine rows in the VS Code extension and the menu bar app; the golden image in `kunj ct blueprint status`; containers on machines in the `kunj events` container stream; `SshFleetProvider`; the opt-in `*.gce.test.ts` suite; the machine-side idle timer seen firing on a real machine (needs no coordinator running for 45 minutes) | [cloud-machines.md](cloud-machines.md#plan) | `kunj ct start --remote machines` works end to end on `kunj-dev` |
