@@ -84,10 +84,14 @@ export function planTitleText(plan: AgentPlanItemJson): string {
   return plan.title?.trim() || plan.branch;
 }
 
-/** "feat/x · worktree", "feat/x · container", "handoff · feat/x", with "agent <id>" for one of several */
+/**
+ * "feat/x · worktree", "feat/x · container", "handoff · feat/x", with "agent <id>" for one of several.
+ * The short part comes first, so a consumer that cuts the end of a long line keeps it: "handoff ·
+ * agent two · feat/…" (an indented lane has less room than a root one).
+ */
 export function planPlace(plan: AgentPlanItemJson, child: boolean): string {
   const extra = plan.id ? ` · agent ${plan.id}` : '';
-  return child ? `handoff · ${plan.branch}${extra}` : `${plan.branch} · ${plan.container ? 'container' : 'worktree'}${extra}`;
+  return child ? `handoff${extra} · ${plan.branch}` : `${plan.branch} · ${plan.container ? 'container' : 'worktree'}${extra}`;
 }
 
 /** "Waiting for input", "Step 3 of 5", "All 5 steps done", "Working" (no task list) */

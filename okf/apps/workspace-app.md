@@ -158,7 +158,7 @@ against `docs/workspace-app/design/mockups/warm.png`.
 [13] [src/lib/apps.ts](/src/lib/apps.ts)
 ## Overview window
 
-Window ▸ Overview (⌘⇧O; written 2026-11-23, its AppKit half not yet built or run): every running agent as
+Window ▸ Overview (⌘⇧O; shipped 2026-11-23, built and run on a Mac): every running agent as
 a line of its plan's steps. The CLI is the brain: `kunj agent overview --containers --json`
 (`AgentOverviewJson`, built by `buildOverview()` in src/lib/agent-overview.ts) gives the agents, their
 grouping, text and every position. `KunjWorkspaceCore/Overview/AgentOverview.swift` only decodes it and

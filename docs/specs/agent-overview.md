@@ -22,7 +22,7 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 | CLI: `kunj agent overview [--containers] --json` (`AgentOverviewJson`): grouping, text and layout | Shipped; run against a recorded live session |
 | CLI: parent link for a start from inside another agent's session (handoff) | Shipped |
 | `kunj events` for a container's plan: a `plan` event with `container` when the records' size in the status script changes | Shipped |
-| Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Written 2026-11-23. The Core half (the decoder of `AgentOverviewJson`, the filter, the events; `OverviewTests`) was compiled and its tests run with Swift 6.0.3 on Linux. The AppKit half (`OverviewWindow`, `OverviewCanvas`, the `AppDelegate` wiring) was only syntax-checked: **never compiled or run**. Left: build on a Mac, run `--demo --overview --screenshot` against the mockup, fix what the compiler and the picture show |
+| Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Shipped 2026-11-23: built and tested on a Mac (314 tests), `--demo --overview --screenshot` matches the mockup in both themes, and run against a live agent started by this kunj (steps, current step, branch change, subagent loop) |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |
 | Rewind forks (needs the transcript) | Later, only if wanted |
 
@@ -77,9 +77,11 @@ Run against Claude Code 2.1.330; the recording is `src/lib/__tests__/fixtures/ag
 5. `SubagentStop` also fires for helper agents that never had a `SubagentStart`; they are ignored.
 6. The `Agent` call's `PostToolUse` comes after the subagent ended, so its description is taken from
    `PreToolUse` and matched to the next `SubagentStart` of that type.
-7. **A subagent does not always get the task tools.** In `claude -p` it did; in an interactive session
-   started by `kunj agent` it searched for `TaskCreate` and did not find it. Such a subagent is a loop
-   with its task text and no stops. Not understood yet.
+7. **A background subagent has no task tools at all** (checked 2026-11-23 on Claude Code 2.1.330): it
+   has `TaskStop` only, neither `TaskCreate` nor `TodoWrite`, whatever the session has. A foreground
+   subagent gets the session's task tools. An interactive session runs subagents in the background
+   by default, so most subagents are a loop with their task text and no stops. Nothing in kunj can
+   change that; showing a background subagent's progress would need its tool calls counted (later).
 8. tmux outside a UTF-8 locale prints the tabs of `list-sessions -F` as underscores, so the tagged
    listing found no session; it now passes `-u` (also in `kunj sessions`).
 

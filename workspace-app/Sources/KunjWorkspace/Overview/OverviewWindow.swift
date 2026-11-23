@@ -27,7 +27,7 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
                                                    target: nil, action: nil)
     private let errorLabel = makeLabel("", font: Theme.sans(DesignTokens.TypeScale.caption), color: .clear)
     private let legend = makeLabel(
-        "● done    ◎ where the agent is: green working, amber waiting for you    ○ to come    ◇ branch or worktree change    ⌣ subagent    Click a line to open its agent",
+        "● done   ◎ now (amber: waiting for you)   ○ to come   ◇ branch or worktree change   ╰╯ subagent   Click a line to open its agent",
         font: Theme.mono(DesignTokens.TypeScale.caption), color: .clear)
 
     private var repos: [AgentOverviewJson] = []
@@ -213,10 +213,20 @@ final class OverviewWindow: NSWindowController, NSWindowDelegate {
         }
     }
 
+    /// For the screenshot: the window grows to show every row (up to the screen's height).
     func snapshotPNG() -> Data? {
-        guard let root = window?.contentView else { return nil }
+        guard let window, let root = window.contentView else { return nil }
         root.layoutSubtreeIfNeeded()
         canvas.rebuild()
+        let chrome = root.bounds.height - scroll.frame.height
+        let wanted = min(canvas.contentHeight + chrome + 8, (window.screen?.visibleFrame.height ?? 1200) - 40)
+        if wanted > root.bounds.height {
+            var frame = window.frame
+            frame.size.height += wanted - root.bounds.height
+            window.setFrame(frame, display: false)
+            root.layoutSubtreeIfNeeded()
+            canvas.rebuild()
+        }
         root.displayIfNeeded()
         guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return nil }
         root.cacheDisplay(in: root.bounds, to: rep)

@@ -44,6 +44,17 @@ final class OverviewCanvas: NSView {
         needsDisplay = true
     }
 
+    /// The height everything takes, for sizing the window to it (the screenshot).
+    var contentHeight: CGFloat {
+        rows.reduce(0) { total, row in
+            switch row {
+            case .heading: return total + Self.headingHeight
+            case .family(_, let family, _): return total + CGFloat(family.height)
+            case .message: return total + Self.messageHeight
+            }
+        }
+    }
+
     /// Lays the rows out again and resizes to them (also called when the window's width changes).
     func rebuild() {
         rows = []
@@ -285,7 +296,7 @@ final class OverviewCanvas: NSView {
         drawText(lane.title, in: NSRect(x: x + 16, y: y, width: width, height: 18),
                  font: Theme.sans(DesignTokens.TypeScale.body, weight: .semibold), color: theme.color(\.text))
         drawText(lane.place, in: NSRect(x: x + 16, y: y + 19, width: width, height: 15),
-                 font: Theme.mono(DesignTokens.TypeScale.caption), color: theme.color(\.muted), truncation: .byTruncatingMiddle)
+                 font: Theme.mono(DesignTokens.TypeScale.caption), color: theme.color(\.muted))
         drawText(lane.status, in: NSRect(x: x + 16, y: y + 35, width: width, height: 15),
                  font: Theme.sans(DesignTokens.TypeScale.caption), color: lane.waiting ? theme.color(\.amber) : theme.color(\.muted))
     }

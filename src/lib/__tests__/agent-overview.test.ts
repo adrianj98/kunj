@@ -39,7 +39,7 @@ describe('text', () => {
     expect(planTitleText(plan('feat/x'))).toBe('feat/x');
     expect(planTitleText(plan('feat/x', { title: '  Do the thing ' }))).toBe('Do the thing');
     expect(planPlace(plan('feat/x', { id: 'two' }), false)).toBe('feat/x · worktree · agent two');
-    expect(planPlace(plan('feat/x', { id: 'two' }), true)).toBe('handoff · feat/x · agent two');
+    expect(planPlace(plan('feat/x', { id: 'two' }), true)).toBe('handoff · agent two · feat/x');
     expect(planPlace(plan('feat/x', { container: 'c' }), false)).toBe('feat/x · container');
     expect(overviewSummary(2, 1)).toBe('2 agents · 1 waiting for you');
     expect(overviewSummary(1, 0)).toBe('1 agent');

@@ -1965,3 +1965,9 @@ The user asked to be able to choose a remote in the app when remotes are availab
   also be used to copy skills" and asked what my setting added besides forcing the copy; the answer was too little
   to keep a second mechanism.
 - container.files review fixes: on a later start one entry that fails is a warning and the rest are copied; `ct open` copies nothing; docs say files are added and replaced, not deleted.
+- Agent overview: built the workspace app on the Mac (it compiled first time, 314 tests pass) and checked the Overview
+  window with `--demo --overview --screenshot` in warm and light, then against a live agent started by this branch's kunj.
+  Changed: a handed-off lane's second line is now "handoff · agent <id> · <branch>" and is cut at its end, because the
+  middle cut showed "fea…ts" (CLI `planPlace()`; demo data regenerated); the legend is shorter so it fits; the screenshot
+  window grows to show every row. Why: what the screenshots showed. Found: background subagents have no task tools at all,
+  which is why the live subagent showed no steps; recorded in the spec, nothing kunj can change.
