@@ -707,3 +707,69 @@ export interface ContainerCacheSyncJson {
   store: { kind: 'bucket'; location: string };
   caches: Array<{ name: string; action: 'pulled' | 'pushed' | 'empty' | 'failed'; message?: string }>;
 }
+
+/** One stop on an agent's line: a task of Claude's task list (`kunj agent plan`). */
+export interface AgentPlanStepJson {
+  id: string;
+  subject: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  /** ISO times, when the hooks saw the change */
+  startedAt?: string;
+  completedAt?: string;
+}
+
+/** Something that happened between two stops. `afterStep` indexes `steps`; null: before any step. */
+export interface AgentPlanMarkerJson {
+  type: 'branch' | 'worktree' | 'fork' | 'compact';
+  afterStep: number | null;
+  from?: string;
+  to?: string;
+  at: string;
+}
+
+/** A subagent of the session: a loop from `fromStep` to `toStep` with its own steps. */
+export interface AgentPlanSubagentJson {
+  id: string;
+  type: string;
+  /** The short description the agent gave it; null when the hooks did not see one */
+  task: string | null;
+  fromStep: number | null;
+  /** null while it runs */
+  toStep: number | null;
+  running: boolean;
+  steps: AgentPlanStepJson[];
+}
+
+/** One agent session's plan, as its hooks recorded it. */
+export interface AgentPlanItemJson {
+  session: string;
+  /** The `--session <id>`; null for the default session */
+  id: string | null;
+  branch: string;
+  worktree: string;
+  /** The container's name, for a branch container's agent */
+  container?: string;
+  /** First heading of the plan from plan mode, else the conversation's first prompt */
+  title: string | null;
+  /** null: tmux could not be asked */
+  running: boolean | null;
+  state: 'running' | 'waiting' | null;
+  steps: AgentPlanStepJson[];
+  /** Index into `steps` of the step in progress (else the next one to do); null: none left, or no steps */
+  current: number | null;
+  markers: AgentPlanMarkerJson[];
+  subagents: AgentPlanSubagentJson[];
+  /** The session that started this one (a handoff) and the step it was on */
+  parent?: { session: string; step: number | null };
+  /** ISO time of the last recorded change; null when nothing was recorded */
+  updatedAt: string | null;
+}
+
+/**
+ * `kunj agent plan [branch] --json`: where each agent session of the worktree is in its plan
+ * (`--all-worktrees`: of every worktree of the repository). Sessions that are not running are
+ * listed too while their record exists.
+ */
+export interface AgentPlanJson {
+  plans: AgentPlanItemJson[];
+}

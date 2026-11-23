@@ -1,0 +1,241 @@
+// Where an agent is in its plan, from what its Claude Code hooks recorded.
+//
+// kunj's plan hooks (claudeHookSettings() in agent-session.ts) append one JSON line per event to
+// the file named by KUNJ_AGENT_PLAN: `{"kunj":{"t":<unix s>,"branch":"<b>"},"hook":<hook input>}`.
+// The hooks stay a single printf; everything about Claude Code's shapes is here, in reducePlan(),
+// which is pure. Shapes recorded from Claude Code 2.1.330 (src/lib/__tests__/fixtures/).
+// Spec: docs/specs/agent-overview.md.
+
+import * as fs from 'fs';
+import * as path from 'path';
+import type { AgentPlanMarkerJson, AgentPlanStepJson, AgentPlanSubagentJson } from './json-types';
+
+export const CONTAINER_AGENT_PLAN_FILE = '/tmp/kunj-agent-plan';
+
+// The task tools the hooks record. Newer models only have them with CLAUDE_CODE_ENABLE_TODO_TOOLS=1,
+// which `kunj agent` sets with the hooks.
+export const PLAN_TOOL_MATCHER = 'TaskCreate|TaskUpdate|TodoWrite|ExitPlanMode';
+export const PLAN_ENV = { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' } as const;
+
+export function agentPlanDir(kunjDir: string): string {
+  return path.join(kunjDir, 'agent-plan');
+}
+
+export function agentPlanFile(kunjDir: string, session: string): string {
+  return path.join(agentPlanDir(kunjDir), `${session}.ndjson`);
+}
+
+// One printf, so a line is one write and two agents appending at once do not interleave. No single
+// quotes (the settings JSON is single-quoted on the command line). A branch name with a `"` makes
+// a line that does not parse; the reducer skips it.
+export function planHookCommand(): string {
+  return '[ -z "$KUNJ_AGENT_PLAN" ] || printf "%s\\n" "{\\"kunj\\":{\\"t\\":$(date +%s),\\"branch\\":\\"$(git branch --show-current 2>/dev/null)\\"},\\"hook\\":$(cat)}" >> "$KUNJ_AGENT_PLAN"';
+}
+
+// The first line of a handed-off session's file: who started it and on which step
+export function parentLine(session: string, step: number | null): string {
+  return `${JSON.stringify({ kunj: { t: Math.floor(Date.now() / 1000), parent: { session, step } } })}\n`;
+}
+
+export interface ReducedPlan {
+  title: string | null;
+  steps: AgentPlanStepJson[];
+  current: number | null;
+  markers: AgentPlanMarkerJson[];
+  subagents: AgentPlanSubagentJson[];
+  parent?: { session: string; step: number | null };
+  updatedAt: string | null;
+  /** The branch on the last line that had one */
+  branch: string | null;
+  /** Claude's transcript, for a title when there was no plan mode */
+  transcript: string | null;
+}
+
+interface Task extends AgentPlanStepJson {
+  owner: string | null; // the subagent that created it; null: the session itself
+}
+
+const STATUSES = ['pending', 'in_progress', 'completed'];
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+
+export function currentStep(steps: AgentPlanStepJson[]): number | null {
+  const active = steps.findIndex(s => s.status === 'in_progress');
+  if (active >= 0) return active;
+  let last = -1;
+  steps.forEach((s, i) => { if (s.status === 'completed') last = i; });
+  const next = steps.findIndex((s, i) => i > last && s.status === 'pending');
+  return next >= 0 ? next : null;
+}
+
+// Where a marker or a subagent attaches: the step in progress, else the last one finished
+function position(steps: AgentPlanStepJson[]): number | null {
+  const active = steps.findIndex(s => s.status === 'in_progress');
+  if (active >= 0) return active;
+  let last: number | null = null;
+  steps.forEach((s, i) => { if (s.status === 'completed') last = i; });
+  return last;
+}
+
+export function planTitle(plan: unknown): string | null {
+  if (typeof plan !== 'string') return null;
+  const lines = plan.split('\n').map(l => l.trim()).filter(Boolean);
+  const heading = lines.find(l => /^#{1,6}\s+\S/.test(l)) ?? lines[0];
+  if (!heading) return null;
+  const text = heading.replace(/^#{1,6}\s+/, '').replace(/^plan:\s*/i, '').trim();
+  return text ? (text.length > 100 ? `${text.slice(0, 99)}…` : text) : null;
+}
+
+// The worktree a directory is in: the longest listed root that contains it
+function worktreeOf(dir: string | undefined, worktrees: string[]): string | undefined {
+  if (!dir) return undefined;
+  let best: string | undefined;
+  for (const w of worktrees) {
+    if ((dir === w || dir.startsWith(w.endsWith('/') ? w : `${w}/`)) && (!best || w.length > best.length)) best = w;
+  }
+  return best;
+}
+
+/** `text`: the recorded lines. `worktrees`: the repository's worktree roots, to tell a move between two. */
+export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan {
+  let tasks = new Map<string, Task>();
+  let order: string[] = [];
+  let title: string | null = null;
+  let markers: AgentPlanMarkerJson[] = [];
+  let subagents = new Map<string, AgentPlanSubagentJson>();
+  let pendingTasks: Array<{ type?: string; task: string }> = []; // Agent calls not yet started
+  let parent: ReducedPlan['parent'];
+  let updatedAt: string | null = null;
+  let branch: string | null = null;
+  let transcript: string | null = null;
+
+  const mainSteps = (): Task[] => order.map(id => tasks.get(id)!).filter(t => t.owner === null);
+  const setStatus = (task: Task, status: unknown, at: string) => {
+    if (typeof status !== 'string' || !STATUSES.includes(status) || task.status === status) return;
+    task.status = status as Task['status'];
+    if (status === 'in_progress') task.startedAt ??= at;
+    if (status === 'completed') task.completedAt = at;
+  };
+
+  for (const raw of text.split('\n')) {
+    if (!raw.trim()) continue;
+    let line: any;
+    try { line = JSON.parse(raw); } catch { continue; }
+    const meta = line?.kunj;
+    if (!meta || typeof meta !== 'object') continue;
+    const at: string = typeof meta.t === 'number' && isFinite(meta.t) ? new Date(meta.t * 1000).toISOString() : (updatedAt ?? new Date(0).toISOString());
+    updatedAt = at;
+
+    if (meta.parent && typeof meta.parent.session === 'string') {
+      parent = { session: meta.parent.session, step: typeof meta.parent.step === 'number' ? meta.parent.step : null };
+      continue;
+    }
+    const hook = line.hook;
+    if (!hook || typeof hook !== 'object') continue;
+    transcript = str(hook.transcript_path) ?? transcript;
+    const agent = str(hook.agent_id) ?? null;
+    const event = hook.hook_event_name;
+    const input = hook.tool_input && typeof hook.tool_input === 'object' ? hook.tool_input : {};
+
+    // A new conversation in the same session starts a new line
+    if (event === 'SessionStart' && (hook.source === 'startup' || hook.source === 'clear')) {
+      tasks = new Map(); order = []; title = null; markers = []; subagents = new Map(); pendingTasks = [];
+    }
+
+    let moved = false;
+    if (event === 'CwdChanged') {
+      const from = worktreeOf(str(hook.old_cwd), worktrees);
+      const to = worktreeOf(str(hook.new_cwd), worktrees);
+      if (from && to && from !== to) {
+        markers.push({ type: 'worktree', afterStep: position(mainSteps()), from, to, at });
+        moved = true;
+      }
+    }
+    const now = str(meta.branch);
+    if (now && agent === null) {
+      if (branch && now !== branch && !moved) markers.push({ type: 'branch', afterStep: position(mainSteps()), from: branch, to: now, at });
+      branch = now;
+    }
+
+    if (event === 'SessionStart') {
+      if (hook.source === 'fork' || hook.source === 'compact') markers.push({ type: hook.source, afterStep: position(mainSteps()), at });
+    } else if (event === 'SubagentStart' && agent) {
+      const type = str(hook.agent_type) ?? 'agent';
+      let i = pendingTasks.findIndex(p => p.type === type);
+      if (i < 0) i = pendingTasks.length ? 0 : -1;
+      const task = i >= 0 ? pendingTasks.splice(i, 1)[0].task : null;
+      subagents.set(agent, { id: agent, type, task, fromStep: position(mainSteps()), toStep: null, running: true, steps: [] });
+    } else if (event === 'SubagentStop' && agent) {
+      const sub = subagents.get(agent);
+      if (sub) { sub.running = false; sub.toStep = position(mainSteps()); }
+    } else if (event === 'PreToolUse' && (hook.tool_name === 'Agent' || hook.tool_name === 'Task')) {
+      const task = str(input.description);
+      if (task) pendingTasks.push({ type: str(input.subagent_type), task });
+    } else if (event === 'PostToolUse' && hook.tool_name === 'TaskCreate') {
+      const made = hook.tool_response?.task;
+      const id = str(made?.id) ?? (typeof made?.id === 'number' ? String(made.id) : undefined);
+      const subject = str(made?.subject) ?? str(input.subject);
+      if (id && subject && !tasks.has(id)) {
+        tasks.set(id, { id, subject, status: 'pending', owner: agent && subagents.has(agent) ? agent : null });
+        order.push(id);
+      }
+    } else if (event === 'PostToolUse' && hook.tool_name === 'TaskUpdate') {
+      const id = str(input.taskId) ?? (typeof input.taskId === 'number' ? String(input.taskId) : undefined);
+      const task = id ? tasks.get(id) : undefined;
+      if (task && hook.tool_response?.success !== false) {
+        if (input.status === 'deleted') {
+          tasks.delete(task.id);
+          order = order.filter(o => o !== task.id);
+        } else {
+          if (str(input.subject)) task.subject = input.subject;
+          setStatus(task, input.status, at);
+        }
+      }
+    } else if (event === 'PostToolUse' && hook.tool_name === 'TodoWrite' && Array.isArray(input.todos)) {
+      // The legacy tool rewrites the whole list: keep the times of entries that are still there
+      const before = [...tasks.values()].filter(t => t.owner === agent);
+      for (const t of before) { tasks.delete(t.id); order = order.filter(o => o !== t.id); }
+      input.todos.forEach((todo: any, i: number) => {
+        const subject = str(todo?.content);
+        if (!subject) return;
+        const id = `${agent ?? 'todo'}-${i}`;
+        const old = before.find(t => t.subject === subject);
+        const task: Task = { id, subject, status: 'pending', owner: agent && subagents.has(agent) ? agent : null, startedAt: old?.startedAt, completedAt: old?.completedAt };
+        if (old) task.status = old.status;
+        setStatus(task, todo.status, at);
+        if (task.status !== 'completed') delete task.completedAt;
+        tasks.set(id, task); order.push(id);
+      });
+    } else if (event === 'PostToolUse' && hook.tool_name === 'ExitPlanMode' && agent === null) {
+      title = planTitle(input.plan) ?? title;
+    }
+  }
+
+  const clean = ({ owner: _owner, ...step }: Task): AgentPlanStepJson => {
+    const out: AgentPlanStepJson = { id: step.id, subject: step.subject, status: step.status };
+    if (step.startedAt) out.startedAt = step.startedAt;
+    if (step.completedAt) out.completedAt = step.completedAt;
+    return out;
+  };
+  const all = order.map(id => tasks.get(id)!);
+  const steps = all.filter(t => t.owner === null).map(clean);
+  for (const sub of subagents.values()) sub.steps = all.filter(t => t.owner === sub.id).map(clean);
+  return { title, steps, current: currentStep(steps), markers, subagents: [...subagents.values()], ...(parent ? { parent } : {}), updatedAt, branch, transcript };
+}
+
+// A plan file's text; '' when there is none. Past `maxBytes` only the end is read (a first partial
+// line then fails to parse and is skipped), so a huge file costs a bounded read.
+export function readPlanFile(file: string, maxBytes = 16 * 1024 * 1024): string {
+  try {
+    const size = fs.statSync(file).size;
+    if (size <= maxBytes) return fs.readFileSync(file, 'utf8');
+    const fd = fs.openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(maxBytes);
+      return buf.subarray(0, fs.readSync(fd, buf, 0, maxBytes, size - maxBytes)).toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return '';
+  }
+}
