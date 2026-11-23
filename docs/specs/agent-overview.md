@@ -138,6 +138,8 @@ the polled status). The app then asks `kunj agent plan` for that session only.
 
 ## The window
 
+Mockup: [docs/workspace-app/design/mockups/overview.html](../workspace-app/design/mockups/overview.html) (example data, both themes).
+
 Window ▸ Overview. Rows grouped by repository, one per agent session, children indented under their
 parent with the branch drawn. Done stops filled, current ringed, pending hollow; amber when the agent
 waits on the user. Hover shows the step's subject and times; click on a row opens that agent's tab.

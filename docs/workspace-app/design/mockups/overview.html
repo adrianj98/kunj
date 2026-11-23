@@ -1,0 +1,214 @@
+<title>Kunj Agent Overview</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one app window; rows grouped by repository; each agent is a lane with its plan drawn as a transit line. Tokens are the workspace app's (docs/workspace-app/design/tokens.json): light, and warm for dark. */
+:root{
+  --page:#e9e5df; --bg:#ffffff; --side:#f3f1ee; --raised:#e8e4de; --border:#e4e0da; --border-strong:#cfc9c0;
+  --text:#1d1a17; --text2:#3d3833; --muted:#6f675d; --faint:#8d8478; --idle:#cfc8bf;
+  --amber:#b8730f; --green:#2e8b45; --line:#5d554c; --shadow:0 18px 50px rgba(60,45,25,.16);
+  --sans:Inter,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --page:#100f0e; --bg:#1a1816; --side:#201d1b; --raised:#2b2724; --border:#2d2926; --border-strong:#3a3531;
+  --text:#f1ede6; --text2:#dad2c1; --muted:#8f877c; --faint:#6b6459; --idle:#4a443f;
+  --amber:#e8a33d; --green:#5ec26a; --line:#b5ad9f; --shadow:0 18px 50px rgba(0,0,0,.5); color-scheme:dark } }
+:root[data-theme="dark"]{
+  --page:#100f0e; --bg:#1a1816; --side:#201d1b; --raised:#2b2724; --border:#2d2926; --border-strong:#3a3531;
+  --text:#f1ede6; --text2:#dad2c1; --muted:#8f877c; --faint:#6b6459; --idle:#4a443f;
+  --amber:#e8a33d; --green:#5ec26a; --line:#b5ad9f; --shadow:0 18px 50px rgba(0,0,0,.5); color-scheme:dark }
+
+body{background:var(--page);color:var(--text);font-family:var(--sans);font-size:13px;line-height:1.55;letter-spacing:-.005em;-webkit-font-smoothing:antialiased;
+  padding-block:28px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.mono{font-family:var(--mono)}
+.window{max-width:1180px;margin:0 auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.titlebar{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;padding:12px 16px;background:var(--side);border-bottom:1px solid var(--border)}
+.lights{display:flex;gap:8px}
+.lights i{width:12px;height:12px;border-radius:50%;background:var(--idle)}
+.titlebar h1{font-size:14px;font-weight:600;margin:0}
+.titlebar .sum{color:var(--muted);font-size:11px}
+.seg{margin-left:auto;display:flex;border:1px solid var(--border-strong);border-radius:5px;overflow:hidden}
+.seg button{font:inherit;font-size:12px;color:var(--muted);background:transparent;border:0;padding:4px 11px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--border-strong)}
+.seg button[aria-pressed="true"]{background:var(--raised);color:var(--text)}
+.seg button:focus-visible{outline:2px solid var(--amber);outline-offset:-2px}
+.repo{display:flex;justify-content:space-between;padding:14px 20px 4px;color:var(--muted);font-size:12px}
+.scroll{overflow-x:auto}
+.family{position:relative;border-bottom:1px solid var(--border)}
+.family svg{display:block}
+.lane{position:absolute;left:0;width:248px;padding:0 12px 0 20px;box-sizing:border-box;cursor:pointer}
+.lane.child{padding-left:38px}
+.lane .t{display:flex;align-items:center;gap:8px;font-weight:600;white-space:nowrap}
+.lane .t span:last-child{overflow:hidden;text-overflow:ellipsis}
+.dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--green)}
+.dot.waiting{background:var(--amber)}
+.lane .b{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:16px}
+.lane .s{font-size:11px;color:var(--muted);padding-left:16px}
+.lane .s.waiting{color:var(--amber)}
+.status{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;padding:7px 16px;border-top:1px solid var(--border);margin-top:-1px;color:var(--muted);font-size:11px}
+.status svg{vertical-align:-3px;margin-right:5px}
+.note{max-width:1180px;margin:14px auto 0;color:var(--muted);font-size:12px}
+
+/* line drawing */
+.seg-done{stroke:var(--line);stroke-width:3;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.seg-todo{stroke:var(--idle);stroke-width:3;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.thin{stroke-width:2}
+.st-done{fill:var(--line)}
+.st-todo{fill:var(--bg);stroke:var(--idle);stroke-width:2}
+.st-cur{fill:var(--bg);stroke-width:3}
+.running .st-cur,.running .core{stroke:var(--green)} .running .core{fill:var(--green)}
+.waiting .st-cur,.waiting .core{stroke:var(--amber)} .waiting .core{fill:var(--amber)}
+.lbl{font:10.5px var(--sans);fill:var(--faint);text-anchor:middle}
+.lbl.cur{fill:var(--text);font-weight:600}
+.sub{font:10px var(--mono);fill:var(--muted);text-anchor:middle}
+.pill rect{fill:var(--raised);stroke:var(--border-strong)}
+.pill text{font:10px var(--mono);fill:var(--text2);text-anchor:middle}
+.dia{fill:var(--bg);stroke:var(--line);stroke-width:2}
+@media (prefers-reduced-motion: no-preference){
+  .running .halo{animation:pulse 1.8s ease-out infinite;transform-box:fill-box;transform-origin:center}
+  @keyframes pulse{from{opacity:.55;transform:scale(.6)}to{opacity:0;transform:scale(1.9)}}
+}
+.halo{fill:none;stroke:var(--green);stroke-width:2;opacity:0}
+</style>
+
+<div class="window">
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <h1>Overview</h1>
+    <span class="sum mono" id="sum"></span>
+    <div class="seg" role="group" aria-label="Show agents">
+      <button id="f-all" aria-pressed="true">All</button>
+      <button id="f-waiting" aria-pressed="false">Waiting</button>
+      <button id="f-running" aria-pressed="false">Running</button>
+    </div>
+  </div>
+  <div id="rows"></div>
+  <div class="status mono">
+    <span><svg width="14" height="14"><circle cx="7" cy="7" r="5" class="st-done"/></svg>done</span>
+    <span class="running"><svg width="16" height="16"><circle cx="8" cy="8" r="5.5" class="st-cur"/><circle cx="8" cy="8" r="2" class="core"/></svg>working here</span>
+    <span class="waiting"><svg width="16" height="16"><circle cx="8" cy="8" r="5.5" class="st-cur"/><circle cx="8" cy="8" r="2" class="core"/></svg>waiting for you</span>
+    <span><svg width="14" height="14"><circle cx="7" cy="7" r="4.5" class="st-todo"/></svg>to come</span>
+    <span><svg width="14" height="14"><rect x="3" y="3" width="8" height="8" transform="rotate(45 7 7)" class="dia"/></svg>branch or worktree change</span>
+    <span><svg width="26" height="14"><path d="M2 3 v3 a4 4 0 0 0 4 4 h14 a4 4 0 0 0 4 -4 v-3" class="seg-done thin"/></svg>subagent</span>
+    <span style="margin-left:auto">click a line to open its agent tab</span>
+  </div>
+</div>
+<p class="note">Mockup with example data. Stops are the agent's own task list; hover a stop for its full name.</p>
+
+<script>
+// Example data in the shape of the planned AgentPlanJson (docs/specs/agent-overview.md).
+// step status: d done, c current, t to come
+const S = (s, label) => ({ s, label });
+const DATA = [
+  { repo: 'kunj', families: [
+    [ { title: 'Agent overview window', branch: 'feat/agent-overview', kind: 'worktree', state: 'running',
+        steps: [S('d','Probe the hooks'), S('d','Capture in hooks'), S('d','Plan reducer'), S('c','agent plan --json'), S('t','Events action'), S('t','Docs and okf')],
+        subs: [{ from: 2, to: 3, task: 'subagent · write reducer tests', running: true, steps: [S('d','Record fixtures'), S('c','Unit tests'), S('t','Edge cases')] }] },
+      { title: 'Overview window (app)', branch: 'feat/agent-overview-app', kind: 'handoff', state: 'running', parent: 0, at: 1,
+        steps: [S('d','Layout maths'), S('c','Line view'), S('t','Row list'), S('t','Demo data'), S('t','Screenshot check')] } ],
+    [ { title: 'Search in VS Code', branch: 'feat/vscode-search', kind: 'worktree', state: 'waiting', wait: 'Asks: open in a new tab or reuse?',
+        steps: [S('d','Quick pick'), S('d','Run kunj search'), S('c','Open the result'), S('t','Tests')],
+        markers: [{ after: 0, label: 'main → feat/vscode-search' }] } ],
+    [ { title: 'Remote terminal hangup', branch: 'fix/remote-pty', kind: 'container', state: 'running',
+        steps: [S('c','No task list yet: reading how a closed exec ends')] } ],
+  ]},
+  { repo: 'alertd-core', families: [
+    [ { title: 'Usage rollup endpoint', branch: 'feat/llm-insights', kind: 'container', state: 'waiting', wait: 'Asks: want pagination on it?',
+        steps: [S('d','Read spend tables'), S('d','Add the route'), S('d','Tests'), S('d','OpenAPI'), S('c','Pagination')] },
+      { title: 'Try cursor pagination', branch: 'feat/llm-insights', kind: 'fork a-2', state: 'running', parent: 0, at: 3,
+        steps: [S('d','Cursor param'), S('c','Tests')] } ],
+    [ { title: 'Dedupe alert fan-out', branch: 'fix/alert-dedupe', kind: 'worktree', state: 'running',
+        steps: [S('d','Reproduce'), S('d','Failing test'), S('c','Fix the fan-out'), S('t','Run the suite'), S('t','Open the PR')],
+        subs: [{ from: 0, to: 1, task: 'subagent · find fan-out callers', running: false, steps: [S('d','Grep callers'), S('d','Read queue code')] }] } ],
+  ]},
+];
+
+const LABELS = 248, X0 = 56, DX = 116, LANE = 74, SUBH = 40;
+const NS = 'http://www.w3.org/2000/svg';
+const el = (name, attrs = {}, text) => { const e = document.createElementNS(NS, name); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+const html = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+function stop(g, x, y, st, state, small) {
+  const r = small ? 3.5 : 5;
+  if (st.s === 'c') {
+    const w = el('g', { class: state });
+    if (!small) w.append(el('circle', { cx: x, cy: y, r: 9, class: 'halo' }));
+    w.append(el('circle', { cx: x, cy: y, r: small ? 5 : 7, class: 'st-cur' }), el('circle', { cx: x, cy: y, r: small ? 1.6 : 2.6, class: 'core' }));
+    w.append(el('title', {}, st.label)); g.append(w);
+  } else {
+    const c = el('circle', { cx: x, cy: y, r, class: st.s === 'd' ? 'st-done' : 'st-todo' });
+    c.append(el('title', {}, st.label)); g.append(c);
+  }
+}
+const curIndex = steps => { const i = steps.findIndex(s => s.s === 'c'); return i < 0 ? steps.filter(s => s.s === 'd').length - 1 : i; };
+
+function drawFamily(lanes) {
+  const box = html('div', 'family');
+  let y = 0; const ys = [], xs = [];
+  lanes.forEach((l, i) => { ys[i] = y + 40; y += LANE + (l.subs ? SUBH : 0); xs[i] = l.parent == null ? X0 : xs[l.parent] + l.at * DX + DX / 2; });
+  const width = LABELS + Math.max(...lanes.map((l, i) => xs[i] + (l.steps.length - 1) * DX + (l.steps.length === 1 ? l.steps[0].label.length * 6.2 : 0))) + 150;
+  box.style.minWidth = width + 'px'; box.style.height = y + 'px';
+  const svg = el('svg', { width, height: y, role: 'img', 'aria-label': lanes.map(l => l.title).join(', ') });
+  const g = el('g', { transform: `translate(${LABELS},0)` }); svg.append(g);
+
+  lanes.forEach((l, i) => {
+    const ly = ys[i], x = k => xs[i] + k * DX, cur = curIndex(l.steps), n = l.steps.length;
+    if (l.parent != null) { // branch off the parent's line
+      const px = xs[l.parent] + l.at * DX, py = ys[l.parent];
+      g.append(el('path', { d: `M${px} ${py} V${ly - 12} a12 12 0 0 0 12 12 H${x(0)}`, class: 'seg-done' }));
+    }
+    if (n > 1) {
+      g.append(el('path', { d: `M${x(0)} ${ly} H${x(n - 1)}`, class: 'seg-todo' }));
+      if (cur > 0) g.append(el('path', { d: `M${x(0)} ${ly} H${x(cur)}`, class: 'seg-done' }));
+    }
+    (l.subs || []).forEach(sb => { // a loop that leaves the line and rejoins it
+      const a = x(sb.from), b = x(sb.to), by = ly + 30;
+      g.append(el('path', { d: `M${a} ${ly} V${by - 8} a8 8 0 0 0 8 8 H${b - 8} a8 8 0 0 0 8 -8 V${ly}`, class: (sb.running ? 'seg-todo' : 'seg-done') + ' thin' }));
+      const m = sb.steps.length, sx = k => a + 24 + k * ((b - a - 48) / Math.max(1, m - 1)), sc = curIndex(sb.steps);
+      if (sb.running && sc >= 0) g.append(el('path', { d: `M${a} ${ly} V${by - 8} a8 8 0 0 0 8 8 H${sx(sc)}`, class: 'seg-done thin' }));
+      sb.steps.forEach((st, k) => stop(g, sx(k), by, st, 'running', true));
+      g.append(el('text', { x: (a + b) / 2, y: by + 19, class: 'sub' }, sb.task + (sb.running ? '' : ' · done')));
+    });
+    (l.markers || []).forEach(m => { // branch change between two stops
+      const mx = x(m.after) + DX / 2, w = m.label.length * 6.1 + 16;
+      g.append(el('rect', { x: mx - 5, y: ly - 5, width: 10, height: 10, transform: `rotate(45 ${mx} ${ly})`, class: 'dia' }));
+      const p = el('g', { class: 'pill' });
+      p.append(el('rect', { x: mx - w / 2, y: ly + 13, width: w, height: 17, rx: 4 }), el('text', { x: mx, y: ly + 25 }, m.label));
+      g.append(p);
+    });
+    l.steps.forEach((st, k) => {
+      stop(g, x(k), ly, st, l.state);
+      const lone = n === 1;
+      g.append(el('text', { x: lone ? x(k) + 14 : x(k), y: lone ? ly + 4 : ly - 15, class: 'lbl' + (st.s === 'c' ? ' cur' : ''), style: lone ? 'text-anchor:start' : '' }, st.label));
+    });
+
+    const lab = html('div', 'lane' + (l.parent != null ? ' child' : '')); lab.style.top = (ly - 21) + 'px';
+    const t = html('div', 't'); t.append(html('span', 'dot ' + l.state), html('span', '', l.title));
+    const done = l.steps.filter(s => s.s === 'd').length;
+    lab.append(t, html('div', 'b mono', l.parent != null ? `${l.kind} · ${l.branch}` : `${l.branch} · ${l.kind}`),
+      html('div', 's ' + l.state, l.state === 'waiting' ? l.wait : n > 1 ? `Step ${Math.min(done + 1, n)} of ${n}` : 'Working'));
+    box.append(lab);
+  });
+  box.prepend(svg);
+  box.dataset.states = lanes.map(l => l.state).join(' ');
+  return box;
+}
+
+function render(filter) {
+  const rows = document.getElementById('rows'); rows.textContent = '';
+  let agents = 0, waiting = 0;
+  DATA.forEach(r => {
+    const fams = r.families.filter(f => filter === 'all' || f.some(l => l.state === filter));
+    r.families.flat().forEach(l => { agents++; if (l.state === 'waiting') waiting++; });
+    if (!fams.length) return;
+    const head = html('div', 'repo'); head.append(html('span', '', r.repo), html('span', 'mono', String(fams.flat().length)));
+    const sc = html('div', 'scroll'); fams.forEach(f => sc.append(drawFamily(f)));
+    rows.append(head, sc);
+  });
+  document.getElementById('sum').textContent = `${agents} agents · ${waiting} waiting for you`;
+  ['all', 'waiting', 'running'].forEach(f => document.getElementById('f-' + f).setAttribute('aria-pressed', String(f === filter)));
+}
+['all', 'waiting', 'running'].forEach(f => document.getElementById('f-' + f).addEventListener('click', () => render(f)));
+render('all');
+</script>
