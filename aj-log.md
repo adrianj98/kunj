@@ -8,6 +8,8 @@ Changes made with Claude, and why.
   for every repository and draws each answer as it arrives. A quick answer never replaces one that
   shows container agents. Why: the user asked to get it as it goes instead of waiting ~6 s for
   every container to be read.
+- A scope change in the Overview starts its read at once instead of waiting for the old scope's
+  slow full read (found by the adversary review).
 
 ## 2026-11-23 — Overview loads at session start
 

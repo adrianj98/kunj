@@ -71,6 +71,8 @@ final class OverviewPanel: NSView {
     private var scopeMenuKey: [String] = []
     private var timer: Timer?
     private var loading = false
+    /// The scope generation the read now out belongs to.
+    private var loadingGeneration = 0
     private var again = false
     private var pending: DispatchWorkItem?
     /// `topInset`: room above the bar (the main window's header height, so it lines up with the sidebar's search).
@@ -296,8 +298,9 @@ final class OverviewPanel: NSView {
             errorLabel.stringValue = "kunj is not connected"
             return
         }
-        // one read at a time; a request that comes meanwhile runs one more when it is back
-        if loading {
+        // one read at a time per scope; a request that comes meanwhile runs one more when it is back.
+        // A read of a scope left behind does not hold up the new one (its answers are dropped).
+        if loading && loadingGeneration == generation {
             again = true
             return
         }
@@ -310,16 +313,12 @@ final class OverviewPanel: NSView {
         }
         loading = true
         let started = generation
+        loadingGeneration = started
         Task { [weak self] in
             await self?.load(asked, generation: started)
-            guard let self else { return }
+            // a newer scope's read is out: it owns the flags
+            guard let self, self.loadingGeneration == started else { return }
             self.loading = false
-            // the scope changed meanwhile: these were another scope's agents; read again for this one
-            guard started == self.generation else {
-                self.again = false
-                self.refresh()
-                return
-            }
             if self.again {
                 self.again = false
                 self.refresh()
