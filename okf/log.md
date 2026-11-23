@@ -166,3 +166,4 @@
 - Agent overview designed (plan steps per agent from hooks, `kunj agent plan`, Overview window); nothing built. Page updated: none (spec docs/specs/agent-overview.md).
 - Agent plan, CLI side: plan hooks and record, `reducePlan()`, `kunj agent plan`, `kunj ct agent --plan`, `agent.plan`. Page updated: features/worktree-agents.md.
 - Workspace app Overview window written (not built yet); a container's plan change in `kunj events` (`container` action `plan`). Pages updated: apps/workspace-app.md.
+- `kunj agent overview`: the Overview's grouping, text and layout moved from the workspace app into the CLI (`AgentOverviewJson`). Pages updated: apps/workspace-app.md, features/worktree-agents.md.

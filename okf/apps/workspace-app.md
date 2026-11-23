@@ -158,13 +158,13 @@ against `docs/workspace-app/design/mockups/warm.png`.
 [13] [src/lib/apps.ts](/src/lib/apps.ts)
 ## Overview window
 
-Window ▸ Overview (⌘⇧O; written 2026-11-23, not yet built or run): every running agent as a line of its
-plan's steps. `KunjWorkspaceCore/Overview/AgentPlan.swift` decodes `kunj agent plan --all --json` and
-`kunj ct agent <branch> --plan --json` (`AgentPlanJson`), drops ended sessions (`activePlans()`) and links
-handed-off agents to their parents (`overviewFamilies()`); `OverviewLayout.swift` (`layoutFamily()`) gives
-every position as plain numbers and is unit tested (`OverviewTests`). `KunjWorkspace/Overview/OverviewCanvas`
-only strokes that layout; `OverviewWindow` loads the plans of all repositories at once and reads them again
-on `KunjEvent.agentPlan` (`EnvironmentStore.onPlanChanged`, no listing), on the store's `onChange` and every
-10 s. A click on a lane opens the agent's tab. `--demo --overview --screenshot` draws `DemoPlans`. Design:
-docs/specs/agent-overview.md, mockup docs/workspace-app/design/mockups/overview.html.
-
+Window ▸ Overview (⌘⇧O; written 2026-11-23, its AppKit half not yet built or run): every running agent as
+a line of its plan's steps. The CLI is the brain: `kunj agent overview --containers --json`
+(`AgentOverviewJson`, built by `buildOverview()` in src/lib/agent-overview.ts) gives the agents, their
+grouping, text and every position. `KunjWorkspaceCore/Overview/AgentOverview.swift` only decodes it and
+adds `filterFamilies()`, `overviewSummary()` over several repositories and `laneIndex(at:in:)`;
+`KunjWorkspace/Overview/OverviewCanvas` strokes the positions as given; `OverviewWindow` asks every
+repository at once and again on `KunjEvent.agentPlan` (`EnvironmentStore.onPlanChanged`, no listing), on
+the store's `onChange` and every 10 s. A click on a lane opens the agent's tab. `--demo --overview
+--screenshot` draws `DemoPlans`, generated with the test fixture by `scripts/gen-overview-demo.js`.
+Design: docs/specs/agent-overview.md, mockup docs/workspace-app/design/mockups/overview.html.

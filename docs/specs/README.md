@@ -35,6 +35,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
+| `kunj agent overview [--containers] --json`: the running agents of a repository grouped, worded and laid out by the CLI (`AgentOverviewJson`), so the workspace app's Overview window only draws | [agent-overview.md](agent-overview.md#cli-contract-additive) | b38cee7 |
 | A container's agent plan in `kunj events` (`container` with action `plan`, from the records' size in the status script) | [agent-overview.md](agent-overview.md#cli-contract-additive) | this commit |
 | Agent plan, CLI side: Claude agents record their task list, subagents, branch and worktree changes through hooks (`agent.plan`, which also turns Claude Code's task tools on); `kunj agent plan [--all] --json` and `kunj ct agent --plan` (`AgentPlanJson`), `plan: true` on the `agent` event, the parent of a handed-off agent; tmux listings no longer lose their fields outside a UTF-8 locale | [agent-overview.md](agent-overview.md#status) | this commit and the one before |
 | Suspend / Resume Session in the workspace app (sidebar row menu, ⌘⇧U): ends a session's shells and agents but keeps their tabs; Close All on quit and agents that ended (a restart) come back suspended instead of being dropped, resumed from the sidebar | [tmux-sessions.md](tmux-sessions.md#quitting-and-resuming) | this commit |

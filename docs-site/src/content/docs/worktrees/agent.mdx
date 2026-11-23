@@ -140,7 +140,11 @@ Add a usage rollup endpoint  feat/llm-insights  waiting for input
   ○ Pagination
 ```
 
-`--json` gives the same as data: each agent's steps with their status, the current step, its
+`kunj agent overview` lists only the agents that are running, across the repository (add
+`--containers` for its branch containers); its `--json` is what the workspace app's Overview window
+draws.
+
+`kunj agent plan --json` gives the same as data: each agent's steps with their status, the current step, its
 subagents, the points where it changed branch or worktree, and, for an agent that another agent
 started, that parent and the step it was on.
 

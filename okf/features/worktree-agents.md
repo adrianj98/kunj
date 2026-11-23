@@ -96,7 +96,9 @@ list), the current step, subagents with their own steps (a subagent's calls carr
 session's task list), branch/worktree/fork/compact markers and the parent of a handed-off agent
 (`parentLine()`, written by a start from inside another agent's session). `kunj agent plan [--all] --json`
 and `kunj ct agent --plan` print it as `AgentPlanJson`; `kunj events` sends `agent` with `plan: true` when a
-host record changes. The agent is started with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`: newer models have no
+host record changes. `kunj agent overview [--containers] --json` (`AgentOverviewJson`, `buildOverview()` in
+src/lib/agent-overview.ts) is the same agents ready to draw: grouped, with their text and positions.
+The agent is started with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`: newer models have no
 task tools without it.
 
 `kunj agent start --resume` reads it with `readAgentResume()` when the tmux session is not running and
