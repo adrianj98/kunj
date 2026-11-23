@@ -55,6 +55,12 @@ describe('text', () => {
     expect(markerLabel({ type: 'something-new' as any, afterStep: 1, at })).toBeNull();
     expect(subagentLabel(sub({ type: 'Explore' }))).toBe('subagent · Explore · done');
     expect(subagentLabel(sub({ task: 'find callers', running: true }))).toBe('subagent · find callers');
+    // no task list (a background subagent): its activity instead
+    expect(subagentLabel(sub({ task: 'find callers', running: true, toolCalls: 12, lastTool: 'Read' }))).toBe('subagent · find callers · 12 tool calls, now Read');
+    expect(subagentLabel(sub({ task: 'x', running: true, toolCalls: 1 }))).toBe('subagent · x · 1 tool call');
+    expect(subagentLabel(sub({ task: 'x', running: false, toolCalls: 3, lastTool: 'Bash' }))).toBe('subagent · x · done, 3 tool calls');
+    // with its own steps the stops say it; the count is left out
+    expect(subagentLabel(sub({ task: 'x', running: true, toolCalls: 3, steps: [step(1)] }))).toBe('subagent · x');
   });
 });
 

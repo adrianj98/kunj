@@ -11,7 +11,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { containerNames } from './container/names';
 import { kunjEntry } from './self';
-import { PLAN_TOOL_MATCHER, planHookCommand } from './agent-plan';
+import { PLAN_TOOL_MATCHER, planHookCommand, subagentToolHookCommand } from './agent-plan';
 
 const execFileAsync = promisify(execFile);
 
@@ -448,7 +448,7 @@ export function claudeHookSettings(plan = false): string {
   return JSON.stringify({
     hooks: {
       UserPromptSubmit: hook(write('running')),
-      PreToolUse: [...hook(write('running')), ...(plan ? hook(record, 'Agent|Task') : [])],
+      PreToolUse: [...hook(write('running')), ...(plan ? [...hook(record, 'Agent|Task'), ...hook(subagentToolHookCommand())] : [])],
       Stop: hook(write('waiting')),
       Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),
       SessionEnd: hook('rm -f "$KUNJ_AGENT_STATE"'),

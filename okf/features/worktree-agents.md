@@ -98,6 +98,8 @@ session's task list), branch/worktree/fork/compact markers and the parent of a h
 and `kunj ct agent --plan` print it as `AgentPlanJson`; `kunj events` sends a `plan` event (its own type,
 with `session`, or `container` for a branch container) when a record changes. `kunj agent overview [--containers] --json` (`AgentOverviewJson`, `buildOverview()` in
 src/lib/agent-overview.ts) is the same agents ready to draw: grouped, with their text and positions.
+A background subagent has no task tools at all, so each of a subagent's tool calls is recorded too
+(`subagentToolHookCommand()`: id and tool name only) and its loop shows "N tool calls, now <tool>".
 The agent is started with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`: newer models have no
 task tools without it.
 

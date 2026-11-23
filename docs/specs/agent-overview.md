@@ -80,8 +80,13 @@ Run against Claude Code 2.1.330; the recording is `src/lib/__tests__/fixtures/ag
 7. **A background subagent has no task tools at all** (checked 2026-11-23 on Claude Code 2.1.330): it
    has `TaskStop` only, neither `TaskCreate` nor `TodoWrite`, whatever the session has. A foreground
    subagent gets the session's task tools. An interactive session runs subagents in the background
-   by default, so most subagents are a loop with their task text and no stops. Nothing in kunj can
-   change that; showing a background subagent's progress would need its tool calls counted (later).
+   by default, so most subagents are a loop with their task text and no stops. What kunj shows for
+   them instead is their activity: a `PreToolUse` hook (`subagentToolHookCommand()`) records each of a
+   subagent's tool calls as `{"hook_event_name":"SubagentTool","agent_id","tool_name"}` (the main
+   agent's calls are passed over: their input has no `agent_id`; the input itself is never copied,
+   and an id or name outside `[A-Za-z0-9_.-]` is not written), the reducer counts them per subagent
+   (`toolCalls`, `lastTool`; its `SubagentHandback` is not counted) and the loop reads "subagent ·
+   survey the files · 12 tool calls, now Read", or "· done, 12 tool calls". Checked live 2026-11-23.
 8. tmux outside a UTF-8 locale prints the tabs of `list-sessions -F` as underscores, so the tagged
    listing found no session; it now passes `-u` (also in `kunj sessions`).
 

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
-import { CONTAINER_PLAN_SCRIPT, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planTitle, reducePlan } from '../agent-plan';
+import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planTitle, reducePlan } from '../agent-plan';
 
 const line = (hook: any, t = 100, branch = 'main') => JSON.stringify({ kunj: { t, branch }, hook });
 const create = (id: string, subject: string, extra: any = {}) => ({ hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: { task: { id, subject } }, ...extra });
@@ -115,11 +115,60 @@ describe('reducePlan', () => {
     expect(plan.steps.map(s => [s.subject, s.status])).toEqual([['a', 'completed'], ['b', 'in_progress']]);
   });
 
+  it('a subagent\'s tool calls are counted with the latest tool; one whose start was not recorded is ignored', () => {
+    const tool = (agent: string, name: string) => ({ hook_event_name: 'SubagentTool', agent_id: agent, tool_name: name });
+    const plan = reducePlan([
+      line({ hook_event_name: 'SubagentStart', agent_id: 'bg', agent_type: 'general-purpose' }),
+      line(tool('bg', 'Grep')), line(tool('bg', 'Read')), line(tool('unknown', 'Bash')), line(tool('bg', 'SubagentHandback')),
+      line({ hook_event_name: 'SubagentStart', agent_id: 'quiet', agent_type: 'Explore' }),
+    ].join('\n'));
+    expect(plan.subagents.map(s => [s.id, s.toolCalls, s.lastTool])).toEqual([['bg', 2, 'Read'], ['quiet', undefined, undefined]]);
+    expect(plan.subagents[1]).not.toHaveProperty('toolCalls');
+  });
+
   it('the title is the first heading of the plan from plan mode', () => {
     const exit = { hook_event_name: 'PostToolUse', tool_name: 'ExitPlanMode', tool_input: { plan: 'intro\n\n# Plan: Agent overview\n\n## Steps' } };
     expect(reducePlan(line(exit)).title).toBe('Agent overview');
     expect(planTitle('just a line')).toBe('just a line');
     expect(planTitle('')).toBeNull();
+  });
+});
+
+describe('subagentToolHookCommand', () => {
+  const run = (input: string, env: Record<string, string>) =>
+    execFileSync('sh', ['-c', subagentToolHookCommand()], { input, env: { PATH: process.env.PATH!, ...env } });
+
+  it('has no single quote', () => {
+    expect(subagentToolHookCommand()).not.toContain("'");
+  });
+
+  it('records a subagent\'s call as one short line, never its input, and nothing for the main agent', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-subtool-'));
+    const file = path.join(dir, 'p.ndjson');
+    const marker = path.join(dir, 'ran');
+    // a value that looks like the key, and one that would run a command if it reached the shell
+    const tricky = `/x/"agent_id":"evil" $(touch ${marker}) \`x\``;
+    run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Read', agent_id: 'a266ff19', tool_input: { file_path: tricky } }), { KUNJ_AGENT_PLAN: file });
+    run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: '"agent_id":"x"' } }), { KUNJ_AGENT_PLAN: file });
+    run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Read', agent_id: 'a1' }), {});
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toEqual({ kunj: { t: expect.any(Number) }, hook: { hook_event_name: 'SubagentTool', agent_id: 'a266ff19', tool_name: 'Read' } });
+    expect(fs.existsSync(marker)).toBe(false);
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  it('an id with a character outside the safe set records nothing; a tool name outside it is left empty', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-subtool-'));
+    const file = path.join(dir, 'p.ndjson');
+    run('{"tool_name":"Read","agent_id":"ab$cd"}', { KUNJ_AGENT_PLAN: file });
+    run('{"tool_name":"Read","agent_id":"$(id)"}', { KUNJ_AGENT_PLAN: file });
+    expect(fs.existsSync(file)).toBe(false);
+    run('{"tool_name":"x y","agent_id":"a1"}', { KUNJ_AGENT_PLAN: file });
+    run('{"tool_name":"mcp__chrome__click","agent_id":"a1"}', { KUNJ_AGENT_PLAN: file });
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l).hook.tool_name);
+    expect(lines).toEqual(['', 'mcp__chrome__click']);
+    fs.rmSync(dir, { recursive: true });
   });
 });
 

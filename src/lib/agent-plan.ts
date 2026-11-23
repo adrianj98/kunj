@@ -32,6 +32,20 @@ export function planHookCommand(): string {
   return '[ -z "$KUNJ_AGENT_PLAN" ] || printf "%s\\n" "{\\"kunj\\":{\\"t\\":$(date +%s),\\"branch\\":\\"$(git branch --show-current 2>/dev/null)\\"},\\"hook\\":$(cat)}" >> "$KUNJ_AGENT_PLAN"';
 }
 
+// A subagent's tool call, for the activity of a subagent that keeps no task list (a background one
+// has no task tools at all). Every PreToolUse runs it; the main agent's calls (no agent_id) cost one
+// cat and a case. It never copies the hook input: only the subagent id and the tool name, each cut to
+// a safe set of characters, so the record stays small and a value cannot break the line. `.*` is
+// greedy, but inside a JSON string a quote is escaped, so the only "agent_id":" is the top-level key.
+// No single quotes (the settings JSON is single-quoted on the command line).
+export function subagentToolHookCommand(): string {
+  const field = (name: string, chars: string) => String.raw`$(printf %s "$i" | sed -n "s/.*\"${name}\":\"\(${chars}*\)\".*/\1/p" | head -c 64)`;
+  const line = String.raw`{\"kunj\":{\"t\":$(date +%s)},\"hook\":{\"hook_event_name\":\"SubagentTool\",\"agent_id\":\"$a\",\"tool_name\":\"$n\"}}`;
+  return String.raw`[ -z "$KUNJ_AGENT_PLAN" ] || { i=$(cat); case "$i" in *\"agent_id\":\"*) `
+    + `a=${field('agent_id', '[A-Za-z0-9_-]')}; n=${field('tool_name', '[A-Za-z0-9_.-]')}; `
+    + String.raw`[ -z "$a" ] || printf "%s\n" "${line}" >> "$KUNJ_AGENT_PLAN";; esac; }`;
+}
+
 // The first line of a handed-off session's file: who started it and on which step
 export function parentLine(session: string, step: number | null): string {
   return `${JSON.stringify({ kunj: { t: Math.floor(Date.now() / 1000), parent: { session, step } } })}\n`;
@@ -167,6 +181,15 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       if (i < 0) i = pendingTasks.length ? 0 : -1;
       const task = i >= 0 ? pendingTasks.splice(i, 1)[0].task : null;
       subagents.set(agent, { id: agent, type, task, fromStep: planPosition(mainSteps()), toStep: null, running: true, steps: [] });
+    } else if (event === 'SubagentTool' && agent) {
+      // only the subagents whose start was recorded; their tool calls say what they are doing
+      const sub = subagents.get(agent);
+      // its hand-back to the caller is how it ends, not work it did
+      if (sub && hook.tool_name !== 'SubagentHandback') {
+        sub.toolCalls = (sub.toolCalls ?? 0) + 1;
+        const tool = str(hook.tool_name);
+        if (tool) sub.lastTool = tool;
+      }
     } else if (event === 'SubagentStop' && agent) {
       const sub = subagents.get(agent);
       if (sub) { sub.running = false; sub.toStep = planPosition(mainSteps()); }

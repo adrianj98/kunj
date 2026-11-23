@@ -1983,3 +1983,9 @@ The user asked to be able to choose a remote in the app when remotes are availab
   middle cut showed "fea…ts" (CLI `planPlace()`; demo data regenerated); the legend is shorter so it fits; the screenshot
   window grows to show every row. Why: what the screenshots showed. Found: background subagents have no task tools at all,
   which is why the live subagent showed no steps; recorded in the spec, nothing kunj can change.
+- Merged main into the agent overview work (main added the kunj plugin for every agent; both now go into the command)
+  and fast-forwarded main to it; fixed main's handoff test, which still looked for the skill in its old folder.
+- Background subagents' activity: a PreToolUse hook writes a subagent's tool name and id for each call (never its
+  input), the reducer counts them, and the overview's loop says "12 tool calls, now Read". Why: background subagents
+  have no task tools at all, so they could never show steps, and the user asked for subagents with their progress.
+  Checked live: a background subagent's 3 Reads and a Glob were counted; its hand-back call is left out.

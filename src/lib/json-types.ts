@@ -737,6 +737,11 @@ export interface AgentPlanMarkerJson {
 export interface AgentPlanSubagentJson {
   id: string;
   type: string;
+  /** Tool calls it made (recorded for every subagent; a background one keeps no task list, so this is
+   * all there is to show of its progress). Absent when none was recorded */
+  toolCalls?: number;
+  /** The tool of its latest call */
+  lastTool?: string;
   /** The short description the agent gave it; null when the hooks did not see one */
   task: string | null;
   fromStep: number | null;

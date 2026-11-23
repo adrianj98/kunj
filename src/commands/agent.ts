@@ -12,7 +12,7 @@ import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
 import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, withAgentPlugin, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
 import { packagedPluginDir } from '../lib/skills';
-import { activePlans, buildOverview } from '../lib/agent-overview';
+import { activePlans, buildOverview, subagentLabel } from '../lib/agent-overview';
 import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, parentLine, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
 import type { AgentForgetJson, AgentOverviewJson, AgentPlanItemJson, AgentPlanJson, AgentPlanStepJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
@@ -476,11 +476,11 @@ export class AgentCommand extends BaseCommand {
         console.log(`  ${mark(st, i === p.current)} ${st.status === 'pending' && i !== p.current ? chalk.dim(st.subject) : st.subject}`);
         for (const m of p.markers.filter(m => m.afterStep === i)) console.log(chalk.dim(`    ◇ ${m.type}${m.to ? ` ${m.from} → ${m.to}` : ''}`));
         for (const sub of p.subagents.filter(sub => sub.fromStep === i)) {
-          console.log(chalk.dim(`    ↳ subagent ${sub.task ?? sub.type}${sub.running ? '' : ' (done)'}`));
+          console.log(chalk.dim(`    ↳ ${subagentLabel(sub)}`));
           sub.steps.forEach((ss, k) => console.log(`      ${mark(ss, sub.running && ss.status === 'in_progress')} ${chalk.dim(ss.subject)}`));
         }
       });
-      for (const sub of p.subagents.filter(sub => sub.fromStep === null)) console.log(chalk.dim(`  ↳ subagent ${sub.task ?? sub.type}${sub.running ? '' : ' (done)'}`));
+      for (const sub of p.subagents.filter(sub => sub.fromStep === null)) console.log(chalk.dim(`  ↳ ${subagentLabel(sub)}`));
     }
   }
 }

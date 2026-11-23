@@ -121,8 +121,16 @@ export function markerLabel(marker: AgentPlanMarkerJson): string | null {
   }
 }
 
+/**
+ * "subagent · write tests", with " · done" once it ended. A subagent with no task list (all background
+ * ones) shows its activity instead of stops: "· 12 tool calls, now Read" while it runs, "· done, 12 tool
+ * calls" after.
+ */
 export function subagentLabel(sub: AgentPlanSubagentJson): string {
-  return `subagent · ${sub.task?.trim() || sub.type}${sub.running ? '' : ' · done'}`;
+  const name = `subagent · ${sub.task?.trim() || sub.type}`;
+  const calls = !sub.steps.length && sub.toolCalls ? `${sub.toolCalls} tool call${sub.toolCalls === 1 ? '' : 's'}` : '';
+  if (sub.running) return calls ? `${name} · ${calls}${sub.lastTool ? `, now ${sub.lastTool}` : ''}` : name;
+  return `${name} · done${calls ? `, ${calls}` : ''}`;
 }
 
 // ---- geometry
