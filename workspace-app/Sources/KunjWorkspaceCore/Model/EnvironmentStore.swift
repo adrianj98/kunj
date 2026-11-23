@@ -29,6 +29,9 @@ public final class EnvironmentStore {
     /// A handed-off agent (`KunjEvent.openAgent`) whose worktree is now listed: open its tab
     /// (`--session` id, nil for the default agent), select the environment and focus it.
     public var onOpenAgent: ((Environment, String?) -> Void)?
+    /// Called on the main actor, at once, when an agent's plan record changed (`KunjEvent.agentPlan`),
+    /// with the repository root when the event named one: the Overview window reads the plans again.
+    public var onPlanChanged: ((String?) -> Void)?
     private var pendingOpens: [PendingAgentOpen] = []
     /// The clock pending opens expire by (tests replace it).
     public var now: () -> Date = Date.init
@@ -205,6 +208,9 @@ public final class EnvironmentStore {
             if let root { onRepoChanged?(root) }
         case .agent(_, _, _, let root):
             scoped(root) { .worktrees($0) }
+        case .agentPlan(_, let root):
+            // a few of these per step of work: never a listing
+            onPlanChanged?(root)
         case .openAgent(let session, let id, let worktree):
             pendingOpens.removeAll { $0.session == session }
             pendingOpens.append(PendingAgentOpen(session: session, id: id, worktree: worktree,

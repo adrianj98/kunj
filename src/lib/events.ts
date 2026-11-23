@@ -429,6 +429,7 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
 
     // Running main containers of the watched repositories: the `kunj ct list` status script in each
     const containerHashes = new Map<string, string>();
+    const containerPlans = new Map<string, number>();
     const pollContainers = every(statusPollMs, async () => {
       if (!available) return;
       const lists = await untilAbort(Promise.all([...ids].map(id => backend.list({ [LABEL.repo]: id }).catch(() => []))), signal);
@@ -451,8 +452,16 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
         if (before !== undefined && before !== h) {
           emit({ type: 'container', repo: byId.get(c.labels[LABEL.repo]) ?? null, branch: c.labels[LABEL.branch] ?? null, container: c.name, action: 'status', at: at() });
         }
+        // the agents' plan records grew (or a new conversation emptied them): its own action, so a
+        // consumer that draws plans reads them again without listing the containers
+        const planBefore = containerPlans.get(c.name);
+        if (status.planBytes !== undefined) containerPlans.set(c.name, status.planBytes);
+        if (planBefore !== undefined && status.planBytes !== undefined && planBefore !== status.planBytes) {
+          emit({ type: 'container', repo: byId.get(c.labels[LABEL.repo]) ?? null, branch: c.labels[LABEL.branch] ?? null, container: c.name, action: 'plan', at: at() });
+        }
       }));
       for (const name of [...containerHashes.keys()]) if (!seen.has(name)) containerHashes.delete(name);
+      for (const name of [...containerPlans.keys()]) if (!seen.has(name)) containerPlans.delete(name);
     });
     void pollContainers();
 

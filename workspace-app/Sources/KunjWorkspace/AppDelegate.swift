@@ -33,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `--resources`: open the Resources window after discovery (with --screenshot, the PNG is of it)
     private let resourcesArgument: Bool
     private var sessionsWindow: SessionsWindow?
+    private var overviewWindow: OverviewWindow?
+    /// `--overview`: open the Overview window after discovery (with --screenshot, the PNG is of it)
+    private let overviewArgument: Bool
     /// The sidebar rows' CPU and memory: `kunj sessions list --json` (host sessions only, so no
     /// container exec) when the mouse enters the sidebar and every 5 s while it stays there.
     private var usageTimer: Timer?
@@ -83,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             newSessionArgument = nil
         }
         resourcesArgument = arguments.contains("--resources")
+        overviewArgument = arguments.contains("--overview")
         demo = arguments.contains("--demo")
         demoLoading = arguments.contains("--loading")
         super.init()
@@ -184,6 +188,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSApp.terminate(nil)
                     return
                 }
+                if self?.overviewArgument == true {
+                    self?.showOverview(nil)
+                    for _ in 0..<300 where self?.overviewWindow?.isSettled != true {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    if let data = self?.overviewWindow?.snapshotPNG() {
+                        FileManager.default.createFile(atPath: screenshotPath, contents: data)
+                        log("overview screenshot written to \(screenshotPath)")
+                    } else {
+                        log("overview screenshot failed")
+                    }
+                    NSApp.terminate(nil)
+                    return
+                }
                 if self?.resourcesArgument == true {
                     self?.showResources(nil)
                     for _ in 0..<400 where self?.resources?.isSettled != true {
@@ -256,6 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.startLanguageServers(cli: cli)
                 self.settings?.cli = cli
                 self.sessionsWindow?.cli = cli
+                self.overviewWindow?.cli = cli
                 self.windowController.header.show(self.windowController.selectedEnvironment)
             }
             await loadEnvironments(cli: cli)
@@ -285,6 +305,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.windowController.showListingError(store.lastError?.message)
             // a selected environment that could not restore its tabs (stopped) may now
             keeper.selected(self.windowController.selectedEnvironment)
+            // an agent started, ended, or began waiting: the Overview window, when open, follows
+            self.overviewWindow?.planChanged()
         }
         // an agent checked out another branch in its worktree: the worktree's tabs (still running,
         // their tmux sessions found by kunj through the worktree tag), saved layout and selection
@@ -302,6 +324,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // an agent handed off with /handoff (kunj agent start --open-in-app): its tab, selected and focused
         store.onOpenAgent = { [weak self] env, id in self?.openHandedOffAgent(env: env, id: id) }
+        // an agent's plan record changed: the Overview window, when open, reads the plans again
+        store.onPlanChanged = { [weak self] _ in self?.overviewWindow?.planChanged() }
         // the Changes column follows git events and container status changes of its repository
         store.onRepoChanged = { [weak windowController] root in
             windowController?.changesColumn.repoChanged(root: root)
@@ -875,6 +899,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessionsWindow?.window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Window > Overview (⌘⇧O): every running agent as a line of its plan's steps. A click on a line
+    /// opens that agent's tab in the main window.
+    @objc func showOverview(_ sender: Any?) {
+        if overviewWindow == nil {
+            let w = OverviewWindow()
+            w.repositories = { [weak self] in self?.store?.repos ?? [] }
+            w.onOpen = { [weak self] plan, repo in self?.openAgent(of: plan, in: repo) }
+            if demo { w.demoRepos = DemoPlans.repos }
+            overviewWindow = w
+        }
+        overviewWindow?.cli = kunj
+        overviewWindow?.showWindow(nil)
+        overviewWindow?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// The environment an Overview line belongs to: the container by its name, a worktree by its path.
+    private func openAgent(of plan: AgentPlan, in repo: OverviewRepo) {
+        guard !demo, let listed = (store?.repos ?? []).first(where: { $0.repo.root == repo.root }) else { return }
+        let env: Environment?
+        if let container = plan.container {
+            env = listed.environments.first { $0.kind == .container && ($0.containerName == container || $0.branch == plan.branch) }
+        } else {
+            let path = (plan.worktree as NSString).standardizingPath
+            env = listed.environments.first { $0.kind == .worktree && $0.path.map { ($0 as NSString).standardizingPath } == path }
+        }
+        guard let env else { return }
+        openHandedOffAgent(env: env, id: plan.id)
+    }
+
     /// The kunj command changed in Settings: stop the event stream, drop the store and discover
     /// kunj again with the new command (open tabs keep running with the command they started with).
     private func reconnect() {
@@ -894,6 +947,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.sidebar.lspMemory = [:]
         settings?.cli = nil
         sessionsWindow?.cli = nil
+        overviewWindow?.cli = nil
         stopUsagePoll()
         windowController.render(repos: [])
         windowController.setKunjVersion("")
@@ -1380,6 +1434,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         menu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         menu.addItem(.separator())
+        menu.addItem(withTitle: "Overview", action: #selector(showOverview(_:)), keyEquivalent: "O").target = self
         menu.addItem(withTitle: "Sessions", action: #selector(showSessions(_:)), keyEquivalent: "S").target = self
         let resourcesItem = menu.addItem(withTitle: "Resources", action: #selector(showResources(_:)), keyEquivalent: "r")
         resourcesItem.keyEquivalentModifierMask = [.command, .option]

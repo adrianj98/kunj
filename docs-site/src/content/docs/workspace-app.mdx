@@ -275,6 +275,25 @@ select an environment after launching, its shells and agents reattach, and its f
 are not restored. The time on each sidebar row is your last activity there (typing in one of its
 tabs, or the branch changing), kept in the same file.
 
+## Overview
+
+**Window > Overview** (⌘⇧O) shows every running agent as a line of the steps in its plan, so you can
+see where each one is without opening its terminal. Agents are grouped by repository.
+
+- A filled stop is a finished step, the ringed stop is where the agent is now, and hollow stops are
+  still to come. The ring is green while the agent works and amber when it waits for you.
+- A thinner loop under the line is a subagent, with its own stops when it keeps a task list.
+- A line that branches off another is an agent the first one started in its own worktree, for
+  example with `/handoff`. It branches at the step the first agent was on.
+- A diamond marks a change of branch or worktree, with the names under it.
+
+Hover a stop to read its full name. Click a line to open that agent's tab. **All**, **Waiting** and
+**Running** choose which agents are listed.
+
+The steps are the agent's own task list, which kunj records while the agent works (the `agent.plan`
+setting, on by default; see [Worktree agents](/kunj/docs/worktrees/agent/)). An agent with no task
+list shows a single stop. Agents that are not Claude, and agents started outside kunj, are not listed.
+
 ## Sessions
 
 **Window > Sessions** (⌘⇧S) lists every tmux session kunj started on your Mac: agents and shells, the

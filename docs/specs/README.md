@@ -29,12 +29,13 @@ page only says where each thing stands.
 | [github-clone.md](github-clone.md) | `kunj repos github` / `kunj repos clone`, `repos.cloneDir`/`repos.cloneBare`, the workspace app's Clone from GitHub sheet | Shipped (CLI, workspace app) |
 | [cloud-machines.md](cloud-machines.md) | A small VM per session behind a coordinator (`kunj serve --machines`, auto-started locally or always-on in the cloud for several clients) from a pluggable `MachineProvider` (Google Cloud first): lifecycle, labels as state, wake on act, idle loop, token pairing, proxy, golden image, `container.caches`, `kunj machine`, phases | Phases 0–2 shipped and run on a real project (`kunj ct` on a branch's machine through the coordinator, wake on act, idle loop); golden image and `container.caches` shipped; listings, prune, hooks and phase 4 to do |
 | [google-cloud-containers.md](google-cloud-containers.md) | Google Cloud notes for the first provider: machine shape, IAP tunnel, suspend/resume, caching, cost | Notes written |
-| [agent-overview.md](agent-overview.md) | Overview window: every running agent as a subway line of its plan steps (from Claude's task list, through hooks), with subagents, handoffs, forks and branch changes; `kunj agent plan`, `AgentPlanJson` | CLI shipped (`kunj agent plan`, capture); the window to do |
+| [agent-overview.md](agent-overview.md) | Overview window: every running agent as a subway line of its plan steps (from Claude's task list, through hooks), with subagents, handoffs, forks and branch changes; `kunj agent plan`, `AgentPlanJson` | CLI shipped (`kunj agent plan`, capture, events); the window written, not built yet |
 
 ## Done
 
 | Work | Spec | Commits |
 | --- | --- | --- |
+| A container's agent plan in `kunj events` (`container` with action `plan`, from the records' size in the status script) | [agent-overview.md](agent-overview.md#cli-contract-additive) | this commit |
 | Agent plan, CLI side: Claude agents record their task list, subagents, branch and worktree changes through hooks (`agent.plan`, which also turns Claude Code's task tools on); `kunj agent plan [--all] --json` and `kunj ct agent --plan` (`AgentPlanJson`), `plan: true` on the `agent` event, the parent of a handed-off agent; tmux listings no longer lose their fields outside a UTF-8 locale | [agent-overview.md](agent-overview.md#status) | this commit and the one before |
 | Suspend / Resume Session in the workspace app (sidebar row menu, ⌘⇧U): ends a session's shells and agents but keeps their tabs; Close All on quit and agents that ended (a restart) come back suspended instead of being dropped, resumed from the sidebar | [tmux-sessions.md](tmux-sessions.md#quitting-and-resuming) | this commit |
 | Resume closed agents: `kunj agent saved` / `forget` (saved Claude conversations of a worktree whose session no longer runs, with their first prompt); workspace app Resume Agent… (⌘⇧R, sidebar row menu), exited agent tabs point at it | [tmux-sessions.md](tmux-sessions.md#quitting-and-resuming) | this commit |
@@ -129,13 +130,13 @@ page only says where each thing stands.
 
 | Work | Spec | Notes |
 | --- | --- | --- |
+| Workspace app Overview window (Window ▸ Overview, ⌘⇧O): written, never compiled or run. Left: build on a Mac, compare `--demo --overview --screenshot` with the mockup, fix what shows; then why a subagent of an interactive session has no task tools, a link for forked conversations, the pulse on the current stop | [agent-overview.md](agent-overview.md#the-window) | CLI side shipped 2026-11-23 |
 | Containers in the VS Code extension and the macOS app | [containers-in-apps.md](containers-in-apps.md) | CLI 4d99265, 60206aa; extension df59f3f; macOS app shipped. Left: try both against a live container; refresh on `kunj events` |
 
 ## To do
 
 | Work | Spec | Notes |
 | --- | --- | --- |
-| Agent overview, what is left: the workspace app's Overview window (design in the mockup); a container's plan in `kunj events`; why a subagent of an interactive session has no task tools; a link for forked conversations | [agent-overview.md](agent-overview.md#status) | CLI side shipped 2026-11-23 |
 | Search in the VS Code extension: a quick pick over `kunj search --json` | [search.md](search.md) | — |
 | Cloud machines review follow-ups (plausible, not run): `machine.bootTimeoutMs` (300 s) starts before the bootstrap has installed anything, so a slow first boot may time out; a serve restart between a lost pairing reply and its retry still strands the machine; `--idle-exit` is reset by unauthorized requests; `coordinator stop` trusts a pid; the local coordinator's start lock has a three-command window while a stale lock is taken over | [cloud-machines.md](cloud-machines.md#the-coordinator) | From the adversarial reviews and the real runs |
 | Cloud machines, what is left: the registry copy (`machine.registry`: snapshot push and pull, needs image push/pull in `ContainerBackend`); `Ec2Provider` on a real AWS account; machine rows in the VS Code extension and the menu bar app; the golden image in `kunj ct blueprint status`; containers on machines in the `kunj events` container stream; `SshFleetProvider`; the opt-in `*.gce.test.ts` suite; the machine-side idle timer seen firing on a real machine (needs no coordinator running for 45 minutes) | [cloud-machines.md](cloud-machines.md#plan) | `kunj ct start --remote machines` works end to end on `kunj-dev` |

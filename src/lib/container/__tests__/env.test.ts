@@ -43,3 +43,18 @@ describe('parseStatus', () => {
     expect(STATUS_SCRIPT).toContain('/tmp/kunj-agent-state-${n#agent-}');
   });
 });
+
+describe('the plan records in the status', () => {
+  it('reads their size and does not take the line for a changed file', () => {
+    const { parseStatus } = jest.requireActual<typeof import('../env')>('../env');
+    const status = parseStatus('tmux=0\nsession=agent running\nplan=1234\n# branch.oid abc\n# branch.ab +0 -0\n');
+    expect(status.planBytes).toBe(1234);
+    expect(status.dirty).toBe(false);
+    expect(parseStatus('tmux=1\n# branch.oid abc\n').planBytes).toBeUndefined();
+  });
+
+  it('the script prints the size of the records, 0 when there are none', () => {
+    const { STATUS_SCRIPT } = jest.requireActual<typeof import('../env')>('../env');
+    expect(STATUS_SCRIPT).toContain('echo "plan=$(cat /tmp/kunj-agent-plan /tmp/kunj-agent-plan-* 2>/dev/null | wc -c | tr -d \' \')"');
+  });
+});

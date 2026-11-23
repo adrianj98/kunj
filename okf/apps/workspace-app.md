@@ -156,3 +156,15 @@ against `docs/workspace-app/design/mockups/warm.png`.
 [11] [docs/specs/workspace-ide.md](/docs/specs/workspace-ide.md)
 [12] [.github/workflows/release.yml](/.github/workflows/release.yml)
 [13] [src/lib/apps.ts](/src/lib/apps.ts)
+## Overview window
+
+Window ▸ Overview (⌘⇧O; written 2026-11-23, not yet built or run): every running agent as a line of its
+plan's steps. `KunjWorkspaceCore/Overview/AgentPlan.swift` decodes `kunj agent plan --all --json` and
+`kunj ct agent <branch> --plan --json` (`AgentPlanJson`), drops ended sessions (`activePlans()`) and links
+handed-off agents to their parents (`overviewFamilies()`); `OverviewLayout.swift` (`layoutFamily()`) gives
+every position as plain numbers and is unit tested (`OverviewTests`). `KunjWorkspace/Overview/OverviewCanvas`
+only strokes that layout; `OverviewWindow` loads the plans of all repositories at once and reads them again
+on `KunjEvent.agentPlan` (`EnvironmentStore.onPlanChanged`, no listing), on the store's `onChange` and every
+10 s. A click on a lane opens the agent's tab. `--demo --overview --screenshot` draws `DemoPlans`. Design:
+docs/specs/agent-overview.md, mockup docs/workspace-app/design/mockups/overview.html.
+

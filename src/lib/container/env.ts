@@ -69,6 +69,8 @@ export interface ContainerStatus {
   head: string | null;
   ahead: number | null;
   dirty: boolean | null;
+  /** Bytes of the agents' plan records (agent-plan.ts): a change means `kunj ct agent --plan` has something new */
+  planBytes?: number;
   status: 'ok' | 'timeout' | 'error' | 'stopped';
 }
 
@@ -85,7 +87,7 @@ export const SAFE_GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksP
  * default agent session `agent` (state file /tmp/kunj-agent-state) and each `agent-<id>` one
  * (/tmp/kunj-agent-state-<id>), then git status.
  */
-export const STATUS_SCRIPT = `s=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); echo "tmux=$?"; printf '%s\\n' "$s" | while IFS= read -r n; do case "$n" in agent) echo "session=agent $(head -n 1 /tmp/kunj-agent-state 2>/dev/null)";; agent-*) echo "session=$n $(head -n 1 "/tmp/kunj-agent-state-\${n#agent-}" 2>/dev/null)";; esac; done; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
+export const STATUS_SCRIPT = `s=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); echo "tmux=$?"; printf '%s\\n' "$s" | while IFS= read -r n; do case "$n" in agent) echo "session=agent $(head -n 1 /tmp/kunj-agent-state 2>/dev/null)";; agent-*) echo "session=$n $(head -n 1 "/tmp/kunj-agent-state-\${n#agent-}" 2>/dev/null)";; esac; done; echo "plan=$(cat /tmp/kunj-agent-plan /tmp/kunj-agent-plan-* 2>/dev/null | wc -c | tr -d ' ')"; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
 
 // The session names kunj ct agent gives: the id is checked as on the host (checkShellSessionId)
 const AGENT_SESSION_LINE = /^session=(agent(?:-([A-Za-z0-9_-]{1,32}))?)(?: (.*))?$/;
@@ -99,6 +101,11 @@ export function parseStatus(stdout: string): ContainerStatus {
     const tmux = /^tmux=(\d+)$/.exec(line);
     if (tmux) {
       tmuxCode = tmux[1];
+      continue;
+    }
+    const plan = /^plan=(\d+)$/.exec(line);
+    if (plan) {
+      result.planBytes = parseInt(plan[1], 10);
       continue;
     }
     if (line.startsWith('session=')) {

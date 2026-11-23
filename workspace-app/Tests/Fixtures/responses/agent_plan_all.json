@@ -1,0 +1,221 @@
+{
+  "plans": [
+    {
+      "session": "kunj-kunj-feat-agent-overview-1a2b3c",
+      "id": null,
+      "branch": "feat/agent-overview",
+      "worktree": "/Users/demo/src/kunj/.git/kunj/worktrees/feat-agent-overview",
+      "title": "Agent overview window",
+      "running": true,
+      "state": "running",
+      "steps": [
+        {
+          "id": "1",
+          "subject": "Probe the hooks",
+          "status": "completed",
+          "startedAt": "2026-11-23T04:44:11.000Z",
+          "completedAt": "2026-11-23T04:45:11.000Z"
+        },
+        {
+          "id": "2",
+          "subject": "Capture in hooks",
+          "status": "completed",
+          "startedAt": "2026-11-23T04:44:12.000Z",
+          "completedAt": "2026-11-23T04:45:12.000Z"
+        },
+        {
+          "id": "3",
+          "subject": "Plan reducer",
+          "status": "completed",
+          "startedAt": "2026-11-23T04:44:13.000Z",
+          "completedAt": "2026-11-23T04:45:13.000Z"
+        },
+        {
+          "id": "4",
+          "subject": "agent plan --json",
+          "status": "in_progress",
+          "startedAt": "2026-11-23T04:44:14.000Z"
+        },
+        {
+          "id": "5",
+          "subject": "Events action",
+          "status": "pending"
+        },
+        {
+          "id": "6",
+          "subject": "Docs and okf",
+          "status": "pending"
+        }
+      ],
+      "current": 3,
+      "markers": [],
+      "subagents": [
+        {
+          "id": "a266ff19a18f822d6",
+          "type": "general-purpose",
+          "task": "write reducer tests",
+          "fromStep": 2,
+          "toStep": null,
+          "running": true,
+          "steps": [
+            {
+              "id": "7",
+              "subject": "Record fixtures",
+              "status": "completed",
+              "startedAt": "2026-11-23T04:44:17.000Z",
+              "completedAt": "2026-11-23T04:45:17.000Z"
+            },
+            {
+              "id": "8",
+              "subject": "Unit tests",
+              "status": "in_progress",
+              "startedAt": "2026-11-23T04:44:18.000Z"
+            },
+            {
+              "id": "9",
+              "subject": "Edge cases",
+              "status": "pending"
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-11-23T04:46:00.000Z"
+    },
+    {
+      "session": "kunj-kunj-feat-agent-overview-app-4d5e6f",
+      "id": null,
+      "branch": "feat/agent-overview-app",
+      "worktree": "/Users/demo/src/kunj/.git/kunj/worktrees/feat-agent-overview-app",
+      "title": "Overview window (app)",
+      "running": true,
+      "state": "running",
+      "steps": [
+        {
+          "id": "1",
+          "subject": "Layout maths",
+          "status": "completed",
+          "startedAt": "2026-11-23T04:44:11.000Z",
+          "completedAt": "2026-11-23T04:45:11.000Z"
+        },
+        {
+          "id": "2",
+          "subject": "Line view",
+          "status": "in_progress",
+          "startedAt": "2026-11-23T04:44:12.000Z"
+        },
+        {
+          "id": "3",
+          "subject": "Row list",
+          "status": "pending"
+        },
+        {
+          "id": "4",
+          "subject": "Demo data",
+          "status": "pending"
+        },
+        {
+          "id": "5",
+          "subject": "Screenshot check",
+          "status": "pending"
+        }
+      ],
+      "current": 1,
+      "markers": [],
+      "subagents": [],
+      "parent": {
+        "session": "kunj-kunj-feat-agent-overview-1a2b3c",
+        "step": 1
+      },
+      "updatedAt": "2026-11-23T04:46:10.000Z"
+    },
+    {
+      "session": "kunj-kunj-feat-vscode-search-7a8b9c",
+      "id": null,
+      "branch": "feat/vscode-search",
+      "worktree": "/Users/demo/src/kunj/.git/kunj/worktrees/vscode-search",
+      "title": "Search in VS Code",
+      "running": true,
+      "state": "waiting",
+      "steps": [
+        {
+          "id": "1",
+          "subject": "Quick pick",
+          "status": "completed",
+          "startedAt": "2026-11-23T04:44:11.000Z",
+          "completedAt": "2026-11-23T04:45:11.000Z"
+        },
+        {
+          "id": "2",
+          "subject": "Run kunj search",
+          "status": "completed",
+          "startedAt": "2026-11-23T04:44:12.000Z",
+          "completedAt": "2026-11-23T04:45:12.000Z"
+        },
+        {
+          "id": "3",
+          "subject": "Open the result",
+          "status": "in_progress",
+          "startedAt": "2026-11-23T04:44:13.000Z"
+        },
+        {
+          "id": "4",
+          "subject": "Tests",
+          "status": "pending"
+        }
+      ],
+      "current": 2,
+      "markers": [
+        {
+          "type": "branch",
+          "afterStep": 0,
+          "from": "main",
+          "to": "feat/vscode-search",
+          "at": "2026-11-23T04:40:00.000Z"
+        },
+        {
+          "type": "compact",
+          "afterStep": 1,
+          "at": "2026-11-23T04:41:00.000Z"
+        }
+      ],
+      "subagents": [],
+      "updatedAt": "2026-11-23T04:44:00.000Z"
+    },
+    {
+      "session": "kunj-kunj-fix-remote-pty-0f0f0f-a-two",
+      "id": "two",
+      "branch": "fix/remote-pty",
+      "worktree": "/Users/demo/src/kunj/.git/kunj/worktrees/fix-remote-pty",
+      "title": null,
+      "running": true,
+      "state": "running",
+      "steps": [],
+      "current": null,
+      "markers": [],
+      "subagents": [],
+      "updatedAt": null
+    },
+    {
+      "session": "kunj-kunj-old-idea-aaaaaa",
+      "id": null,
+      "branch": "old-idea",
+      "worktree": "/Users/demo/src/kunj/.git/kunj/worktrees/old-idea",
+      "title": "An agent that ended",
+      "running": false,
+      "state": null,
+      "steps": [
+        {
+          "id": "1",
+          "subject": "Only step",
+          "status": "completed",
+          "startedAt": "2026-11-23T04:44:11.000Z",
+          "completedAt": "2026-11-23T04:45:11.000Z"
+        }
+      ],
+      "current": null,
+      "markers": [],
+      "subagents": [],
+      "updatedAt": "2026-11-20T10:00:00.000Z"
+    }
+  ]
+}

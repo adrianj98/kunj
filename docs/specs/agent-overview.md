@@ -20,8 +20,8 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 | CLI: plan capture in the agent hooks, host and container (`agent.plan`) | Shipped |
 | CLI: `kunj agent plan [--all] --json` (`AgentPlanJson`), `kunj ct agent --plan`, `plan: true` on the `agent` event | Shipped |
 | CLI: parent link for a start from inside another agent's session (handoff) | Shipped |
-| `kunj events` for a container's plan (the record's size in the status script) | To do |
-| Workspace app: Overview window | To do |
+| `kunj events` for a container's plan: `container` with `action: 'plan'` when the records' size in the status script changes | Shipped |
+| Workspace app: Overview window (Window ▸ Overview, ⌘⇧O) | Written 2026-11-23, **not built or run yet** (no macOS toolchain where it was written): build it, run `--demo --overview --screenshot` against the mockup, fix what the compiler and the picture show |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |
 | Rewind forks (needs the transcript) | Later, only if wanted |
 
@@ -131,19 +131,36 @@ once ended, while its record exists. `kunj ct agent [branch] --plan [--session <
 same for a branch container, with one exec (`CONTAINER_PLAN_SCRIPT`); nothing for a stopped one.
 
 `kunj events`: an `agent` event with `plan: true` when a host record changes (the directory is
-watched like `agent-state`). The app then asks `kunj agent plan` again. A container's record is not
-in the events yet; the app re-reads it on the container's status events.
+watched like `agent-state`). The app then asks `kunj agent plan` again. For a container the status
+poll's script prints the records' size (`plan=<bytes>`, `ContainerStatus.planBytes`) and a change is a
+`container` event with `action: 'plan'`, separate from `status` so it costs no listing.
 
 ## The window
 
 Mockup: [docs/workspace-app/design/mockups/overview.html](../workspace-app/design/mockups/overview.html) (example data, both themes).
 
-Window ▸ Overview. Rows grouped by repository, one per agent session, children indented under their
-parent with the branch drawn. Done stops filled, current ringed, pending hollow; amber when the agent
-waits on the user. Hover shows the step's subject and times; click on a row opens that agent's tab.
-An agent with no task list shows a single stop with its title, so it is still on the map.
-Layout maths (stop spacing, subagent loops, long lines scrolling) goes in `KunjWorkspaceCore` so it is
-unit tested; checked with `--demo --screenshot`.
+Window ▸ Overview (⌘⇧O), `OverviewWindow` + `OverviewCanvas` (workspace-app/Sources/KunjWorkspace/Overview).
+Rows grouped by repository, one lane per running agent, a handed-off agent under its parent with the
+branch drawn. Done stops filled, current ringed (green working, amber waiting), pending hollow. A
+stop's tooltip is its subject; a click on a lane opens that agent's tab (`openHandedOffAgent`). An
+agent with no task list is one stop, so it is still on the map. All / Waiting / Running filter
+families (a family shows when any of its lanes passes).
+
+- **Model and geometry** are in `KunjWorkspaceCore/Overview` (Foundation only, unit tested in
+  `OverviewTests`): `AgentPlanJson` decoding, `activePlans()` (ended sessions are left out),
+  `overviewFamilies()` (parent links; an orphan is a root), `layoutFamily()` (every x and y: stops
+  116 apart, a child half a stop after the stop it branched from, loops stacked in levels when they
+  overlap, marker labels under the line). The canvas only strokes what `layoutFamily()` returns.
+- **Data:** per listed repository `kunj agent plan --all --json`, and per running container whose
+  listing shows an agent `kunj ct agent <branch> --plan --json` with its `remoteArguments`, all at
+  once (`withTaskGroup`). One read at a time; a request during a read runs one more after it.
+- **Refresh:** `KunjEvent.agentPlan` (an `agent` event with `plan: true`, or a `container` event with
+  action `plan`) → `EnvironmentStore.onPlanChanged`, which runs no listing; the store's `onChange`
+  (an agent started, ended or began waiting); and every 10 s while the window is visible. Changes
+  are gathered for 0.3 s.
+- **Checking it:** `--demo --overview --screenshot <png>` draws `DemoPlans` (the mockup's agents).
+- Not done: the pulse on the current stop, keyboard access to the lanes, plan steps for a kunj older
+  than this command (`agent plan` is then read as a branch name and the window shows kunj's error).
 
 ## Later
 

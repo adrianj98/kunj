@@ -551,7 +551,7 @@ state is UI layout in `~/.kunj/<repo>/workspace.json`. Settings (⌘,) is drawn 
 (`SettingsModel` in Core: rows with value, source and control; `Settings/SettingsWindow.swift`, `SettingRowView`,
 `AppSettingsPane`, `ContainerTokensView`) and writes with `config --set-json`/`--unset` in the global config or one
 repository's; check it with `--settings <category> --screenshot` and the `-settings*` arguments in a scratch `HOME`
-(docs/specs/workspace-settings.md). `MIN_KUNJ_VERSION` is 1.3.0 (1.0.0 is accepted as a
+(docs/specs/workspace-settings.md). Window ▸ Overview (`Overview/OverviewWindow`, `OverviewCanvas`) draws every running agent's plan as a line of stops from `kunj agent plan --all --json` and `kunj ct agent <branch> --plan`; all positions come from `layoutFamily()` in Core (`Overview/OverviewLayout.swift`, tested), the canvas only strokes them; check with `--demo --overview --screenshot` against docs/workspace-app/design/mockups/overview.html (docs/specs/agent-overview.md). `MIN_KUNJ_VERSION` is 1.3.0 (1.0.0 is accepted as a
 dev build), so a JSON or command change it relies on must stay additive. `KunjWorkspaceCore` (Foundation
 only) is unit tested with Swift Testing against `Tests/Fixtures/fake-kunj`; build with
 `workspace-app/scripts/test.sh` and `scripts/bundle.sh` (`SCRATCH=.build/<name>` when building in

@@ -40,6 +40,11 @@ func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) async -> Bool {
             == .agent(session: "kunj-a-main-1", running: true, state: "waiting", repoRoot: "/a"))
         #expect(parseEventLine(#"{"type":"agent","session":"s","running":false,"at":"x"}"#)
             == .agent(session: "s", running: false, state: nil, repoRoot: nil))
+        #expect(parseEventLine(#"{"type":"container","repo":{"name":"a","root":"/a"},"branch":"feature/x","container":"c","action":"plan","at":"x"}"#)
+            == .agentPlan(session: "c", repoRoot: "/a"))
+        // a plan record changed: its own event, so the store runs no listing for it
+        #expect(parseEventLine(#"{"type":"agent","session":"kunj-a-main-1","running":true,"plan":true,"repo":{"name":"a","root":"/a"},"at":"x"}"#)
+            == .agentPlan(session: "kunj-a-main-1", repoRoot: "/a"))
         #expect(parseEventLine(#"{"type":"backend","status":"unavailable","message":"no docker","at":"x"}"#)
             == .backend(available: false, message: "no docker"))
         #expect(parseEventLine(#"{"type":"backend","status":"available","at":"x"}"#)

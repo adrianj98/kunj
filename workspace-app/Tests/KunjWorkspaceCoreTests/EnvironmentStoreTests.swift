@@ -173,6 +173,20 @@ private func sleepMs(_ ms: UInt64) async { try? await Task.sleep(nanoseconds: ms
         #expect(fake.count("all") == 4)
     }
 
+    @Test func aPlanEventTellsTheOverviewAndRunsNoListing() async {
+        let fake = FakeKunj()
+        let store = makeStore(fake)
+        await store.refreshAll()
+        var roots: [String?] = []
+        store.onPlanChanged = { roots.append($0) }
+        store.handle(.agentPlan(session: "kunj-x", repoRoot: repoA.root))
+        store.handle(.agentPlan(session: "kunj-y", repoRoot: nil))
+        await sleepMs(150)
+        #expect(roots == [repoA.root, nil])
+        #expect(fake.count("wt:\(repoA.root)") == 1)
+        #expect(fake.count("all") == 1)
+    }
+
     @Test func agentEventWithRepoRefreshesItsWorktrees() async {
         let fake = FakeKunj()
         let store = makeStore(fake)
