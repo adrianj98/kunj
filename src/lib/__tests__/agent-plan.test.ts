@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import * as os from 'os';
-import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, reducePlan } from '../agent-plan';
+import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, reducePlan, setPlanGuardCommand } from '../agent-plan';
 
 const line = (hook: any, t = 100, branch = 'main') => JSON.stringify({ kunj: { t, branch }, hook });
 const create = (id: string, subject: string, extra: any = {}) => ({ hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: { task: { id, subject } }, ...extra });
@@ -332,5 +332,21 @@ describe('set_plan in the record', () => {
       line(2, { hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'Explore' }),
     ].join('\n'));
     expect(plan.subagents[0].fromStep).toBe(1);
+  });
+});
+
+describe('setPlanGuardCommand', () => {
+  const run = (input: string) => spawnSync('sh', ['-c', setPlanGuardCommand()], { input, encoding: 'utf8' });
+
+  test('a subagent\'s set_plan is denied, with exit 0', () => {
+    const out = run(JSON.stringify({ hook_event_name: 'PreToolUse', agent_id: 'a1', tool_name: 'mcp__plugin_kunj_kunj__set_plan', tool_input: { steps: ['x'], current: 0 } }));
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout).hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'deny' });
+  });
+
+  test('the main agent\'s call passes: no output, even with agent_id inside its steps', () => {
+    const out = run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'mcp__plugin_kunj_kunj__set_plan', tool_input: { steps: ['"agent_id":"x"'], current: 0 } }));
+    expect(out.status).toBe(0);
+    expect(out.stdout).toBe('');
   });
 });

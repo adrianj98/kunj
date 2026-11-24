@@ -81,6 +81,14 @@ export function subagentToolHookCommand(): string {
     + String.raw`[ -z "$a" ] || printf "%s\n" "${line}" >> "$KUNJ_AGENT_PLAN";; esac; }`);
 }
 
+// A PreToolUse hook for set_plan that refuses it from a subagent (its input has an agent_id): the plan
+// line carries no caller, so a subagent's call would replace the main agent's plan. Prints Claude
+// Code's deny decision and exits 0; the main agent's calls pass untouched.
+export function setPlanGuardCommand(): string {
+  const deny = String.raw`{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"set_plan is the main agent plan; a subagent does not set it\"}}`;
+  return hookSafe(String.raw`i=$(cat); i=${"${"}i%%\"tool_input\":*}; case "$i" in *\"agent_id\":\"*) printf "%s" "${deny}";; esac`);
+}
+
 // The first line of a handed-off session's file: who started it and on which step
 export function parentLine(session: string, step: number | null): string {
   return `${JSON.stringify({ kunj: { t: Math.floor(Date.now() / 1000), parent: { session, step } } })}\n`;

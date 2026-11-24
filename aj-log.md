@@ -20,6 +20,8 @@ Changes made with Claude, and why.
   task tools take a call per task and per change, so agents skipped them; one cheap call, like the
   work-band mod's set_topic, gets done. Checked with a real Haiku agent: it set a 4-step plan first
   and moved it on twice.
+- A subagent's set_plan is refused by a PreToolUse hook (`setPlanGuardCommand()`): the plan line
+  carries no caller, so it would have replaced the main agent's plan (adversary review).
 
 ## 2026-11-24 — Steps from the transcript
 
