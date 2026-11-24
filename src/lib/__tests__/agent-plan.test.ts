@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import * as os from 'os';
-import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, reducePlan } from '../agent-plan';
+import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, promptSubject, reducePlan } from '../agent-plan';
 
 const line = (hook: any, t = 100, branch = 'main') => JSON.stringify({ kunj: { t, branch }, hook });
 const create = (id: string, subject: string, extra: any = {}) => ({ hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: { task: { id, subject } }, ...extra });
@@ -303,5 +303,44 @@ describe('planNudge', () => {
   test('nothing in progress: the next step, or every step done', () => {
     expect(planNudge({ steps: [step('Read', 'completed'), step('Test', 'pending')], markers: [] })).toContain('next: Test');
     expect(planNudge({ steps: [step('Read', 'completed')], markers: [] })).toContain('1 of 1 done, every step done');
+  });
+});
+
+describe('prompts as steps', () => {
+  const line = (t: number, hook: object) => JSON.stringify({ kunj: { t }, hook });
+  const prompt = (t: number, text: string) => line(t, { hook_event_name: 'UserPromptSubmit', prompt: text });
+
+  test('an agent with no task list shows its prompts, the last one current', () => {
+    const plan = reducePlan([prompt(1, 'fix the overview\nmore detail'), prompt(2, '   \n  then reinstall it ')].join('\n'));
+    expect(plan.steps.map(s => [s.subject, s.status, s.kind])).toEqual([
+      ['fix the overview', 'completed', 'prompt'], ['then reinstall it', 'in_progress', 'prompt']]);
+    expect(plan.current).toBe(1);
+    // they are not a task list: the nudge still asks for one
+    expect(planNudge(plan)).toContain('has none yet');
+  });
+
+  test('a task list wins over the prompts', () => {
+    const plan = reducePlan([
+      prompt(1, 'build it'),
+      line(2, { hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject: 'Step one' }, tool_response: { task: { id: '1', subject: 'Step one' } } }),
+    ].join('\n'));
+    expect(plan.steps.map(s => s.subject)).toEqual(['Step one']);
+  });
+
+  test('after /clear the finished prompts stay as history behind a new marker', () => {
+    const plan = reducePlan([
+      prompt(1, 'first'), prompt(2, 'second'),
+      line(3, { hook_event_name: 'SessionStart', source: 'clear' }),
+      prompt(4, 'third'),
+    ].join('\n'));
+    expect(plan.steps.map(s => [s.subject, s.status])).toEqual([['first', 'completed'], ['third', 'in_progress']]);
+    expect(plan.markers).toEqual([{ type: 'new', afterStep: 0, at: expect.any(String) }]);
+  });
+
+  test('promptSubject: the first line that is not blank, whitespace collapsed, at most 80 characters', () => {
+    expect(promptSubject('\n  a   b \nc')).toBe('a b');
+    expect(promptSubject('x'.repeat(100))).toHaveLength(80);
+    expect(promptSubject('  \n ')).toBeNull();
+    expect(promptSubject(undefined)).toBeNull();
   });
 });

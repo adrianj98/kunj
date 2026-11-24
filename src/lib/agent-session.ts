@@ -458,7 +458,8 @@ export function claudeHookSettings(plan = false, nudge?: string): string {
   const record = planHookCommand();
   return JSON.stringify({
     hooks: {
-      UserPromptSubmit: [...hook(write('running')), ...(nudge ? hook(nudge) : [])],
+      // the prompt is recorded too: an agent that keeps no task list shows its prompts as steps
+      UserPromptSubmit: [...hook(write('running')), ...(plan ? hook(record) : []), ...(nudge ? hook(nudge) : [])],
       PreToolUse: [...hook(write('running')), ...(plan ? [...hook(record, 'Agent|Task'), ...hook(subagentToolHookCommand())] : [])],
       Stop: hook(write('waiting')),
       Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),

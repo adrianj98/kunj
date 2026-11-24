@@ -47,7 +47,8 @@ export function planNudge(plan: Pick<ReducedPlan, 'steps' | 'markers'>): string 
   // only this conversation's steps: those of earlier ones (kept in front, behind a `new` marker after
   // /clear or a fresh start) are not its task list
   const fresh = plan.markers.filter(m => m.type === 'new').reduce((last, m) => Math.max(last, m.afterStep ?? -1), -1);
-  const steps = plan.steps.slice(fresh + 1);
+  // the prompts that stand in for a missing task list are not one
+  const steps = plan.steps.slice(fresh + 1).filter(s => s.kind !== 'prompt');
   if (steps.length === 0) {
     return 'kunj shows the user your plan as a line of steps, and it has none yet. If this prompt is work with more '
       + 'than one step, create a task list (TaskCreate) before anything else and mark each task in progress and '
@@ -130,6 +131,14 @@ export function planPosition(steps: AgentPlanStepJson[]): number | null {
   return last;
 }
 
+// A prompt as a step: its first line that is not blank, at most 80 characters
+export function promptSubject(prompt: unknown): string | null {
+  if (typeof prompt !== 'string') return null;
+  const line = prompt.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).find(Boolean);
+  if (!line) return null;
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+}
+
 export function planTitle(plan: unknown): string | null {
   if (typeof plan !== 'string') return null;
   const lines = plan.split('\n').map(l => l.trim()).filter(Boolean);
@@ -167,7 +176,13 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
   let history: Task[] = [];
   let conversations = 0;
   let parentFresh = false;
-  const mainSteps = (): Task[] => [...history, ...order.map(id => tasks.get(id)!).filter(t => t.owner === null)];
+  // the user's prompts of this conversation: its steps while it keeps no task list of its own
+  let prompts: Task[] = [];
+  const ownSteps = (): Task[] => {
+    const own = order.map(id => tasks.get(id)!).filter(t => t.owner === null);
+    return own.length ? own : prompts;
+  };
+  const mainSteps = (): Task[] => [...history, ...ownSteps()];
   const setStatus = (task: Task, status: unknown, at: string) => {
     if (typeof status !== 'string' || !STATUSES.includes(status) || task.status === status) return;
     task.status = status as Task['status'];
@@ -206,7 +221,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       const n = conversations++;
       const done = mainSteps().filter(t => t.status === 'completed').map(t => ({ ...t, id: t.id.startsWith('h') ? t.id : `h${n}-${t.id}` }));
       history = done.slice(-HISTORY_STEPS);
-      tasks = new Map(); order = []; title = null; subagents = new Map(); pendingTasks = [];
+      tasks = new Map(); order = []; title = null; subagents = new Map(); pendingTasks = []; prompts = [];
       markers = history.length ? [{ type: 'new', afterStep: history.length - 1, at }] : [];
     }
 
@@ -229,6 +244,13 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
     if (event === 'SessionStart') parentFresh = false;
     if (event === 'SessionStart') {
       if (hook.source === 'fork' || hook.source === 'compact') markers.push({ type: hook.source, afterStep: planPosition(mainSteps()), at });
+    } else if (event === 'UserPromptSubmit' && agent === null) {
+      const subject = promptSubject(hook.prompt);
+      if (subject) {
+        const last = prompts[prompts.length - 1];
+        if (last) setStatus(last, 'completed', at);
+        prompts.push({ id: `p${prompts.length + 1}`, subject, status: 'in_progress', owner: null, kind: 'prompt', startedAt: at });
+      }
     } else if (event === 'SubagentStart' && agent) {
       const type = str(hook.agent_type) ?? 'agent';
       let i = pendingTasks.findIndex(p => p.type === type);
@@ -295,12 +317,13 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
 
   const clean = ({ owner: _owner, ...step }: Task): AgentPlanStepJson => {
     const out: AgentPlanStepJson = { id: step.id, subject: step.subject, status: step.status };
+    if (step.kind) out.kind = step.kind;
     if (step.startedAt) out.startedAt = step.startedAt;
     if (step.completedAt) out.completedAt = step.completedAt;
     return out;
   };
   const all = order.map(id => tasks.get(id)!);
-  const steps = [...history, ...all.filter(t => t.owner === null)].map(clean);
+  const steps = mainSteps().map(clean);
   for (const sub of subagents.values()) sub.steps = all.filter(t => t.owner === sub.id).map(clean);
   return { title, steps, current: currentStep(steps), markers, subagents: [...subagents.values()], ...(parent ? { parent } : {}), updatedAt, branch, transcript };
 }

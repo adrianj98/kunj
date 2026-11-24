@@ -477,10 +477,12 @@ describe('planNudgeHookCommand', () => {
     expect(planNudgeHookCommand(['/usr/bin/node', '/opt/"x"/index.js'])).toBeUndefined();
   });
 
-  test('claudeHookSettings adds it to UserPromptSubmit after the state write, and only when given', () => {
-    expect(JSON.parse(claudeHookSettings(true)).hooks.UserPromptSubmit).toHaveLength(1);
+  test('claudeHookSettings: UserPromptSubmit writes the state, records the prompt (with a plan), then nudges (when given)', () => {
+    expect(JSON.parse(claudeHookSettings()).hooks.UserPromptSubmit).toHaveLength(1);
+    expect(JSON.parse(claudeHookSettings(true)).hooks.UserPromptSubmit).toHaveLength(2);
     const hooks = JSON.parse(claudeHookSettings(true, 'NUDGE')).hooks.UserPromptSubmit;
-    expect(hooks).toHaveLength(2);
-    expect(hooks[1].hooks[0].command).toBe('NUDGE');
+    expect(hooks).toHaveLength(3);
+    expect(hooks[1].hooks[0].command).toContain('KUNJ_AGENT_PLAN');
+    expect(hooks[2].hooks[0].command).toBe('NUDGE');
   });
 });

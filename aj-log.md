@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-23 — Prompts as steps
+
+- The plan record now keeps each prompt the user sends; a conversation with no task list shows those
+  prompts as its steps (the last one current), and a task list replaces them once it exists. Why:
+  agents doing lots of work showed only subagent loops ("forks") in the Overview, because none of
+  the records had a single TaskCreate.
+
 ## 2026-11-23 — Agents nudged to keep a plan
 
 - Every prompt sent to a kunj Claude agent now carries a line from `kunj agent nudge` (a

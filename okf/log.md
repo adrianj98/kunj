@@ -184,3 +184,4 @@
 - Workspace app sidebar: suspended sessions under N more, repositories menu (Active/All, pin). Page updated: none.
 - Workspace app: All/Active repositories preference moved to showAllRepos so everyone starts on Active. Page updated: none.
 - Agents nudged to keep a plan: kunj agent nudge from a UserPromptSubmit hook. Page updated: none.
+- Agent plan: user prompts recorded and shown as steps when there is no task list. Page updated: none.
