@@ -15,8 +15,10 @@ extension DiffService: ChangesSource {}
 /// `border` hairline under it) over the file list (196 px, `ChangedFileRowView` rows of 28 px,
 /// padding 8 × 6, a hairline at its right) and Monaco's diff editor filling the rest. The first
 /// file is selected on load; a reload keeps the selected path while it is still listed. It reloads
-/// when the environment or the scope changes, and 500 ms after `repoChanged(root:)` for its
-/// repository (the store's `onRepoChanged`). No files: `No changes` in `muted`; a `DiffError` (or
+/// when the environment or the scope changes, and 500 ms after a `repoChanged(_:)` that concerns
+/// its environment (the store's `onRepoChanged`). One summary load runs at a time (`SerialReloader`:
+/// more requests meanwhile make one more), and none while the window is hidden
+/// (`windowVisibilityChanged(_:)`). No files: `No changes` in `muted`; a `DiffError` (or
 /// any failure) shows its message there instead.
 final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var theme: Theme { didSet { apply() } }
@@ -28,7 +30,11 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var isActive = true {
         didSet {
             guard isActive != oldValue else { return }
-            if isActive { reload() } else { pendingReload?.cancel(); pendingReload = nil; summaryGeneration += 1 }
+            if isActive {
+                reload()
+            } else {
+                pendingReload?.cancel(); pendingReload = nil; summaryGeneration += 1; reloader.cancelPending()
+            }
         }
     }
 
@@ -79,6 +85,8 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private var contentGeneration = 0
     private var selecting = false
     private var pendingReload: DispatchWorkItem?
+    /// Loads the summary, one at a time; skipped while the window is hidden.
+    private lazy var reloader = SerialReloader { [weak self] in await self?.loadSummary() }
     /// What the diff editor shows (nil after `clear` or a page reload): an identical refetch is
     /// not sent again, so an unrelated `git` event does not scroll the diff back to the top.
     private var shown: ShownDiff?
@@ -252,17 +260,28 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
         reload()
     }
 
-    /// A `git` event (or a container status change) in the repository at `root`: reload after 500 ms
-    /// when it is this environment's repository.
-    func repoChanged(root: String) {
-        guard environment?.repo.root == root else { return }
+    /// A `git` event, a container status change or a save: reload after 500 ms when it concerns this
+    /// environment.
+    func repoChanged(_ change: RepoChange) {
+        guard let env = environment, change.concerns(env) else { return }
         scheduleReload()
+    }
+
+    /// The window went off screen (minimized, hidden, another Space) or came back: no loads while
+    /// it is hidden, and one when it is shown again if anything asked for one meanwhile.
+    func windowVisibilityChanged(_ visible: Bool) {
+        reloader.isVisible = visible
     }
 
     private func scheduleReload() {
         guard isActive else { return }
         pendingReload?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.reload() }
+        // the same environment and scope: a load already running may finish and apply
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isActive else { return }
+            self.pendingReload = nil
+            self.reloader.request()
+        }
         pendingReload = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.debounce, execute: work)
     }
@@ -276,23 +295,27 @@ final class ChangesColumn: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     // MARK: loading
 
+    /// The environment or scope changed: a load still running for the earlier one is not applied.
     private func reload() {
         pendingReload?.cancel()
         pendingReload = nil
-        guard isActive, let env = environment, let source else { return }
+        guard isActive, environment != nil, source != nil else { return }
         summaryGeneration += 1
+        reloader.request()
+    }
+
+    private func loadSummary() async {
+        guard isActive, let env = environment, let source else { return }
         let generation = summaryGeneration
         let scope = self.scope
-        Task { @MainActor in
-            do {
-                let (s, label) = try await source.summary(env: env, scope: scope)
-                guard generation == self.summaryGeneration else { return }
-                if scope == .base { self.baseTitles[env.id] = label }
-                self.applySummary(s)
-            } catch {
-                guard generation == self.summaryGeneration else { return }
-                self.showFailure(error)
-            }
+        do {
+            let (s, label) = try await source.summary(env: env, scope: scope)
+            guard generation == summaryGeneration else { return }
+            if scope == .base { baseTitles[env.id] = label }
+            applySummary(s)
+        } catch {
+            guard generation == summaryGeneration else { return }
+            showFailure(error)
         }
     }
 

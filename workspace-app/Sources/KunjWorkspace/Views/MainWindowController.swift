@@ -122,10 +122,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    // the Overview's pulse only runs while it can be seen
-    func windowDidMiniaturize(_ notification: Notification) { overview.visibilityChanged() }
-    func windowDidDeminiaturize(_ notification: Notification) { overview.visibilityChanged() }
-    func windowDidChangeOcclusionState(_ notification: Notification) { overview.visibilityChanged() }
+    // the Overview's pulse and the shown terminal's drawing only run while the window can be seen
+    func windowDidMiniaturize(_ notification: Notification) { windowVisibilityChanged() }
+    func windowDidDeminiaturize(_ notification: Notification) { windowVisibilityChanged() }
+    func windowDidChangeOcclusionState(_ notification: Notification) { windowVisibilityChanged() }
+
+    private func windowVisibilityChanged() {
+        overview.visibilityChanged()
+        let hidden = TerminalTab.cannotBeSeen(window)
+        for tab in terminalColumn.registry.allTerminals { tab.windowHidden = hidden }
+        // the Changes and Files columns only note reloads while the window cannot be seen
+        changesColumn.windowVisibilityChanged(!hidden)
+        filesColumn.windowVisibilityChanged(!hidden)
+    }
 
     // MARK: state
 

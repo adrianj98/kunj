@@ -12,8 +12,15 @@ import KunjWorkspaceCore
 final class SidebarRowView: NSView {
     static let height: CGFloat = 54
 
-    let environment: Environment
-    var time: String { didSet { needsDisplay = true } }
+    /// Replaced in place when the listing changes (the sidebar reuses rows by environment id).
+    var environment: Environment {
+        didSet {
+            guard environment != oldValue else { return }
+            describe()
+            needsDisplay = true
+        }
+    }
+    var time: String { didSet { if time != oldValue { needsDisplay = true } } }
     /// The summed usage of the worktree's host tmux sessions; nil draws nothing.
     var usage: SessionUsage? { didSet { if usage != oldValue { needsDisplay = true } } }
     /// The mouse is over the sidebar: the usage is drawn only then.
@@ -23,7 +30,9 @@ final class SidebarRowView: NSView {
     private var statusVerb: String {
         suspended && environment.state != .missing && environment.state != .stopped ? "Suspended" : environment.statusVerb
     }
-    var selected: Bool { didSet { needsDisplay = true; setAccessibilitySelected(selected) } }
+    var selected: Bool {
+        didSet { if selected != oldValue { needsDisplay = true; setAccessibilitySelected(selected) } }
+    }
     var theme: Theme { didSet { needsDisplay = true } }
     var onSelect: ((String) -> Void)?
     /// The row's right-click menu (the runner's `rowMenu`).
@@ -40,12 +49,16 @@ final class SidebarRowView: NSView {
                                        owner: self, userInfo: nil))
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel([environment.branch, [environment.kind.rawValue, sidebarFolder(environment)].compactMap { $0 }
-            .joined(separator: " "), environment.statusVerb].joined(separator: ", "))
-        toolTip = environment.path
+        describe()
         setAccessibilitySelected(selected)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    private func describe() {
+        setAccessibilityLabel([environment.branch, [environment.kind.rawValue, sidebarFolder(environment)].compactMap { $0 }
+            .joined(separator: " "), environment.statusVerb].joined(separator: ", "))
+        toolTip = environment.path
+    }
 
     override var isFlipped: Bool { true }
     override func mouseEntered(with event: NSEvent) { hovering = true }

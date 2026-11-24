@@ -14,6 +14,12 @@ final class FileListerSource: FilesSource {
 
 /// A node of the outline view (it needs objects, and the same object for the same item across
 /// `reloadData`, so folders keep their open state).
+/// Items built off the main thread and handed over once, untouched until then.
+private struct FileItemTree: @unchecked Sendable {
+    let items: [FileItem]
+    init(_ items: [FileItem]) { self.items = items }
+}
+
 private final class FileItem: NSObject {
     let node: FileNode
     let children: [FileItem]
@@ -44,7 +50,11 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         didSet {
             guard isActive != oldValue else { return }
             searchPanel.isActive = isActive && mode == .search
-            if isActive { reload() } else { pendingReload?.cancel(); pendingReload = nil; generation += 1 }
+            if isActive {
+                reload()
+            } else {
+                pendingReload?.cancel(); pendingReload = nil; generation += 1; reloader.cancelPending()
+            }
         }
     }
     let searchPanel: SearchPanel
@@ -72,6 +82,8 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     private var restoring = false
     private var generation = 0
     private var pendingReload: DispatchWorkItem?
+    /// Lists the files, one listing at a time; skipped while the window is hidden.
+    private lazy var reloader = SerialReloader { [weak self] in await self?.loadFiles() }
 
     init(theme: Theme) {
         self.theme = theme
@@ -199,44 +211,65 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         reload()
     }
 
-    /// A `git` event (or a container status change) in the repository at `root`.
-    func repoChanged(root: String) {
-        guard environment?.repo.root == root else { return }
+    /// A `git` event, a container status change or a save: reload when it concerns this environment.
+    func repoChanged(_ change: RepoChange) {
+        guard let env = environment, change.concerns(env) else { return }
         scheduleReload()
+    }
+
+    /// The window went off screen or came back: no listings while it is hidden, and one when it is
+    /// shown again if anything asked for one meanwhile.
+    func windowVisibilityChanged(_ visible: Bool) {
+        reloader.isVisible = visible
     }
 
     private func scheduleReload() {
         guard isActive, mode == .files else { return }
         pendingReload?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.reload() }
+        // the same environment: a listing already running may finish and apply
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isActive, self.mode == .files else { return }
+            self.pendingReload = nil
+            self.reloader.request()
+        }
         pendingReload = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.debounce, execute: work)
     }
 
+    /// The environment changed (or the column opened): a listing still running for the earlier one is
+    /// not applied.
     private func reload() {
         pendingReload?.cancel()
         pendingReload = nil
-        guard isActive, mode == .files, let env = environment, let source else { return }
+        guard isActive, mode == .files, environment != nil, source != nil else { return }
         generation += 1
-        let gen = generation
         if items.isEmpty { message.stringValue = "Loading files…" }
-        Task { @MainActor in
-            do {
-                let listing = try await source.files(env: env)
-                guard gen == self.generation else { return }
-                self.message.stringValue = listing.paths.isEmpty ? "No files" : ""
-                self.setItems(buildFileTree(listing.paths, directories: listing.ignoredDirectories,
-                                            ignored: listing.ignored).map(FileItem.init), listed: env.id)
-                self.count.stringValue = listing.truncated
-                    ? "first \(listing.paths.count.formatted())" : listing.paths.count.formatted()
-            } catch {
-                guard gen == self.generation else { return }
-                self.setItems([], listed: nil)
-                switch error {
-                case let e as DiffError: self.message.stringValue = e.description
-                case let e as KunjCLIError: self.message.stringValue = e.message
-                default: self.message.stringValue = error.localizedDescription
-                }
+        reloader.request()
+    }
+
+    private func loadFiles() async {
+        guard isActive, mode == .files, let env = environment, let source else { return }
+        let gen = generation
+        do {
+            let listing = try await source.files(env: env)
+            guard gen == generation else { return }
+            // the tree of a large worktree takes tens of milliseconds: built off the main thread
+            let tree = await Task.detached(priority: .userInitiated) {
+                FileItemTree(buildFileTree(listing.paths, directories: listing.ignoredDirectories,
+                                       ignored: listing.ignored).map(FileItem.init))
+            }.value
+            guard gen == generation else { return }
+            message.stringValue = listing.paths.isEmpty ? "No files" : ""
+            setItems(tree.items, listed: env.id)
+            count.stringValue = listing.truncated
+                ? "first \(listing.paths.count.formatted())" : listing.paths.count.formatted()
+        } catch {
+            guard gen == generation else { return }
+            setItems([], listed: nil)
+            switch error {
+            case let e as DiffError: message.stringValue = e.description
+            case let e as KunjCLIError: message.stringValue = e.message
+            default: message.stringValue = error.localizedDescription
             }
         }
     }

@@ -13,6 +13,21 @@ private func spec(_ env: Environment, _ kind: TabKind, action: [String] = [], cw
 }
 
 @Suite struct TerminalSpecTests {
+    /// A kunj with --exec-script: worktree agent and shell tabs run sh, which becomes the tmux client;
+    /// container tabs and actions are unchanged.
+    @Test func attachesByExec() throws {
+        let exec = KunjCLI(command: "kunj", path: "/usr/bin")
+        exec.attachesByExec = true
+        let a = try spec(testWorktree(), .agent, cli: exec, session: "a1")
+        #expect(a.executable == "/bin/sh")
+        #expect(a.arguments == ["-c", execScriptRunner, "kunj-attach", "/usr/bin/env", "kunj", "agent", "feature/x", "--session", "a1", "--exec-script"])
+        #expect(a.session == "a1")
+        let sh = try spec(testWorktree(), .shell, cli: exec, session: "s1")
+        #expect(sh.arguments.suffix(7) == ["kunj", "worktree", "shell", "feature/x", "--session", "s1", "--exec-script"])
+        #expect(try spec(testContainer(), .agent, cli: exec, session: "a1").executable == "/usr/bin/env")
+        #expect(supportsExecScript("1.0.0") && supportsExecScript("1.3.2") && !supportsExecScript("1.3.1"))
+    }
+
     @Test func worktreeShell() throws {
         let s = try spec(testWorktree(), .shell)
         #expect(s.executable == "/bin/zsh")

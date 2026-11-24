@@ -86,6 +86,14 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
         TerminalSpec(executable: "/usr/bin/env", arguments: cli.commandParts + args, cwd: cwd ?? env.repo.root,
                      environment: environment, title: title, closeOnExitZero: closeOnExitZero)
     }
+    // An attach (agent or shell in a worktree): with --exec-script kunj prints the line that attaches
+    // and sh runs it, becoming the tmux client, so no kunj process stays beside every open tab
+    func attach(_ args: [String], title: String) -> TerminalSpec {
+        guard cli.attachesByExec else { return kunj(args, title: title) }
+        return TerminalSpec(executable: "/bin/sh",
+                            arguments: ["-c", execScriptRunner, "kunj-attach", "/usr/bin/env"] + cli.commandParts + args + ["--exec-script"],
+                            cwd: cwd ?? env.repo.root, environment: environment, title: title, closeOnExitZero: false)
+    }
 
     switch kind {
     case .editor:
@@ -101,7 +109,7 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
     case .worktree:
         guard env.exists, env.state != .missing else { throw TerminalSpecError.worktreeMissing }
         if kind == .agent {
-            var s = kunj(["agent", env.branch] + (session.map { ["--session", $0] } ?? [])
+            var s = attach(["agent", env.branch] + (session.map { ["--session", $0] } ?? [])
                          + (agent.map { ["--agent", $0.rawValue] } ?? []) + (resume ? ["--resume"] : []),
                          title: agent?.title ?? "agent")
             s.session = session
@@ -110,7 +118,7 @@ public func terminalSpec(cli: KunjCLI, env: Environment, kind: TabKind, action: 
         }
         guard let path = env.path else { throw TerminalSpecError.noWorktree }
         if let session {
-            var s = kunj(["worktree", "shell", env.branch, "--session", session],
+            var s = attach(["worktree", "shell", env.branch, "--session", session],
                          title: URL(fileURLWithPath: shell).lastPathComponent)
             s.session = session
             return s
@@ -193,3 +201,7 @@ public enum QuitSessionsChoice: Equatable, Sendable {
             + "\n\nLeaving them running in \(secondsLeft) s."
     }
 }
+
+/// The sh a tab runs around `kunj … --exec-script` (the CLI's EXEC_SCRIPT_RUNNER): kunj prints one
+/// line, sh evals it and so becomes tmux; a failing kunj ends it with kunj's exit code.
+public let execScriptRunner = #"s=$("$@") || exit $?; eval "$s""#

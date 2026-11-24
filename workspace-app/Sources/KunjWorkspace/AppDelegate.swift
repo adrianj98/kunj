@@ -349,9 +349,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // an agent's plan record changed: the Overview window, when open, reads the plans again
         store.onPlanChanged = { [weak self] _ in self?.windowController.overview.planChanged() }
         // the Changes column follows git events and container status changes of its repository
-        store.onRepoChanged = { [weak windowController] root in
-            windowController?.changesColumn.repoChanged(root: root)
-            windowController?.filesColumn.repoChanged(root: root)
+        store.onRepoChanged = { [weak windowController] change in
+            windowController?.changesColumn.repoChanged(change)
+            windowController?.filesColumn.repoChanged(change)
         }
         windowController.showLoading(.listing)
         await store.refreshAll()
@@ -1312,7 +1312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.linkFileMenu?.show(at: NSEvent.mouseLocation)
         }
         column.registry.onSaved = { [weak windowController] tab in
-            windowController?.changesColumn.repoChanged(root: tab.env.repo.root)
+            windowController?.changesColumn.repoChanged(RepoChange(env: tab.env))
         }
     }
 

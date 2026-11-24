@@ -5,8 +5,8 @@ import KunjWorkspaceCore
 /// repository (`sidebarGroups`: tabs in the app or saved, a running agent, the selection), each
 /// group ending in `N more…` (11 px `faint`, as the design's more row) that lists the others too
 /// (`Show fewer` closes it); a search lists every match. At the foot `+ New session ⌘N` over
-/// `N agents running · kunj <version>`. A row's right-click menu is `ActionRunner.rowMenu`. The rows are rebuilt on
-/// every change (a few dozen at most).
+/// `N agents running · kunj <version>`. A row's right-click menu is `ActionRunner.rowMenu`. Rows are
+/// reused by environment id on every change; only appeared or gone environments add or remove one.
 final class SidebarView: NSView {
     var repos: [RepoEnvironments] = [] { didSet { reload() } }
     var selectedId: String? { didSet { list.rows.forEach { $0.selected = $0.environment.id == selectedId } } }
@@ -84,6 +84,15 @@ final class SidebarView: NSView {
         return s
     }()
     private var planData: (repos: [AgentOverviewJson], filter: OverviewFilter)?
+    /// What `plans` last drew beside the rows (nil: nothing yet, or it was cleared).
+    private struct DrawnPlans: Equatable {
+        var repos: [AgentOverviewJson]
+        var filter: OverviewFilter
+        var lanes: [AlignedLane]
+        var tops: [String: CGFloat]
+        var room: NSSize
+    }
+    private var drawnPlans: DrawnPlans?
     /// Where the list starts: the Overview's bar sits above it, right of the search.
     var listTopAnchor: NSLayoutYAxisAnchor { scroll.topAnchor }
 
@@ -110,6 +119,7 @@ final class SidebarView: NSView {
         // a read that comes back after the Overview closed draws nothing
         let data = overviewColumn == nil ? nil : data
         planData = data
+        drawnPlans = nil
         if data == nil {
             list.plans = nil
             list.onPlaced = nil
@@ -132,10 +142,14 @@ final class SidebarView: NSView {
         list.rowHeights = alignment.rowHeights.mapValues { CGFloat($0) }
         list.onPlaced = { [weak self] tops in
             guard let self, let data = self.planData else { return }
+            // every layout of the list ends here: draw again only when the rows moved or the data changed
+            let room = self.plansScroll.frame.size
+            let drawn = DrawnPlans(repos: data.repos, filter: data.filter, lanes: alignment.lanes, tops: tops, room: room)
+            guard drawn != self.drawnPlans else { return }
+            self.drawnPlans = drawn
             self.plans.showAligned(data.repos, filter: data.filter, lanes: alignment.lanes, rowTops: tops)
             // as wide as the widest lane (scrolled sideways) and as tall as the list it sits beside; the
             // lanes are placed again at that size (they take the canvas's width)
-            let room = self.plansScroll.frame.size
             let size = NSSize(width: max(room.width, self.plans.alignedContentWidth), height: room.height)
             if self.plans.frame.size != size {
                 self.plans.frame = NSRect(origin: .zero, size: size)
@@ -248,6 +262,8 @@ final class SidebarView: NSView {
     override func mouseExited(with event: NSEvent) { hovering = false }
 
     private func apply() {
+        // a new theme: the lanes beside the rows are drawn again even though nothing else changed
+        drawnPlans = nil
         search.theme = theme
         list.theme = theme
         overviewRow.theme = theme
@@ -340,24 +356,40 @@ private final class SidebarListView: NSView {
 
     func set(groups model: [SidebarGroup], selectedId: String?, time: (String) -> String) {
         self.model = model
-        rows.forEach { $0.removeFromSuperview() }
-        moreRows.values.forEach { $0.removeFromSuperview() }
-        moreRows = [:]
+        // rows are kept by environment id and only updated (a store change touches a field or two);
+        // only environments that appeared or went away add or remove a row
+        var previous = Dictionary(rows.map { ($0.environment.id, $0) }, uniquingKeysWith: { first, _ in first })
         rows = model.flatMap { g in
             g.environments.map { e in
+                if let r = previous.removeValue(forKey: e.id) {
+                    r.environment = e
+                    r.time = time(e.id)
+                    r.selected = e.id == selectedId
+                    return r
+                }
                 let r = SidebarRowView(environment: e, time: time(e.id), selected: e.id == selectedId, theme: theme)
                 r.onSelect = { [weak self] id in self?.onSelect(id) }
                 r.rowMenu = { [weak self] env in self?.rowMenu(env) }
+                addSubview(r)
                 return r
             }
         }
-        rows.forEach(addSubview)
+        previous.values.forEach { $0.removeFromSuperview() }
+        var previousMore = moreRows
+        moreRows = [:]
         for g in model where g.more > 0 {
-            let row = MoreRowView(text: g.expanded ? "Show fewer" : "\(g.more) more…", theme: theme)
-            row.onPress = { [weak self] in self?.onToggleMore(g.repo.root) }
+            let text = g.expanded ? "Show fewer" : "\(g.more) more…"
+            let row = previousMore.removeValue(forKey: g.repo.root) ?? {
+                let row = MoreRowView(text: text, theme: theme)
+                let root = g.repo.root
+                row.onPress = { [weak self] in self?.onToggleMore(root) }
+                addSubview(row)
+                return row
+            }()
+            row.text = text
             moreRows[g.repo.root] = row
-            addSubview(row)
         }
+        previousMore.values.forEach { $0.removeFromSuperview() }
         layoutRows()
     }
 
@@ -444,7 +476,9 @@ extension SidebarListView {
 /// A repository's `N more…` / `Show fewer` row: 11 px in `faint` (`text2` on hover), padded 8 px
 /// like the design's more row.
 private final class MoreRowView: NSView {
-    let text: String
+    var text: String {
+        didSet { if text != oldValue { needsDisplay = true; setAccessibilityLabel(text) } }
+    }
     var theme: Theme { didSet { needsDisplay = true } }
     var onPress: (() -> Void)?
     private var hovering = false { didSet { needsDisplay = true } }

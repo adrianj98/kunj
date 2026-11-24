@@ -22,10 +22,10 @@ public final class EnvironmentStore {
     public private(set) var lastError: KunjCLIError?
     /// Called on the main actor after a refresh that changed `repos` or `lastError`.
     public var onChange: (() -> Void)?
-    /// Called on the main actor, at once (not coalesced), with the repository root of a `git`
-    /// event or a container `status` event (head or dirty state changed): the Changes column
-    /// reloads its diff when the root is its environment's (it debounces).
-    public var onRepoChanged: ((String) -> Void)?
+    /// Called on the main actor, at once (not coalesced), for a `git` event (the repository root)
+    /// or a container `status` event (head or dirty state changed; the container and branch too):
+    /// the Changes and Files columns reload when it `concerns` their environment (they debounce).
+    public var onRepoChanged: ((RepoChange) -> Void)?
     /// A handed-off agent (`KunjEvent.openAgent`) whose worktree is now listed: open its tab
     /// (`--session` id, nil for the default agent), select the environment and focus it.
     public var onOpenAgent: ((Environment, String?) -> Void)?
@@ -205,7 +205,7 @@ public final class EnvironmentStore {
             seenHello = true
         case .git(let root):
             scoped(root) { .worktrees($0) }
-            if let root { onRepoChanged?(root) }
+            if let root { onRepoChanged?(RepoChange(root: root)) }
         case .agent(_, _, _, let root):
             scoped(root) { .worktrees($0) }
         case .agentPlan(_, let root):
@@ -217,9 +217,11 @@ public final class EnvironmentStore {
                                                  until: now().addingTimeInterval(PendingAgentOpen.wait)))
             // the event names no repository: the new worktree may be in any of them
             schedule(.all)
-        case .container(let root, _, _, let action):
+        case .container(let root, let branch, let container, let action):
             scoped(root) { .containers($0) }
-            if action == "status", let root { onRepoChanged?(root) }
+            if action == "status", let root {
+                onRepoChanged?(RepoChange(root: root, container: container, branch: branch))
+            }
         case .registry, .backend:
             schedule(.all)
         case .error(let code, let message):

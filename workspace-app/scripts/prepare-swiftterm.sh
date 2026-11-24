@@ -15,7 +15,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION=1.20.0
 # Bump the suffix when the patches change, so existing checkouts are fetched again
-STAMP="$VERSION+kunj3"
+STAMP="$VERSION+kunj4"
 DIR=vendor/SwiftTerm
 ready() { [ -f "$DIR/.kunj-version" ] && [ "$(cat "$DIR/.kunj-version")" = "$STAMP" ]; }
 ready && exit 0
@@ -36,6 +36,9 @@ perl -0pi -e 's/(\n(\s*)if pid == 0 \{\n)/$1$2    \/\/ kunj: keep only the termi
 grep -q 'kunj: keep only the terminal' "$DIR.tmp/Sources/SwiftTerm/Pty.swift"
 perl -0pi -e 's/(\n(\s*)let regex = schemeURLBranch \+ "\|" \+ rootedOrRelativePathBranch \+ "\|" \+ bareRelativePathBranch)\n/\n$2\/\/ kunj: a bare file name with a line\n$2let kunjBareFileBranch = #"(?<![\\w\\-.~\\\/:\@\$])\\w[\\w\\-.]*\\.[A-Za-z]\\w*:\\d+(?:[:\\-]\\d+)?(?!\\w)"#$1 + "|" + kunjBareFileBranch\n/' "$DIR.tmp/Sources/SwiftTerm/Terminal.swift"
 grep -q 'bareRelativePathBranch + "|" + kunjBareFileBranch' "$DIR.tmp/Sources/SwiftTerm/Terminal.swift"
+# kunj: 30 fps, drawing an agent TUI at 60 was most of the app's idle CPU
+perl -0pi -e 's|// let fps30 = 16670000\*2\n(\s*)let fpsDelay = fps60\n|// kunj: 30 fps, drawing an agent TUI at 60 was most of the idle CPU\n$1let fpsDelay = 16670000 * 2\n|' "$DIR.tmp/Sources/SwiftTerm/Apple/AppleTerminalView.swift"
+grep -q 'kunj: 30 fps' "$DIR.tmp/Sources/SwiftTerm/Apple/AppleTerminalView.swift" || { echo "prepare-swiftterm: the 30 fps patch no longer applies" >&2; exit 1; }
 echo "$STAMP" > "$DIR.tmp/.kunj-version"
 mv "$DIR.tmp" "$DIR"
 echo "SwiftTerm $VERSION ready in $DIR (Shaders.metal patched to .copy, child descriptors closed, bare file links)"

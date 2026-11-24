@@ -297,8 +297,8 @@ private func sleepMs(_ ms: UInt64) async { try? await Task.sleep(nanoseconds: ms
         let fake = FakeKunj()
         let store = makeStore(fake)
         await store.refreshAll()
-        var roots: [String] = []
-        store.onRepoChanged = { roots.append($0) }
+        var changes: [RepoChange] = []
+        store.onRepoChanged = { changes.append($0) }
         store.handle(.git(repoRoot: repoA.root))
         store.handle(.git(repoRoot: nil))
         store.handle(.container(repoRoot: repoB.root, branch: "x", container: "c", action: "status"))
@@ -306,6 +306,6 @@ private func sleepMs(_ ms: UInt64) async { try? await Task.sleep(nanoseconds: ms
         store.handle(.agent(session: "s", running: true, state: nil, repoRoot: repoA.root))
         store.handle(.registry(kind: "repos", repoRoot: nil))
         // At once (the Changes column debounces), only for git and container status changes.
-        #expect(roots == [repoA.root, repoB.root])
+        #expect(changes == [RepoChange(root: repoA.root), RepoChange(root: repoB.root, container: "c", branch: "x")])
     }
 }

@@ -37,6 +37,12 @@ public struct SemVer: Comparable, Hashable, CustomStringConvertible, Sendable {
 /// The oldest kunj whose JSON contract the app understands: the first release after v1.2.0.
 public let MIN_KUNJ_VERSION = SemVer("1.3.0")!
 
+/// `kunj agent|worktree shell --exec-script` came after 1.3.1; the dev build (1.0.0) has it.
+public func supportsExecScript(_ printed: String) -> Bool {
+    guard let v = SemVer(printed) else { return false }
+    return v == DEV_KUNJ_VERSION || v > SemVer("1.3.1")!
+}
+
 /// `1.0.0` is what an `npm link`ed checkout reports (the release workflow rewrites package.json),
 /// so it is accepted and shown as a dev build.
 let DEV_KUNJ_VERSION = SemVer("1.0.0")!

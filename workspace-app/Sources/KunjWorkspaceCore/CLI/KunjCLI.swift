@@ -57,6 +57,9 @@ public struct SpawnSpec: Equatable, Sendable {
 public final class KunjCLI: @unchecked Sendable {
     public let command: String
     public let path: String
+    /// The kunj found has `--exec-script` (`kunj agent` / `kunj worktree shell`): a tab's sh becomes
+    /// the tmux client itself instead of a kunj process waiting beside it. Set by `discover`.
+    public internal(set) var attachesByExec = false
 
     public init(command: String, path: String) {
         self.command = command
@@ -87,6 +90,7 @@ public final class KunjCLI: @unchecked Sendable {
                                message: "\(found) is older than \(MIN_KUNJ_VERSION): npm install -g kunj")
         }
         let version = SemVer(printed)!.description
+        cli.attachesByExec = supportsExecScript(printed)
         return (cli, KunjStatus(binary: cli.resolvedBinary(), version: version, dev: check.dev))
     }
 

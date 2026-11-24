@@ -35,12 +35,52 @@ final class TerminalTab: LocalProcessTerminalView {
     /// `sizeChanged(source:)` clashes with the view's own method of that name.
     private var events: TabProcessEvents!
 
+    /// Set by the tab column: the tab is not the one shown.
     var inBackground: Bool = true {
-        didSet {
-            isHidden = inBackground
-            guard !inBackground, oldValue else { return }
-            queue.drainAll()
-            needsDisplay = true
+        didSet { feedModeChanged(wasDeferred: oldValue || windowHidden) }
+    }
+
+    /// Set by the window: it cannot be seen (fully occluded, another Space, minimised). The shown
+    /// tab then queues its output like a background one, so an agent's TUI is not parsed and drawn
+    /// for nobody. Kept apart from `inBackground`, so a tab the column hid stays hidden when the
+    /// window comes back.
+    var windowHidden = false {
+        didSet { feedModeChanged(wasDeferred: inBackground || oldValue) }
+    }
+
+    /// Output goes through the queue rather than straight to the emulator.
+    private var defersOutput: Bool { inBackground || windowHidden }
+    /// The tab was the window's first responder when it was hidden for the window, given back
+    /// when the window is seen again (hiding a first responder passes the focus on).
+    private var refocusWhenShown = false
+
+    /// True when `window` is fully covered, on another Space or minimised.
+    static func cannotBeSeen(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        return window.isMiniaturized || !window.occlusionState.contains(.visible)
+    }
+
+    /// A tab added while the window cannot be seen starts in that state (the window's
+    /// notifications only reach tabs that already exist).
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        windowHidden = window.isVisible && Self.cannotBeSeen(window)
+    }
+
+    private func feedModeChanged(wasDeferred: Bool) {
+        let hide = defersOutput
+        if hide && !isHidden && window?.firstResponder === self { refocusWhenShown = true }
+        isHidden = hide
+        guard !hide, wasDeferred else {
+            if inBackground { refocusWhenShown = false }
+            return
+        }
+        queue.drainAll()
+        needsDisplay = true
+        if refocusWhenShown {
+            refocusWhenShown = false
+            window?.makeFirstResponder(self)
         }
     }
 
@@ -130,9 +170,9 @@ final class TerminalTab: LocalProcessTerminalView {
     // MARK: output
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
-        if inBackground || queue.hasPending {
+        if defersOutput || queue.hasPending {
             queue.append(slice)
-            if !inBackground { queue.drainAll() }
+            if !defersOutput { queue.drainAll() }
         } else {
             feed(byteArray: slice)
         }
