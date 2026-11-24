@@ -382,6 +382,16 @@ describe('withTranscriptPrompts', () => {
     expect(plan.subagents[0].fromStep).toBe(1);
   });
 
+  test('a prompt in the same second as /clear belongs to the new conversation', () => {
+    const record = [
+      line(5, { hook_event_name: 'SessionStart', source: 'startup' }),
+      line(10, { hook_event_name: 'SessionStart', source: 'clear' }),
+    ].join('\n');
+    const plan = reducePlan(withTranscriptPrompts(record, [{ subject: 'after clear', at: 10_400 }]));
+    expect(plan.steps.map(s => [s.subject, s.status])).toEqual([['after clear', 'in_progress']]);
+    expect(plan.markers).toEqual([]);
+  });
+
   test('no prompts: the record as it was', () => {
     expect(withTranscriptPrompts('x', [])).toBe('x');
   });

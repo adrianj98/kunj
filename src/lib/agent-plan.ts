@@ -88,13 +88,19 @@ export function withTranscriptPrompts(text: string, prompts: Array<{ subject: st
       out.push(promptRecordLine(p.subject, p.at)!.trimEnd());
     }
   };
-  for (const raw of text.split('\n')) {
-    if (!raw.trim()) continue;
-    let t: unknown;
-    try { t = JSON.parse(raw)?.kunj?.t; } catch { /* kept as it is */ }
-    if (typeof t === 'number' && isFinite(t)) flush(t);
+  // the transcript is the last conversation's: none of its prompts go before the line that started
+  // it, not even one typed in the same second as a /clear
+  const lines = text.split('\n').filter(l => l.trim());
+  const parsed = lines.map(l => { try { return JSON.parse(l); } catch { return null; } });
+  let start = -1;
+  parsed.forEach((p, i) => {
+    if (p?.hook?.hook_event_name === 'SessionStart' && (p.hook.source === 'startup' || p.hook.source === 'clear')) start = i;
+  });
+  lines.forEach((raw, i) => {
+    const t = parsed[i]?.kunj?.t;
+    if (i > start && typeof t === 'number' && isFinite(t)) flush(t);
     out.push(raw);
-  }
+  });
   flush(Infinity);
   return `${out.join('\n')}\n`;
 }
