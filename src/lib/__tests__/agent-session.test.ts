@@ -463,26 +463,26 @@ describe('resuming a Claude conversation', () => {
   });
 });
 
-describe('planNudgeHookCommand', () => {
-  const { planNudgeHookCommand, claudeHookSettings } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+describe('promptHookCommand', () => {
+  const { promptHookCommand, claudeHookSettings } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
 
-  test('runs this kunj with agent nudge only when the agent has a plan record', () => {
-    const cmd = planNudgeHookCommand(['/usr/bin/node', '/opt/kunj/dist/index.js'])!;
-    expect(cmd).toContain('[ -z "$KUNJ_AGENT_PLAN" ] || "/usr/bin/node" "/opt/kunj/dist/index.js" agent nudge');
-    expect(cmd).toMatch(/; true$/);
+  test('runs this kunj with agent nudge (or prompt) only when the agent has a plan record', () => {
+    expect(promptHookCommand(true, ['/usr/bin/node', '/opt/kunj/dist/index.js']))
+      .toContain('[ -z "$KUNJ_AGENT_PLAN" ] || "/usr/bin/node" "/opt/kunj/dist/index.js" agent nudge');
+    expect(promptHookCommand(false, ['/usr/bin/node', '/opt/kunj/dist/index.js'])).toMatch(/ agent prompt\) 2>\/dev\/null; true$/);
   });
 
-  test('a path with a quote gets no nudge (the settings are single-quoted)', () => {
-    expect(planNudgeHookCommand(['/usr/bin/node', "/opt/it's/index.js"])).toBeUndefined();
-    expect(planNudgeHookCommand(['/usr/bin/node', '/opt/"x"/index.js'])).toBeUndefined();
+  test('a path with a quote gets no hook (the settings are single-quoted)', () => {
+    expect(promptHookCommand(true, ['/usr/bin/node', "/opt/it's/index.js"])).toBeUndefined();
+    expect(promptHookCommand(true, ['/usr/bin/node', '/opt/"x"/index.js'])).toBeUndefined();
   });
 
-  test('claudeHookSettings: UserPromptSubmit writes the state, records the prompt (with a plan), then nudges (when given)', () => {
-    expect(JSON.parse(claudeHookSettings()).hooks.UserPromptSubmit).toHaveLength(1);
-    expect(JSON.parse(claudeHookSettings(true)).hooks.UserPromptSubmit).toHaveLength(2);
-    const hooks = JSON.parse(claudeHookSettings(true, 'NUDGE')).hooks.UserPromptSubmit;
-    expect(hooks).toHaveLength(3);
-    expect(hooks[1].hooks[0].command).toContain('KUNJ_AGENT_PLAN');
-    expect(hooks[2].hooks[0].command).toBe('NUDGE');
+  test('claudeHookSettings: UserPromptSubmit writes the state, then runs the prompt hook when given; Stop is recorded with a plan', () => {
+    expect(JSON.parse(claudeHookSettings(true)).hooks.UserPromptSubmit).toHaveLength(1);
+    const hooks = JSON.parse(claudeHookSettings(true, 'PROMPT')).hooks;
+    expect(hooks.UserPromptSubmit).toHaveLength(2);
+    expect(hooks.UserPromptSubmit[1].hooks[0].command).toBe('PROMPT');
+    expect(hooks.Stop).toHaveLength(2);
+    expect(JSON.parse(claudeHookSettings()).hooks.Stop).toHaveLength(1);
   });
 });

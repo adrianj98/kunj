@@ -8,6 +8,10 @@ Changes made with Claude, and why.
   prompts as its steps (the last one current), and a task list replaces them once it exists. Why:
   agents doing lots of work showed only subagent loops ("forks") in the Overview, because none of
   the records had a single TaskCreate.
+- Review fixes: only a prompt's first line (80 characters) is stored, by kunj itself, never the
+  whole prompt (it could hold a pasted secret); a recorded Stop ends the prompt's step so an idle
+  agent is not shown working; once a task list exists the prompts stay in front of it, so markers
+  and subagent loops keep pointing at the step they were recorded at.
 
 ## 2026-11-23 — Agents nudged to keep a plan
 

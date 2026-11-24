@@ -28,7 +28,7 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 | Plan history: a record is kept across conversations (/clear, a fresh start); a new conversation goes on after the earlier ones' finished steps (last 30) behind a `new` marker | Shipped 2026-11-23 (`reducePlan`, `HISTORY_STEPS`) |
 | Every claude kunj starts is asked to keep a task list (`agent.taskList`, `--append-system-prompt`, host agents) | Shipped 2026-11-23 (`withAgentTaskList`) |
 | With every prompt the user sends, a host agent is told its task list as the user sees it and to update it when the work moves on (`kunj agent nudge` from a `UserPromptSubmit` hook, `planNudge()`; with `agent.taskList`) | Shipped 2026-11-23 (`planNudgeHookCommand`) |
-| An agent that keeps no task list shows the user's prompts as its steps (the `UserPromptSubmit` hook records them; `kind: 'prompt'` on `AgentPlanStepJson`, first line, 80 characters); a task list wins | Shipped 2026-11-23 |
+| An agent that keeps no task list shows the user's prompts as its steps (`kunj agent prompt|nudge` from the `UserPromptSubmit` hook records each prompt's first line, 80 characters, never the rest; `kind: 'prompt'` on `AgentPlanStepJson`); a recorded `Stop` ends a prompt's step; once a task list exists the prompts so far stay in front of it and later ones are not added; host agents only | Shipped 2026-11-23 |
 | An ended agent's last plan stays in the overview, dimmed (`ended` on the lane): the newest of a place with no running agent, with steps, changed in the last 3 days | Shipped 2026-11-23 (`endedPlans`) |
 | Workspace app: closing the Overview puts the rows back to their height; a read that comes back after it closed draws nothing | Shipped 2026-11-23 |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |

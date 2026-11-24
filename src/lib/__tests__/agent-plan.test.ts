@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import * as os from 'os';
-import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, promptSubject, reducePlan } from '../agent-plan';
+import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, promptRecordLine, promptSubject, reducePlan, STOP_RECORD } from '../agent-plan';
 
 const line = (hook: any, t = 100, branch = 'main') => JSON.stringify({ kunj: { t, branch }, hook });
 const create = (id: string, subject: string, extra: any = {}) => ({ hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: { task: { id, subject } }, ...extra });
@@ -319,12 +319,35 @@ describe('prompts as steps', () => {
     expect(planNudge(plan)).toContain('has none yet');
   });
 
-  test('a task list wins over the prompts', () => {
+  test('a task list follows the prompts: they stay in front (markers keep their step), later prompts are not added', () => {
     const plan = reducePlan([
       prompt(1, 'build it'),
-      line(2, { hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject: 'Step one' }, tool_response: { task: { id: '1', subject: 'Step one' } } }),
+      line(2, { hook_event_name: 'SessionStart', source: 'compact' }),
+      line(3, { hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject: 'Step one' }, tool_response: { task: { id: '1', subject: 'Step one' } } }),
+      prompt(4, 'and more'),
     ].join('\n'));
-    expect(plan.steps.map(s => s.subject)).toEqual(['Step one']);
+    expect(plan.steps.map(s => [s.subject, s.status])).toEqual([['build it', 'completed'], ['Step one', 'pending']]);
+    expect(plan.markers).toEqual([{ type: 'compact', afterStep: 0, at: expect.any(String) }]);
+  });
+
+  test('Stop ends the prompt\'s step: an idle agent has no step in progress', () => {
+    const plan = reducePlan([prompt(1, 'fix it'), line(2, { hook_event_name: 'Stop' })].join('\n'));
+    expect(plan.steps.map(s => s.status)).toEqual(['completed']);
+  });
+
+  test('promptRecordLine keeps the first line only, never the rest of the prompt', () => {
+    const recorded = promptRecordLine('do this\nsecret=abc', 5000)!;
+    expect(recorded).not.toContain('secret');
+    expect(reducePlan(recorded).steps.map(s => s.subject)).toEqual(['do this']);
+    expect(promptRecordLine('   ')).toBeNull();
+  });
+
+  test('STOP_RECORD appends a Stop line the reducer reads', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-stop-'));
+    const file = path.join(dir, 'p.ndjson');
+    execFileSync('sh', ['-c', STOP_RECORD], { env: { ...process.env, KUNJ_AGENT_PLAN: file } });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).hook).toEqual({ hook_event_name: 'Stop' });
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   test('after /clear the finished prompts stay as history behind a new marker', () => {

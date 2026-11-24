@@ -62,6 +62,16 @@ export function planNudge(plan: Pick<ReducedPlan, 'steps' | 'markers'>): string 
     + 'adds work, update the list (TaskCreate, TaskUpdate) before anything else; if it continues the same step, leave it.';
 }
 
+// The Stop hook's line: the time and the event only (its input may carry the agent's answer)
+export const STOP_RECORD = hookSafe('[ -z "$KUNJ_AGENT_PLAN" ] || printf "%s\\n" "{\\"kunj\\":{\\"t\\":$(date +%s)},\\"hook\\":{\\"hook_event_name\\":\\"Stop\\"}}" >> "$KUNJ_AGENT_PLAN"');
+
+/** The line `kunj agent prompt|nudge` appends for a prompt: its subject only, never the whole text. */
+export function promptRecordLine(prompt: unknown, now = Date.now()): string | null {
+  const subject = promptSubject(prompt);
+  if (!subject) return null;
+  return `${JSON.stringify({ kunj: { t: Math.floor(now / 1000) }, hook: { hook_event_name: 'UserPromptSubmit', prompt: subject } })}\n`;
+}
+
 export function hookSafe(command: string): string {
   return `(${command}) 2>/dev/null; true`;
 }
@@ -176,11 +186,15 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
   let history: Task[] = [];
   let conversations = 0;
   let parentFresh = false;
-  // the user's prompts of this conversation: its steps while it keeps no task list of its own
+  // the user's prompts of this conversation, as steps until it keeps a task list of its own; then
+  // they stay in front of the tasks (so a marker's or loop's step stays the one it was recorded at)
+  // and later prompts are not added
   let prompts: Task[] = [];
-  const ownSteps = (): Task[] => {
-    const own = order.map(id => tasks.get(id)!).filter(t => t.owner === null);
-    return own.length ? own : prompts;
+  const hasOwnTasks = () => order.some(id => tasks.get(id)!.owner === null);
+  const ownSteps = (): Task[] => [...prompts, ...order.map(id => tasks.get(id)!).filter(t => t.owner === null)];
+  const endPrompt = (at: string) => {
+    const last = prompts[prompts.length - 1];
+    if (last && last.status === 'in_progress') setStatus(last, 'completed', at);
   };
   const mainSteps = (): Task[] => [...history, ...ownSteps()];
   const setStatus = (task: Task, status: unknown, at: string) => {
@@ -246,11 +260,13 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       if (hook.source === 'fork' || hook.source === 'compact') markers.push({ type: hook.source, afterStep: planPosition(mainSteps()), at });
     } else if (event === 'UserPromptSubmit' && agent === null) {
       const subject = promptSubject(hook.prompt);
-      if (subject) {
-        const last = prompts[prompts.length - 1];
-        if (last) setStatus(last, 'completed', at);
+      if (subject && !hasOwnTasks()) {
+        endPrompt(at);
         prompts.push({ id: `p${prompts.length + 1}`, subject, status: 'in_progress', owner: null, kind: 'prompt', startedAt: at });
       }
+    } else if (event === 'Stop' && agent === null) {
+      // the agent answered: its prompt's step is done
+      endPrompt(at);
     } else if (event === 'SubagentStart' && agent) {
       const type = str(hook.agent_type) ?? 'agent';
       let i = pendingTasks.findIndex(p => p.type === type);
@@ -277,6 +293,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       const id = str(made?.id) ?? (typeof made?.id === 'number' ? String(made.id) : undefined);
       const subject = str(made?.subject) ?? str(input.subject);
       if (id && subject && !tasks.has(id)) {
+        if (!(agent && subagents.has(agent))) endPrompt(at);
         tasks.set(id, { id, subject, status: 'pending', owner: agent && subagents.has(agent) ? agent : null });
         order.push(id);
       }
@@ -297,6 +314,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       // the same owner for what is replaced and what replaces it: a subagent whose start was not
       // recorded (a cut record) writes to the session's own list both times
       const owner = agent && subagents.has(agent) ? agent : null;
+      if (owner === null) endPrompt(at);
       const before = [...tasks.values()].filter(t => t.owner === owner);
       for (const t of before) { tasks.delete(t.id); order = order.filter(o => o !== t.id); }
       input.todos.forEach((todo: any, i: number) => {
