@@ -1504,10 +1504,25 @@
     "category": "container",
     "default": "",
     "description": "Memory limit passed to docker run (e.g. 4g)",
-    "detailedDescription": null,
+    "detailedDescription": "Empty by default: no memory cap, because a cap too small for a build or a test run kills it. Set one (e.g. 8g) to keep a runaway agent or test from taking the whole Docker VM. Services take their own `memory` in their spec.",
     "options": null,
     "examples": [
       "4g"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "container.pidsLimit",
+    "type": "number",
+    "category": "container",
+    "default": 4096,
+    "description": "Most processes a branch container or service may run (docker run --pids-limit; 0 = no limit)",
+    "detailedDescription": "Stops a fork bomb or a runaway test from exhausting the Docker host. Applies to the main container and every service; the network helper always has its own small limit. Takes effect when a container is created (kunj ct start --rebuild).",
+    "options": null,
+    "examples": [
+      "8192",
+      "0"
     ],
     "relatedSettings": null,
     "sensitive": false
@@ -1567,6 +1582,21 @@
     "sensitive": false
   },
   {
+    "key": "container.snapshotPruneDays",
+    "type": "number",
+    "category": "container",
+    "default": 14,
+    "description": "`kunj container prune` also removes blueprint snapshots no container uses that were built more than this many days ago (0 = off)",
+    "detailedDescription": "A snapshot is several GB. One that no container (running or stopped) uses goes once it is this old, even for the current blueprint; the next start rebuilds it. Snapshots of an older blueprint go whatever their age.",
+    "options": null,
+    "examples": [
+      "30",
+      "0"
+    ],
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "container.dockerInDocker",
     "type": "enum",
     "category": "container",
@@ -1608,7 +1638,7 @@
     "category": "container",
     "default": {},
     "description": "Sidecar services (Postgres, Redis, ...) started next to each branch container, by name",
-    "detailedDescription": "An object of name: { image, env?, command?, port?, healthcheck?, volumes?, dependsOn? }; edit the config file by hand. Each service runs on the branch's own network and is reached by its name (postgres:5432). It gets only the env declared here, only named volumes (created per branch), no added capabilities and no published ports. The blueprint's services win over these by name, and these over the devcontainer's compose services.",
+    "detailedDescription": "An object of name: { image, env?, command?, port?, healthcheck?, volumes?, dependsOn?, memory? }; edit the config file by hand. Each service runs on the branch's own network and is reached by its name (postgres:5432). It gets only the env declared here, only named volumes (created per branch), no added capabilities and no published ports. The blueprint's services win over these by name, and these over the devcontainer's compose services. memory (e.g. \"512m\") is its docker run --memory (none by default); container.pidsLimit applies to every service.",
     "options": null,
     "examples": [
       "{\"postgres\": {\"image\": \"postgres:16-alpine\", \"env\": {\"POSTGRES_PASSWORD\": \"dev\"}, \"healthcheck\": \"pg_isready -U postgres\", \"volumes\": {\"data\": \"/var/lib/postgresql/data\"}}}"
@@ -1852,6 +1882,35 @@
     "options": null,
     "examples": null,
     "relatedSettings": null,
+    "sensitive": false
+  },
+  {
+    "key": "machine.stopAfterDays",
+    "type": "number",
+    "category": "machine",
+    "default": 3,
+    "description": "Stop a machine that has been suspended this many days (0: never): a suspended machine still pays for its memory, a stopped one only for its disk",
+    "detailedDescription": "Read by the coordinator's idle loop. Stopping keeps the disk and everything on it (the branch container, its clone and unpushed work); the machine boots again on next use, without the processes it had in memory. On EC2 a hibernated machine is already as stopped as it gets.",
+    "options": null,
+    "examples": null,
+    "relatedSettings": [
+      "machine.idleMinutes",
+      "machine.deleteAfterDays"
+    ],
+    "sensitive": false
+  },
+  {
+    "key": "machine.deleteAfterDays",
+    "type": "number",
+    "category": "machine",
+    "default": 0,
+    "description": "List a machine asleep (suspended or stopped) this many days in kunj machine prune (0: never); its disk keeps billing until it is deleted",
+    "detailedDescription": "Never deleted automatically: a sleeping machine cannot be checked for work origin does not have without waking it. kunj machine prune names it with how long it has slept; delete it with kunj machine delete once its work is pushed.",
+    "options": null,
+    "examples": null,
+    "relatedSettings": [
+      "machine.stopAfterDays"
+    ],
     "sensitive": false
   },
   {

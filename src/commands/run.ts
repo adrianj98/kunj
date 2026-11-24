@@ -13,6 +13,7 @@ interface RunOptions {
   json?: boolean;
   branch?: string;
   hold?: boolean;
+  envScript?: boolean;
 }
 
 // Test seams; each defaults to git and the key provider settings.
@@ -42,10 +43,11 @@ export class RunCommand extends BaseCommand {
     super({
       name: 'run',
       description: 'Run a command with the host secrets in its environment',
-      arguments: '<command...>',
+      arguments: '[command...]',
       options: [
         { flags: '--branch <branch>', description: 'Resolve the secrets of this branch (default: the current one)' },
         { flags: '--hold', description: 'On an error before the command starts, wait for Enter (tmux panes close with the process)' },
+        { flags: '--env-script', description: 'Print the secrets as sh export lines instead of running a command (for a wrapper that execs the command)' },
       ],
       helpText: [
         'Put -- before the command so its own options are not read as kunj\'s:',
@@ -62,7 +64,7 @@ export class RunCommand extends BaseCommand {
   async execute(command?: any, options?: any): Promise<void> {
     const argv: string[] = Array.isArray(command) ? command : [];
     const opts: RunOptions = (options && typeof options === 'object' ? options : {}) as RunOptions;
-    if (argv.length === 0) throw new UserError('Give the command to run.', 'Usage: kunj run [--branch <b>] -- <command…>');
+    if (argv.length === 0 && !opts.envScript) throw new UserError('Give the command to run.', 'Usage: kunj run [--branch <b>] -- <command…>');
 
     const branch = opts.branch || (await (this.deps.currentBranch ?? getCurrentBranch)()) || undefined;
     const root = await (this.deps.worktreeRoot ?? (() => getCurrentWorktreePath()))();
@@ -83,6 +85,20 @@ export class RunCommand extends BaseCommand {
       }
       throw error;
     }
+    // --env-script: the wrapper of hostRunArgv() evals this and execs the command itself, so no node
+    // process waits beside every agent and shell session for as long as it runs
+    if (opts.envScript) {
+      process.stdout.write(envScript(env));
+      return;
+    }
     process.exitCode = await runAttached(argv, { ...process.env, ...env });
   }
+}
+
+/** `export NAME='value'` lines for sh; a name that is not a shell variable name is left out. */
+export function envScript(env: Record<string, string>): string {
+  return Object.entries(env)
+    .filter(([name]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+    .map(([name, value]) => `export ${name}='${value.replace(/'/g, `'\\''`)}'\n`)
+    .join('');
 }

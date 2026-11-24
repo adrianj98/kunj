@@ -18,7 +18,7 @@ import { BaseCommand } from '../lib/command';
 import { loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import type { CoordinatorAccess, ResolveOptions } from '../lib/machines/local-coordinator';
-import type { MachinePruneJson, MachineSetupJson } from '../lib/json-types';
+import type { MachinePruneJson, MachineSetupJson, MachineSetupRemoveJson } from '../lib/json-types';
 import type { MachineJson, MachineListJson, MachineJsonResult, MachineProvidersJson, CoordinatorStatusJson, MachineImageListJson, MachineImageBuildJson } from '../lib/json-types';
 import { IMAGE_BUILD_BRANCH, MachineError, machineName } from '../lib/machines/provider';
 import type { KunjConfig } from '../types';
@@ -42,6 +42,10 @@ interface MachineOptions {
   provider?: string;
   /** --no-cache */
   cache?: boolean;
+  /** [setup] --remove: delete what setup made */
+  remove?: boolean;
+  /** [setup --remove] also the cache bucket and every cache in it */
+  removeBucket?: boolean;
 }
 
 export interface MachineCommandDeps {
@@ -92,7 +96,7 @@ export class MachineCommand extends BaseCommand {
       arguments: '[action] [branch] [name]',
       options: [
         { flags: '--remote <name>', description: 'The coordinator: a remote running kunj serve --machines (local: the one kunj starts here)' },
-        { flags: '--all', description: '[list] Every machine of the coordinator, not only this repository\'s' },
+        { flags: '--all', description: '[list] Every machine of the coordinator, not only this repository\'s; [prune] every repository\'s unused golden images' },
         { flags: '--size <size>', description: '[create] small, medium, large or a provider shape (default machine.size)' },
         { flags: '-y, --yes', description: '[delete] Do not ask' },
         { flags: '--keep-disks', description: '[delete] Keep the machine\'s disks' },
@@ -100,6 +104,8 @@ export class MachineCommand extends BaseCommand {
         { flags: '--zone <zone>', description: '[setup] Where machines run (default: the one in machine.gce, else us-central1-a)' },
         { flags: '--network <name>', description: '[setup] The VPC network (default: default)' },
         { flags: '--no-cache', description: '[setup] Do not make a cache bucket' },
+        { flags: '--remove', description: '[setup] Delete what setup made (refused while kunj machines or golden images exist)' },
+        { flags: '--remove-bucket', description: '[setup --remove] Also delete the cache bucket and every cache in it' },
         { flags: '--force', description: '[prune] Also delete machines that are asleep or hold work origin does not have' },
         { flags: '--dry-run', description: '[prune] Only show what would be deleted' },
         { flags: '--no-hooks', description: '[create, delete] Skip the machine hooks' },
@@ -108,12 +114,15 @@ export class MachineCommand extends BaseCommand {
       helpText: [
         'Actions:',
         '  setup                       prepare a cloud project for machines: shows what is missing and what it costs, then makes it',
+        '  setup --remove              delete what setup made (NAT, router, firewall rule, account, role); the bucket only',
+        '                              with --remove-bucket or when asked separately',
         '  list (default)              this repository\'s machines, any state',
         '  status [branch]             the branch\'s machine (the current branch by default)',
         '  create [branch]             make the branch\'s machine and wait until its kunj serve answers',
         '  suspend|resume|stop|start [branch]',
         '  delete [branch]             delete the machine and its disks (the branch is on origin)',
-        '  prune                       delete machines whose branch is gone from origin, and ones left without a container',
+        '  prune                       delete machines whose branch is gone from origin, and ones left without a container,',
+        '                              and golden images older than 14 days of a repository with no machine (--all: every repository)',
         '  image [list]                this repository\'s golden images; new machines boot the newest',
         '  image build                 bake one: a builder machine installs everything and builds the blueprint',
         '                              snapshot, its disk becomes the image, older images are deleted',
@@ -162,6 +171,7 @@ export class MachineCommand extends BaseCommand {
     const { gceSetup } = await import('../lib/machines/setup/gce');
     // The network machines are created on (machine.gce.network) is the one that needs the NAT and the rule
     const network = opts.network || (typeof existing.network === 'string' ? existing.network : '') || undefined;
+    if (opts.remove) return this.removeSetup(opts, { project, zone, network }, run);
     const plan = gceSetup({ project, zone, network, cache: opts.cache !== false, existing }, run);
 
     const say = (line: string) => (this.jsonMode ? console.error(line) : console.log(line));
@@ -208,6 +218,87 @@ export class MachineCommand extends BaseCommand {
       console.log(chalk.gray('  kunj machine image build bakes an image so new machines start in about 2 minutes instead of 10.'));
     } else if (!apply && missing > 0 && dryRun) {
       console.log(chalk.gray('Nothing created. Run kunj machine setup in a terminal, or with --yes.'));
+    }
+    if (failed) process.exitCode = 1;
+  }
+
+  /**
+   * `kunj machine setup --remove`: deletes what setup made, refused while the project still has kunj
+   * machines or golden images (they need the account, the rule and the NAT). The cache bucket is a
+   * question of its own, since every cache in it goes too: --remove-bucket, or a separate yes.
+   */
+  private async removeSetup(opts: MachineOptions, where: { project: string; zone: string; network?: string }, run: import('../lib/machines/cli').CliRunner): Promise<void> {
+    const { gceRemove } = await import('../lib/machines/setup/gce');
+    const plan = gceRemove(where, run);
+    const say = (line: string) => (this.jsonMode ? console.error(line) : console.log(line));
+    say(chalk.blue(`Checking ${plan.target}…`));
+    const inUse = await plan.inUse();
+    if (inUse.machines.length || inUse.images.length) {
+      const lines = [
+        ...(inUse.machines.length ? [`machines: ${inUse.machines.join(', ')} (kunj machine delete <branch>, or kunj machine prune)`] : []),
+        ...(inUse.images.length ? [`golden images: ${inUse.images.join(', ')} (kunj machine image delete <name>)`] : []),
+      ];
+      throw new MachineError(`${where.project} still has kunj ${lines.map(l => l.split(':')[0]).join(' and ')}, which need what setup made. Delete them first:\n  ${lines.join('\n  ')}`, 'machine-exists');
+    }
+    type State = 'present' | 'absent' | 'removed' | 'failed' | 'kept';
+    const states: Array<{ title: string; cost?: string; state: State; message?: string }> = [];
+    for (const step of plan.steps) {
+      const present = await step.exists();
+      states.push({ title: step.title, ...(step.cost ? { cost: step.cost } : {}), state: present ? 'present' : 'absent' });
+      say(present ? `  - ${step.title}${step.cost ? chalk.green(`  (${step.cost})`) : ''}` : chalk.gray(`  ✓ gone: ${step.title}`));
+    }
+    const bucketThere = await plan.bucket.exists();
+    let bucketState: State = bucketThere ? 'present' : 'absent';
+    if (bucketThere) say(opts.removeBucket ? `  - ${plan.bucket.name} and every cache in it` : chalk.yellow(`  ? ${plan.bucket.name} holds the caches: kept unless --remove-bucket`));
+    const present = states.filter(s => s.state === 'present').length;
+    const interactive = !this.jsonMode && !!process.stdin.isTTY;
+    const dryRun = !!opts.dryRun || (present + (bucketThere && opts.removeBucket ? 1 : 0) > 0 && !opts.yes && !interactive);
+    let apply = !dryRun;
+    if (apply && present > 0 && !opts.yes) {
+      apply = await this.confirm(`Delete the ${present} thing${present === 1 ? '' : 's'} marked - in ${where.project}?`);
+      if (!apply) say(chalk.gray('Nothing deleted.'));
+    }
+    let failed = false;
+    if (apply) {
+      for (let i = 0; i < plan.steps.length; i++) {
+        if (states[i].state !== 'present') continue;
+        try {
+          await plan.steps[i].apply();
+          states[i].state = 'removed';
+          say(chalk.green(`  ✓ deleted: ${plan.steps[i].title}`));
+        } catch (err) {
+          states[i].state = 'failed';
+          states[i].message = (err as Error).message;
+          say(chalk.red(`  ✗ ${plan.steps[i].title}: ${(err as Error).message}`));
+          failed = true;
+          break; // the account is not deleted while its role binding stays, the router while its NAT does
+        }
+      }
+      // The bucket: --remove-bucket, or its own question (never a yes given for the rest)
+      if (!failed && bucketThere) {
+        const remove = opts.removeBucket || (!opts.yes && interactive && (await this.confirm(`Also delete ${plan.bucket.name} and every cache in it? They cannot be recovered.`)));
+        if (remove) {
+          try {
+            await plan.bucket.remove();
+            bucketState = 'removed';
+            say(chalk.green(`  ✓ deleted: ${plan.bucket.name}`));
+          } catch (err) {
+            bucketState = 'failed';
+            failed = true;
+            say(chalk.red(`  ✗ ${plan.bucket.name}: ${(err as Error).message}`));
+          }
+        } else {
+          bucketState = 'kept';
+          say(chalk.gray(`  kept ${plan.bucket.name}; kunj machine setup --remove --remove-bucket deletes it with its caches`));
+        }
+      }
+    }
+    if (this.jsonMode) {
+      this.outputJSON({ provider: plan.provider, target: plan.target, remove: true, dryRun: !apply, success: !failed, steps: states, bucket: { name: plan.bucket.name, state: bucketState } } satisfies MachineSetupRemoveJson);
+    } else if (apply && !failed) {
+      console.log(chalk.green('✓ Removed.') + chalk.gray(' The Compute Engine and IAP APIs stay on. machine.* settings are unchanged: kunj config --unset machine.provider --global stops kunj starting a coordinator.'));
+    } else if (!apply && dryRun) {
+      console.log(chalk.gray('Nothing deleted. Run kunj machine setup --remove in a terminal, or with --yes.'));
     }
     if (failed) process.exitCode = 1;
   }
@@ -261,13 +352,15 @@ export class MachineCommand extends BaseCommand {
     const resolve = this.deps.coordinator ?? (await import('../lib/machines/local-coordinator')).resolveCoordinator;
     const access = await resolve({ remote: opts.remote, config });
     try {
-      await this.run(verb, target, positionals.slice(2), opts, access, config.hooks);
+      const { machineSettings } = await import('../lib/machines/config');
+      const settings = machineSettings(config);
+      await this.run(verb, target, positionals.slice(2), opts, access, config.hooks, settings.deleteAfterDays, settings.defaults.image ?? '');
     } finally {
       await access.close();
     }
   }
 
-  private async run(verb: string, target: string | undefined, rest: string[], opts: MachineOptions, access: CoordinatorAccess, hooks?: KunjConfig['hooks']): Promise<void> {
+  private async run(verb: string, target: string | undefined, rest: string[], opts: MachineOptions, access: CoordinatorAccess, hooks?: KunjConfig['hooks'], deleteAfterDays = 0, pinnedImage = ''): Promise<void> {
     const { client } = access;
     // The machine hooks run here, on the client, where the user's config is
     const hook = async (name: 'pre-machine-create' | 'post-machine-create' | 'pre-machine-delete' | 'post-machine-delete', branch: string, machine: string) => {
@@ -301,27 +394,40 @@ export class MachineCommand extends BaseCommand {
     if (verb === 'image') return this.image(target ?? 'list', rest[0], opts, access, repo);
 
     if (verb === 'prune') {
-      const { planMachinePrune, machineRemovals } = await import('../lib/machines/prune');
+      const { planMachinePrune, machineRemovals, planImagePrune, IMAGE_UNUSED_AFTER_DAYS } = await import('../lib/machines/prune');
       const heads = await (this.deps.heads ?? (async () => (await import('../lib/container/prune')).lsRemoteHeads(process.cwd())))();
       const inspect = this.deps.inspect ?? ((m: MachineJson) => this.inspectMachine(m, access, repo));
-      const plan = await planMachinePrune({ machines: await client.list({ 'kunj.repo': repo.id }), heads, force: !!opts.force, inspect });
+      const plan = await planMachinePrune({ machines: await client.list({ 'kunj.repo': repo.id }), heads, force: !!opts.force, inspect, deleteAfterDays });
       const removals = machineRemovals(plan);
+      // Golden images of a repository with no machine left: this repository's, every one's with --all.
+      // Every machine of the coordinator counts, since a machine of any repository may boot any image
+      const [allMachines, images] = await Promise.all([client.list({}), client.images(opts.all ? '' : repo.id)]);
+      const imagePlan = planImagePrune({ images, machines: allMachines, pinned: pinnedImage, repo: repo.id });
+      const imageRemovals = imagePlan.filter(i => !i.kept);
       const dryRun = !!opts.dryRun || (!opts.yes && (this.jsonMode || !process.stdin.isTTY));
-      const why = { 'branch-gone': 'its branch is gone from origin', 'no-container': 'it holds no container', 'image-builder': 'an image build left it behind' };
+      const why = { 'branch-gone': 'its branch is gone from origin', 'no-container': 'it holds no container', 'image-builder': 'an image build left it behind', 'asleep-long': `it has slept longer than machine.deleteAfterDays (${deleteAfterDays})` };
       if (!this.jsonMode) {
         for (const w of plan.warnings) console.error(chalk.yellow(w));
         for (const m of plan.machines) {
           console.log(m.kept ? chalk.yellow(`keep    ${m.name}  (${m.branch}): ${why[m.reason]}, but ${m.kept}`) : `${dryRun ? 'would delete' : 'delete'}  ${m.name}  (${m.branch}): ${why[m.reason]}`);
         }
-        if (plan.machines.length === 0) console.log(chalk.gray('Nothing to prune.'));
+        for (const i of imagePlan) {
+          const why = `${opts.all ? `${i.repo} has` : 'this repository has'} no machine and it is older than ${IMAGE_UNUSED_AFTER_DAYS} days (${i.createdAt.slice(0, 10)})`;
+          console.log(i.kept ? chalk.yellow(`keep    image ${i.name}: ${why}, but ${i.kept}`) : `${dryRun ? 'would delete' : 'delete'}  image ${i.name}: ${why}`);
+        }
+        if (plan.machines.length === 0 && imagePlan.length === 0) console.log(chalk.gray('Nothing to prune.'));
       }
-      let apply = !dryRun && removals.length > 0;
+      const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+      let apply = !dryRun && removals.length + imageRemovals.length > 0;
       if (apply && !opts.yes) {
-        apply = await this.confirm(`Delete ${removals.length} machine${removals.length === 1 ? '' : 's'} and their disks?`);
+        const what = [removals.length ? `${count(removals.length, 'machine')} and their disks` : '', imageRemovals.length ? count(imageRemovals.length, 'golden image') : ''].filter(Boolean).join(' and ');
+        apply = await this.confirm(`Delete ${what}?`);
         if (!apply) console.log(chalk.gray('Nothing deleted.'));
       }
       const removed: string[] = [];
       const failed: string[] = [];
+      const removedImages: string[] = [];
+      const failedImages: string[] = [];
       if (apply) {
         for (const m of removals) {
           try {
@@ -334,11 +440,23 @@ export class MachineCommand extends BaseCommand {
             console.error(chalk.yellow(`could not delete ${m.name}: ${(err as Error).message}`));
           }
         }
+        for (const i of imageRemovals) {
+          try {
+            await client.deleteImage(i.name);
+            removedImages.push(i.name);
+          } catch (err) {
+            failedImages.push(i.name);
+            console.error(chalk.yellow(`could not delete image ${i.name}: ${(err as Error).message}`));
+          }
+        }
       }
-      if (this.jsonMode) return this.outputJSON({ coordinator: access.name, success: failed.length === 0, dryRun, plan, removed, failed } satisfies MachinePruneJson);
-      if (apply) console.log(chalk.green(`✓ Deleted ${removed.length} machine${removed.length === 1 ? '' : 's'}`));
-      else if (dryRun && removals.length) console.log(chalk.gray('Dry run: kunj machine prune --yes deletes them.'));
-      if (failed.length) process.exitCode = 1;
+      const ok = failed.length === 0 && failedImages.length === 0;
+      if (this.jsonMode) {
+        return this.outputJSON({ coordinator: access.name, success: ok, dryRun, plan: { ...plan, images: imagePlan }, removed, failed, removedImages, failedImages } satisfies MachinePruneJson);
+      }
+      if (apply) console.log(chalk.green(`✓ Deleted ${count(removed.length, 'machine')}${imageRemovals.length ? ` and ${count(removedImages.length, 'golden image')}` : ''}`));
+      else if (dryRun && removals.length + imageRemovals.length) console.log(chalk.gray('Dry run: kunj machine prune --yes deletes them.'));
+      if (!ok) process.exitCode = 1;
       return;
     }
 

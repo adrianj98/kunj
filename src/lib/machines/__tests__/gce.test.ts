@@ -209,6 +209,18 @@ describe('GceProvider argv', () => {
     expect(gcloud.calls.map(a => a[2])).toEqual(['describe']);
   });
 
+  it('reports when a machine went to sleep: lastSuspendedTimestamp when suspended, lastStopTimestamp when stopped', async () => {
+    const p = new GceProvider(CFG, { run: gcloud.runner });
+    await p.create(spec());
+    const inst = gcloud.instances.get('kunj-app-x-abc123');
+    Object.assign(inst, { lastSuspendedTimestamp: '2026-11-17T08:00:00.000-08:00', lastStopTimestamp: '2026-11-10T08:00:00.000-08:00' });
+    expect((await p.get('kunj-app-x-abc123'))!.sleptAt).toBeUndefined();
+    inst.status = 'SUSPENDED';
+    expect((await p.get('kunj-app-x-abc123'))!.sleptAt).toBe('2026-11-17T08:00:00.000-08:00');
+    inst.status = 'TERMINATED';
+    expect((await p.list({}))[0].sleptAt).toBe('2026-11-10T08:00:00.000-08:00');
+  });
+
   it('opens an IAP tunnel to the serve port and reports the internal address', async () => {
     const p = new GceProvider(CFG, { run: gcloud.runner });
     const m = await p.create(spec());

@@ -68,6 +68,30 @@ export function registerMachineSettings(): void {
       validate: positive,
     },
     {
+      key: 'machine.stopAfterDays',
+      description: 'Stop a machine that has been suspended this many days (0: never): a suspended machine still pays for its memory, a stopped one only for its disk',
+      type: 'number',
+      defaultValue: 3,
+      category: 'machine',
+      detailedDescription:
+        'Read by the coordinator\'s idle loop. Stopping keeps the disk and everything on it (the branch container, its clone and unpushed work); ' +
+        'the machine boots again on next use, without the processes it had in memory. On EC2 a hibernated machine is already as stopped as it gets.',
+      validate: (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0,
+      relatedSettings: ['machine.idleMinutes', 'machine.deleteAfterDays'],
+    },
+    {
+      key: 'machine.deleteAfterDays',
+      description: 'List a machine asleep (suspended or stopped) this many days in kunj machine prune (0: never); its disk keeps billing until it is deleted',
+      type: 'number',
+      defaultValue: 0,
+      category: 'machine',
+      detailedDescription:
+        'Never deleted automatically: a sleeping machine cannot be checked for work origin does not have without waking it. ' +
+        'kunj machine prune names it with how long it has slept; delete it with kunj machine delete once its work is pushed.',
+      validate: (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0,
+      relatedSettings: ['machine.stopAfterDays'],
+    },
+    {
       key: 'machine.bootTimeoutMs',
       description: 'How long to wait for a new or waking machine to answer; a new machine from the stock image spends about 3.5 minutes installing',
       type: 'number',

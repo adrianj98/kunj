@@ -2,6 +2,30 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-24 — Resource review, part 2 (items 1–15)
+
+Why: a second review found idle work and waste: two `kunj events` re-scanning untracked files in
+~24 worktrees every 10 s (~55% of a core), the menu bar app listing every repo with containers
+~20×/min while closed, the app's hidden terminal redrawing at 60 fps, ~40 node processes waiting
+beside sessions and tabs (~540 MB), uncapped file reads, sleeping machines billing forever, a
+snapshot rebuild on every release, and resources nothing cleaned up.
+- events: tracked-only status with a full scan every 6th tick; one container listing per backend.
+- Session heartbeat writes the registry only on a real change (or lastSeen over an hour old).
+- KunjBar: closed panel → 5 min timer, no containers, no events stream; restarts its stream only
+  when the repo set changes.
+- Workspace app: terminals stop drawing while the window is hidden; 30 fps; ProcessRunner without
+  blocked threads; Changes/Files reload one at a time, not while hidden, tree off the main actor;
+  sidebar rows reused; Overview not re-placed when unchanged.
+- No waiting node: sessions start through `sh` + `kunj run --env-script`; tabs attach through
+  `--exec-script` (sh becomes the tmux client).
+- `ct file read` refuses files over 8 MB; exec stdout can be capped.
+- Machines asleep `machine.stopAfterDays` (default 3) are stopped; `deleteAfterDays` only lists.
+- Snapshot hash no longer contains the kunj version (one rebuild after this change); unused
+  snapshots pruned after 14 days; blueprint `seedExclude`; `container.pidsLimit` (4096).
+- `kunj machine setup --remove`; cache bucket lifecycle (30 days); stale golden images in prune.
+- `docker events` dies with kunj (tether); container plan records trimmed by a SessionStart hook.
+- VS Code output channel capped.
+
 ## 2026-11-24 — Fewer gcloud processes
 
 - SSH remotes share one master connection per destination (ControlMaster, 10 min persist) and each

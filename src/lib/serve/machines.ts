@@ -35,6 +35,7 @@ export function machineJson(m: Machine, paired: boolean): MachineJson {
     image: l['kunj.image'] || undefined,
     version: l['kunj.version'] || undefined,
     paired,
+    ...(m.sleptAt ? { sleptAt: m.sleptAt } : {}),
   };
 }
 

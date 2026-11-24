@@ -204,6 +204,75 @@ describe('kunj machine', () => {
     expect([...provider.machines.values()].map(m => m.labels['kunj.branch'])).toEqual(['here']);
   });
 
+  it('prunes golden images over 14 days old of a repository with no machine: this one\'s removed, every one\'s listed with --all', async () => {
+    const old = new Date(Date.now() - 20 * 24 * 3600_000).toISOString();
+    const img = (name: string, repo: string, createdAt = old) => provider.images_.set(name, { name, labels: { 'kunj.repo': repo, 'kunj.role': 'machine-image' }, createdAt });
+    img('app-old', REPO.id);
+    img('app-new', REPO.id, new Date().toISOString());
+    img('other-old', 'github.com/acme/other');
+    const deps = { heads: async () => ['main'], inspect: async () => ({ container: true, problems: [] }) };
+    stdout.length = 0;
+    await cmd(deps).execute('prune', { json: true });
+    const dry = json();
+    expect(dry).toMatchObject({ dryRun: true, removedImages: [] });
+    expect(dry.plan.images.map((i: any) => i.name)).toEqual(['app-old']);
+
+    // a machine of the repository keeps its images
+    await cmd().execute('create', 'main', {});
+    stdout.length = 0;
+    await cmd(deps).execute('prune', { json: true, yes: true });
+    expect(json().plan.images).toEqual([]);
+    await cmd({ confirm: async () => true }).execute('delete', 'main', { yes: true });
+
+    stdout.length = 0;
+    await cmd(deps).execute('prune', { all: true, json: true, yes: true });
+    // --all lists another repository's image but keeps it (its own machine.image may name it)
+    const all = json();
+    expect(all).toMatchObject({ success: true, removedImages: ['app-old'], failedImages: [] });
+    expect(all.plan.images.find((i: any) => i.name === 'other-old').kept).toMatch(/another repository/);
+    expect([...provider.images_.keys()].sort()).toEqual(['app-new', 'other-old']);
+  });
+
+  it('removes what setup made only when no machine or image is left, and the bucket only when asked', async () => {
+    const gone = new Set<string>();
+    let machines = '[{"name":"kunj-app-x","zone":"z/us-central1-a"}]';
+    const calls: string[] = [];
+    const run = async (_cmd: string, args: string[]) => {
+      const line = args.join(' ');
+      calls.push(line);
+      if (line.startsWith('compute instances list')) return { code: 0, stdout: machines, stderr: '' };
+      if (line.startsWith('compute images list')) return { code: 0, stdout: '[]', stderr: '' };
+      if (line.startsWith('projects get-iam-policy')) return { code: 0, stdout: '{"bindings":[]}', stderr: '' };
+      if (line.startsWith('compute routers describe')) return gone.has('router') ? { code: 1, stdout: '', stderr: 'NOT_FOUND' } : { code: 0, stdout: '{"nats":[]}', stderr: '' };
+      if (line.includes(' describe ')) return gone.has(line.split(' ')[1]) ? { code: 1, stdout: '', stderr: 'NOT_FOUND' } : { code: 0, stdout: '{}', stderr: '' };
+      if (line.includes(' delete ')) gone.add(line.split(' ')[1]);
+      if (line.startsWith('compute routers delete')) gone.add('router');
+      if (line.startsWith('storage rm')) gone.add('buckets');
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(cmd({ run }).execute('setup', { remove: true, json: true, yes: true, project: 'my-proj-123' })).rejects.toThrow(/kunj-app-x \(us-central1-a\)[\s\S]*kunj machine delete/);
+    expect(calls.some(c => c.includes(' delete '))).toBe(false);
+
+    machines = '[]';
+    stdout.length = 0;
+    await cmd({ run }).execute('setup', { remove: true, json: true, project: 'my-proj-123' });
+    const dry = json();
+    expect(dry).toMatchObject({ remove: true, dryRun: true, bucket: { name: 'gs://my-proj-123-kunj-cache', state: 'present' } });
+    expect(calls.some(c => c.includes(' delete ') || c.startsWith('storage rm'))).toBe(false);
+
+    await cmd({ run }).execute('setup', { remove: true, json: true, yes: true, project: 'my-proj-123' });
+    const done = json();
+    expect(done.success).toBe(true);
+    expect(done.steps.filter((s: any) => s.state === 'removed').length).toBeGreaterThan(0);
+    expect(done.bucket.state).toBe('kept');
+    expect(calls.some(c => c.startsWith('storage rm'))).toBe(false);
+
+    await cmd({ run }).execute('setup', { remove: true, json: true, yes: true, removeBucket: true, project: 'my-proj-123' });
+    expect(json().bucket.state).toBe('removed');
+    expect(calls.some(c => c.startsWith('storage rm --recursive gs://my-proj-123-kunj-cache'))).toBe(true);
+  });
+
   it('sets a project up: a dry run by default, then everything missing, then the settings', async () => {
     const have = new Set<string>();
     const run = async (_cmd: string, args: string[]) => {

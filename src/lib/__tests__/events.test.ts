@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { gitPathMatters, watchEvents } from '../events';
+import { gitPathMatters, splitStatus, watchEvents } from '../events';
 import { listTmuxSessions, readTaggedTmuxSessions } from '../agent-session';
 import { FakeBackend } from '../container/__tests__/fake-backend';
 import { STATUS_SCRIPT } from '../container/env';
@@ -457,6 +457,16 @@ function git(args: string[]): string {
   return execFileSync('git', args, { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
 }
 
+describe('splitStatus', () => {
+  it('hashes the tracked part as --untracked-files=no prints it, and the untracked lines apart', () => {
+    const tracked = '# branch.oid abc\n# branch.head main\n1 .M N... 100644 100644 100644 a b a.txt\n';
+    const full = '# branch.oid abc\n# branch.head main\n1 .M N... 100644 100644 100644 a b a.txt\n? new.txt\n';
+    expect(splitStatus(full).tracked).toBe(splitStatus(tracked).tracked);
+    expect(splitStatus(full).untracked).not.toBe(splitStatus(tracked).untracked);
+    expect(splitStatus(full + '? other.txt\n').tracked).toBe(splitStatus(tracked).tracked);
+  });
+});
+
 describe('watchEvents status poll', () => {
   let root: string;
   let ready: Promise<void>;
@@ -490,6 +500,30 @@ describe('watchEvents status poll', () => {
     fs.writeFileSync(path.join(tmp, 'side', 'new.txt'), 'x');
     await waitFor(() => ofType('git').length > 0);
     expect(ofType('git')[0]).toEqual({ type: 'git', repo: { name: 'real', root }, at: expect.any(String) });
+    await settle(600);
+    expect(ofType('git')).toHaveLength(1);
+  });
+
+  it('a poll between full scans skips untracked files but still sees a tracked change', async () => {
+    // never a full scan after the first: a new untracked file is no event, an edit to a tracked one is
+    startPolling({ untrackedEveryTicks: 1_000_000 });
+    await ready;
+    await settle(600);
+    events = [];
+    fs.writeFileSync(path.join(tmp, 'side', 'untracked.txt'), 'x');
+    await new Promise(r => setTimeout(r, 800));
+    expect(ofType('git')).toEqual([]);
+    fs.writeFileSync(path.join(tmp, 'side', 'a.txt'), 'changed\n');
+    await waitFor(() => ofType('git').length > 0);
+  });
+
+  it('a full scan every untrackedEveryTicks polls reports a new untracked file', async () => {
+    startPolling({ untrackedEveryTicks: 3 });
+    await ready;
+    await settle(600);
+    events = [];
+    fs.writeFileSync(path.join(tmp, 'side', 'untracked.txt'), 'x');
+    await waitFor(() => ofType('git').length > 0);
     await settle(600);
     expect(ofType('git')).toHaveLength(1);
   });
@@ -542,6 +576,27 @@ describe('watchEvents status poll', () => {
       remote.emitEvent({ action: 'start', name: 'kunj-app-x-1', labels: { 'kunj.repo': 'github.com/acme/app', 'kunj.branch': 'x' }, at: 'now' });
       await waitFor(() => ofType('container').length > 0);
       expect(ofType('container')[0]).toMatchObject({ type: 'container', repo: { name: 'real', root }, container: 'kunj-app-x-1', action: 'start' });
+    });
+
+    it('lists the containers once per backend and tick for all its repositories', async () => {
+      const backend = new FakeBackend();
+      const other = { ...repo, root: path.join(tmp, 'other'), gitCommonDir: path.join(tmp, 'other', '.git'), name: 'other' };
+      backend.existing = [
+        main('kunj-app-x-1', {}),
+        main('kunj-other-y-1', { 'kunj.repo': 'github.com/acme/other', 'kunj.branch': 'y' }),
+        main('kunj-stranger-z-1', { 'kunj.repo': 'github.com/acme/stranger' }),
+      ];
+      backend.execResults.set(key, { exitCode: 0, stdout: 'tmux=1\n# branch.oid ' + 'a'.repeat(40) + '\n' });
+      startPolling({
+        backend, statusPollMs: 50, repos: [repo, other],
+        repoId: async r => (r.name === 'other' ? 'github.com/acme/other' : 'github.com/acme/app'),
+      });
+      await ready;
+      await waitFor(() => backend.callsOf('list').length >= 3);
+      expect(backend.callsOf('list').every(([filter]) => JSON.stringify(filter) === JSON.stringify({ 'kunj.role': 'main' }))).toBe(true);
+      await waitFor(() => new Set(backend.callsOf('exec').map(([id]) => id)).size >= 2);
+      const execd = new Set(backend.callsOf('exec').map(([id]) => id));
+      expect(execd).toEqual(new Set(['id-kunj-app-x-1', 'id-kunj-other-y-1']));
     });
 
     it('a failing exec is skipped and polls never overlap', async () => {

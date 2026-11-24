@@ -1,5 +1,5 @@
 import { PassThrough, Readable, Writable } from 'stream';
-import { ExecIO, ExecTimeoutError } from '../../container/backend';
+import { ExecIO, ExecOutputLimitError, ExecTimeoutError } from '../../container/backend';
 import { FakeBackend } from '../../container/__tests__/fake-backend';
 import WebSocket from 'ws';
 import { HARNESS_TOKEN, Harness, startHarness } from '../../container/__tests__/remote-harness';
@@ -46,6 +46,27 @@ describe('RemoteKunjBackend: streams', () => {
       expect(cmd).toEqual(['id', '-un']);
       expect(io.stdin).toBe('ignore');
       expect(io.user).toBeUndefined();
+    });
+
+    it('maxStdout: past the cap the client hangs up and rejects with ExecOutputLimitError', async () => {
+      // the server's exec never ends on its own: only the client's hang-up (its signal) stops it
+      let aborted = false;
+      h.fake.execHandler = (_id, _cmd, io) => new Promise(resolve => {
+        const out = io.stdout as NodeJS.WritableStream;
+        out.write('x'.repeat(64));
+        out.write('y'.repeat(64));
+        io.signal?.addEventListener('abort', () => {
+          aborted = true;
+          resolve({ exitCode: 137, stdout: '' });
+        });
+      });
+      await expect(h.remote.exec('kunj-r-b-1', ['cat', 'big'], { maxStdout: 100 })).rejects.toBeInstanceOf(ExecOutputLimitError);
+      for (let i = 0; i < 50 && !aborted; i++) await new Promise(r => setTimeout(r, 10));
+      expect(aborted).toBe(true);
+      // under the cap it is an ordinary exec
+      h.fake.execHandler = undefined;
+      h.fake.execResults.set('id -un', { exitCode: 0, stdout: 'dev\n' });
+      expect(await h.remote.exec('kunj-r-b-1', ['id', '-un'], { maxStdout: 4 })).toEqual({ exitCode: 0, stdout: 'dev\n' });
     });
 
     it('passes user, workdir, env and timeoutMs through', async () => {

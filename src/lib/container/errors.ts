@@ -25,6 +25,8 @@ export type ContainerErrorCode =
   | 'bad-path'
   | 'not-found'
   | 'write-failed'
+  // a file too large for `kunj ct file read`
+  | 'too-large'
   // a setting kunj cannot use as written (container.caches)
   | 'bad-config'
   // remotes (docs/specs/remote-containers.md)

@@ -38,6 +38,8 @@ export interface LabelledObject {
 
 export interface ContainerSpec {
   name: string;
+  /** --pids-limit: the most processes the container may run (container.pidsLimit) */
+  pidsLimit?: number;
   image: string;
   labels: Labels;
   env: Record<string, string>;
@@ -79,6 +81,11 @@ export interface ExecIO {
   timeoutMs?: number;
   /** Aborting ends the exec (the process is killed); the call then rejects with Error('exec aborted') */
   signal?: AbortSignal;
+  /**
+   * The most stdout bytes to collect (only when stdout is captured, not given a stream): one more
+   * ends the exec (killed) and the call rejects with ExecOutputLimitError.
+   */
+  maxStdout?: number;
 }
 
 /** A TTY exec (shell, attach, agent) for the remote server: the pty's bytes both ways, resize, exit. */
@@ -106,6 +113,14 @@ export class ExecTimeoutError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ExecTimeoutError';
+  }
+}
+
+/** An exec whose captured stdout passed ExecIO.maxStdout; the exec was ended. */
+export class ExecOutputLimitError extends Error {
+  constructor(readonly limit: number) {
+    super(`docker exec printed more than ${limit} bytes`);
+    this.name = 'ExecOutputLimitError';
   }
 }
 

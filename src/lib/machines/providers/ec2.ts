@@ -106,6 +106,8 @@ interface Ec2Instance {
   InstanceType?: string;
   State?: { Name?: string };
   StateReason?: { Code?: string };
+  /** e.g. "User initiated (2026-11-17 09:30:00 GMT)" */
+  StateTransitionReason?: string;
   Tags?: Array<{ Key: string; Value: string }>;
   PrivateIpAddress?: string;
   LaunchTime?: string;
@@ -181,14 +183,19 @@ export class Ec2Provider implements MachineProvider {
       stopping: hibernated ? 'suspending' : 'stopping',
       stopped: hibernated ? 'suspended' : 'stopped',
     };
+    const state = states[i.State?.Name ?? ''] ?? 'unknown';
+    // The time of the last stop (or hibernation) is only in the transition reason's text
+    const when = /\((\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) GMT\)/.exec(i.StateTransitionReason ?? '');
+    const sleptAt = (state === 'stopped' || state === 'suspended') && when ? `${when[1]}T${when[2]}Z` : undefined;
     return {
       name: i.Tags?.find(t => t.Key === 'Name')?.Value ?? i.InstanceId,
       id: i.InstanceId,
-      state: states[i.State?.Name ?? ''] ?? 'unknown',
+      state,
       labels: labelsOf(i.Tags),
       size: i.InstanceType ?? '',
       zone: i.Placement?.AvailabilityZone,
       createdAt: i.LaunchTime ?? '',
+      ...(sleptAt ? { sleptAt } : {}),
       addresses: { internal: i.PrivateIpAddress },
     };
   }

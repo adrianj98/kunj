@@ -79,7 +79,8 @@ describe('image', () => {
 
     const fromSandbox = resolveImage({ setting: '', devcontainer: null, repoName: 'repo', kunjVersion: '1.2.3' });
     expect(fromSandbox.kind).toBe('sandbox');
-    expect(fromSandbox.tag).toMatch(/^kunj-sandbox:1\.2\.3-[0-9a-f]{12}$/);
+    // The tag is the build context's hash only, so a release that leaves it alone reuses the image
+    expect(fromSandbox.tag).toMatch(/^kunj-sandbox:[0-9a-f]{12}$/);
     expect(fromSandbox.tag).toBe(SANDBOX_IMAGE('1.2.3'));
     expect(fromSandbox.build?.dockerfile).toBe('Dockerfile');
     expect(fromSandbox.user).toBe('dev');
@@ -168,8 +169,9 @@ describe('image', () => {
     fs.renameSync(path.join(dir, 'sub', 'firewall.sh'), path.join(dir, 'sub', 'other.sh'));
     expect(directoryHash(dir)).not.toBe(first);
 
-    expect(SANDBOX_IMAGE('1.0.0')).toBe(`kunj-sandbox:1.0.0-${assetHash('sandbox')}`);
-    expect(NETHELPER_IMAGE('1.0.0')).toBe(`kunj-nethelper:1.0.0-${directoryHash(path.join(sandboxAssetsDir(), 'nethelper'))}`);
+    expect(SANDBOX_IMAGE('1.0.0')).toBe(`kunj-sandbox:${assetHash('sandbox')}`);
+    expect(SANDBOX_IMAGE('1.0.1')).toBe(SANDBOX_IMAGE('1.0.0'));
+    expect(NETHELPER_IMAGE('1.0.0')).toBe(`kunj-nethelper:${directoryHash(path.join(sandboxAssetsDir(), 'nethelper'))}`);
   });
 
   posixOnly('ships a syntactically valid default zshrc', () => {
@@ -183,7 +185,7 @@ describe('image', () => {
 
   it('resolveHelperImage builds the network helper from its assets', () => {
     const helper = resolveHelperImage('2.0.0');
-    expect(helper.tag).toMatch(/^kunj-nethelper:2\.0\.0-[0-9a-f]{12}$/);
+    expect(helper.tag).toMatch(/^kunj-nethelper:[0-9a-f]{12}$/);
     expect(helper.tag).toBe(NETHELPER_IMAGE('2.0.0'));
     expect(helper.build?.dockerfile).toBe('Dockerfile');
   });

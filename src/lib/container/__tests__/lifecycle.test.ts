@@ -1657,6 +1657,27 @@ describe('services', () => {
     });
   }
 
+  it('limits processes: container.pidsLimit (default 4096) on the main container and services, a small fixed one on the helper', async () => {
+    const b = backend();
+    await startContainer(b, svcOptions());
+    const [pg, main, helper] = runSpecs(b);
+    expect([pg.pidsLimit, main.pidsLimit, helper.pidsLimit]).toEqual([4096, 4096, 512]);
+    // No memory cap unless asked for
+    expect([pg.memory, main.memory]).toEqual([undefined, undefined]);
+
+    const set = backend();
+    const config = { container: { pidsLimit: 100, memory: '8g', services: { postgres: { ...SERVICES.postgres, memory: '512m' } } } } as unknown as KunjConfig;
+    await startContainer(set, options({ config }));
+    const [pg2, main2, helper2] = runSpecs(set);
+    expect([pg2.pidsLimit, main2.pidsLimit, helper2.pidsLimit]).toEqual([100, 100, 512]);
+    expect([pg2.memory, main2.memory, helper2.memory]).toEqual(['512m', '8g', undefined]);
+
+    // 0: no limit
+    const off = backend();
+    await startContainer(off, options({ config: { container: { pidsLimit: 0, services: SERVICES } } as unknown as KunjConfig }));
+    expect(runSpecs(off).map(s => s.pidsLimit)).toEqual([undefined, undefined, 512]);
+  });
+
   it('start: services run (and pass their health check) before the branch container, without host env', async () => {
     const b = backend();
     const result = await startContainer(b, svcOptions());

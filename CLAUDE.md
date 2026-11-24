@@ -276,7 +276,8 @@ READY (start and resume), and never in a snapshot (`StartOptions.withoutDind`: s
 agrees, but no dockerd and no docker volume).
 The images' build contexts live in `src/container/{sandbox,nethelper,sandbox-dind}/` and are copied to
 `dist/container` by `scripts/copy-container-assets.js` as part of the build. Their tags are
-`kunj-sandbox:<version>-<hash>` / `kunj-nethelper:<version>-<hash>`, the hash covering the build
+`kunj-sandbox:<hash>` / `kunj-nethelper:<hash>` (no kunj version, so a release with an unchanged context
+reuses the images and the blueprint snapshots, `imageContentKey()`), the hash covering the build
 context's files (`assetHash()` in image.ts), so editing a Dockerfile or `firewall.sh` rebuilds;
 `kunj-sandbox-dind:<version>-<hash>` also hashes the sandbox tag it is built FROM.
 
@@ -284,7 +285,7 @@ context's files (`assetHash()` in image.ts), so editing a Dockerfile or `firewal
 `ContainerBackend` interface (backend.ts) so a remote backend can be added later; unit tests use
 `FakeBackend`.
 
-**Files:** `ct file read|write [branch] <path>` (src/lib/container/files.ts) validates paths against `/workspace` and runs as the sandbox user; its errors carry a `ContainerError` code (`bad-path`, `not-found`, `write-failed`) printed as the `--json` error code. It is for text: `read` decodes UTF-8, and symlinks inside /workspace are followed (the sandbox boundary is the container, not the path check).
+**Files:** `ct file read|write [branch] <path>` (src/lib/container/files.ts) validates paths against `/workspace` and runs as the sandbox user; `read` refuses files over `MAX_READ_BYTES` (8 MB, `too-large`) and caps the exec's stdout (`ExecIO.maxStdout`); its errors carry a `ContainerError` code (`bad-path`, `not-found`, `write-failed`, `too-large`) printed as the `--json` error code. It is for text: `read` decodes UTF-8, and symlinks inside /workspace are followed (the sandbox boundary is the container, not the path check).
 
 **Naming and state:** containers, volumes and networks are `kunj-<repo>-<b>-<h>`, where `<h>` is a
 short hash of the exact branch name, because `branchToDirName` collapses `feature/x` and
@@ -374,6 +375,11 @@ gives the rclone image, env and remote (GCE: a bucket through `machine.gce.servi
 `kunj.role=cache-sync` container on the machine (never in the branch container, which cannot reach the credential), pulling at a new
 container's start and pushing only on `kunj ct cache push` (`ct cache status|pull|push`).
 
+**Limits and snapshots:** `container.pidsLimit` (default 4096; 512 for the network helper) goes to `docker run --pids-limit` for
+main containers and services; a service may set `memory`; `container.memory` stays empty by default. `ct prune` also removes
+blueprint snapshots no container uses after `container.snapshotPruneDays` (14). A blueprint's `seedExclude` paths are removed
+from the throwaway /workspace (as the sandbox user) before it is copied to the seed.
+
 **Services:** `services.ts` parses and validates services (blueprint `services`, `container.services`, the
 devcontainer's compose file read through `backend.composeConfig()`, i.e. `docker compose config
 --no-interpolate` on stdin in an empty project directory; first source wins by name), orders them by
@@ -453,8 +459,13 @@ listings (`worktree list`, `ct list`, `events`) never do. Tests use a fixed `KUN
 fake `Runner`/prompt, never the real Keychain. Error codes (`SecretError`, no stack trace):
 `secrets-locked`, `secrets-corrupt`, `secret-not-found`, `bad-name`, `not-ignored`, `bad-dotenv`.
 Host: `kunj agent` and `kunj worktree shell` run their tmux command as the argv array
-`hostRunArgv()` = `<node> <kunj> run --hold --branch <b> -- <shell> -lc <cmd>` (the vault is unlocked
-inside the session; without tmux, in-process); `worktree add` renders file deliveries after keep files
+`hostRunArgv()` = `/bin/sh -c HOST_RUN_SCRIPT kunj-run <node> <kunj> <branch> <shell> -lc <cmd>`: sh runs
+`kunj run --hold --env-script` (the vault is unlocked inside the session; the values come back as
+`export` lines through a pipe, never argv) and execs the command, so no node process waits beside
+every session (without tmux, in-process). The workspace app attaches tabs with `kunj agent|worktree shell
+… --exec-script` run as `sh -c EXEC_SCRIPT_RUNNER` (`execScript()`: `cd … && exec env -u … KUNJ_*=… tmux …`,
+only env differences on argv), so sh becomes the tmux client; the app uses it for kunj > 1.3.1 or dev
+(`supportsExecScript`); `worktree add` renders file deliveries after keep files
 (failures are warnings). Rendered host files that git does not ignore are refused (`not-ignored`)
 unless `--force`; paths outside the worktree, through a symlinked directory or inside `.git` are
 refused always. Containers: container-targeted env secrets join the `docker run` env file only on
@@ -512,7 +523,10 @@ deletes a baked-in serve token on a machine whose name differs from `/etc/kunj-m
 `kunj ct list` lists a coordinator's machines without waking one (`collectMember()`: containers of running machines carry `machine`, the
 rest are `machines` rows); the machine hooks `pre/post-machine-create|delete` (`branch`, `machine`, `provider`) run on the client.
 `Coordinator.idleTick()` suspends a machine after `machine.idleMinutes` with no proxied request, open
-stream or running agent (src/lib/machines/idle.ts); the machine's own serve does the same 15 minutes later (`--idle-suspend`,
+stream or running agent (src/lib/machines/idle.ts), and stops one suspended `machine.stopAfterDays` (default 3,
+`Machine.sleptAt`) so only its disk bills; `machine.deleteAfterDays` only lists in `machine prune` (`asleep-long`), which also
+lists golden images of repositories with no machines after 14 days; `kunj machine setup --remove` undoes setup, refusing while
+machines or images exist; the machine's own serve does the same 15 minutes later (`--idle-suspend`,
 self-suspend.ts, the provider's `selfSuspendScript()`), for when no coordinator runs. The coordinator's question is sent `x-kunj-passive`. `kunj serve` takes named client tokens (`token add|list|remove`).
 Tests: `FakeProvider`, a conformance suite every provider runs, and proxy.test.ts (a coordinator serve in front of a
 machine serve, in process).
@@ -572,9 +586,9 @@ sessions, 5 s; a failed listing is skipped, not read as every agent ending) and 
 (`ContainerBackend.events()`, filtered on `kunj.repo`; exec/attach/copy actions are dropped because
 `kunj ct list` execs and would trigger its own refresh). The watches cannot see a file edited in a
 worktree or work inside a container, so a status poll (`statusPollMs`, 10 s) runs one
-`git worktree list --porcelain` per repo and one `git status --porcelain=v2 --branch` per worktree
-(both `GIT_OPTIONAL_LOCKS=0`), emitting a `git` event when a worktree's hash changes, and, while the
-backend is available, one `backend.list` per repo and one exec of `STATUS_SCRIPT` (env.ts, shared with
+`git worktree list --porcelain` per repo and one `git status --porcelain=v2 --branch --untracked-files=no` per worktree
+(the untracked scan was most of the cost: a full status only every `untrackedEveryTicks` = 6th tick, two hashes per worktree via `splitStatus()`; both `GIT_OPTIONAL_LOCKS=0`), emitting a `git` event when a worktree's hash changes, and, while the
+backend is available, one `backend.list({'kunj.role':'main'})` per backend (split by `kunj.repo` in process) and one exec of `STATUS_SCRIPT` (env.ts, shared with
 `kunj ct list`) per running main container, emitting `container` with `action: 'status'` when
 `{ agentRunning, agentState, agentSessions, head, ahead, dirty }` changes. The first poll only primes; ticks never overlap; a
 failing worktree or container is skipped; Docker calls are raced against the abort signal. `hello` is
@@ -584,7 +598,7 @@ debounced per key (250 ms, the first change starts the timer). An unreachable ba
 a repo through an id computed once per repo at startup from `git remote get-url origin` (insteadOf,
 includes; userinfo stripped), as the `kunj.repo` label has it (`repoId` is the test seam). It stops on SIGINT/SIGTERM
 or when stdin ends, so a child dies with its parent; docker calls still hung then are killed
-(`LocalDockerBackend.killChildren()`). On the fast path; a missing directory is skipped.
+(`LocalDockerBackend.killChildren()`), and `docker events` runs under a `/bin/sh` tether holding a pipe from kunj, so it ends even when kunj is SIGKILLed. On the fast path; a missing directory is skipped.
 `index` is a trigger, so `getWorktreeStatus()` runs `git status` with `GIT_OPTIONAL_LOCKS=0`: otherwise
 git rewrites a stale index on every listing, which is another `git` event and another refresh.
 

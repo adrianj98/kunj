@@ -15,6 +15,7 @@ import {
   ContainerSpec,
   EngineInfo,
   ExecIO,
+  ExecOutputLimitError,
   ExecTimeoutError,
   ImageInfo,
   Labels,
@@ -527,6 +528,7 @@ export class RemoteKunjBackend implements ContainerBackend {
       if (io.signal?.aborted) return reject(new Error('exec aborted'));
       const ws = this.socket(`/v1/containers/${encodeURIComponent(id)}/exec`);
       const collected: Buffer[] = [];
+      let collectedBytes = 0;
       const draining = new Set<NodeJS.WritableStream>();
       let settled = false;
       let exitCode: number | undefined;
@@ -569,7 +571,16 @@ export class RemoteKunjBackend implements ContainerBackend {
       // frames → io streams; the socket waits while any stream is behind
       const deliver = (target: NodeJS.WritableStream | undefined, bytes: Buffer, collect: boolean) => {
         if (!target) {
-          if (collect) collected.push(bytes);
+          if (!collect) return;
+          collectedBytes += bytes.length;
+          // Over the cap: stop reading and hang up, which ends the exec on the box
+          if (io.maxStdout !== undefined && collectedBytes > io.maxStdout) {
+            collected.length = 0;
+            finish(() => reject(new ExecOutputLimitError(io.maxStdout!)));
+            ws.close();
+            return;
+          }
+          collected.push(bytes);
           return;
         }
         if (!target.write(bytes) && !draining.has(target)) {

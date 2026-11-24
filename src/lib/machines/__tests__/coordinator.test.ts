@@ -216,6 +216,127 @@ describe('Coordinator', () => {
     expect(await c.idleTick(60_000, async () => false)).toEqual([made.machine.name]);
   });
 
+  describe('machine.stopAfterDays', () => {
+    const DAY = 24 * 60 * 60_000;
+
+    function asleep(stopAfterDays: number | undefined) {
+      let clock = 100 * DAY;
+      const logs: string[] = [];
+      const { provider, coordinator } = setup({
+        now: () => clock,
+        log: l => logs.push(l),
+        defaults: { size: 'medium', diskGb: 30, spot: false, selfSuspend: false, bootTimeoutMs: 60_000, stopAfterDays },
+      });
+      return { provider, coordinator, logs, advance: (ms: number) => (clock += ms), at: () => clock };
+    }
+
+    it('stops a machine suspended longer than the setting, by the time the cloud gives, and logs it', async () => {
+      const { provider, coordinator, logs, at } = asleep(3);
+      const { machine } = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'b', create: true });
+      provider.setState(machine.name, 'suspended');
+      provider.machines.get(machine.name)!.sleptAt = new Date(at() - 2 * DAY).toISOString();
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.methods()).not.toContain('stop');
+      provider.machines.get(machine.name)!.sleptAt = new Date(at() - 3 * DAY - 1).toISOString();
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.callsOf('stop').map(c => c.args[0])).toEqual([machine.name]);
+      expect(provider.machines.get(machine.name)!.state).toBe('stopped');
+      expect(logs.some(l => l.startsWith(`stopping machine ${machine.name}: suspended 3.0 days`))).toBe(true);
+      // stopped: nothing more happens to it, and it is never deleted
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.callsOf('stop')).toHaveLength(1);
+      expect(provider.methods()).not.toContain('delete');
+    });
+
+    it('asks the cloud again before stopping: a machine woken since the tick\'s listing is left alone', async () => {
+      const { provider, coordinator, at } = asleep(1);
+      const { machine } = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'b', create: true });
+      provider.setState(machine.name, 'suspended');
+      provider.machines.get(machine.name)!.sleptAt = new Date(at() - 2 * DAY).toISOString();
+      // the listing says suspended, the machine itself is running by the time it is asked
+      const get = provider.get.bind(provider);
+      provider.get = async (name: string) => {
+        const m = await get(name);
+        return m ? { ...m, state: 'running' } : m;
+      };
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.methods()).not.toContain('stop');
+    });
+
+    it('a refused stop is tried three times per sleep, then left alone', async () => {
+      const { provider, coordinator, at } = asleep(1);
+      const { machine } = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'b', create: true });
+      provider.setState(machine.name, 'suspended');
+      provider.machines.get(machine.name)!.sleptAt = new Date(at() - 2 * DAY).toISOString();
+      provider.failOn = 'stop';
+      for (let i = 0; i < 6; i++) await coordinator.idleTick(60_000, async () => false);
+      expect(provider.callsOf('stop')).toHaveLength(3);
+    });
+
+    it('without a time from the cloud, counts from when this coordinator first saw it asleep', async () => {
+      const { provider, coordinator, advance } = asleep(1);
+      const { machine } = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'b', create: true });
+      provider.setState(machine.name, 'suspended');
+      await coordinator.idleTick(60_000, async () => false);
+      advance(DAY - 1);
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.methods()).not.toContain('stop');
+      advance(1);
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.callsOf('stop')).toHaveLength(1);
+    });
+
+    it('a wake in between starts the count again', async () => {
+      const { provider, coordinator, advance } = asleep(1);
+      const { machine } = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'b', create: true });
+      provider.setState(machine.name, 'suspended');
+      await coordinator.idleTick(60_000, async () => false);
+      advance(DAY / 2);
+      provider.setState(machine.name, 'running');
+      (coordinator as any).lastBusy.set(machine.name, Infinity);
+      await coordinator.idleTick(60_000, async () => false);
+      provider.setState(machine.name, 'suspended');
+      advance(DAY / 2);
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.methods()).not.toContain('stop');
+    });
+
+    it('does nothing with 0 or unset, to a machine being woken, or to a stopped one', async () => {
+      for (const days of [0, undefined]) {
+        const { provider, coordinator } = asleep(days);
+        const { machine } = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'b', create: true });
+        provider.setState(machine.name, 'suspended');
+        provider.machines.get(machine.name)!.sleptAt = new Date(0).toISOString();
+        await coordinator.idleTick(60_000, async () => false);
+        expect(provider.methods()).not.toContain('stop');
+      }
+      const { provider, coordinator } = asleep(1);
+      const { machine } = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'b', create: true });
+      provider.setState(machine.name, 'suspended');
+      provider.machines.get(machine.name)!.sleptAt = new Date(0).toISOString();
+      (coordinator as any).starting.set(machine.name, 1);
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.methods()).not.toContain('stop');
+      (coordinator as any).starting.delete(machine.name);
+      provider.setState(machine.name, 'stopped');
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.methods()).not.toContain('stop');
+    });
+
+    it('a failed stop is logged and tried again on the next tick', async () => {
+      const { provider, coordinator, logs } = asleep(1);
+      const { machine } = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'b', create: true });
+      provider.setState(machine.name, 'suspended');
+      provider.machines.get(machine.name)!.sleptAt = new Date(0).toISOString();
+      provider.failOn = 'stop';
+      await coordinator.idleTick(60_000, async () => false);
+      expect(logs.some(l => l.startsWith(`could not stop ${machine.name}`))).toBe(true);
+      provider.failOn = undefined;
+      await coordinator.idleTick(60_000, async () => false);
+      expect(provider.machines.get(machine.name)!.state).toBe('stopped');
+    });
+  });
+
   it('gives a new machine the startup script and the configured image', async () => {
     const { provider, coordinator } = setup();
     const c = new Coordinator({ ...(coordinator as any).opts, startupScript: '#!/bin/bash\n', defaults: { ...(coordinator as any).opts.defaults, image: 'kunj-img-1' } });

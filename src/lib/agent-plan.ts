@@ -370,7 +370,17 @@ export function readPlanFile(file: string, maxBytes = 16 * 1024 * 1024): string 
 // `#kunj-plan <session> <1|0 tmux session exists> <state>`; a record line starts with `{`.
 // ---------------------------------------------------------------------------
 
-export const CONTAINER_PLAN_SCRIPT = `for f in ${CONTAINER_AGENT_PLAN_FILE} ${CONTAINER_AGENT_PLAN_FILE}-*; do [ -f "$f" ] || continue; i=\${f#${CONTAINER_AGENT_PLAN_FILE}}; r=0; tmux has-session -t "=agent$i" 2>/dev/null && r=1; echo "#kunj-plan agent$i $r $(head -c 16 /tmp/kunj-agent-state$i 2>/dev/null)"; cat "$f"; echo; done`;
+/** The most of one container record an overview read sends (a trimmed record is under 1 MB) */
+export const CONTAINER_PLAN_READ_MAX = 4 * 1024 * 1024;
+
+export const CONTAINER_PLAN_SCRIPT = `for f in ${CONTAINER_AGENT_PLAN_FILE} ${CONTAINER_AGENT_PLAN_FILE}-*; do [ -f "$f" ] || continue; i=\${f#${CONTAINER_AGENT_PLAN_FILE}}; r=0; tmux has-session -t "=agent$i" 2>/dev/null && r=1; echo "#kunj-plan agent$i $r $(head -c 16 /tmp/kunj-agent-state$i 2>/dev/null)"; tail -c ${CONTAINER_PLAN_READ_MAX} "$f"; echo; done`;
+
+/**
+ * A SessionStart hook that trims the agent's plan record over 1 MB to its last 512 KB, from a line
+ * start, where the record lives (a container's otherwise grows for the container's whole life, and
+ * every overview read sends it; the host's trimPlanFile does the same before a start). No single quote.
+ */
+export const PLAN_TRIM_HOOK = hookSafe('f="$KUNJ_AGENT_PLAN"; [ -n "$f" ] && s=$(wc -c < "$f") && [ "$s" -gt 1048576 ] && tail -c 524288 "$f" | sed 1d > "$f.kunj-trim" && mv "$f.kunj-trim" "$f"');
 
 const CONTAINER_PLAN_HEADER = /^#kunj-plan (agent(?:-([A-Za-z0-9_-]{1,32}))?) ([01])(?: (\S*))?$/;
 

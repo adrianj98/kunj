@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { AgentError, readTaggedTmuxSessions, worktreeAgentSessions, worktreeShellSessions, pickSession, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName, kunjSelf, hostRunArgv, spawnCwd, inDirectory } from '../agent-session';
+import { AgentError, readTaggedTmuxSessions, worktreeAgentSessions, worktreeShellSessions, pickSession, agentSessionId, agentSessionName, agentSessionsOf, combineAgentStates, killTmuxSessionsWithPrefix, sessionsWithPrefix, agentRunning, agentArgv, checkShellSessionId, hasTmuxSession, killTmuxSessionIfExists, listTmuxSessions, loginShell, readTmuxSessions, shellArgv, shellSessionName, kunjSelf, hostRunArgv, HOST_RUN_SCRIPT, spawnCwd, inDirectory } from '../agent-session';
 import { kunjEntry } from '../self';
 
 jest.mock('child_process', () => ({
@@ -272,7 +272,7 @@ describe('kunjSelf and hostRunArgv', () => {
     const argv = agentArgv('kunj-x', '/wt', hostRunArgv('feature/x', ['/bin/zsh', '-lc', 'claude']), { KUNJ_BRANCH: 'feature/x' });
     expect(argv).toEqual([
       'tmux', '-u', 'new-session', '-A', '-s', 'kunj-x', '-c', '/wt', '-e', 'KUNJ_BRANCH=feature/x',
-      ...inDirectory('/wt', [process.execPath, '/k/dist/index.js', 'run', '--hold', '--branch', 'feature/x', '--', '/bin/zsh', '-lc', 'claude']),
+      ...inDirectory('/wt', ['/bin/sh', '-c', HOST_RUN_SCRIPT, 'kunj-run', process.execPath, '/k/dist/index.js', 'feature/x', '/bin/zsh', '-lc', 'claude']),
       ';', 'set-option', '-t', 'kunj-x', 'window-size', 'latest', ';', 'set-option', '-t', 'kunj-x', 'status', 'off',
     ]);
     expect(argv.some((a) => a.includes('FOO='))).toBe(false);
@@ -280,7 +280,7 @@ describe('kunjSelf and hostRunArgv', () => {
 
   test('hostRunArgv without a branch lets run use the worktree\'s current branch', () => {
     process.argv[1] = '/k/dist/index.js';
-    expect(hostRunArgv(undefined, ['/bin/zsh', '-l'])).toEqual([process.execPath, '/k/dist/index.js', 'run', '--hold', '--', '/bin/zsh', '-l']);
+    expect(hostRunArgv(undefined, ['/bin/zsh', '-l'])).toEqual(['/bin/sh', '-c', HOST_RUN_SCRIPT, 'kunj-run', process.execPath, '/k/dist/index.js', '', '/bin/zsh', '-l']);
   });
 });
 
@@ -482,5 +482,34 @@ describe('planNudgeHookCommand', () => {
     const hooks = JSON.parse(claudeHookSettings(true, 'NUDGE')).hooks.UserPromptSubmit;
     expect(hooks).toHaveLength(2);
     expect(hooks[1].hooks[0].command).toBe('NUDGE');
+  });
+});
+
+describe('execScript (--exec-script)', () => {
+  const { execScript, EXEC_SCRIPT_RUNNER } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+  const { execFileSync } = jest.requireActual<typeof import('child_process')>('child_process');
+  const fs = jest.requireActual<typeof import('fs')>('fs');
+  const os = jest.requireActual<typeof import('os')>('os');
+  const path = jest.requireActual<typeof import('path')>('path');
+
+  test('the runner execs the exact argv with only the env differences, in the directory', () => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kunj exec '")));
+    const base = { PATH: process.env.PATH!, HOME: process.env.HOME!, TMUX: '/tmp/x', KEEP: 'k' };
+    const env = { PATH: base.PATH, HOME: base.HOME, KEEP: 'k', KUNJ_BRANCH: "it's $x" };
+    const argv = ['/bin/sh', '-c', 'printf "%s|%s|%s|%s|%s" "$PWD" "${TMUX-unset}" "$KEEP" "$KUNJ_BRANCH" "$1"', 'sh', 'a "b" `c`'];
+    // a non-tmux argv: the directory given is used as it is
+    const line = execScript(argv, dir, env, base);
+    expect(line).not.toContain('KEEP=');
+    const printer = path.join(dir, 'print.js');
+    fs.writeFileSync(printer, `process.stdout.write(${JSON.stringify(line)})`);
+    const out = execFileSync('/bin/sh', ['-c', EXEC_SCRIPT_RUNNER, 'kunj-attach', process.execPath, printer], { env: base, encoding: 'utf8' });
+    expect(out).toBe(`${dir}|unset|k|it's $x|a "b" \`c\``);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('a failing kunj ends the runner with its exit code and runs nothing', () => {
+    let code = 0;
+    try { execFileSync('/bin/sh', ['-c', EXEC_SCRIPT_RUNNER, 'kunj-attach', '/bin/sh', '-c', 'exit 3'], { stdio: 'ignore' }); } catch (e: any) { code = e.status; }
+    expect(code).toBe(3);
   });
 });

@@ -18,6 +18,8 @@ import {
   serviceOrder,
   serviceRemoval,
   serviceRunSpec,
+  pidsLimitOf,
+  DEFAULT_PIDS_LIMIT,
   servicesFromCompose,
   splitWords,
   startServices,
@@ -208,6 +210,36 @@ describe('mergeServices / serviceOrder', () => {
     expect(await resolveServices(b, { compose: [{ path: 'c.yml', text: 'bad' }], warn: m => w2.push(m) })).toEqual([]);
     expect(w2[0]).toMatch(/^c\.yml: could not read the compose file/);
     await expect(resolveServices(b, { config: { pg: {} }, warn: () => {} })).rejects.toThrow('container.services: services.pg: image is required');
+  });
+});
+
+describe('service limits', () => {
+  it('takes memory as a docker size and refuses anything else', () => {
+    expect(parseServices({ db: { image: 'postgres:16', memory: '512m' } }, 'bp')[0].memory).toBe('512m');
+    expect(parseServices({ db: { image: 'postgres:16', memory: '1.5GiB' } }, 'bp')[0].memory).toBe('1.5GiB');
+    expect(parseServices({ db: { image: 'postgres:16' } }, 'bp')[0].memory).toBeUndefined();
+    for (const memory of ['--privileged', '512 m', 'lots', '', 512, '0', '0m', '-1g']) {
+      expect(() => parseServices({ db: { image: 'postgres:16', memory } }, 'bp')).toThrow(/memory must be a size/);
+    }
+  });
+
+  it('passes memory and the pids limit to the run spec, and neither by default', () => {
+    const spec = serviceRunSpec(names, REPO, BRANCH, svc('db', { memory: '1g' }), '9.9.9', { pidsLimit: 2048 });
+    expect([spec.memory, spec.pidsLimit]).toEqual(['1g', 2048]);
+    // memory is not recorded in the labels (only what resume needs)
+    expect(spec.labels[LABEL.options]).not.toContain('1g');
+    const plain = serviceRunSpec(names, REPO, BRANCH, svc('db'), '9.9.9');
+    expect([plain.memory, plain.pidsLimit]).toEqual([undefined, undefined]);
+    expect(serviceRunSpec(names, REPO, BRANCH, svc('db'), '9.9.9', { pidsLimit: 0 }).pidsLimit).toBeUndefined();
+  });
+
+  it('pidsLimitOf: 0 is no limit, unset or invalid is the default', () => {
+    expect(pidsLimitOf(undefined)).toBe(DEFAULT_PIDS_LIMIT);
+    expect(pidsLimitOf({})).toBe(4096);
+    expect(pidsLimitOf({ pidsLimit: 0 })).toBe(0);
+    expect(pidsLimitOf({ pidsLimit: 300 })).toBe(300);
+    expect(pidsLimitOf({ pidsLimit: -1 })).toBe(4096);
+    expect(pidsLimitOf({ pidsLimit: '10' })).toBe(4096);
   });
 });
 

@@ -30,6 +30,7 @@ import {
   BUNDLE_CONTAINER_PATH,
   SEED_COPY_SCRIPT,
   SNAPSHOT_READ_SCRIPT,
+  seedExcludeScript,
   ensureSnapshot,
   makeBranchBundle,
   removeSnapshots,
@@ -315,6 +316,33 @@ describe('snapshotBlueprint', () => {
     await expect(snapshotBlueprint(b, options())).rejects.toThrow('Copying the workspace to /opt/kunj/seed in the snapshot container failed (exit 1)');
     expect(b.callsOf('commitContainer')).toEqual([]);
     expect(mocked.removeContainer).toHaveBeenCalledTimes(2);
+  });
+
+  it('seedExclude: removes the paths from /workspace as the sandbox user before the seed copy', async () => {
+    const text = '{ "setup": ["npm ci"], "maintain": ["npm ci"], "seedExclude": ["node_modules", "./packages/*/dist/"] }';
+    const bp: ResolvedBlueprint = { blueprint: parseBlueprint(text, 'bp'), source: 'host', path: '/host/blueprint.json', text };
+    const script = seedExcludeScript(bp.blueprint.seedExclude);
+    expect(script).toBe('cd /workspace && rm -rf -- ./node_modules ./packages/*/dist');
+    const b = backendWith();
+    await snapshotBlueprint(b, options({ blueprint: bp }));
+    const execs = b.callsOf('exec');
+    expect(execs[0].slice(0, 2)).toEqual(['ctr-1', ['sh', '-c', script]]);
+    expect(execs[0][2]).toMatchObject({ user: 'kunj' });
+    expect(execs[1].slice(0, 2)).toEqual(['ctr-1', COPY]);
+    expect(execs[1][2]).toMatchObject({ user: 'root' });
+    expect(b.callsOf('commitContainer')).toHaveLength(1);
+  });
+
+  it('seedExclude: nothing extra without it, and a failed removal commits nothing', async () => {
+    expect(seedExcludeScript(undefined)).toBeNull();
+    expect(seedExcludeScript([])).toBeNull();
+    const text = '{ "seedExclude": ["dist"] }';
+    const bp: ResolvedBlueprint = { blueprint: parseBlueprint(text, 'bp'), source: 'host', path: '/host/blueprint.json', text };
+    const b = backendWith();
+    b.execResults.set(['sh', '-c', 'cd /workspace && rm -rf -- ./dist'].join(' '), { exitCode: 1, stdout: '' });
+    await expect(snapshotBlueprint(b, options({ blueprint: bp }))).rejects.toThrow(/seedExclude paths .* failed \(exit 1\)/);
+    expect(b.callsOf('exec').map(e => (e as unknown[])[1])).not.toContainEqual(COPY);
+    expect(b.callsOf('commitContainer')).toEqual([]);
   });
 
   it('commit failure still removes the temp container', async () => {

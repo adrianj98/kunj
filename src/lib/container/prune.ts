@@ -3,8 +3,9 @@
 // Removes branch containers whose branch is gone from origin (or that have been stopped longer than
 // container.pruneAfterDays) when their remove guard is clean; orphans (helpers, services and
 // networks labelled for a branch that has no main container; such volumes only with --force);
-// leftover snapshot-build containers; snapshot images of another blueprint hash; and kunj-sandbox / kunj-nethelper / kunj-sandbox-dind tags of other
-// versions. Every rule fails safe: origin unreachable -> no branch is gone, a branch the clone never
+// leftover snapshot-build containers; snapshot images of another blueprint hash, and of the current one
+// when no container uses them and they are older than container.snapshotPruneDays (they rebuild on
+// demand); and kunj-sandbox / kunj-nethelper / kunj-sandbox-dind tags other than the current ones. Every rule fails safe: origin unreachable -> no branch is gone, a branch the clone never
 // saw on origin -> not gone, hash unknown -> every snapshot is kept, an image in use or a guard that
 // cannot run -> kept. The guard runs again at removal time.
 
@@ -35,6 +36,8 @@ export interface PrunePlan {
   orphans: PruneOrphan[];
   /** Image tags to remove */
   images: string[];
+  /** Why each tag in `images` goes (same keys) */
+  imageReasons?: Record<string, string>;
   /** The images' size (each image once, whatever its number of tags) */
   bytes: number;
   /** What the plan could not decide, e.g. origin unreachable */
@@ -65,7 +68,9 @@ export interface PruneContext {
   force: boolean;
   /** Branch names on origin; null (or none) when origin cannot be reached. Default: one git ls-remote in cwd. */
   remoteBranches?: () => Promise<string[] | null>;
-  /** The blueprint hash a snapshot would have now; null (or no function) keeps every snapshot. */
+  /** Snapshots no container uses and created longer ago than this are removed, whatever their hash; unset or 0 = off */
+  snapshotPruneDays?: number;
+  /** The blueprint hash a snapshot would have now; null (or no function) keeps every snapshot of another hash. */
   currentBlueprintHash?: () => Promise<string | null>;
   /** The kunj image tags of this version (default: the sandbox, network helper and DinD tags) */
   currentImages?: string[];
@@ -175,7 +180,7 @@ function createdTime(createdAt: string): number {
 }
 
 export async function planPrune(backend: ContainerBackend, ctx: PruneContext): Promise<PrunePlan> {
-  const plan: PrunePlan = { containers: [], orphans: [], images: [], bytes: 0, warnings: [] };
+  const plan: PrunePlan = { containers: [], orphans: [], images: [], imageReasons: {}, bytes: 0, warnings: [] };
   // Every container: an image is in use whichever repository's container runs it
   const everything = await backend.list({});
   const containers = everything.filter(c => c.labels[LABEL.repo] === ctx.repoId);
@@ -236,11 +241,14 @@ export async function planPrune(backend: ContainerBackend, ctx: PruneContext): P
   plan.orphans = findOrphans(containers, volumes, networks, ctx.now).map(o =>
     o.kind === 'volume' && !ctx.force ? { ...o, kept: KEPT_VOLUME } : o);
 
-  // 3. Images nobody uses: snapshots of another hash, kunj images of another version
+  // 3. Images nobody uses: snapshots of another hash or unused for long, kunj images not current.
+  // Every container counts, stopped ones too: they still need their image to start again.
   const inUse = new Set(everything.map(c => c.image));
   const sized = new Map<string, number>();
-  const take = (tag: string, id: string, size: number) => {
+  const take = (tag: string, id: string, size: number, why: string) => {
+    if (plan.images.includes(tag)) return;
     plan.images.push(tag);
+    plan.imageReasons![tag] = why;
     sized.set(id, size);
   };
   const prefix = `${SNAPSHOT_REPO(ctx.repoName)}:`;
@@ -248,13 +256,25 @@ export async function planPrune(backend: ContainerBackend, ctx: PruneContext): P
   if (snapshots.length) {
     const hash = ctx.currentBlueprintHash ? await ctx.currentBlueprintHash().catch(() => null) : null;
     if (hash) {
-      for (const i of snapshots) if (i.labels[LABEL.blueprintHash] !== hash && !inUse.has(i.tag)) take(i.tag, i.id, i.size);
+      for (const i of snapshots) {
+        if (i.labels[LABEL.blueprintHash] !== hash && !inUse.has(i.tag)) take(i.tag, i.id, i.size, 'snapshot of an older blueprint');
+      }
+    }
+    const snapshotDays = ctx.snapshotPruneDays ?? 0;
+    if (snapshotDays > 0) {
+      for (const i of snapshots) {
+        if (inUse.has(i.tag)) continue;
+        // The label is when kunj committed it; the engine's Created is the fallback. Unknown age: kept.
+        const created = createdTime(i.labels[LABEL.blueprintCreatedAt] || i.createdAt || '');
+        if (Number.isNaN(created) || now - created <= snapshotDays * DAY_MS) continue;
+        take(i.tag, i.id, i.size, `snapshot no container uses, built over ${snapshotDays} days ago (rebuilt on the next start)`);
+      }
     }
   }
   const current = new Set(ctx.currentImages ?? [SANDBOX_IMAGE(ctx.kunjVersion), NETHELPER_IMAGE(ctx.kunjVersion), DIND_IMAGE(ctx.kunjVersion)]);
   const kunjImages = ctx.kunjImages === false ? [] : await backend.listImages({}, { references: KUNJ_IMAGE_REPOS });
   for (const i of kunjImages) {
-    if (!current.has(i.tag) && !inUse.has(i.tag)) take(i.tag, i.id, i.size);
+    if (!current.has(i.tag) && !inUse.has(i.tag)) take(i.tag, i.id, i.size, 'kunj image of another version or build');
   }
   plan.bytes = [...sized.values()].reduce((a, b) => a + b, 0);
   return plan;
@@ -330,6 +350,7 @@ export function mergePlans(plans: PrunePlan[]): PrunePlan {
     containers: plans.flatMap(p => p.containers),
     orphans: plans.flatMap(p => p.orphans),
     images: plans.flatMap(p => p.images),
+    imageReasons: Object.assign({}, ...plans.map(p => p.imageReasons ?? {})),
     bytes: plans.reduce((sum, p) => sum + p.bytes, 0),
     warnings: plans.flatMap(p => p.warnings),
   };

@@ -6,7 +6,7 @@ import { promisify } from 'util';
 import { Labels, isImageRef } from './backend';
 import { parseJsonc } from './devcontainer';
 import { ContainerError } from './errors';
-import { imageRepoName } from './image';
+import { imageContentKey, imageRepoName } from './image';
 import { LABEL } from './names';
 import { ServiceSpec, parseServices } from './services';
 
@@ -37,15 +37,65 @@ export interface Blueprint {
   services?: ServiceSpec[];
   /** Shell aliases for interactive shells in the container, written to /etc/profile.d at setup */
   aliases?: Record<string, string>;
+  // Paths in /workspace left out of the snapshot's seed, relative to the repository root with sh globs
+  // (`node_modules`, `packages/*/dist`): regenerable output that `maintain` rebuilds in each container
+  seedExclude?: string[];
   ignoredKeys: string[];
 }
 
-const KNOWN_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes', 'image', 'services', 'aliases']);
+const KNOWN_KEYS = new Set(['tools', 'setup', 'maintain', 'lockfiles', 'notes', 'image', 'services', 'aliases', 'seedExclude']);
 
 export const SANDBOX_IMAGE_KEYWORD = 'sandbox';
 
 /** An alias name zsh, bash and sh all accept */
 export const ALIAS_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.+-]*$/;
+
+/** A seedExclude entry: a relative path or glob, as plain characters (no whitespace, quotes, braces or `\`). */
+export const SEED_EXCLUDE_PATTERN = /^[A-Za-z0-9._@+*?[\]\/-]+$/;
+const MAX_SEED_EXCLUDES = 64;
+
+/** A shell-style glob (`*`, `?`, `[...]`) as an anchored regular expression over one path component. */
+function globComponent(glob: string): RegExp {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') re += '[^/]*';
+    else if (c === '?') re += '[^/]';
+    else if (c === '[') {
+      const end = glob.indexOf(']', i + 2);
+      if (end === -1) re += '\\[';
+      else {
+        const body = glob.slice(i + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\');
+        re += `[${body}]`;
+        i = end;
+      }
+    } else re += c.replace(/[.+^${}()|\\]/g, '\\$&');
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/**
+ * Validates seedExclude entries: relative paths or sh globs under /workspace, anchored at its root.
+ * None may be absolute, climb with `..`, look like an option, match a `.git` (the seed is a checkout,
+ * and a submodule's .git is one too) or be every top-level entry.
+ */
+export function checkSeedExclude(value: unknown, source: string): string[] {
+  const usage = `${source}: seedExclude must be an array of paths relative to the repository root (globs allowed), e.g. ["node_modules", "packages/*/dist"].`;
+  if (!isStringArray(value) || value.length > MAX_SEED_EXCLUDES) throw new ContainerError(usage);
+  return value.map(entry => {
+    const bad = (why: string) => new ContainerError(`${source}: seedExclude entry ${JSON.stringify(entry)} ${why}`);
+    if (!entry || entry.length > 200 || !SEED_EXCLUDE_PATTERN.test(entry)) throw bad('is not a plain relative path; use letters, digits and . _ - @ + / and the globs * ? [ ].');
+    if (entry.startsWith('-')) throw bad('may not start with -.');
+    if (entry.startsWith('/')) throw bad('must be relative to the repository root, not absolute.');
+    const parts = entry.replace(/^\.\//, '').replace(/\/+$/, '').split('/');
+    if (parts.some(p => p === '..')) throw bad('may not contain "..".');
+    if (parts.some(p => p === '' || p === '.')) throw bad('must be a plain path (no empty or "." parts after a leading ./).');
+    // sh globs match a leading dot only when the pattern spells it, so only such a component can reach .git
+    if (parts.some(p => p.startsWith('.') && globComponent(p).test('.git'))) throw bad('would leave out .git, which the seed needs.');
+    if (/^\*+$/.test(parts[0])) throw bad('would leave out the whole working tree; name the directories instead.');
+    return entry.replace(/\/+$/, '');
+  });
+}
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every(x => typeof x === 'string');
@@ -104,6 +154,7 @@ export function parseBlueprint(text: string, source: string): Blueprint {
   }
 
   const services = parseServices(obj.services, source);
+  const seedExclude = obj.seedExclude === undefined ? [] : checkSeedExclude(obj.seedExclude, source);
 
   const aliases: Record<string, string> = {};
   if (obj.aliases !== undefined) {
@@ -128,6 +179,7 @@ export function parseBlueprint(text: string, source: string): Blueprint {
     ...(obj.image !== undefined ? { image: obj.image as string } : {}),
     ...(services.length ? { services } : {}),
     ...(Object.keys(aliases).length ? { aliases } : {}),
+    ...(seedExclude.length ? { seedExclude } : {}),
     ignoredKeys: Object.keys(obj).filter(k => !KNOWN_KEYS.has(k)).sort(),
   };
 }
@@ -214,8 +266,10 @@ export function blueprintHash(input: {
   baseImage: string;
   presetHashes: string[];
 }): string {
+  // The base by its content, not the kunj version that tagged it: a release that leaves the
+  // sandbox's build context alone keeps every snapshot
   const body =
-    input.text + '\n' + input.lockfiles.map(l => `${l.path}:${l.id}`).join('\n') + '\n' + input.baseImage + '\n' + input.presetHashes.join('\n');
+    input.text + '\n' + input.lockfiles.map(l => `${l.path}:${l.id}`).join('\n') + '\n' + imageContentKey(input.baseImage) + '\n' + input.presetHashes.join('\n');
   return createHash('sha1').update(body).digest('hex').slice(0, 12);
 }
 

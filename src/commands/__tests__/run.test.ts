@@ -92,6 +92,16 @@ test('the command gets the host secret in its environment and its exit code is p
   expect(keychainRun).not.toHaveBeenCalled();
 });
 
+test('--env-script prints the host secrets as exports and runs no command (none needed)', async () => {
+  await repoVault([entry('FOO', "it's")]);
+  const out: string[] = [];
+  const write = jest.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => { out.push(String(chunk)); return true; });
+  await cmd().execute([], { envScript: true });
+  write.mockRestore();
+  expect(out.join('')).toBe(`export FOO='it'\\''s'\n`);
+  expect(process.exitCode).toBeUndefined();
+});
+
 test('a container-only secret is absent', async () => {
   await repoVault([entry('FOO', 'v'), entry('BAR', 'c', { targets: ['container'] })]);
   expect(await runNode("process.exit(process.env.BAR===undefined&&process.env.FOO==='v'?3:4)")).toBe(3);
@@ -198,5 +208,33 @@ describe('worktree add', () => {
     expect(fs.existsSync(path.join(target, '.env'))).toBe(false);
     expect(result.secretFiles).toEqual([]);
     expect(result.secretWarnings.join('\n')).toMatch(/not ignored/);
+  });
+});
+
+describe('the env-script wrapper (hostRunArgv)', () => {
+  const { execFileSync } = jest.requireActual<typeof import('child_process')>('child_process');
+  const fs = jest.requireActual<typeof import('fs')>('fs');
+  const os = jest.requireActual<typeof import('os')>('os');
+  const path = jest.requireActual<typeof import('path')>('path');
+
+  test('envScript exports values exactly, quotes, newlines and $ included; bad names left out', () => {
+    const { envScript } = jest.requireActual<typeof import('../run')>('../run');
+    const env = { A: "it's", B: 'two\nlines', C: '$HOME `x` "q"', 'BAD-NAME': 'x' };
+    const out = execFileSync('/bin/sh', ['-c', `eval "$1"; printf '%s|%s|%s|%s' "$A" "$B" "$C" "\${BAD:-none}"`, 'sh', envScript(env)], { encoding: 'utf8' });
+    expect(out).toBe(`it's|two\nlines|$HOME \`x\` "q"|none`);
+  });
+
+  test('HOST_RUN_SCRIPT runs kunj for the exports, then execs the command with them (no waiting parent)', () => {
+    const { HOST_RUN_SCRIPT } = jest.requireActual<typeof import('../../lib/agent-session')>('../../lib/agent-session');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-runsh-'));
+    // a stand-in for `node kunj`: checks its arguments and prints one export
+    const fake = path.join(dir, 'fake-kunj.js');
+    fs.writeFileSync(fake, `const a = process.argv.slice(2); process.stdout.write(a.join(' ') === 'run --hold --env-script --branch feat/x' ? "export SECRET='s3'\\n" : 'exit 9\\n');`);
+    const out = execFileSync('/bin/sh', ['-c', HOST_RUN_SCRIPT, 'kunj-run', process.execPath, fake, 'feat/x', '/bin/sh', '-c', 'echo "$SECRET:$$"'], { encoding: 'utf8' });
+    expect(out.trim()).toMatch(/^s3:\d+$/);
+    // no branch: no --branch
+    fs.writeFileSync(fake, `process.stdout.write(process.argv.slice(2).join(' ') === 'run --hold --env-script' ? "export SECRET='nb'\\n" : 'exit 9\\n');`);
+    expect(execFileSync('/bin/sh', ['-c', HOST_RUN_SCRIPT, 'kunj-run', process.execPath, fake, '', '/bin/sh', '-c', 'echo "$SECRET"'], { encoding: 'utf8' }).trim()).toBe('nb');
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

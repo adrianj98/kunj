@@ -87,7 +87,7 @@ export const SAFE_GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksP
  * default agent session `agent` (state file /tmp/kunj-agent-state) and each `agent-<id>` one
  * (/tmp/kunj-agent-state-<id>), then git status.
  */
-export const STATUS_SCRIPT = `s=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); echo "tmux=$?"; printf '%s\\n' "$s" | while IFS= read -r n; do case "$n" in agent) echo "session=agent $(head -n 1 /tmp/kunj-agent-state 2>/dev/null)";; agent-*) echo "session=$n $(head -n 1 "/tmp/kunj-agent-state-\${n#agent-}" 2>/dev/null)";; esac; done; echo "plan=$(cat /tmp/kunj-agent-plan /tmp/kunj-agent-plan-* 2>/dev/null | wc -c | tr -d ' ')"; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
+export const STATUS_SCRIPT = `s=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); echo "tmux=$?"; printf '%s\\n' "$s" | while IFS= read -r n; do case "$n" in agent) echo "session=agent $(head -n 1 /tmp/kunj-agent-state 2>/dev/null)";; agent-*) echo "session=$n $(head -n 1 "/tmp/kunj-agent-state-\${n#agent-}" 2>/dev/null)";; esac; done; p=$(wc -c /tmp/kunj-agent-plan /tmp/kunj-agent-plan-* 2>/dev/null | tail -n 1 | awk '{print $1}'); echo "plan=\${p:-0}"; cd /workspace && ${SAFE_GIT.join(' ')} status --porcelain=v2 --branch`;
 
 // The session names kunj ct agent gives: the id is checked as on the host (checkShellSessionId)
 const AGENT_SESSION_LINE = /^session=(agent(?:-([A-Za-z0-9_-]{1,32}))?)(?: (.*))?$/;

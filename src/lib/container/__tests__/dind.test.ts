@@ -83,7 +83,8 @@ describe('dind helpers', () => {
 
   it('the DinD image tag covers its own build context and the base tag', () => {
     expect(DIND_IMAGE('1.0.0')).toMatch(/^kunj-sandbox-dind:1\.0\.0-[0-9a-f]{12}$/);
-    expect(DIND_IMAGE('1.0.0')).not.toBe(DIND_IMAGE('1.0.1').replace('1.0.1', '1.0.0'));
+    // The base tag no longer names the version, so only the version prefix differs between releases
+    expect(DIND_IMAGE('1.0.0')).toBe(DIND_IMAGE('1.0.1').replace('1.0.1', '1.0.0'));
     expect(DIND_IMAGE('1.0.0').endsWith(assetHash('sandbox-dind'))).toBe(false);
     expect(SANDBOX_IMAGE('1.0.0')).not.toBe(DIND_IMAGE('1.0.0'));
   });

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import * as os from 'os';
-import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, reducePlan, setPlanGuardCommand } from '../agent-plan';
+import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, reducePlan, setPlanGuardCommand, PLAN_TRIM_HOOK } from '../agent-plan';
 
 const line = (hook: any, t = 100, branch = 'main') => JSON.stringify({ kunj: { t, branch }, hook });
 const create = (id: string, subject: string, extra: any = {}) => ({ hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: { task: { id, subject } }, ...extra });
@@ -348,5 +348,26 @@ describe('setPlanGuardCommand', () => {
     const out = run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'mcp__plugin_kunj_kunj__set_plan', tool_input: { steps: ['"agent_id":"x"'], current: 0 } }));
     expect(out.status).toBe(0);
     expect(out.stdout).toBe('');
+  });
+});
+
+describe('PLAN_TRIM_HOOK', () => {
+  test('a record over 1 MB keeps its last 512 KB from a line start; a small one is left alone', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-trim-'));
+    const big = path.join(dir, 'big');
+    const line = `{"kunj":{"t":1},"hook":{"hook_event_name":"Stop"}}\n`;
+    fs.writeFileSync(big, line.repeat(Math.ceil(1.2 * 1024 * 1024 / line.length)));
+    execFileSync('sh', ['-c', PLAN_TRIM_HOOK], { env: { ...process.env, KUNJ_AGENT_PLAN: big } });
+    const kept = fs.readFileSync(big, 'utf8');
+    expect(kept.length).toBeLessThanOrEqual(512 * 1024);
+    expect(kept.startsWith('{"kunj"')).toBe(true);
+    const small = path.join(dir, 'small');
+    fs.writeFileSync(small, line);
+    execFileSync('sh', ['-c', PLAN_TRIM_HOOK], { env: { ...process.env, KUNJ_AGENT_PLAN: small } });
+    expect(fs.readFileSync(small, 'utf8')).toBe(line);
+    // a missing file is fine
+    execFileSync('sh', ['-c', PLAN_TRIM_HOOK], { env: { ...process.env, KUNJ_AGENT_PLAN: path.join(dir, 'none') } });
+    execFileSync('sh', ['-c', PLAN_TRIM_HOOK], { env: { ...process.env, KUNJ_AGENT_PLAN: '' } });
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

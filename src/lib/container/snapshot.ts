@@ -67,6 +67,19 @@ export const SEED_COPY_SCRIPT =
   ` && rm -f ${SEED_DIR}/${SEED_MARKER_EXCLUDE} ${SEED_DIR}/${SEED_FRESH} ${SEED_DIR}/${SEED_COPYING}` +
   ` && chown -R "$(stat -c %u:%g /workspace)" ${SEED_DIR}`;
 
+/**
+ * Removes the blueprint's seedExclude paths from the snapshot container's /workspace (a throwaway
+ * volume) before the seed copy, so they are neither copied into the image nor into each container.
+ * Run as the sandbox user, so a symlink in the branch cannot point it at the image. The entries are
+ * validated by checkSeedExclude (plain characters and globs, no leading - or /, no ..), and are left
+ * unquoted so sh expands their globs; `./` keeps every word a path. null when there is nothing to do.
+ */
+export function seedExcludeScript(seedExclude: string[] | undefined): string | null {
+  if (!seedExclude?.length) return null;
+  const paths = seedExclude.map(e => `./${e.replace(/^\.\//, '')}`).join(' ');
+  return `cd /workspace && rm -rf -- ${paths}`;
+}
+
 /** KEY=VALUE lines as Dockerfile ENV instructions; `$` is escaped so values stay literal, as in the login shell. */
 export function envChanges(text: string, warn: (m: string) => void): string[] {
   const changes: string[] = [];
@@ -224,6 +237,11 @@ export async function snapshotBlueprint(backend: ContainerBackend, opts: Snapsho
     result = await startContainer(backend, startOptions);
     tools = result.blueprint?.tools ?? [];
     const id = result.containerId;
+    const exclude = seedExcludeScript(opts.blueprint.blueprint.seedExclude);
+    if (exclude) {
+      const removed = await backend.exec(id, ['sh', '-c', exclude], result.user ? { user: result.user } : {});
+      if (removed.exitCode !== 0) throw new ContainerError(`Removing the blueprint's seedExclude paths in the snapshot container failed (exit ${removed.exitCode}).`);
+    }
     const copy = await backend.exec(id, ['sh', '-c', SEED_COPY_SCRIPT], { user: 'root' });
     if (copy.exitCode !== 0) throw new ContainerError(`Copying the workspace to ${SEED_DIR} in the snapshot container failed (exit ${copy.exitCode})`);
     const read = await backend.exec(id, ['sh', '-c', SNAPSHOT_READ_SCRIPT], { user: 'root' });

@@ -22,7 +22,12 @@ export interface MachineSettings {
   bootstrap: boolean;
   /** machine.cache as written; a coordinator checks it with cacheStoreConfig() when it starts */
   cache: unknown;
+  /** machine.deleteAfterDays: kunj machine prune lists machines asleep longer (0: never) */
+  deleteAfterDays: number;
 }
+
+/** machine.stopAfterDays' default: a suspended machine's memory is billed, a stopped one's is not */
+export const STOP_AFTER_DAYS = 3;
 
 const BUCKET = /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/;
 const PREFIX = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
@@ -45,6 +50,8 @@ export function cacheStoreConfig(value: unknown): CacheStoreConfig | null {
 }
 
 const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback);
+/** A number of days where 0 (or anything not a positive number) means never */
+const days = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : fallback);
 
 export function machineSettings(config: KunjConfig): MachineSettings {
   const m = (config.machine ?? {}) as NonNullable<KunjConfig['machine']>;
@@ -61,6 +68,7 @@ export function machineSettings(config: KunjConfig): MachineSettings {
       selfSuspend: m.selfSuspend !== false,
       bootTimeoutMs: num(m.bootTimeoutMs, 600000),
       image: typeof m.image === 'string' ? m.image : '',
+      stopAfterDays: days(m.stopAfterDays, STOP_AFTER_DAYS),
     },
     kunjPackage: typeof m.kunjPackage === 'string' ? m.kunjPackage : '',
     bootstrap: m.bootstrap !== false,
@@ -68,6 +76,7 @@ export function machineSettings(config: KunjConfig): MachineSettings {
     idleMinutes: num(m.idleMinutes, 30),
     pairWindowMinutes: num(m.pairWindowMinutes, 10),
     coordinatorIdleMinutes: num(m.coordinatorIdleMinutes, 60),
+    deleteAfterDays: days(m.deleteAfterDays, 0),
   };
 }
 

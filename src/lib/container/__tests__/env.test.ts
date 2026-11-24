@@ -55,6 +55,7 @@ describe('the plan records in the status', () => {
 
   it('the script prints the size of the records, 0 when there are none', () => {
     const { STATUS_SCRIPT } = jest.requireActual<typeof import('../env')>('../env');
-    expect(STATUS_SCRIPT).toContain('echo "plan=$(cat /tmp/kunj-agent-plan /tmp/kunj-agent-plan-* 2>/dev/null | wc -c | tr -d \' \')"');
+    // the size without reading the records (wc -c of the files, the total line when there are several)
+    expect(STATUS_SCRIPT).toContain(`p=$(wc -c /tmp/kunj-agent-plan /tmp/kunj-agent-plan-* 2>/dev/null | tail -n 1 | awk '{print $1}'); echo "plan=\${p:-0}"`);
   });
 });

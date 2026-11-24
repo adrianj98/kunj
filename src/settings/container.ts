@@ -100,10 +100,27 @@ export function registerContainerSettings(): void {
     {
       key: 'container.memory',
       description: 'Memory limit passed to docker run (e.g. 4g)',
+      detailedDescription:
+        'Empty by default: no memory cap, because a cap too small for a build or a test run kills it. ' +
+        'Set one (e.g. 8g) to keep a runaway agent or test from taking the whole Docker VM. Services take their own `memory` in their spec.',
       type: 'string',
       defaultValue: '',
       category: 'container',
+      // A docker size (as services' memory): digits and a unit, never an option
+      validate: (value: string) => value === '' || /^[0-9]+(\.[0-9]+)?[kmgtp]?i?b?$/i.test(value),
       examples: ['4g'],
+    },
+    {
+      key: 'container.pidsLimit',
+      description: 'Most processes a branch container or service may run (docker run --pids-limit; 0 = no limit)',
+      detailedDescription:
+        'Stops a fork bomb or a runaway test from exhausting the Docker host. Applies to the main container and every service; ' +
+        'the network helper always has its own small limit. Takes effect when a container is created (kunj ct start --rebuild).',
+      type: 'number',
+      defaultValue: 4096,
+      category: 'container',
+      validate: (value: number) => Number.isInteger(value) && value >= 0,
+      examples: ['8192', '0'],
     },
     {
       key: 'container.publish',
@@ -139,6 +156,18 @@ export function registerContainerSettings(): void {
       examples: ['30'],
     },
     {
+      key: 'container.snapshotPruneDays',
+      description: '`kunj container prune` also removes blueprint snapshots no container uses that were built more than this many days ago (0 = off)',
+      detailedDescription:
+        'A snapshot is several GB. One that no container (running or stopped) uses goes once it is this old, even for the current blueprint; ' +
+        'the next start rebuilds it. Snapshots of an older blueprint go whatever their age.',
+      type: 'number',
+      defaultValue: 14,
+      category: 'container',
+      validate: (value: number) => Number.isInteger(value) && value >= 0,
+      examples: ['30', '0'],
+    },
+    {
       key: 'container.dockerInDocker',
       description: 'Docker inside branch containers: off, sysbox (needs the sysbox-runc runtime on the Docker host) or privileged (needs container.allowPrivileged; refused on Docker Desktop)',
       detailedDescription:
@@ -169,10 +198,11 @@ export function registerContainerSettings(): void {
       defaultValue: {},
       category: 'container',
       detailedDescription:
-        'An object of name: { image, env?, command?, port?, healthcheck?, volumes?, dependsOn? }; edit the config file by hand. ' +
+        'An object of name: { image, env?, command?, port?, healthcheck?, volumes?, dependsOn?, memory? }; edit the config file by hand. ' +
         "Each service runs on the branch's own network and is reached by its name (postgres:5432). It gets only the env " +
         'declared here, only named volumes (created per branch), no added capabilities and no published ports. ' +
-        "The blueprint's services win over these by name, and these over the devcontainer's compose services.",
+        "The blueprint's services win over these by name, and these over the devcontainer's compose services. " +
+        'memory (e.g. "512m") is its docker run --memory (none by default); container.pidsLimit applies to every service.',
       examples: ['{"postgres": {"image": "postgres:16-alpine", "env": {"POSTGRES_PASSWORD": "dev"}, "healthcheck": "pg_isready -U postgres", "volumes": {"data": "/var/lib/postgresql/data"}}}'],
       validate: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
     },

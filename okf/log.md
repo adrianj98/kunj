@@ -190,3 +190,4 @@
 - Workspace app Overview: lanes scroll sideways beside the sidebar rows. Page updated: none.
 - Local coordinator pile-up fixed (single owner via coordinator.json, no Docker wait). Page updated: none.
 - Fewer gcloud processes: shared ssh master per remote, shared coordinator listing, throttled hidden Overview. Page updated: none.
+- Resource review part 2 (items 1-15): events poll, KunjBar idle, app terminals/threads, no waiting node wrappers, file cap, machine stop, snapshots, limits, setup --remove, tether. Page updated: none.

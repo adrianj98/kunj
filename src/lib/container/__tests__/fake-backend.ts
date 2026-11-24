@@ -1,7 +1,7 @@
 // In-memory ContainerBackend for lifecycle and port-forwarding tests. Records every call;
 // exec results are programmed by the joined command.
 import { PassThrough } from 'stream';
-import { BackendEvent, ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecTimeoutError, ImageInfo, Labels, LogOptions, TtyExecOptions, TtySession } from '../backend';
+import { BackendEvent, ContainerBackend, ContainerInfo, ContainerSpec, EngineInfo, ExecIO, ExecOutputLimitError, ExecTimeoutError, ImageInfo, Labels, LogOptions, TtyExecOptions, TtySession } from '../backend';
 
 export const FAKE_STARTED_AT = '2026-01-01T00:00:00.000000000Z';
 /** Old enough that nothing is inside prune's orphan grace period */
@@ -164,7 +164,7 @@ export class FakeBackend implements ContainerBackend {
   async exec(id: string, cmd: string[], io: ExecIO = {}): Promise<ExecResult> {
     this.record('exec', [id, cmd, io]);
     const handled = this.execHandler?.(id, cmd, io);
-    if (handled) return handled;
+    if (handled) return handled.then(r => this.capStdout(r, io));
     const key = cmd.join(' ');
     const stdin = typeof io.stdin === 'object' ? io.stdin : undefined;
     let input: string | undefined;
@@ -183,7 +183,13 @@ export class FakeBackend implements ContainerBackend {
     if (this.echoUpper && input !== undefined && io.stdout && io.stdout !== 'inherit') {
       io.stdout.write(input.toUpperCase());
     }
-    return this.execResults.get(key) ?? { exitCode: 0, stdout: '' };
+    return this.capStdout(this.execResults.get(key) ?? { exitCode: 0, stdout: '' }, io);
+  }
+
+  /** ExecIO.maxStdout as the real backends apply it */
+  private capStdout(result: ExecResult, io: ExecIO): ExecResult {
+    if (io.maxStdout !== undefined && Buffer.byteLength(result.stdout) > io.maxStdout) throw new ExecOutputLimitError(io.maxStdout);
+    return result;
   }
 
   /** TTY sessions opened through execTty, in order: what they were asked, what they got, how they ended */

@@ -14,7 +14,7 @@ import { DEVCONTAINER_PATHS, DevcontainerSpec, parseDevcontainer } from './devco
 import { Blueprint, ResolvedBlueprint, SANDBOX_IMAGE_KEYWORD, SEED_DIR, computeBlueprintHash, resolveBlueprint } from './blueprint';
 import { Preset, orderTools, resolvePresets } from './presets';
 import { FoundSnapshot, findSnapshot, maintain, provisionNew } from './provision';
-import { ComposeSource, ServiceOwner, ServiceSpec, findServices, resolveServices, resumeServices, serviceNames, serviceRemoval, servicesOf, startServices, stopServices, warnStoppedServices } from './services';
+import { ComposeSource, HELPER_PIDS_LIMIT, ServiceOwner, ServiceSpec, findServices, pidsLimitOf, resolveServices, resumeServices, serviceNames, serviceRemoval, servicesOf, startServices, stopServices, warnStoppedServices } from './services';
 import { SEED_MARKER, hostGitIdentity, inspectOrigin, originPort, pushBranch, refExistsOnOrigin, seedScript } from './seed';
 import {
   CLAUDE_AUTH_KEYS,
@@ -445,6 +445,7 @@ function helperSpec(
     volumes: [],
     publish: [],
     capabilities: ['NET_ADMIN', 'NET_RAW'],
+    pidsLimit: HELPER_PIDS_LIMIT,
     networkOf: mainId,
     init: false,
     command: [],
@@ -1007,6 +1008,7 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       startServices(backend, names, repo.id, labelBranch, services, {
         warn,
         kunjVersion: options.kunjVersion,
+        pidsLimit: pidsLimitOf(options.config.container),
         recreate: options.rebuild,
         keepVolumes: options.keepVolumes,
         created,
@@ -1058,6 +1060,8 @@ export async function startContainer(backend: ContainerBackend, startOptions: St
       publish,
       cpus: cfg?.cpus || undefined,
       memory: cfg?.memory || undefined,
+      // not with Docker-in-Docker: the nested containers share the cgroup, so the cap would count them all
+      ...(dind === 'off' && pidsLimitOf(cfg) ? { pidsLimit: pidsLimitOf(cfg) } : {}),
       ...(dind === 'off'
         ? { capDrop: ['ALL'], capabilities: MAIN_CAPABILITIES }
         : dind === 'sysbox'
@@ -1295,7 +1299,7 @@ async function resume(
     await step('docker', () => resumeServices(backend, services.filter(c => !declaredNames.has(c.name)), health));
     if (declared?.length) {
       await step('docker', () =>
-        startServices(backend, names, repo.id, labelBranch, declared, { ...health, kunjVersion: options.kunjVersion }));
+        startServices(backend, names, repo.id, labelBranch, declared, { ...health, kunjVersion: options.kunjVersion, pidsLimit: pidsLimitOf(options.config.container) }));
     }
     if (mainWasRunning && helperRunning && !keepHelper) {
       // The old helper keeps the firewall up meanwhile: without the new image, keep it and carry on

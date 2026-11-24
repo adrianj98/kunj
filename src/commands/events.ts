@@ -135,6 +135,7 @@ export class EventsCommand extends BaseCommand {
     const stdin = process.stdin;
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
+    process.on('SIGHUP', stop); // the terminal went away: clean up like SIGTERM, not node's default exit
     process.stdout.on('error', stop); // the reader went away (EPIPE)
     stdin.on('end', stop);
     stdin.on('error', stop);
@@ -176,6 +177,7 @@ export class EventsCommand extends BaseCommand {
       for (const s of selections.values()) await s.close().catch(() => undefined);
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
+      process.off('SIGHUP', stop);
       process.stdout.off('error', stop);
       stdin.off('end', stop);
       stdin.off('error', stop);

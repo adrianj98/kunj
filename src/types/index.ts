@@ -71,10 +71,14 @@ export interface KunjConfig {
     remote?: string;
     cpus?: string;
     memory?: string;
+    // --pids-limit of main containers and services (0 = none); the network helper gets its own small one
+    pidsLimit?: number;
     publish?: string[];
     forward?: { auto?: boolean; ignore?: Array<number | string> | number | string };
     // `kunj container prune` removes stopped containers created longer ago (0/unset = off)
     pruneAfterDays?: number;
+    // `kunj container prune` removes blueprint snapshots no container uses, built longer ago (0 = off)
+    snapshotPruneDays?: number;
     // Cache volumes shared by every branch container of the repository: [{ name, path }] (src/lib/container/caches.ts)
     caches?: unknown;
     // Sidecar services by name (validated by parseServices in src/lib/container/services.ts)

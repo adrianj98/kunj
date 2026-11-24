@@ -61,7 +61,7 @@ import {
 } from '../lib/keep';
 import { resolveBaseRef } from '../lib/base-branch';
 import { recordRepo } from '../lib/repos';
-import { AgentError, agentArgv, agentSessionName, checkShellSessionId, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, killTmuxSessionsWithPrefix, loginShell, pickSession, readTaggedTmuxSessions, runTmux, shellSessionName, worktreeShellSessions } from '../lib/agent-session';
+import { AgentError, agentArgv, agentSessionName, checkShellSessionId, execScript, hostRunArgv, hostSecretEnv, killTmuxSessionIfExists, kunjSelf, shQuote, killTmuxSessionsWithPrefix, loginShell, pickSession, readTaggedTmuxSessions, runTmux, shellSessionName, worktreeShellSessions } from '../lib/agent-session';
 import { repoIdentity } from '../lib/repo-identity';
 import type { BranchContainerJson, ShellKillJson, WorktreeJson, WorktreeListContainersJson, WorktreeListJson } from '../lib/json-types';
 import { describeError, formatError, UserError } from '../lib/errors';
@@ -87,6 +87,7 @@ interface WorktreeOptions {
   hooks?: boolean;
   session?: string;
   kill?: boolean;
+  execScript?: boolean;
 }
 
 // `kunj worktree list --containers` stops waiting for Docker after this long
@@ -138,6 +139,7 @@ export class WorktreeCommand extends BaseCommand {
         { flags: '--label <text>', description: '[session] Human readable window label' },
         { flags: '--id <id>', description: '[session] Session id' },
         { flags: '--session <id>', description: '[shell] Keep the shell in a tmux session with this id (letters, digits, _ and -; up to 32), reattaching when it exists' },
+        { flags: '--exec-script', description: '[shell] Print the sh line that attaches instead of attaching (a terminal runs it as sh -c, so no kunj process waits beside it)' },
         { flags: '--kill', description: '[shell] End the --session tmux session, or without --session every shell session of the branch (exit 0 whether or not one existed)' },
       ],
     });
@@ -230,9 +232,19 @@ export class WorktreeCommand extends BaseCommand {
       const config = await loadResolvedConfig(process.cwd());
       if (config.agent?.tmux !== false && tmux !== 'missing' && (tmux !== null || (await readTaggedTmuxSessions()) !== 'missing')) {
         const argv = agentArgv(name, wt.path, hostRunArgv(branch, [shell, '-l']), {}, { status: config.agent?.tmuxStatus === true, worktree: wt.path });
+        // --exec-script: the terminal's sh becomes the tmux client (EXEC_SCRIPT_RUNNER)
+        if (options.execScript) {
+          process.stdout.write(execScript(argv, wt.path, env));
+          return;
+        }
         process.exitCode = await runTmux(argv, wt.path, env);
         return;
       }
+    }
+    // without tmux the shell runs in this process: the wrapper runs kunj again, without the flag
+    if (options.execScript) {
+      process.stdout.write(`exec ${[...kunjSelf(), ...process.argv.slice(2).filter(a => a !== '--exec-script')].map(shQuote).join(' ')}\n`);
+      return;
     }
     const secrets = await hostSecretEnv(branch, wt.path);
     process.exitCode = await runTmux([shell, '-l'], wt.path, { ...env, ...secrets });

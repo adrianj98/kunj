@@ -10,7 +10,7 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, planNudgeHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, planNudgeHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile, execScript, kunjSelf, shQuote } from '../lib/agent-session';
 import { packagedPluginDir } from '../lib/skills';
 import { activePlans, buildOverview, subagentLabel } from '../lib/agent-overview';
 import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, parentLine, planNudge, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
@@ -28,6 +28,7 @@ interface AgentOptions {
   promptFile?: string;
   openInApp?: boolean;
   containers?: boolean;
+  execScript?: boolean;
 }
 
 // The largest brief --prompt-file takes (it becomes one shell argument)
@@ -54,6 +55,7 @@ export class AgentCommand extends BaseCommand {
         { flags: '--detach', description: '[start] Start the tmux session without attaching to it (no terminal needed); a running one is left as it is' },
         { flags: '--prompt-file <file>', description: "[start] The agent's first prompt, read from a file (claude only; a new session only)" },
         { flags: '--containers', description: "[overview] Also the agents in this repository's running branch containers" },
+        { flags: '--exec-script', description: '[start] Print the sh line that attaches instead of attaching (a terminal runs it as sh -c, so no kunj process waits beside it)' },
         { flags: '--open-in-app', description: '[start] Ask the workspace app to open, select and focus a tab for the new session' },
       ],
       helpText: [
@@ -350,7 +352,17 @@ export class AgentCommand extends BaseCommand {
     // the values in argv; KUNJ_* stay there); directly, the same resolution in-process.
     if (!direct) {
       const argv = agentArgv(session, wt.path, hostRunArgv(wt.branch, [loginShell(), '-lc', command]), vars, { status: config.agent?.tmuxStatus === true, worktree: wt.path, openInApp: opts.openInApp });
+      // --exec-script: the terminal's sh becomes the tmux client (EXEC_SCRIPT_RUNNER)
+      if (opts.execScript) {
+        process.stdout.write(execScript(argv, wt.path, tmuxEnv));
+        return;
+      }
       process.exitCode = await runTmux(argv, wt.path, tmuxEnv);
+      return;
+    }
+    // without tmux the agent runs in this process: the wrapper runs kunj again, without the flag
+    if (opts.execScript) {
+      process.stdout.write(`exec ${[...kunjSelf(), ...process.argv.slice(2).filter(a => a !== '--exec-script')].map(shQuote).join(' ')}\n`);
       return;
     }
     const secrets = await hostSecretEnv(wt.branch, wt.path);

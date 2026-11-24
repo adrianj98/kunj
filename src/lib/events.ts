@@ -55,6 +55,8 @@ export interface WatchEventsOptions {
    */
   machines?: () => Promise<Array<{ name: string; repo: string; branch: string; state: string }> | null>;
   machinePollMs?: number;
+  /** A full git status (untracked files included) every this many status polls per worktree; default 6 */
+  untrackedEveryTicks?: number;
   /** Called once the watches, the repo ids and the first tmux and status polls are in place (not waiting for Docker) */
   onReady?: () => void;
 }
@@ -104,6 +106,27 @@ export function worktreePaths(porcelain: string): string[] {
 }
 
 const hash = (text: string) => createHash('sha1').update(text).digest('hex');
+
+interface WorktreeStatusState {
+  /** Hash of `git status --porcelain=v2 --branch --untracked-files=no` */
+  tracked: string;
+  /** Hash of the untracked entries (`? ` lines) of the last full status */
+  untracked: string;
+  /** Status polls since the last full one */
+  sinceFull: number;
+}
+
+/**
+ * A full porcelain v2 status as the hash of what --untracked-files=no would print (every line but
+ * the `? ` ones) and the hash of the untracked lines, so the two kinds of tick compare alike.
+ */
+export function splitStatus(out: string): { tracked: string; untracked: string } {
+  const lines = out.split('\n');
+  return {
+    tracked: hash(lines.filter(l => !l.startsWith('? ')).join('\n')),
+    untracked: hash(lines.filter(l => l.startsWith('? ')).join('\n')),
+  };
+}
 
 // The promise's value, or undefined as soon as the signal aborts (a hung Docker call must not block exit)
 function untilAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T | undefined> {
@@ -380,7 +403,12 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
 
   // Worktree status: one git worktree list per repository, one git status per worktree. A
   // worktree seen for the first time only primes; one whose status fails keeps its last hash.
-  const worktreeHashes = new Map<string, Map<string, string>>();
+  // Scanning for untracked files is most of git status's cost in a large worktree, so a tick runs
+  // it with --untracked-files=no and only every untrackedEveryTicks-th tick of a worktree (and its
+  // first) runs a full one: a new untracked file is reported within that many ticks, a change to
+  // a tracked file (or the index, HEAD, upstream) on the next one.
+  const untrackedEvery = Math.max(1, options.untrackedEveryTicks ?? 6);
+  const worktreeStates = new Map<string, Map<string, WorktreeStatusState>>();
   const pollWorktrees = every(statusPollMs, async () => {
     for (const resync of resyncs) resync();
     await Promise.all(repos.map(async repo => {
@@ -390,20 +418,22 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
       } catch {
         return;
       }
-      const before = worktreeHashes.get(repo.gitCommonDir);
-      const after = new Map<string, string>();
+      const before = worktreeStates.get(repo.gitCommonDir);
+      const after = new Map<string, WorktreeStatusState>();
       let changed = false;
       await Promise.all(paths.map(async dir => {
+        const last = before?.get(dir);
+        const full = last === undefined || last.sinceFull + 1 >= untrackedEvery;
         try {
-          const h = hash(await git(['-C', dir, 'status', '--porcelain=v2', '--branch']));
-          after.set(dir, h);
-          if (before?.has(dir) && before.get(dir) !== h) changed = true;
+          const out = await git(['-C', dir, 'status', '--porcelain=v2', '--branch', ...(full ? [] : ['--untracked-files=no'])]);
+          const next = full ? splitStatus(out) : { tracked: hash(out), untracked: last!.untracked };
+          after.set(dir, { ...next, sinceFull: full ? 0 : last!.sinceFull + 1 });
+          if (last && (last.tracked !== next.tracked || last.untracked !== next.untracked)) changed = true;
         } catch {
-          const last = before?.get(dir);
           if (last !== undefined) after.set(dir, last);
         }
       }));
-      worktreeHashes.set(repo.gitCommonDir, after);
+      worktreeStates.set(repo.gitCommonDir, after);
       if (changed && !signal.aborted) gitEvent(repo);
     }));
   });
@@ -433,9 +463,14 @@ export async function watchEvents(options: WatchEventsOptions): Promise<void> {
     const containerPlans = new Map<string, number>();
     const pollContainers = every(statusPollMs, async () => {
       if (!available) return;
-      const lists = await untilAbort(Promise.all([...ids].map(id => backend.list({ [LABEL.repo]: id }).catch(() => []))), signal);
-      if (!lists) return;
-      const mains = lists.flat().filter(c => c.state === 'running' && isMain(c));
+      // One listing for all the backend's repositories (every kunj main container carries
+      // kunj.role=main), split by kunj.repo here: no docker ps per repository on every tick
+      if (ids.size === 0) return;
+      // a failed listing skips the tick and keeps what is known: one failure must not make every
+      // repository's next change look like a first sighting (no event)
+      const listed = await untilAbort(backend.list({ [LABEL.role]: 'main' }).catch(() => null), signal);
+      if (!listed) return;
+      const mains = listed.filter(c => c.state === 'running' && isMain(c) && ids.has(c.labels[LABEL.repo]));
       const seen = new Set(mains.map(c => c.name));
       await Promise.all(mains.map(async c => {
         let status;

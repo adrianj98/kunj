@@ -40,6 +40,8 @@ export interface Machine {
   size: string;
   zone?: string;
   createdAt: string;
+  /** When it last went to sleep (suspended or stopped), as the cloud reports it; absent when unknown */
+  sleptAt?: string;
   addresses: { internal?: string };
 }
 

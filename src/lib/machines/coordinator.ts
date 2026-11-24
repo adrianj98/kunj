@@ -130,6 +130,11 @@ export interface MachineDefaults {
   bootTimeoutMs: number;
   /** A machine image to boot ('' = the provider's stock image) */
   image?: string;
+  /**
+   * machine.stopAfterDays: the idle loop stops a machine suspended this long (a suspended machine's
+   * memory is billed, a stopped one's is not; its disk, and so its work, stays). 0 or absent: never.
+   */
+  stopAfterDays?: number;
 }
 
 export interface CoordinatorOptions {
@@ -176,6 +181,9 @@ export interface LocateResult {
 }
 
 const POLL_MS = 2000;
+const DAY_MS = 24 * 60 * 60_000;
+/** Stop attempts per sleep before the idle loop leaves a machine alone */
+const STOP_TRIES = 3;
 const SHARED_IDLE_MS = 60_000;
 
 interface SharedEndpoint {
@@ -211,6 +219,12 @@ export class Coordinator {
    * 60 MB of python for a second or two). Dropped whenever this coordinator changes a machine.
    */
   private readonly listings = new Map<string, { at: number; machines: Promise<Machine[]> }>();
+  /** When this coordinator first saw each machine suspended, for a provider that does not say when it slept */
+  private readonly seenAsleep = new Map<string, number>();
+  /** Suspended machines this coordinator already asked to stop (a provider may leave one suspended: EC2) */
+  private readonly stopAsked = new Set<string>();
+  /** Failed stops per machine during its current sleep */
+  private readonly stopFailures = new Map<string, number>();
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.provider = opts.provider;
@@ -570,8 +584,12 @@ export class Coordinator {
     for (const machine of await this.list({}, { fresh: true })) {
       if (!isAwake(machine.state)) {
         this.lastBusy.delete(machine.name);
+        await this.stopIfLongSuspended(machine);
         continue;
       }
+      this.seenAsleep.delete(machine.name);
+      this.stopAsked.delete(machine.name);
+      this.stopFailures.delete(machine.name);
       const now = this.now();
       if (!this.lastBusy.has(machine.name)) this.lastBusy.set(machine.name, now);
       let busy = (this.inUse.get(machine.name) ?? 0) > 0 || this.starting.has(machine.name);
@@ -603,6 +621,53 @@ export class Coordinator {
       }
     }
     return suspended;
+  }
+
+  /**
+   * machine.stopAfterDays: a machine suspended that long is stopped. Only from `suspended` (a stopped
+   * one already bills only its disk), never while a locate is waking it or a request is on it, and
+   * never deleted: its disk may hold work origin does not have, which cannot be checked asleep.
+   */
+  private async stopIfLongSuspended(machine: Machine): Promise<void> {
+    if (machine.state !== 'suspended') {
+      this.seenAsleep.delete(machine.name);
+      this.stopFailures.delete(machine.name);
+      return;
+    }
+    const now = this.now();
+    if (!this.seenAsleep.has(machine.name)) this.seenAsleep.set(machine.name, now);
+    const afterDays = this.opts.defaults.stopAfterDays ?? 0;
+    if (!(afterDays > 0) || this.stopAsked.has(machine.name)) return;
+    if (this.starting.has(machine.name) || (this.inUse.get(machine.name) ?? 0) > 0) return;
+    // The cloud's time when it has one; else the first time this coordinator saw it asleep, which is
+    // never earlier than the real one, so the wait is only ever longer
+    const slept = Date.parse(machine.sleptAt ?? '');
+    const since = Number.isNaN(slept) ? this.seenAsleep.get(machine.name)! : slept;
+    const asleepMs = now - since;
+    if (asleepMs < afterDays * DAY_MS) return;
+    // the listing is from the start of the tick: a wake may have come meanwhile. Ask the cloud now,
+    // and check again for a locate or a request after every wait
+    const fresh = await this.provider.get(machine.name).catch(() => null);
+    if (!fresh || fresh.state !== 'suspended') return;
+    if (this.starting.has(machine.name) || (this.inUse.get(machine.name) ?? 0) > 0) return;
+    this.stopAsked.add(machine.name);
+    this.log(`stopping machine ${machine.name}: suspended ${(asleepMs / DAY_MS).toFixed(1)} days (machine.stopAfterDays ${afterDays}); its disk is kept`);
+    await this.dropShared(machine.name);
+    if (this.starting.has(machine.name) || (this.inUse.get(machine.name) ?? 0) > 0) {
+      this.stopAsked.delete(machine.name);
+      return;
+    }
+    try {
+      await this.provider.stop(machine.name);
+      this.changed();
+    } catch (err) {
+      // a few tries per sleep, then left alone: a cloud that refuses (a hibernated EC2 instance) must
+      // not get a failing CLI run every minute for ever
+      const tries = (this.stopFailures.get(machine.name) ?? 0) + 1;
+      this.stopFailures.set(machine.name, tries);
+      if (tries < STOP_TRIES) this.stopAsked.delete(machine.name);
+      this.log(`could not stop ${machine.name}${tries >= STOP_TRIES ? ` (giving up for this sleep after ${tries} tries)` : ''}: ${(err as Error).message}`);
+    }
   }
 
   // ---- reaching a machine ----------------------------------------------------------------------

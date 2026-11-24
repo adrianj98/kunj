@@ -193,6 +193,16 @@ describe('Ec2Provider', () => {
     expect(aws.calls.filter(c => c[1] === 'run-instances')[1][aws.calls.filter(c => c[1] === 'run-instances')[1].indexOf('--image-id') + 1]).toMatch(/^ami-/);
   });
 
+  it('reads when a machine went to sleep from its state transition reason', async () => {
+    const p = new Ec2Provider(CFG, { run: aws.runner });
+    const m = await p.create(spec());
+    const inst = aws.instances.get(m.id!);
+    inst.StateTransitionReason = 'User initiated (2026-11-17 09:30:00 GMT)';
+    expect((await p.get(m.name))!.sleptAt).toBeUndefined();
+    await p.suspend(m.name);
+    expect((await p.get(m.name))!.sleptAt).toBe('2026-11-17T09:30:00Z');
+  });
+
   it('checks its settings and explains a missing login', async () => {
     expect(() => new Ec2Provider({ region: 'us-east-1', securityGroups: ['sg-0abc1234'] })).toThrow(/machine\.ec2\.subnet/);
     expect(() => new Ec2Provider({ ...CFG, securityGroups: [] })).toThrow(/securityGroups/);

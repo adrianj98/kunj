@@ -247,6 +247,8 @@ export interface MachineJson {
   version?: string;
   /** Whether the coordinator holds its kunj serve token */
   paired: boolean;
+  /** When it last went to sleep (suspended or stopped), when the cloud says */
+  sleptAt?: string;
 }
 
 /** `kunj machine list --json`; `repo` is absent with --all */
@@ -325,6 +327,20 @@ export interface MachineSetupJson {
   config: Record<string, unknown>;
 }
 
+/** `kunj machine setup --remove --json` */
+export interface MachineSetupRemoveJson {
+  provider: string;
+  target: string;
+  remove: true;
+  /** Nothing was deleted (what is there is `present`) */
+  dryRun: boolean;
+  success: boolean;
+  /** In the order they are deleted; `absent` was already gone */
+  steps: Array<{ title: string; cost?: string; state: 'present' | 'absent' | 'removed' | 'failed' | 'kept'; message?: string }>;
+  /** The cache bucket, deleted only with --remove-bucket or a separate yes */
+  bucket: { name: string; state: 'present' | 'absent' | 'removed' | 'failed' | 'kept' };
+}
+
 /** `kunj machine prune --json` */
 export interface MachinePruneJson {
   coordinator: string;
@@ -332,11 +348,16 @@ export interface MachinePruneJson {
   dryRun: boolean;
   plan: {
     /** Every machine with a reason to go; `kept` says why one stays anyway */
-    machines: Array<{ name: string; branch: string; state: MachineJson['state']; reason: 'branch-gone' | 'no-container' | 'image-builder'; kept?: string }>;
+    machines: Array<{ name: string; branch: string; state: MachineJson['state']; reason: 'branch-gone' | 'no-container' | 'image-builder' | 'asleep-long'; kept?: string }>;
     warnings: string[];
+    /** Golden images older than 14 days of a repository with no machine (this repository's; every one's with --all) */
+    images?: Array<{ name: string; repo: string; createdAt: string; reason: 'unused'; kept?: string }>;
   };
   removed: string[];
   failed: string[];
+  /** Golden images deleted, and ones that could not be */
+  removedImages?: string[];
+  failedImages?: string[];
 }
 
 /** `kunj machine status|create|suspend|resume|stop|start --json` */

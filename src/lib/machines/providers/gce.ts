@@ -137,6 +137,8 @@ interface GceInstance {
   machineType?: string;
   zone?: string;
   creationTimestamp?: string;
+  lastSuspendedTimestamp?: string;
+  lastStopTimestamp?: string;
   networkInterfaces?: Array<{ networkIP?: string }>;
 }
 
@@ -195,14 +197,17 @@ export class GceProvider implements MachineProvider {
 
   private toMachine(i: GceInstance): Machine | null {
     const exact = decodeLabels(i.metadata?.items?.find(m => m.key === LABELS_METADATA_KEY)?.value);
+    const state = STATES[i.status] ?? 'unknown';
+    const sleptAt = state === 'suspended' ? i.lastSuspendedTimestamp : state === 'stopped' ? i.lastStopTimestamp : undefined;
     return {
       name: i.name,
-      state: STATES[i.status] ?? 'unknown',
+      state,
       // A machine kunj did not make has no exact labels: its GCE labels as they are (never kunj.role)
       labels: exact ?? { ...(i.labels ?? {}) },
       size: lastSegment(i.machineType) ?? '',
       zone: lastSegment(i.zone),
       createdAt: i.creationTimestamp ?? '',
+      ...(sleptAt ? { sleptAt } : {}),
       addresses: { internal: i.networkInterfaces?.[0]?.networkIP },
     };
   }

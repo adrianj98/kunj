@@ -17,12 +17,29 @@ export interface ServiceSpec {
   /** { volumeName: containerPath }; named volumes only, one per branch */
   volumes: Record<string, string>;
   dependsOn: string[];
+  /** docker run --memory, e.g. 512m (MEMORY_LIMIT); none by default */
+  memory?: string;
 }
+
+/** A docker memory size (512m, 2g, 1.5GiB): digits and a unit, so it can never become an option. */
+export const MEMORY_LIMIT = /^[0-9]+(\.[0-9]+)?[kmgtp]?i?b?$/i;
+
+/** container.pidsLimit when unset: high enough for any build, low enough to stop a fork bomb */
+export const DEFAULT_PIDS_LIMIT = 4096;
+
+/** container.pidsLimit as a number of processes; 0 means no limit, anything invalid the default. */
+export function pidsLimitOf(cfg: { pidsLimit?: unknown } | undefined): number {
+  const v = cfg?.pidsLimit;
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : DEFAULT_PIDS_LIMIT;
+}
+
+/** The most processes the network helper runs (socat tunnels and the port poll): its own, not container.pidsLimit */
+export const HELPER_PIDS_LIMIT = 512;
 
 export const SERVICE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const VOLUME_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const KEYS = new Set(['image', 'env', 'command', 'port', 'healthcheck', 'volumes', 'dependsOn']);
+const KEYS = new Set(['image', 'env', 'command', 'port', 'healthcheck', 'volumes', 'dependsOn', 'memory']);
 
 export const HEALTH_TIMEOUT_MS = 120_000;
 export const HEALTH_INTERVAL_MS = 2_000;
@@ -40,7 +57,7 @@ function validPort(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 65535;
 }
 
-/** `{ name: { image, env?, command?, port?, healthcheck?, volumes?, dependsOn? } }`; throws on anything else. */
+/** `{ name: { image, env?, command?, port?, healthcheck?, volumes?, dependsOn?, memory? } }`; throws on anything else. */
 export function parseServices(raw: unknown, source: string): ServiceSpec[] {
   if (raw === undefined || raw === null) return [];
   if (!isRecord(raw)) throw new ContainerError(`${source}: services must be an object of name: { image, ... }, e.g. {"postgres": {"image": "postgres:16"}}.`);
@@ -50,7 +67,7 @@ export function parseServices(raw: unknown, source: string): ServiceSpec[] {
     if (!SERVICE_NAME.test(name)) throw new ContainerError(`${where}: a service name may only use a-z, 0-9 and -.`);
     if (!isRecord(def)) throw new ContainerError(`${where} must be an object with at least an image, e.g. {"image": "redis:7"}.`);
     const unknown = Object.keys(def).filter(k => !KEYS.has(k));
-    if (unknown.length) throw new ContainerError(`${where}: unsupported keys ${unknown.sort().join(', ')}. A service may set image, env, command, port, healthcheck, volumes, dependsOn.`);
+    if (unknown.length) throw new ContainerError(`${where}: unsupported keys ${unknown.sort().join(', ')}. A service may set image, env, command, port, healthcheck, volumes, dependsOn, memory.`);
     if (typeof def.image !== 'string' || !def.image.trim()) throw new ContainerError(`${where}: image is required, e.g. "image": "postgres:16".`);
     if (!isImageRef(def.image.trim())) throw new ContainerError(`${where}: image "${def.image}" is not a valid image reference.`);
 
@@ -82,6 +99,9 @@ export function parseServices(raw: unknown, source: string): ServiceSpec[] {
         volumes[vol] = target;
       }
     }
+    if (def.memory !== undefined && (typeof def.memory !== 'string' || !MEMORY_LIMIT.test(def.memory) || /^0+(\.0+)?[a-z]*$/i.test(def.memory))) {
+      throw new ContainerError(`${where}: memory must be a size such as "512m" or "2g".`);
+    }
     if (def.dependsOn !== undefined && !isStringArray(def.dependsOn)) throw new ContainerError(`${where}: dependsOn must be an array of service names, e.g. ["postgres"].`);
 
     services.push({
@@ -93,6 +113,7 @@ export function parseServices(raw: unknown, source: string): ServiceSpec[] {
       ...(def.healthcheck ? { healthcheck: def.healthcheck as string } : {}),
       volumes,
       dependsOn: (def.dependsOn as string[] | undefined) ?? [],
+      ...(def.memory !== undefined ? { memory: def.memory as string } : {}),
     });
   }
   return services;
@@ -307,8 +328,13 @@ function serviceRecord(info: ContainerInfo): ServiceRecord {
   };
 }
 
+/** Resource limits of a service container besides its own `memory`: container.pidsLimit (0 = none). */
+export interface ServiceLimits {
+  pidsLimit?: number;
+}
+
 /** The run spec of one service: nothing from the host, on the branch network under its own name. */
-export function serviceRunSpec(names: ContainerNames, repoId: string, branch: string, svc: ServiceSpec, kunjVersion = ''): ContainerSpec {
+export function serviceRunSpec(names: ContainerNames, repoId: string, branch: string, svc: ServiceSpec, kunjVersion = '', limits: ServiceLimits = {}): ContainerSpec {
   const sn = serviceNames(names, svc.name);
   const volumes = Object.entries(svc.volumes).map(([v, p]) => ({ name: sn.volume(v), path: p }));
   const record: ServiceRecord = {
@@ -332,6 +358,8 @@ export function serviceRunSpec(names: ContainerNames, repoId: string, branch: st
     workdir: '',
     volumes,
     publish: [],
+    ...(svc.memory ? { memory: svc.memory } : {}),
+    ...(limits.pidsLimit ? { pidsLimit: limits.pidsLimit } : {}),
     // The image's own entrypoint and init: database images expect to be PID 1
     init: false,
     command: svc.command ?? [],
@@ -409,6 +437,8 @@ export interface ServiceStartOptions {
   timeoutMs?: number;
   intervalMs?: number;
   kunjVersion?: string;
+  /** container.pidsLimit for each service (0 or unset: none) */
+  pidsLimit?: number;
   /** Remove and recreate existing service containers (volumes are kept) */
   recreate?: boolean;
   /** With recreate: a service no longer declared keeps its data volumes (`--keep-volumes`) */
@@ -500,7 +530,7 @@ export async function startServices(
   const volumeLabels: Labels = labelsFor(repoId, branch, { [LABEL.role]: 'service', ...(opts.kunjVersion ? { [LABEL.version]: opts.kunjVersion } : {}) });
 
   for (const svc of ordered) {
-    const spec = serviceRunSpec(names, repoId, branch, svc, opts.kunjVersion);
+    const spec = serviceRunSpec(names, repoId, branch, svc, opts.kunjVersion, { pidsLimit: opts.pidsLimit });
     for (const v of spec.volumes) {
       if (await backend.volumeExists(v.name)) continue;
       await backend.createVolume(v.name, volumeLabels);

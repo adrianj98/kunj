@@ -2221,6 +2221,7 @@ export class ContainerCommand extends BaseCommand {
           kunjVersion: getVersion(),
           allowPrivileged: ctx.config.container?.allowPrivileged === true,
           pruneAfterDays: ctx.config.container?.pruneAfterDays,
+          snapshotPruneDays: ctx.config.container?.snapshotPruneDays ?? 14,
           force: !!options.force,
           currentBlueprintHash: () => this.currentHash(ctx),
           kunjImages: runs.length === 0,
@@ -2298,7 +2299,10 @@ export class ContainerCommand extends BaseCommand {
         if (o.kept) console.log(`  ${chalk.yellow('keep  ')} ${o.kind} ${o.name}  ${chalk.gray(o.kept)}`);
         else console.log(`  ${chalk.red('remove')} ${o.kind} ${o.name}  ${chalk.gray('orphan: its branch container is gone')}`);
       }
-      for (const tag of plan.images) console.log(`  ${chalk.red('remove')} image ${tag}`);
+      for (const tag of plan.images) {
+        const why = plan.imageReasons?.[tag];
+        console.log(`  ${chalk.red('remove')} image ${tag}${why ? `  ${chalk.gray(why)}` : ''}`);
+      }
       if (plan.images.length) console.log(chalk.gray(`  images: ${megabytes(plan.bytes)} MB`));
     }
   }

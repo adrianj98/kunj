@@ -52,6 +52,11 @@
         "default": null
       },
       {
+        "flags": "--exec-script",
+        "description": "[start] Print the sh line that attaches instead of attaching (a terminal runs it as sh -c, so no kunj process waits beside it)",
+        "default": null
+      },
+      {
         "flags": "--open-in-app",
         "description": "[start] Ask the workspace app to open, select and focus a tab for the new session",
         "default": null
@@ -850,7 +855,7 @@
       },
       {
         "flags": "--all",
-        "description": "[list] Every machine of the coordinator, not only this repository's",
+        "description": "[list] Every machine of the coordinator, not only this repository's; [prune] every repository's unused golden images",
         "default": null
       },
       {
@@ -889,6 +894,16 @@
         "default": null
       },
       {
+        "flags": "--remove",
+        "description": "[setup] Delete what setup made (refused while kunj machines or golden images exist)",
+        "default": null
+      },
+      {
+        "flags": "--remove-bucket",
+        "description": "[setup --remove] Also delete the cache bucket and every cache in it",
+        "default": null
+      },
+      {
         "flags": "--force",
         "description": "[prune] Also delete machines that are asleep or hold work origin does not have",
         "default": null
@@ -914,7 +929,7 @@
         "default": null
       }
     ],
-    "helpText": "Actions:\n  setup                       prepare a cloud project for machines: shows what is missing and what it costs, then makes it\n  list (default)              this repository's machines, any state\n  status [branch]             the branch's machine (the current branch by default)\n  create [branch]             make the branch's machine and wait until its kunj serve answers\n  suspend|resume|stop|start [branch]\n  delete [branch]             delete the machine and its disks (the branch is on origin)\n  prune                       delete machines whose branch is gone from origin, and ones left without a container\n  image [list]                this repository's golden images; new machines boot the newest\n  image build                 bake one: a builder machine installs everything and builds the blueprint\n                              snapshot, its disk becomes the image, older images are deleted\n  image delete <name>\n  providers                   the coordinator's provider, its sizes and features\n  coordinator [status|stop]   the local coordinator kunj started on this machine\n\nMachines are created by a coordinator, kunj serve --machines: the remote that --remote or container.remote\nnames, or a local one kunj starts on its own when machine.provider is set here (machine.gce for Google Cloud).\nDesign: docs/specs/cloud-machines.md."
+    "helpText": "Actions:\n  setup                       prepare a cloud project for machines: shows what is missing and what it costs, then makes it\n  setup --remove              delete what setup made (NAT, router, firewall rule, account, role); the bucket only\n                              with --remove-bucket or when asked separately\n  list (default)              this repository's machines, any state\n  status [branch]             the branch's machine (the current branch by default)\n  create [branch]             make the branch's machine and wait until its kunj serve answers\n  suspend|resume|stop|start [branch]\n  delete [branch]             delete the machine and its disks (the branch is on origin)\n  prune                       delete machines whose branch is gone from origin, and ones left without a container,\n                              and golden images older than 14 days of a repository with no machine (--all: every repository)\n  image [list]                this repository's golden images; new machines boot the newest\n  image build                 bake one: a builder machine installs everything and builds the blueprint\n                              snapshot, its disk becomes the image, older images are deleted\n  image delete <name>\n  providers                   the coordinator's provider, its sizes and features\n  coordinator [status|stop]   the local coordinator kunj started on this machine\n\nMachines are created by a coordinator, kunj serve --machines: the remote that --remote or container.remote\nnames, or a local one kunj starts on its own when machine.provider is set here (machine.gce for Google Cloud).\nDesign: docs/specs/cloud-machines.md."
   },
   {
     "name": "pr",
@@ -1108,9 +1123,9 @@
   },
   {
     "name": "run",
-    "usage": "run <command...>",
+    "usage": "run [command...]",
     "description": "Run a command with the host secrets in its environment",
-    "arguments": "<command...>",
+    "arguments": "[command...]",
     "aliases": [],
     "options": [
       {
@@ -1121,6 +1136,11 @@
       {
         "flags": "--hold",
         "description": "On an error before the command starts, wait for Enter (tmux panes close with the process)",
+        "default": null
+      },
+      {
+        "flags": "--env-script",
+        "description": "Print the secrets as sh export lines instead of running a command (for a wrapper that execs the command)",
         "default": null
       },
       {
@@ -1676,6 +1696,11 @@
       {
         "flags": "--session <id>",
         "description": "[shell] Keep the shell in a tmux session with this id (letters, digits, _ and -; up to 32), reattaching when it exists",
+        "default": null
+      },
+      {
+        "flags": "--exec-script",
+        "description": "[shell] Print the sh line that attaches instead of attaching (a terminal runs it as sh -c, so no kunj process waits beside it)",
         "default": null
       },
       {

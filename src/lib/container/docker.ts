@@ -13,6 +13,7 @@ import {
   ContainerSpec,
   EngineInfo,
   ExecIO,
+  ExecOutputLimitError,
   ExecTimeoutError,
   ImageInfo,
   Labels,
@@ -62,6 +63,7 @@ export function runArgs(spec: ContainerSpec, envFile: string): string[] {
   for (const p of spec.publish) args.push('-p', `127.0.0.1:${p.host}:${p.container}`);
   if (spec.cpus) args.push('--cpus', spec.cpus);
   if (spec.memory) args.push('--memory', spec.memory);
+  if (spec.pidsLimit) args.push('--pids-limit', String(spec.pidsLimit));
   // Drops first: Docker applies --cap-add on top of --cap-drop ALL
   for (const cap of spec.capDrop ?? []) args.push('--cap-drop', cap);
   for (const cap of spec.capabilities ?? []) args.push('--cap-add', cap);
@@ -139,6 +141,26 @@ export function parseImageInspect(json: string): ImageInfo[] {
       .filter(t => t && !t.startsWith('<none>'))
       .map(tag => ({ tag, id: o.Id, createdAt: o.Created, labels: o.Config?.Labels ?? {}, size: o.Size ?? 0 })));
 }
+
+/**
+ * Runs a long-lived docker command ("$@") so that it ends with kunj, however kunj ends. `docker events`
+ * writes only when an event comes, so it would notice a dead reader (SIGPIPE) only at the next event:
+ * hours later with kunj's filters, and an orphan until then. Here the shell keeps a pipe from kunj on
+ * its stdin and a `cat` reads it: the pipe reaches end of file when kunj closes it or dies (SIGKILL
+ * included, since the kernel closes a dead process's descriptors), and then docker is killed. A TERM,
+ * INT or HUP to the shell (kunj's child.kill()) is passed on to docker too. The `cat` subshell keeps
+ * neither stdout nor stderr, so kunj's 'close' comes when docker ends. Background jobs of a
+ * non-interactive shell get /dev/null as stdin, hence the explicit fd 3.
+ */
+export const TETHER_SCRIPT = [
+  'exec 3<&0',
+  '"$@" </dev/null 3<&- &',
+  'pid=$!',
+  "trap 'kill $pid 2>/dev/null' TERM INT HUP",
+  '{ cat >/dev/null; kill $pid 2>/dev/null; } <&3 >/dev/null 2>&1 &',
+  'exec 3<&-',
+  'wait $pid',
+].join('\n');
 
 /** One line of `docker events --format '{{json .}}'`; null when it is not a container event. */
 export function parseDockerEvent(line: string): BackendEvent | null {
@@ -252,8 +274,11 @@ export class LocalDockerBackend implements ContainerBackend {
   // Every docker child still running, so a long-lived caller (kunj events) can end hung ones on exit
   private readonly children = new Set<ChildProcess>();
 
-  private spawnChild(args: string[], options: SpawnOptions): ChildProcess {
-    const child = spawn(this.dockerPath, this.argv(args), options);
+  /** `tethered`: through TETHER_SCRIPT, with a pipe on stdin that ends it when kunj goes (a long-lived child) */
+  private spawnChild(args: string[], options: SpawnOptions, tethered = false): ChildProcess {
+    const child = tethered && process.platform !== 'win32'
+      ? spawn('/bin/sh', ['-c', TETHER_SCRIPT, 'kunj-docker-tether', this.dockerPath, ...this.argv(args)], { ...options, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(this.dockerPath, this.argv(args), options);
     this.children.add(child);
     const forget = () => this.children.delete(child);
     child.on('close', forget);
@@ -496,7 +521,20 @@ export class LocalDockerBackend implements ContainerBackend {
 
       if (child.stdout) {
         if (io.stdout && io.stdout !== 'inherit') child.stdout.pipe(io.stdout, { end: false });
-        else child.stdout.on('data', (d: Buffer) => stdout.push(d));
+        else {
+          let collected = 0;
+          child.stdout.on('data', (d: Buffer) => {
+            if (settled) return;
+            collected += d.length;
+            if (io.maxStdout !== undefined && collected > io.maxStdout) {
+              stdout.length = 0;
+              child.kill('SIGKILL');
+              finish(() => reject(new ExecOutputLimitError(io.maxStdout!)));
+              return;
+            }
+            stdout.push(d);
+          });
+        }
       }
       if (child.stderr) {
         if (io.stderr && io.stderr !== 'inherit') child.stderr.pipe(io.stderr, { end: false });
@@ -748,8 +786,13 @@ export class LocalDockerBackend implements ContainerBackend {
     for (const [k, v] of Object.entries(filter)) args.push('--filter', v === '' ? `label=${k}` : `label=${k}=${v}`);
     return new Promise((resolve, reject) => {
       if (signal.aborted) return resolve();
-      const child = this.spawnChild(args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const onAbort = () => child.kill();
+      // Tethered: it lives for as long as kunj does, and must not outlive it even when kunj is killed
+      const child = this.spawnChild(args, { stdio: ['ignore', 'pipe', 'pipe'] }, true);
+      child.stdin?.on('error', () => undefined); // the tether already gone
+      const onAbort = () => {
+        child.stdin?.end();
+        child.kill();
+      };
       signal.addEventListener('abort', onAbort, { once: true });
       let pending = '';
       const stderr: Buffer[] = [];

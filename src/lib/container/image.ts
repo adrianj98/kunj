@@ -38,10 +38,24 @@ export interface ResolveImageInput {
   snapshot?: { tag: string; user: string; stale: boolean } | null;
 }
 
-// The tags carry a hash of the build context, so a changed Dockerfile or firewall.sh is rebuilt
-// even when the version is the same (a development build, or a re-release)
-export const SANDBOX_IMAGE = (version: string) => `kunj-sandbox:${version}-${assetHash('sandbox')}`;
-export const NETHELPER_IMAGE = (version: string) => `kunj-nethelper:${version}-${assetHash('nethelper')}`;
+// The tags are the hash of the build context only: a changed Dockerfile or firewall.sh is rebuilt,
+// and a release that leaves them alone reuses the image (and the blueprint snapshots built on it).
+// Older tags carried the kunj version too (`<version>-<hash>`); prune removes them as superseded.
+// The argument is ignored, kept for callers.
+export const SANDBOX_IMAGE = (_version?: string) => `kunj-sandbox:${assetHash('sandbox')}`;
+export const NETHELPER_IMAGE = (_version?: string) => `kunj-nethelper:${assetHash('nethelper')}`;
+
+const KUNJ_VERSIONED_TAG = /^(kunj-(?:sandbox|nethelper|sandbox-dind)):(?:.+-)?([0-9a-f]{12})$/;
+
+/**
+ * What a base image is for the blueprint hash: a kunj image by its content hash alone, whatever
+ * kunj version tagged it (`kunj-sandbox-dind:1.4.0-<h>` and `kunj-sandbox-dind:1.5.0-<h>` are the
+ * same image), any other reference as given.
+ */
+export function imageContentKey(tag: string): string {
+  const m = KUNJ_VERSIONED_TAG.exec(tag);
+  return m ? `${m[1]}:${m[2]}` : tag;
+}
 
 /** dist/container from dist/lib/container, src/container under ts-jest. */
 export function sandboxAssetsDir(): string {

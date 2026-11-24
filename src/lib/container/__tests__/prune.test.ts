@@ -266,6 +266,42 @@ describe('planPrune', () => {
     expect((await planPrune(b, ctx())).images).toEqual([]);
   });
 
+  it('removes snapshots no container uses once older than snapshotPruneDays, whatever their hash', async () => {
+    // NOW is 2026-10-23T12:00Z
+    const snap = (hash: string, createdAt: string, labelCreated?: string) => ({
+      ...image(`kunj-blueprint-app:${hash}`, 1000, {
+        [LABEL.repo]: REPO.id,
+        [LABEL.blueprintHash]: hash,
+        ...(labelCreated ? { [LABEL.blueprintCreatedAt]: labelCreated } : {}),
+      }),
+      createdAt,
+    });
+    const b = backendWith([main('alive', { image: 'kunj-blueprint-app:used', state: 'exited' })]);
+    b.images = [
+      snap('cur', '', '2026-10-01T00:00:00.000Z'), // current hash, 22 days old, unused: goes
+      snap('young', '2026-10-20T00:00:00Z'), // 3 days: stays
+      snap('used', '2026-01-01T00:00:00Z'), // a stopped container uses it: stays
+      snap('noage', 'not a date'), // unknown age: stays
+      snap('old', '2026-09-01T00:00:00.123456789Z'), // older blueprint: goes, once
+    ];
+    // The hash unknown: only the age rule
+    const plan = await planPrune(b, ctx({ snapshotPruneDays: 14 }));
+    expect(plan.images.sort()).toEqual(['kunj-blueprint-app:cur', 'kunj-blueprint-app:old']);
+    expect(plan.imageReasons?.['kunj-blueprint-app:cur']).toMatch(/no container uses, built over 14 days ago/);
+    expect(plan.bytes).toBe(2000);
+    expect(removalCount(plan)).toBe(2);
+
+    // The hash known: other hashes go whatever their age (once each), the current one by age
+    const withHash = await planPrune(b, ctx({ currentBlueprintHash: async () => 'cur', snapshotPruneDays: 14 }));
+    expect(withHash.images.sort()).toEqual(['kunj-blueprint-app:cur', 'kunj-blueprint-app:noage', 'kunj-blueprint-app:old', 'kunj-blueprint-app:young']);
+    expect(withHash.imageReasons?.['kunj-blueprint-app:old']).toBe('snapshot of an older blueprint');
+    expect((await planPrune(b, ctx({ currentBlueprintHash: async () => 'cur', snapshotPruneDays: 0 }))).images).not.toContain('kunj-blueprint-app:cur');
+
+    // 0 (or unset) turns the age rule off
+    expect((await planPrune(b, ctx({ snapshotPruneDays: 0 }))).images).toEqual([]);
+    expect((await planPrune(b, ctx({ snapshotPruneDays: 30 }))).images).toEqual(['kunj-blueprint-app:old']);
+  });
+
   it('removes superseded kunj-sandbox and kunj-nethelper tags that no container uses', async () => {
     const b = backendWith([main('alive', { image: 'kunj-sandbox:1.1.0-old' })]);
     b.images = [
@@ -307,7 +343,7 @@ describe('findOrphans', () => {
 
   it('mergePlans joins the repositories\' plans', () => {
     const one = { containers: [], orphans: [{ kind: 'network' as const, name: 'a' }], images: ['x'], bytes: 1, warnings: ['w'] };
-    expect(mergePlans([one, one])).toEqual({ containers: [], orphans: [one.orphans[0], one.orphans[0]], images: ['x', 'x'], bytes: 2, warnings: ['w', 'w'] });
+    expect(mergePlans([one, one])).toEqual({ containers: [], orphans: [one.orphans[0], one.orphans[0]], images: ['x', 'x'], imageReasons: {}, bytes: 2, warnings: ['w', 'w'] });
   });
 
   it('leaves a branch alone while anything of it is younger than the grace period (a start waiting on services)', () => {

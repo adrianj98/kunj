@@ -11,7 +11,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { containerNames } from './container/names';
 import { kunjEntry } from './self';
-import { PLAN_TOOL_MATCHER, hookSafe, planHookCommand, setPlanGuardCommand, subagentToolHookCommand } from './agent-plan';
+import { PLAN_TOOL_MATCHER, PLAN_TRIM_HOOK, hookSafe, planHookCommand, setPlanGuardCommand, subagentToolHookCommand } from './agent-plan';
 import { SET_PLAN_TOOL_ID } from './plan-mcp';
 
 const execFileAsync = promisify(execFile);
@@ -272,12 +272,15 @@ export function planNudgeHookCommand(self: string[] = kunjSelf()): string | unde
   return hookSafe(`[ -z "$KUNJ_AGENT_PLAN" ] || ${self.map(p => `"${p}"`).join(' ')} agent nudge`);
 }
 
-// `argv` under `kunj run`, which unlocks the vault and puts the host secrets in argv's environment.
-// tmux sessions start agents and shells this way: `new-session -e` would put the values in argv.
-// Without a branch, run resolves with the branch checked out where it runs (the session's -c).
-// --hold keeps the pane open on a failed unlock, so its message is not lost with the pane.
+// `argv` with the host secrets in its environment: `kunj run --env-script` unlocks the vault and prints
+// them as export lines, which a small sh evals before it execs argv (so no node process stays beside
+// every session: one waiting `kunj run` per agent and shell was about 30 node runtimes at once). tmux
+// sessions start agents and shells this way: `new-session -e` would put the values in argv, and here
+// they only pass through a pipe. Without a branch, run resolves with the branch checked out where it
+// runs (the session's -c). --hold keeps the pane open on a failed unlock, so its message is not lost.
+export const HOST_RUN_SCRIPT = 'n=$1; e=$2; b=$3; shift 3; s=$("$n" "$e" run --hold --env-script ${b:+--branch "$b"}) || exit $?; eval "$s"; exec "$@"';
 export function hostRunArgv(branch: string | undefined, argv: string[]): string[] {
-  return [...kunjSelf(), 'run', '--hold', ...(branch ? ['--branch', branch] : []), '--', ...argv];
+  return ['/bin/sh', '-c', HOST_RUN_SCRIPT, 'kunj-run', ...kunjSelf(), branch ?? '', ...argv];
 }
 
 // The branch's host secrets for a process started here without tmux (`kunj agent`, `kunj worktree shell`),
@@ -305,6 +308,27 @@ export function spawnCwd(argv: string[], cwd: string): string {
 }
 
 // Run argv attached to the terminal; resolves with the exit code
+/** A word for sh: single-quoted. */
+export function shQuote(word: string): string {
+  return `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * What runTmux(argv, cwd, env) would run, as one sh line for a wrapper to eval (`--exec-script`): the
+ * wrapper's sh becomes tmux, so no node process waits beside every attached terminal. Only the
+ * differences from this process's environment go on `env`'s command line (variables removed with -u,
+ * the KUNJ_* ones set), never the whole environment, which stays inherited.
+ */
+export function execScript(argv: string[], cwd: string, env: Record<string, string | undefined>, base: NodeJS.ProcessEnv = process.env): string {
+  const unset = Object.keys(base).filter(name => base[name] !== undefined && env[name] === undefined);
+  const set = Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined && base[e[0]] !== e[1]);
+  const words = ['env', ...unset.flatMap(name => ['-u', name]), ...set.map(([k, v]) => `${k}=${v}`), ...argv];
+  return `cd ${shQuote(spawnCwd(argv, cwd))} && exec ${words.map(shQuote).join(' ')}\n`;
+}
+
+/** The sh a terminal runs for `kunj … --exec-script`: kunj prints the line, sh evals it (and so becomes tmux). */
+export const EXEC_SCRIPT_RUNNER = 's=$("$@") || exit $?; eval "$s"';
+
 export function runTmux(argv: string[], cwd: string, env: Record<string, string | undefined>): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn(argv[0], argv.slice(1), { cwd: spawnCwd(argv, cwd), env, stdio: 'inherit' });
@@ -465,7 +489,7 @@ export function claudeHookSettings(plan = false, nudge?: string): string {
       Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),
       SessionEnd: hook(hookSafe('rm -f "$KUNJ_AGENT_STATE"')),
       // Unset in containers (no resume there yet), where it does nothing
-      SessionStart: [...hook(hookSafe('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"')), ...(plan ? hook(record) : [])],
+      SessionStart: [...hook(hookSafe('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"')), ...(plan ? [...hook(PLAN_TRIM_HOOK), ...hook(record)] : [])],
       ...(plan ? {
         PostToolUse: hook(record, PLAN_TOOL_MATCHER),
         SubagentStart: hook(record),

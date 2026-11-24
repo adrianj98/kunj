@@ -27,6 +27,8 @@ export const WORKTREE_SESSIONS_FILE = 'worktree-sessions.json';
 // Sessions that have not been seen for this long are considered stale
 // (only used when we cannot check the owning PID, e.g. a different host).
 const SESSION_STALE_MS = 24 * 60 * 60 * 1000;
+// A heartbeat moves lastSeen on disk only once it is this old (well inside SESSION_STALE_MS)
+const SESSION_TOUCH_MS = 60 * 60 * 1000;
 
 export interface WorktreeSession {
   id: string;
@@ -767,6 +769,7 @@ export function registerSession(options: RegisterSessionOptions): WorktreeSessio
   const normalized = normalizePath(options.path);
   const now = new Date().toISOString();
   const data = readSessionsFile();
+  const unchanged = JSON.stringify(data.sessions);
   const alive = data.sessions.filter(s => isSessionAlive(s));
 
   let session = alive.find(
@@ -774,7 +777,10 @@ export function registerSession(options: RegisterSessionOptions): WorktreeSessio
   );
 
   if (session) {
-    session.lastSeen = now;
+    // A heartbeat that changes nothing but lastSeen leaves the file alone while lastSeen is recent:
+    // every watcher of the file (editor windows, the menu bar app, kunj events) refreshes on a write
+    const seen = Date.parse(session.lastSeen);
+    if (Number.isNaN(seen) || Date.now() - seen >= SESSION_TOUCH_MS) session.lastSeen = now;
     session.path = normalized;
     if (options.editor) session.editor = options.editor;
     if (options.label !== undefined) session.label = options.label;
@@ -792,7 +798,7 @@ export function registerSession(options: RegisterSessionOptions): WorktreeSessio
     alive.push(session);
   }
 
-  writeSessionsFile({ sessions: alive });
+  if (JSON.stringify(alive) !== unchanged) writeSessionsFile({ sessions: alive });
   return session;
 }
 

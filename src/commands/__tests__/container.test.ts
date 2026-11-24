@@ -1,4 +1,5 @@
 import { FakeBackend } from '../../lib/container/__tests__/fake-backend';
+import { MAX_READ_BYTES, READ_SCRIPT } from '../../lib/container/files';
 import { HARNESS_TOKEN, Harness, startHarness } from '../../lib/container/__tests__/remote-harness';
 import { ContainerInfo } from '../../lib/container/backend';
 import { containerNames, repoIdFromUrl } from '../../lib/container/names';
@@ -2068,7 +2069,7 @@ describe('ContainerCommand', () => {
 });
 
 describe('ct file', () => {
-  const READ = 'sh -c cat -- "$1" sh src/a.ts';
+  const READ = `sh -c ${READ_SCRIPT} sh src/a.ts ${MAX_READ_BYTES}`;
   const WRITE = 'sh -c mkdir -p -- "$(dirname -- "$1")" && cat > "$1" sh src/a.ts';
   let exit: jest.SpyInstance;
 
@@ -2084,7 +2085,7 @@ describe('ct file', () => {
     await new ContainerCommand().execute('file', 'read', ['feat', './src/a.ts'], { json: true });
     expect(JSON.parse(stdout.join(''))).toEqual({ path: 'src/a.ts', content: 'hello' });
     const [, cmd, io] = backend.callsOf('exec')[0] as [string, string[], { user?: string; workdir?: string }];
-    expect(cmd.slice(-2)).toEqual(['sh', 'src/a.ts']);
+    expect(cmd.slice(-3)).toEqual(['sh', 'src/a.ts', String(MAX_READ_BYTES)]);
     expect(io).toMatchObject({ user: 'dev', workdir: '/workspace' });
   });
 
@@ -2115,6 +2116,14 @@ describe('ct file', () => {
     }
     expect(JSON.parse(stdout.join(''))).toEqual({ success: true, path: 'src/a.ts' });
     expect(backend.stdinData).toEqual(['new']);
+  });
+
+  it('a file over the cap is too-large in --json mode', async () => {
+    backend.existing = [mainContainer('feat')];
+    backend.execResults.set(READ, { exitCode: 3, stdout: String(20 * 1024 * 1024) });
+    await new ContainerCommand().execute('file', 'read', ['feat', 'src/a.ts'], { json: true });
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(JSON.parse(stdout.join('')).error).toMatchObject({ code: 'too-large' });
   });
 
   it('read on a stopped container fails', async () => {

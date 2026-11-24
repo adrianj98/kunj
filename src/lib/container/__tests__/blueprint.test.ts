@@ -10,7 +10,9 @@ import {
   snapshotTag,
   blueprintLabels,
   blueprintRef,
+  checkSeedExclude,
 } from '../blueprint';
+import { SANDBOX_IMAGE, imageContentKey } from '../image';
 
 // Fixture repositories and subprocesses: slow when the machine is busy
 jest.setTimeout(30000);
@@ -87,6 +89,26 @@ describe('parseBlueprint', () => {
     for (const value of ['', '  ', 'a\nb', 1]) {
       expect(() => parseBlueprint(JSON.stringify({ aliases: { s: value } }), 'x.json')).toThrow('x.json: aliases.s must be a one-line command');
     }
+  });
+
+  it('takes seedExclude as relative paths or globs, normalised, and leaves it out when absent', () => {
+    expect(parseBlueprint('{}', 'bp').seedExclude).toBeUndefined();
+    expect(parseBlueprint('{"seedExclude": []}', 'bp').seedExclude).toBeUndefined();
+    expect(parseBlueprint('{"seedExclude": ["node_modules", "packages/*/dist/", "./.next", "build-[0-9]", "@scope+x"]}', 'bp').seedExclude)
+      .toEqual(['node_modules', 'packages/*/dist', './.next', 'build-[0-9]', '@scope+x']);
+    expect(parseBlueprint('{"seedExclude": ["node_modules"]}', 'bp').ignoredKeys).toEqual([]);
+  });
+
+  it('rejects seedExclude entries that are absolute, climb, look like options, use shell characters or would drop .git', () => {
+    const bad = (entry: unknown) => () => checkSeedExclude([entry], 'bp');
+    for (const entry of ['/etc', '../x', 'a/../../b', '-rf', '--exclude=x', '', '.', './', 'a//b', 'a b', "a'b", 'a;b', '$(x)', 'a\\b', '{a,b}', '.git', '.git/objects', './.git', 'sub/.git', '*', '**', '*/dist', '.*', '.g?t', 'x/*/.git', '.[g]it', 42]) {
+      expect(bad(entry)).toThrow(/seedExclude/);
+    }
+    expect(() => checkSeedExclude('node_modules', 'bp')).toThrow(/must be an array/);
+    expect(() => checkSeedExclude(Array(65).fill('a'), 'bp')).toThrow(/must be an array/);
+    expect(() => parseBlueprint('{"seedExclude": ["../up"]}', '.kunj/blueprint.json')).toThrow(/\.kunj\/blueprint\.json: seedExclude entry "\.\.\/up"/);
+    // sh globs never match a leading dot unless spelled, so these cannot reach a .git
+    expect(checkSeedExclude(['.n*', '*.log', 'dist?', 'packages/*/node_modules'], 'bp')).toEqual(['.n*', '*.log', 'dist?', 'packages/*/node_modules']);
   });
 
   it('reads "*" as any version, like true', () => {
@@ -191,6 +213,22 @@ describe('hash and names', () => {
     expect(blueprintHash({ ...base, lockfiles: [{ path: 'yarn.lock', id: '2' }] })).not.toBe(h);
     expect(blueprintHash({ ...base, baseImage: 'other' })).not.toBe(h);
     expect(blueprintHash({ ...base, presetHashes: ['q'] })).not.toBe(h);
+  });
+
+  it('hashes a kunj base image by its content, not the kunj version in its tag', () => {
+    const h = blueprintHash({ ...base, baseImage: 'kunj-sandbox-dind:1.4.0-0123456789ab' });
+    expect(blueprintHash({ ...base, baseImage: 'kunj-sandbox-dind:1.5.0-rc.1-0123456789ab' })).toBe(h);
+    expect(blueprintHash({ ...base, baseImage: 'kunj-sandbox-dind:0123456789ab' })).toBe(h);
+    expect(blueprintHash({ ...base, baseImage: 'kunj-sandbox-dind:1.5.0-0123456789ac' })).not.toBe(h);
+    expect(blueprintHash({ ...base, baseImage: 'kunj-sandbox:1.4.0-0123456789ab' })).not.toBe(h);
+    // A release that leaves the sandbox's build context alone keeps the hash
+    expect(blueprintHash({ ...base, baseImage: SANDBOX_IMAGE('1.4.0') })).toBe(blueprintHash({ ...base, baseImage: SANDBOX_IMAGE('9.9.9') }));
+    expect(imageContentKey('kunj-sandbox:1.2.3-0123456789ab')).toBe('kunj-sandbox:0123456789ab');
+    expect(imageContentKey('kunj-nethelper:0123456789ab')).toBe('kunj-nethelper:0123456789ab');
+    // Anything else is taken as given
+    expect(imageContentKey('node:20-0123456789ab')).toBe('node:20-0123456789ab');
+    expect(imageContentKey('kunj-sandbox:1.2.3')).toBe('kunj-sandbox:1.2.3');
+    expect(imageContentKey('ghcr.io/x/kunj-sandbox:1.2.3-0123456789ab')).toBe('ghcr.io/x/kunj-sandbox:1.2.3-0123456789ab');
   });
 
   it('snapshotTag lowercases', () => {

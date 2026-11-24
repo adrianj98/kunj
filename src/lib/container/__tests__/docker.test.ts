@@ -6,10 +6,10 @@ import { spawn } from 'child_process';
 import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
-import { LocalDockerBackend, composeConfigArgs, parseEngineEndpoint, runArgs, parsePsJson, parseInspect, parseImageLs, parseImageInspect, parseDockerEvent } from '../docker';
+import { LocalDockerBackend, composeConfigArgs, parseEngineEndpoint, runArgs, parsePsJson, parseInspect, parseImageLs, parseImageInspect, parseDockerEvent, TETHER_SCRIPT } from '../docker';
 import { FakeBackend } from './fake-backend';
 import { BackendEvent } from '../backend';
-import { ContainerSpec, ExecTimeoutError } from '../backend';
+import { ContainerSpec, ExecOutputLimitError, ExecTimeoutError } from '../backend';
 
 jest.mock('child_process');
 const spawnMock = spawn as unknown as jest.Mock;
@@ -112,6 +112,9 @@ describe('docker backend', () => {
 
     it('runArgs passes --runtime and --privileged for Docker-in-Docker', () => {
       expect(runArgs({ ...baseSpec, runtime: 'sysbox-runc' }, '/tmp/x/env').join(' ')).toContain('--runtime sysbox-runc kunj/default:1');
+      // container.pidsLimit: --pids-limit before the image; none when unset
+      expect(runArgs({ ...baseSpec, pidsLimit: 4096 }, '/tmp/x/env').join(' ')).toMatch(/--pids-limit 4096 .*kunj\/default:1/);
+      expect(runArgs(baseSpec, '/tmp/x/env')).not.toContain('--pids-limit');
       expect(runArgs({ ...baseSpec, privileged: true }, '/tmp/x/env').join(' ')).toContain('--privileged kunj/default:1');
       expect(runArgs(baseSpec, '/tmp/x/env')).not.toContain('--privileged');
     });
@@ -209,6 +212,22 @@ describe('docker backend', () => {
       await expect(backend.exec('abc', ['echo', 'hello'], { user: 'dev', workdir: '/w', env: { A: '1' } }))
         .resolves.toEqual({ exitCode: 3, stdout: 'hello\n' });
       expect(argvOf(0)).toEqual(['exec', '-u', 'dev', '-w', '/w', '-e', 'A=1', 'abc', 'echo', 'hello']);
+    });
+
+    it('exec with maxStdout kills the child and rejects once stdout passes the cap', async () => {
+      const backend = new LocalDockerBackend();
+      const pending = backend.exec('abc', ['cat', 'big'], { maxStdout: 10 });
+      await new Promise(r => setImmediate(r));
+      children[0].stdout.write('12345');
+      children[0].stdout.write('678901');
+      await expect(pending).rejects.toBeInstanceOf(ExecOutputLimitError);
+      expect(children[0].kill).toHaveBeenCalledWith('SIGKILL');
+    });
+
+    it('exec with maxStdout returns output at the cap', async () => {
+      results.push({ code: 0, stdout: '1234567890' });
+      const backend = new LocalDockerBackend();
+      await expect(backend.exec('abc', ['cat', 'f'], { maxStdout: 10 })).resolves.toEqual({ exitCode: 0, stdout: '1234567890' });
     });
 
     it('exec rejects when docker itself fails instead of returning exit code 1', async () => {
@@ -700,7 +719,10 @@ describe('docker backend', () => {
       const controller = new AbortController();
       const got: BackendEvent[] = [];
       const done = backend.events({ 'kunj.repo': '', 'kunj.role': 'main' }, e => got.push(e), controller.signal);
+      // through the tether (TETHER_SCRIPT), so it ends with kunj even when kunj is killed
+      expect(spawnMock.mock.calls[0][0]).toBe('/bin/sh');
       expect(argvOf(0)).toEqual([
+        '-c', TETHER_SCRIPT, 'kunj-docker-tether', 'docker',
         '--context', 'remote', 'events', '--format', '{{json .}}', '--filter', 'type=container',
         '--filter', 'label=kunj.repo', '--filter', 'label=kunj.role=main',
       ]);

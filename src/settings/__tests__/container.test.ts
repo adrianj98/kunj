@@ -14,12 +14,14 @@ describe('container settings', () => {
       dockerContext: '',
       cpus: '',
       memory: '',
+      pidsLimit: 4096,
       publish: [],
       services: {},
       caches: [],
       useGhToken: true,
       forward: { auto: true, ignore: [] },
       pruneAfterDays: 0,
+      snapshotPruneDays: 14,
       remote: '',
       dockerInDocker: 'off',
       allowPrivileged: false,
@@ -30,6 +32,13 @@ describe('container settings', () => {
     expect(settingsRegistry.get('container.dockerInDocker')?.validate?.('yes')).toBe(false);
     expect(settingsRegistry.get('container.pruneAfterDays')?.validate?.(30)).toBe(true);
     expect(settingsRegistry.get('container.pruneAfterDays')?.validate?.(-1)).toBe(false);
+    expect(settingsRegistry.get('container.snapshotPruneDays')?.validate?.(0)).toBe(true);
+    expect(settingsRegistry.get('container.snapshotPruneDays')?.validate?.(1.5)).toBe(false);
+    expect(settingsRegistry.get('container.pidsLimit')?.validate?.(0)).toBe(true);
+    expect(settingsRegistry.get('container.pidsLimit')?.validate?.(-1)).toBe(false);
+    expect(settingsRegistry.get('container.memory')?.validate?.('')).toBe(true);
+    expect(settingsRegistry.get('container.memory')?.validate?.('4g')).toBe(true);
+    expect(settingsRegistry.get('container.memory')?.validate?.('--privileged')).toBe(false);
     expect(settingsRegistry.get('container.services')?.validate?.({ pg: { image: 'p' } })).toBe(true);
     expect(settingsRegistry.get('container.mcp')?.validate?.({ chrome: {} })).toBe(true);
     expect(settingsRegistry.get('container.mcp')?.validate?.(['chrome'])).toBe(false);

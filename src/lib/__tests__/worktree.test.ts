@@ -2,7 +2,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, listWorktreesDetailed, getWorktreeStatus, WorktreeSession, PullRequestInfo } from '../worktree';
+import { parseWorktreeList, branchToDirName, isSessionAlive, summarizeChecks, pickPullRequest, parseStatusV2, isCacheFresh, buildOpenCommand, registerSession, getSessionsPath, listWorktreesDetailed, getWorktreeStatus, WorktreeSession, PullRequestInfo } from '../worktree';
 import { agentSessionName, listTmuxSessions } from '../agent-session';
 import { repoIdentity } from '../repo-identity';
 import { repoIdFromUrl } from '../container/names';
@@ -178,6 +178,44 @@ describe('worktree utilities', () => {
       expect(isCacheFresh(entry, 0, 1_000_000)).toBe(false);
       expect(isCacheFresh(undefined, 60)).toBe(false);
     });
+  });
+});
+
+describe('registerSession heartbeat', () => {
+  const file = () => getSessionsPath();
+  const read = () => JSON.parse(fs.readFileSync(file(), 'utf8')).sessions as WorktreeSession[];
+  const write = (sessions: WorktreeSession[]) => fs.writeFileSync(file(), JSON.stringify({ sessions }, null, 2));
+  const dir = path.join(kunjHome, 'wt');
+
+  beforeEach(() => fs.rmSync(file(), { force: true }));
+
+  it('does not rewrite the file when only lastSeen would move', () => {
+    const first = registerSession({ path: dir, pid: process.pid, editor: 'code' });
+    const text = fs.readFileSync(file(), 'utf8');
+    // a write is a rename over the file: a new inode
+    const ino = fs.statSync(file()).ino;
+    const again = registerSession({ path: dir, pid: process.pid, editor: 'code' });
+    expect(again.id).toBe(first.id);
+    expect(fs.statSync(file()).ino).toBe(ino);
+    expect(fs.readFileSync(file(), 'utf8')).toBe(text);
+  });
+
+  it('moves lastSeen once it is an hour old, and writes any other change', () => {
+    const first = registerSession({ path: dir, pid: process.pid, editor: 'code' });
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    write([{ ...first, lastSeen: old }]);
+    registerSession({ path: dir, pid: process.pid, editor: 'code' });
+    expect(Date.parse(read()[0].lastSeen)).toBeGreaterThan(Date.parse(old));
+    registerSession({ path: dir, pid: process.pid, editor: 'code', label: 'renamed' });
+    expect(read()[0].label).toBe('renamed');
+  });
+
+  it('still prunes a dead session on a heartbeat', () => {
+    const first = registerSession({ path: dir, pid: process.pid, editor: 'code' });
+    const dead: WorktreeSession = { ...first, id: 'dead', pid: 2 ** 22 + 12345, path: path.join(kunjHome, 'other') };
+    write([first, dead]);
+    registerSession({ path: dir, pid: process.pid, editor: 'code' });
+    expect(read().map(s => s.id)).toEqual([first.id]);
   });
 });
 
