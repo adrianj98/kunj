@@ -93,6 +93,37 @@ describe('kunj serve --machines and --allow-pairing', () => {
     expect(stderr.join('\n')).toMatch(/no request for 0.002 min: exiting/);
   });
 
+  it('an auto-started coordinator exits once coordinator.json names another one', async () => {
+    const record = path.join(dir, 'coordinator', 'coordinator.json');
+    const cmd = new ServeCommand({
+      backend: async () => fake, coordinatorDir: path.join(dir, 'coordinator'), provider: async () => provider,
+      onListening: () => {
+        // a later start took over
+        fs.writeFileSync(record, JSON.stringify({ pid: process.pid + 100000, port: 1, version: 'x', startedAt: 'x' }));
+      },
+      stderr: l => stderr.push(l), ownerCheckMs: 20,
+    });
+    const started = Date.now();
+    await cmd.execute({ machines: true, listen: '127.0.0.1:0', idleExit: '60' });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(stderr.join('\n')).toMatch(/coordinator \d+ took over: exiting/);
+    // the newer one's record is left alone
+    expect(JSON.parse(fs.readFileSync(record, 'utf8')).pid).toBe(process.pid + 100000);
+  });
+
+  it('a coordinator listens without waiting for a Docker that does not answer', async () => {
+    fake.info = () => new Promise(() => {});
+    let listened = false;
+    const cmd = new ServeCommand({
+      backend: async () => fake, coordinatorDir: path.join(dir, 'coordinator'), provider: async () => provider,
+      onListening: (_a, stop) => { listened = true; stop(); },
+      stderr: l => stderr.push(l), coordinatorDockerWaitMs: 20,
+    });
+    await cmd.execute({ machines: true, listen: '127.0.0.1:0' });
+    expect(listened).toBe(true);
+    expect(stderr.join('\n')).toMatch(/no Docker here/);
+  });
+
   it('keeps named client tokens for the coordinator with token add|list|remove --machines', async () => {
     const cmd = command();
     await cmd.execute('token', 'add', 'laptop-a', { machines: true });

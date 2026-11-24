@@ -2,6 +2,17 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-24 — Coordinator pile-up
+
+- 56 auto-started `kunj serve --machines --idle-exit 60` were running (up to 7.5 h), each polling
+  `gcloud compute instances list` every minute (61 at once, ~3.8 GB of Python). Cause: a coordinator
+  waited for Docker before listening; OrbStack answering slowly made starts miss the launcher's 20 s,
+  so the next command started another; each new one took over coordinator.json and the old ones
+  never exited because a cloud machine was awake.
+- Fix: an auto-started coordinator exits once coordinator.json names another (checked every minute);
+  a coordinator waits at most 2 s for Docker before listening. Killed every coordinator and its
+  gcloud polls (user asked).
+
 ## 2026-11-24 — Overview lines scroll sideways
 
 - The lanes beside the sidebar's rows are in a sideways-only scroll view as wide as the widest lane;

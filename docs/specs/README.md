@@ -35,6 +35,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
+| Local coordinator pile-up fixed: an auto-started coordinator exits when coordinator.json names another; coordinators listen without waiting for Docker | [cloud-machines.md](cloud-machines.md) | this commit |
 | Workspace app Overview lines scroll left and right beside the sidebar's rows; the demo's worktree paths match its plans | [agent-overview.md](agent-overview.md#the-window) | this commit |
 | Agents give a basic plan through `set_plan` (kunj's plugin, `kunj agent mcp`): one call per change, shown as steps in the Overview | [agent-overview.md](agent-overview.md#status) | this commit |
 | Agents are nudged to keep a plan: a `UserPromptSubmit` hook runs `kunj agent nudge`, adding their task list's state and a reminder to every prompt | [agent-overview.md](agent-overview.md#status) | this commit |

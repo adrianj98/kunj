@@ -188,3 +188,4 @@
 - Agent plan: steps from the Claude transcript's typed prompts for records without prompts. Page updated: none.
 - Agents give a basic plan with set_plan (kunj agent mcp in the plugin); prompts-as-steps removed. Page updated: none.
 - Workspace app Overview: lanes scroll sideways beside the sidebar rows. Page updated: none.
+- Local coordinator pile-up fixed (single owner via coordinator.json, no Docker wait). Page updated: none.

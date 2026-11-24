@@ -49,6 +49,10 @@ export interface ServeCommandDeps {
   stderr?: (line: string) => void;
   /** How long Docker may take to answer before the "Waiting for Docker" line (default 5000; tests) */
   slowDockerMs?: number;
+  /** How long a coordinator waits for Docker before listening without it (default 2000; tests) */
+  coordinatorDockerWaitMs?: number;
+  /** How often an auto-started coordinator checks it is still the one in coordinator.json (default 60 s; tests) */
+  ownerCheckMs?: number;
 }
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost|::1|\[::1\])$/;
@@ -221,8 +225,13 @@ export class ServeCommand extends BaseCommand {
       this.deps.slowDockerMs ?? 5000,
     );
     // fails early, with docker's own message, when the daemon is down; a coordinator needs no Docker
+    // and does not wait for it: a slow Docker kept an auto-started one from listening within the
+    // launcher's wait, and the launcher started another, and another (docs/specs/cloud-machines.md)
     const engine = opts.machines
-      ? await backend.info().catch(() => null).finally(() => clearTimeout(waiting))
+      ? await Promise.race([
+          backend.info().catch(() => null),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), this.deps.coordinatorDockerWaitMs ?? 2000).unref?.()),
+        ]).finally(() => clearTimeout(waiting))
       : await backend.info().finally(() => clearTimeout(waiting));
 
     const { fileAuthenticator } = await import('../lib/serve/token');
@@ -367,6 +376,26 @@ export class ServeCommand extends BaseCommand {
       writeRecord(recordFile, { pid: process.pid, port: address.port, version: getVersion(), startedAt: new Date().toISOString() });
     }
     touch();
+    // An auto-started coordinator (--idle-exit) is one of a kind: once coordinator.json names another
+    // (a later start that took over) or is gone, this one has no clients left and quits, instead of
+    // polling the cloud next to the new one for as long as a machine is awake
+    let ownerCheck: NodeJS.Timeout | undefined;
+    if (recordFile && opts.idleExit !== undefined) {
+      const file = recordFile;
+      ownerCheck = setInterval(() => {
+        let owner: number | undefined;
+        try {
+          owner = JSON.parse(fs.readFileSync(file, 'utf8'))?.pid;
+        } catch {
+          owner = undefined;
+        }
+        if (owner !== process.pid) {
+          stderr(`${stamp()} ${owner ? `coordinator ${owner} took over` : 'coordinator.json is gone'}: exiting`);
+          stopServer?.();
+        }
+      }, this.deps.ownerCheckMs ?? 60_000);
+      ownerCheck.unref?.();
+    }
     let idleLoop: NodeJS.Timeout | undefined;
     if (machines) {
       const { coordinator, idleMs: machineIdleMs } = machines;
@@ -404,6 +433,7 @@ export class ServeCommand extends BaseCommand {
       }
     });
     if (idleLoop) clearInterval(idleLoop);
+    if (ownerCheck) clearInterval(ownerCheck);
     await machines?.coordinator.close();
     if (recordFile) (await import('../lib/machines/local-coordinator')).removeRecord(recordFile, process.pid);
   }
