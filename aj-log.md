@@ -2,6 +2,13 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-24 — Steps from the transcript
+
+- An agent whose record has no prompts (started before prompts were recorded) now shows the last 30
+  prompts typed in its Claude transcript as steps, placed at their time so subagents and branch
+  markers hang off the right one. Why: every live agent showed "No task list yet" with only fork and
+  branch markers; recording prompts only helps after a restart.
+
 ## 2026-11-23 — Prompts as steps
 
 - The plan record now keeps each prompt the user sends; a conversation with no task list shows those

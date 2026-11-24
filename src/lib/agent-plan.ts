@@ -72,6 +72,33 @@ export function promptRecordLine(prompt: unknown, now = Date.now()): string | nu
   return `${JSON.stringify({ kunj: { t: Math.floor(now / 1000) }, hook: { hook_event_name: 'UserPromptSubmit', prompt: subject } })}\n`;
 }
 
+/**
+ * `text` with the transcript's prompts put in as prompt lines at their time (before the record's
+ * lines of the same second or later), for a record that has none: an agent started before kunj
+ * recorded prompts still shows what it was asked as its steps, with its markers and subagents at the
+ * prompt they came under.
+ */
+export function withTranscriptPrompts(text: string, prompts: Array<{ subject: string; at: number }>): string {
+  if (!prompts.length) return text;
+  const queue = [...prompts].sort((a, b) => a.at - b.at);
+  const out: string[] = [];
+  const flush = (until: number) => {
+    while (queue.length && Math.floor(queue[0].at / 1000) <= until) {
+      const p = queue.shift()!;
+      out.push(promptRecordLine(p.subject, p.at)!.trimEnd());
+    }
+  };
+  for (const raw of text.split('\n')) {
+    if (!raw.trim()) continue;
+    let t: unknown;
+    try { t = JSON.parse(raw)?.kunj?.t; } catch { /* kept as it is */ }
+    if (typeof t === 'number' && isFinite(t)) flush(t);
+    out.push(raw);
+  }
+  flush(Infinity);
+  return `${out.join('\n')}\n`;
+}
+
 export function hookSafe(command: string): string {
   return `(${command}) 2>/dev/null; true`;
 }

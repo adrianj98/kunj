@@ -11,7 +11,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { containerNames } from './container/names';
 import { kunjEntry } from './self';
-import { PLAN_TOOL_MATCHER, STOP_RECORD, hookSafe, planHookCommand, subagentToolHookCommand } from './agent-plan';
+import { PLAN_TOOL_MATCHER, STOP_RECORD, hookSafe, planHookCommand, promptSubject, subagentToolHookCommand } from './agent-plan';
 
 const execFileAsync = promisify(execFile);
 
@@ -396,6 +396,43 @@ export function conversationTitle(transcript: unknown, maxBytes = 256 * 1024): s
     return oneLine.length > 100 ? `${oneLine.slice(0, 99)}…` : oneLine;
   }
   return null;
+}
+
+/**
+ * The prompts the user typed in a Claude transcript, oldest first, each as its subject (first line,
+ * 80 characters) and time: what an agent was asked when its record has no prompts (hooks from before
+ * prompts were recorded). Hook feedback, notifications and other meta lines are left out. Reads at
+ * most the last `maxBytes`.
+ */
+export function transcriptPrompts(transcript: unknown, maxBytes = 32 * 1024 * 1024): Array<{ subject: string; at: number }> {
+  if (typeof transcript !== 'string' || !path.isAbsolute(transcript)) return [];
+  let text: string;
+  try {
+    const fd = fs.openSync(transcript, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const length = Math.min(size, maxBytes);
+      const buf = Buffer.alloc(length);
+      text = buf.subarray(0, fs.readSync(fd, buf, 0, length, size - length)).toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return [];
+  }
+  const out: Array<{ subject: string; at: number }> = [];
+  for (const line of text.split('\n')) {
+    if (!line.includes('"type":"user"')) continue;
+    let entry: any;
+    try { entry = JSON.parse(line); } catch { continue; }
+    if (entry?.type !== 'user' || entry.isMeta || entry.isCompactSummary || entry.isSidechain) continue;
+    const content = entry.message?.content;
+    if (typeof content !== 'string' || content.trimStart().startsWith('<')) continue;
+    const at = Date.parse(entry.timestamp);
+    const subject = promptSubject(content);
+    if (subject && isFinite(at)) out.push({ subject, at });
+  }
+  return out;
 }
 
 export interface SavedAgent {

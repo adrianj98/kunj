@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import * as os from 'os';
-import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, promptRecordLine, promptSubject, reducePlan, STOP_RECORD } from '../agent-plan';
+import { CONTAINER_PLAN_SCRIPT, subagentToolHookCommand, agentPlanDir, agentPlanFile, recordedPlanSessions, removePlanRecords, currentStep, parentLine, parseContainerPlans, planHookCommand, planNudge, planTitle, promptRecordLine, promptSubject, reducePlan, STOP_RECORD, withTranscriptPrompts } from '../agent-plan';
 
 const line = (hook: any, t = 100, branch = 'main') => JSON.stringify({ kunj: { t, branch }, hook });
 const create = (id: string, subject: string, extra: any = {}) => ({ hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: { task: { id, subject } }, ...extra });
@@ -365,5 +365,24 @@ describe('prompts as steps', () => {
     expect(promptSubject('x'.repeat(100))).toHaveLength(80);
     expect(promptSubject('  \n ')).toBeNull();
     expect(promptSubject(undefined)).toBeNull();
+  });
+});
+
+describe('withTranscriptPrompts', () => {
+  const line = (t: number, hook: object) => JSON.stringify({ kunj: { t }, hook });
+
+  test('puts the prompts in at their time, so a subagent hangs off the prompt it came under', () => {
+    const record = [
+      line(10, { hook_event_name: 'SessionStart', source: 'startup' }),
+      line(30, { hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'Explore' }),
+    ].join('\n');
+    const text = withTranscriptPrompts(record, [{ subject: 'second', at: 25_000 }, { subject: 'first', at: 20_000 }, { subject: 'later', at: 99_000 }]);
+    const plan = reducePlan(text);
+    expect(plan.steps.map(s => [s.subject, s.status])).toEqual([['first', 'completed'], ['second', 'completed'], ['later', 'in_progress']]);
+    expect(plan.subagents[0].fromStep).toBe(1);
+  });
+
+  test('no prompts: the record as it was', () => {
+    expect(withTranscriptPrompts('x', [])).toBe('x');
   });
 });

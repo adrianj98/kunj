@@ -486,3 +486,32 @@ describe('promptHookCommand', () => {
     expect(JSON.parse(claudeHookSettings()).hooks.Stop).toHaveLength(1);
   });
 });
+
+describe('transcriptPrompts', () => {
+  const { transcriptPrompts } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+  const fs = jest.requireActual<typeof import('fs')>('fs');
+  const os = jest.requireActual<typeof import('os')>('os');
+  const path = jest.requireActual<typeof import('path')>('path');
+
+  test('the typed prompts only, oldest first, as subjects with their time', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-transcript-'));
+    const file = path.join(dir, 't.jsonl');
+    const user = (content: unknown, extra: object = {}) => JSON.stringify({ type: 'user', timestamp: '2026-11-23T10:00:00.000Z', message: { role: 'user', content }, ...extra });
+    fs.writeFileSync(file, [
+      user('fix the overview\nplease'),
+      user([{ type: 'tool_result', content: 'x' }]),
+      user('<task-notification>done</task-notification>'),
+      user('Stop hook feedback: run it', { isMeta: true }),
+      user('summary', { isCompactSummary: true }),
+      JSON.stringify({ type: 'assistant', message: { content: 'hi' } }),
+      user('then reinstall'),
+    ].join('\n'));
+    expect(transcriptPrompts(file)).toEqual([
+      { subject: 'fix the overview', at: Date.parse('2026-11-23T10:00:00.000Z') },
+      { subject: 'then reinstall', at: Date.parse('2026-11-23T10:00:00.000Z') },
+    ]);
+    expect(transcriptPrompts('relative.jsonl')).toEqual([]);
+    expect(transcriptPrompts(path.join(dir, 'missing.jsonl'))).toEqual([]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});

@@ -10,10 +10,10 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, promptHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, promptHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile, transcriptPrompts } from '../lib/agent-session';
 import { packagedPluginDir } from '../lib/skills';
 import { activePlans, buildOverview, subagentLabel } from '../lib/agent-overview';
-import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, parentLine, planNudge, planPosition, promptRecordLine, readPlanFile, reducePlan } from '../lib/agent-plan';
+import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, HISTORY_STEPS, parentLine, planNudge, planPosition, promptRecordLine, withTranscriptPrompts, readPlanFile, reducePlan } from '../lib/agent-plan';
 import type { AgentForgetJson, AgentOverviewJson, AgentPlanItemJson, AgentPlanJson, AgentPlanStepJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
@@ -471,7 +471,14 @@ export class AgentCommand extends BaseCommand {
         const isRunning = running ? running.includes(s.session) : null;
         const text = readPlanFile(agentPlanFile(kunjDir, s.session));
         if (!text.trim() && isRunning !== true) continue;
-        const { branch: _branch, transcript, ...plan } = reducePlan(text, roots);
+        let reduced = reducePlan(text, roots);
+        // hooks from before prompts were recorded: what the agent was asked, from its transcript
+        if (!text.includes('"UserPromptSubmit"') && reduced.transcript) {
+          // the latest ones, as many as the history keeps
+          const prompts = transcriptPrompts(reduced.transcript).slice(-HISTORY_STEPS);
+          if (prompts.length) reduced = reducePlan(withTranscriptPrompts(text, prompts), roots);
+        }
+        const { branch: _branch, transcript, ...plan } = reduced;
         plans.push({
           session: s.session, id: s.id, branch: wt.branch!, worktree: wt.path,
           running: isRunning, state: isRunning === false ? null : readAgentState(agentStateFile(kunjDir, s.session)),
