@@ -190,7 +190,8 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
   // they stay in front of the tasks (so a marker's or loop's step stays the one it was recorded at)
   // and later prompts are not added
   let prompts: Task[] = [];
-  const hasOwnTasks = () => order.some(id => tasks.get(id)!.owner === null);
+  // set by the conversation's first task of its own and kept (deleting them all brings no prompts back)
+  let keptTasks = false;
   const ownSteps = (): Task[] => [...prompts, ...order.map(id => tasks.get(id)!).filter(t => t.owner === null)];
   const endPrompt = (at: string) => {
     const last = prompts[prompts.length - 1];
@@ -235,7 +236,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       const n = conversations++;
       const done = mainSteps().filter(t => t.status === 'completed').map(t => ({ ...t, id: t.id.startsWith('h') ? t.id : `h${n}-${t.id}` }));
       history = done.slice(-HISTORY_STEPS);
-      tasks = new Map(); order = []; title = null; subagents = new Map(); pendingTasks = []; prompts = [];
+      tasks = new Map(); order = []; title = null; subagents = new Map(); pendingTasks = []; prompts = []; keptTasks = false;
       markers = history.length ? [{ type: 'new', afterStep: history.length - 1, at }] : [];
     }
 
@@ -260,7 +261,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       if (hook.source === 'fork' || hook.source === 'compact') markers.push({ type: hook.source, afterStep: planPosition(mainSteps()), at });
     } else if (event === 'UserPromptSubmit' && agent === null) {
       const subject = promptSubject(hook.prompt);
-      if (subject && !hasOwnTasks()) {
+      if (subject && !keptTasks) {
         endPrompt(at);
         prompts.push({ id: `p${prompts.length + 1}`, subject, status: 'in_progress', owner: null, kind: 'prompt', startedAt: at });
       }
@@ -293,7 +294,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       const id = str(made?.id) ?? (typeof made?.id === 'number' ? String(made.id) : undefined);
       const subject = str(made?.subject) ?? str(input.subject);
       if (id && subject && !tasks.has(id)) {
-        if (!(agent && subagents.has(agent))) endPrompt(at);
+        if (!(agent && subagents.has(agent))) { endPrompt(at); keptTasks = true; }
         tasks.set(id, { id, subject, status: 'pending', owner: agent && subagents.has(agent) ? agent : null });
         order.push(id);
       }
@@ -314,7 +315,7 @@ export function reducePlan(text: string, worktrees: string[] = []): ReducedPlan 
       // the same owner for what is replaced and what replaces it: a subagent whose start was not
       // recorded (a cut record) writes to the session's own list both times
       const owner = agent && subagents.has(agent) ? agent : null;
-      if (owner === null) endPrompt(at);
+      if (owner === null) { endPrompt(at); keptTasks = true; }
       const before = [...tasks.values()].filter(t => t.owner === owner);
       for (const t of before) { tasks.delete(t.id); order = order.filter(o => o !== t.id); }
       input.todos.forEach((todo: any, i: number) => {
