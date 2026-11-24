@@ -2,6 +2,14 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-24 — Overview lines scroll sideways
+
+- The lanes beside the sidebar's rows are in a sideways-only scroll view as wide as the widest lane;
+  vertical scrolling still moves the list. Why: the user asked for the lines to scroll left and
+  right instead of being cut at the window's edge.
+- The demo's worktree paths now match its plans (only the container lane showed before), and
+  `-windowWidth` narrows the window for a screenshot. Why: to check the Overview with every lane.
+
 ## 2026-11-24 — Agents give a basic plan with set_plan
 
 - Removed the prompts-as-steps tracking (recorded prompts, Stop lines, transcript prompts). Why: the

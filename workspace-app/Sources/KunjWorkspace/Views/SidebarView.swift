@@ -71,6 +71,18 @@ final class SidebarView: NSView {
     private var columnWidth: NSLayoutConstraint!
     /// The agents' plans right of the rows while the Overview is shown (`showPlans`).
     let plans = OverviewCanvas(frame: .zero)
+    /// Holds `plans` beside the rows: scrolls them left and right; up and down is the list's own scroll.
+    private lazy var plansScroll: SidewaysScrollView = {
+        let s = SidewaysScrollView()
+        s.drawsBackground = false
+        s.hasHorizontalScroller = true
+        s.hasVerticalScroller = false
+        s.autohidesScrollers = true
+        s.scrollerStyle = .overlay
+        s.borderType = .noBorder
+        s.documentView = plans
+        return s
+    }()
     private var planData: (repos: [AgentOverviewJson], filter: OverviewFilter)?
     /// Where the list starts: the Overview's bar sits above it, right of the search.
     var listTopAnchor: NSLayoutYAxisAnchor { scroll.topAnchor }
@@ -99,7 +111,6 @@ final class SidebarView: NSView {
         let data = overviewColumn == nil ? nil : data
         planData = data
         if data == nil {
-            plans.removeFromSuperview()
             list.plans = nil
             list.onPlaced = nil
             list.rowHeights = [:]
@@ -108,7 +119,7 @@ final class SidebarView: NSView {
             // the rows go back to their own height
             list.layoutRows()
         } else {
-            list.plans = plans
+            list.plans = plansScroll
         }
         placePlans()
     }
@@ -122,6 +133,14 @@ final class SidebarView: NSView {
         list.onPlaced = { [weak self] tops in
             guard let self, let data = self.planData else { return }
             self.plans.showAligned(data.repos, filter: data.filter, lanes: alignment.lanes, rowTops: tops)
+            // as wide as the widest lane (scrolled sideways) and as tall as the list it sits beside; the
+            // lanes are placed again at that size (they take the canvas's width)
+            let room = self.plansScroll.frame.size
+            let size = NSSize(width: max(room.width, self.plans.alignedContentWidth), height: room.height)
+            if self.plans.frame.size != size {
+                self.plans.frame = NSRect(origin: .zero, size: size)
+                self.plans.showAligned(data.repos, filter: data.filter, lanes: alignment.lanes, rowTops: tops)
+            }
         }
         list.layoutRows()
     }
@@ -562,5 +581,17 @@ extension SidebarView: NSMenuDelegate {
         // picking a repository while all are listed means: list the active ones and this one
         if !hideEmptyRepos && pinned.contains(root) { onShowAllRepos(false) }
         reload()
+    }
+}
+
+/// Scrolls only sideways: a mostly vertical wheel or trackpad move goes to the enclosing list, so the
+/// plans beside the sidebar's rows scroll up and down with them.
+final class SidewaysScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        if abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) {
+            nextResponder?.scrollWheel(with: event)
+        } else {
+            super.scrollWheel(with: event)
+        }
     }
 }

@@ -135,6 +135,14 @@ final class OverviewCanvas: NSView {
         needsDisplay = true
     }
 
+    /// How wide the lanes beside the rows are drawn: the widest family kunj laid out, from the lanes'
+    /// left edge, with a margin (the sidebar scrolls them sideways when it is wider than the room).
+    var alignedContentWidth: CGFloat {
+        (aligned ?? []).reduce(0) { widest, p in
+            max(widest, Self.alignedGx + CGFloat(repos[p.repo].families[p.family].width) + 24)
+        }
+    }
+
     /// The line's y of the lane a child branched from, when it is shown: where its elbow starts.
     private func parentLineY(of p: Placed) -> CGFloat? {
         guard let b = p.lane.elbow else { return nil }

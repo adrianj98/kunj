@@ -21,7 +21,8 @@ enum DemoData {
         let dir = branch.replacingOccurrences(of: "/", with: "-")
         return Environment(
             id: environmentId(repo: repo.name, kind: kind, branch: branch), kind: kind, repo: repo, branch: branch,
-            path: kind == .worktree ? (isMain ? repo.root : "\(repo.root)/.git/kunj/worktrees/\(dir)") : nil,
+            // beside the repository, as the demo plans (DemoPlans.swift) have the worktrees
+            path: kind == .worktree ? (isMain ? repo.root : "\((repo.root as NSString).deletingLastPathComponent)/\(branch)") : nil,
             containerName: kind == .container ? "\(repo.name)-\(dir)" : nil,
             state: state ?? (kind == .worktree ? .ok : .running), agent: agent,
             agentSession: kind == .worktree && agent != .none ? "kunj-\(repo.name)-\(dir)" : nil,

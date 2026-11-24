@@ -199,6 +199,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 // -overviewInline YES: the main window with its Overview item selected (the usual screenshot below)
                 if self?.overviewArgument == true, UserDefaults.standard.bool(forKey: "overviewInline") {
+                    // -windowWidth <n>: a narrower window, to see the lanes scroll sideways
+                    let width = UserDefaults.standard.double(forKey: "windowWidth")
+                    if width > 0, let window = self?.windowController.window {
+                        var frame = window.frame
+                        frame.size.width = max(width, window.minSize.width)
+                        window.setFrame(frame, display: true)
+                    }
                     self?.windowController.showOverview()
                     for _ in 0..<300 where self?.windowController.overview.isSettled != true {
                         try? await Task.sleep(nanoseconds: 100_000_000)

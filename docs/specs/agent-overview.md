@@ -208,6 +208,10 @@ families (a family shows when any of its lanes passes).
   lane passes), `overviewSummary()` (kunj's line for one repository, the totals for several) and
   `laneIndex(at:in:)` for a click. `OverviewCanvas` strokes the positions as given. No layout, no
   grouping and no wording in Swift.
+- **Sideways:** beside the sidebar's rows the lanes sit in a sideways-only scroll view
+  (`SidewaysScrollView` in SidebarView.swift) as wide as the widest family (`alignedContentWidth`); a
+  mostly vertical scroll goes on to the list, so rows and lanes scroll up and down together. Checked
+  with `--demo --overview -overviewInline YES -windowWidth 1000 --screenshot <png>`.
 - **Refresh:** `KunjEvent.agentPlan` (a `plan` event, of a host session or of a container) → `EnvironmentStore.onPlanChanged`, which runs no listing; the store's `onChange`
   (an agent started, ended or began waiting); and every 10 s while the window is visible. Changes
   are gathered for 0.3 s. The event-driven reads run while the Overview is hidden too, from the first
