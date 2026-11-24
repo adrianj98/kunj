@@ -239,6 +239,14 @@ from a terminal with `kunj agent <branch> --session handoff`.
 The new branch starts from your default base branch; ask for "from this branch" to build on the
 current one. Uncommitted changes are not carried over, only the brief.
 
+To continue a Claude Code web session (claude.ai/code) on your Mac in its own worktree, give the
+skill its session id or URL: `/kunj:handoff --teleport session_01Gsw…`, or `/kunj:teleport
+session_01Gsw…` (`/teleport` with the installed copy). No brief is written: the skill creates a
+worktree and starts `claude --teleport <session>` there
+(`kunj agent start <branch> --detach --open-in-app --teleport <session>`), and Claude checks out the
+web session's branch in it. If that branch is already checked out in another worktree, run
+`kunj agent start <that branch> --teleport <session>` instead.
+
 To copy from a terminal where a program has the mouse (tmux with `mouse on`, or a full-screen agent),
 hold ⌥ (or ⇧) while you drag, then press ⌘C. The selection stays until you copy, click again or scroll.
 In a Shell tab a plain drag does this too, because tmux's own copy never reaches the Mac clipboard;

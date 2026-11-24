@@ -461,6 +461,17 @@ describe('resuming a Claude conversation', () => {
     expect(withAgentResume('agy', 'abc')).toBe('agy');
     expect(withAgentResume('claude', null)).toBe('claude');
   });
+
+  it('teleports a claude to a web session given by id or URL, and refuses anything else', () => {
+    const { withAgentTeleport, checkTeleportId } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+    expect(withAgentTeleport('claude --model opus', 'session_01Gsw')).toBe('claude --model opus --teleport session_01Gsw');
+    expect(withAgentTeleport('claude', null)).toBe('claude');
+    expect(checkTeleportId('session_01GswEqFVAEhfqNDfU19ZpW8')).toBe('session_01GswEqFVAEhfqNDfU19ZpW8');
+    expect(checkTeleportId('https://claude.ai/code/session_01Gsw?x=1')).toBe('session_01Gsw');
+    for (const bad of ['', 'a b', 'x;rm -rf /', '$(id)', '-p']) {
+      expect(() => checkTeleportId(bad)).toThrow(/Not a Claude Code session id/);
+    }
+  });
 });
 
 describe('planNudgeHookCommand', () => {

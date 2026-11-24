@@ -1,12 +1,35 @@
 ---
 name: handoff
-description: Hand off the work being discussed to a new agent in a new kunj worktree - writes a brief from this conversation, creates the worktree, starts a Claude agent there with the brief as its first prompt, and the Kunj Workspace app switches to it. Use when the user says /handoff, "hand this off", "start that in a new worktree", or asks for a new agent to pick up the research or plan just discussed.
+description: Hand off the work being discussed to a new agent in a new kunj worktree - writes a brief from this conversation, creates the worktree, starts a Claude agent there with the brief as its first prompt, and the Kunj Workspace app switches to it. With --teleport <session> it instead continues a Claude Code web session (claude --teleport) in a new worktree, with no brief. Use when the user says /handoff, "hand this off", "start that in a new worktree", asks for a new agent to pick up the research or plan just discussed, or gives /handoff a --teleport session id.
 ---
 
 # Hand off to a new worktree
 
 The user wants the work in this conversation picked up by a fresh agent in its own worktree. The new
 agent sees nothing of this conversation except the brief you write, so the brief is the whole job.
+
+## Teleport: `/handoff [claude] --teleport <session>`
+
+When the arguments contain `--teleport <session>` (a Claude Code web session id such as
+`session_01GswEqFVAEhfqNDfU19ZpW8`, or its `https://claude.ai/code/session_…` URL), the user wants that
+web session continued locally in its own worktree, not this conversation handed over. Then:
+
+- Write **no brief**: the teleported session brings its own conversation. Skip step 1.
+- A leading `claude` is the agent to run, which is the only one that can teleport. If the user names
+  another agent (`antigravity`), say it cannot teleport and stop.
+- Branch (step 2): the name the user gave, else `teleport-<the last 8 characters of the id, lowercased>`.
+  Always from kunj's default base: `claude --teleport` checks out the web session's own branch in the
+  worktree, so the branch you create is only a starting point.
+- Step 3 with `--teleport <session>` in place of `--prompt-file <brief>`:
+  ```bash
+  kunj worktree add -c <branch> --json
+  kunj agent start <branch> --session handoff --detach --open-in-app --teleport <session> --json
+  ```
+  An error code `bad-teleport-id` means the id is not one; show kunj's message and stop.
+- Report as in step 4, without a brief path, and add: claude fetches and checks out the web session's
+  branch in that worktree, which fails when that branch is already checked out in another worktree; then
+  run `kunj agent start <that branch> --teleport <session>` there instead (`kunj worktree list` shows it).
+  Nothing in this session can see whether the teleport succeeded: the user sees it in the agent's tab.
 
 ## 1. Write the brief
 

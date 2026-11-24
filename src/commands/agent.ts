@@ -10,7 +10,7 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, planNudgeHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile, execScript, kunjSelf, shQuote } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, withAgentTeleport, checkTeleportId, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, planNudgeHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile, execScript, kunjSelf, shQuote } from '../lib/agent-session';
 import { packagedPluginDir } from '../lib/skills';
 import { activePlans, buildOverview, subagentLabel } from '../lib/agent-overview';
 import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, parentLine, planNudge, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
@@ -24,6 +24,7 @@ interface AgentOptions {
   session?: string;
   all?: boolean;
   resume?: boolean;
+  teleport?: string;
   detach?: boolean;
   promptFile?: string;
   openInApp?: boolean;
@@ -51,6 +52,7 @@ export class AgentCommand extends BaseCommand {
         { flags: '--no-tmux', description: 'Run the agent directly in this terminal, without a tmux session' },
         { flags: '--session <id>', description: "One of several agents of the worktree: its own tmux session (<agent session>-a-<id>; letters, digits, _ and -, up to 32)" },
         { flags: '--resume', description: "[start] When the session is not running, resume its agent's last Claude conversation (saved by a hook)" },
+        { flags: '--teleport <session>', description: '[start] Continue a Claude Code web session here (claude --teleport <session>; a session id or its claude.ai/code URL; a new session only)' },
         { flags: '--all', description: '[stop] Stop the default session and every --session one (exit 0 when none runs); [forget] forget every saved conversation of the worktree; [plan] the agents of every worktree of the repository' },
         { flags: '--detach', description: '[start] Start the tmux session without attaching to it (no terminal needed); a running one is left as it is' },
         { flags: '--prompt-file <file>', description: "[start] The agent's first prompt, read from a file (claude only; a new session only)" },
@@ -81,6 +83,8 @@ export class AgentCommand extends BaseCommand {
         '(the app quit with Close All, a reboot), start --resume runs claude --resume <id> in a new one.',
         '`saved` lists those conversations with their first prompt; resume one with',
         '`kunj agent start <branch> --session <id> --resume` (no --session for the default one).',
+        '--teleport: `kunj agent start <branch> --teleport session_01…` runs claude --teleport in the worktree;',
+        'claude checks out the web session\'s branch there, so that branch must not be checked out elsewhere.',
         '',
         '--detach starts the session in the background and returns (with --json: branch, worktree,',
         'session, id, started). --prompt-file gives a new claude agent its first prompt; --open-in-app',
@@ -240,9 +244,12 @@ export class AgentCommand extends BaseCommand {
       return;
     }
 
-    if ((opts.detach || opts.promptFile || opts.openInApp) && verb !== 'start') {
-      throw new AgentError('bad-option', '--detach, --prompt-file and --open-in-app only go with `kunj agent start`.');
+    if ((opts.detach || opts.promptFile || opts.openInApp || opts.teleport) && verb !== 'start') {
+      throw new AgentError('bad-option', '--detach, --prompt-file, --open-in-app and --teleport only go with `kunj agent start`.');
     }
+    const teleportArg = opts.teleport !== undefined ? checkTeleportId(opts.teleport) : null;
+    if (teleportArg && opts.resume) throw new AgentError('bad-option', '--teleport and --resume each pick the conversation; use one.');
+    if (teleportArg && opts.promptFile) throw new AgentError('bad-option', '--teleport continues a conversation that has its own prompts; drop --prompt-file.');
     if (!opts.detach && !process.stdin.isTTY) throw new AgentError('no-tty', 'kunj agent needs a terminal to attach to. Run it from an interactive terminal, or use `kunj agent status` to check on it.');
     const config = await loadResolvedConfig(process.cwd());
     // The Claude Code hooks report "waiting for input" into the state file (agent-session.ts)
@@ -256,6 +263,12 @@ export class AgentCommand extends BaseCommand {
     const resumeId = opts.resume && !(sessions?.includes(session) ?? false) ? readAgentResume(resumeFile) : null;
     // a failed listing does not mean it is not running: ask tmux about this one
     const alreadyRunning = sessions ? sessions.includes(session) : opts.detach === true && tmux === 'failed' && await hasTmuxSession(session);
+    if (teleportArg && !isClaudeCommand(agentCmd)) {
+      throw new AgentError('teleport-needs-claude', `--teleport only works with claude, and this agent runs \`${agentCmd}\`.`);
+    }
+    // a running session is reattached as it is
+    const teleportId = teleportArg && !alreadyRunning ? teleportArg : null;
+    if (teleportArg && alreadyRunning) process.stderr.write(`⚠ ${session} is already running; --teleport was not applied to it.\n`);
     let promptCopy: string | null = null;
     if (opts.promptFile) {
       if (!isClaudeCommand(agentCmd)) {
@@ -306,7 +319,7 @@ export class AgentCommand extends BaseCommand {
     const plugin = fs.existsSync(path.join(packagedPluginDir(), '.claude-plugin', 'plugin.json')) ? packagedPluginDir() : null;
     // the plan is only worth recording when the agent keeps a task list: ask it to (agent.taskList)
     const taskList = withPlan && config.agent?.taskList !== false;
-    const command = withAgentPrompt(withAgentPlugin(withAgentTaskList(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false, withPlan, taskList ? planNudgeHookCommand() : undefined), taskList), plugin), promptCopy);
+    const command = withAgentPrompt(withAgentPlugin(withAgentTaskList(withAgentHooks(withAgentTeleport(withAgentResume(agentCmd, resumeId), teleportId), stateFile, config.agent?.hooks !== false, withPlan, taskList ? planNudgeHookCommand() : undefined), taskList), plugin), promptCopy);
     const vars = {
       KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile,
       ...(withPlan ? { KUNJ_AGENT_PLAN: planFile, ...PLAN_ENV } : {}),

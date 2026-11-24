@@ -7,7 +7,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { UserError } from './errors';
 
-export const KUNJ_SKILLS = ['handoff'] as const;
+export const KUNJ_SKILLS = ['handoff', 'teleport'] as const;
 const MARKER = '.kunj-version';
 
 // The Claude Code plugin in the package (claude-plugin/ next to dist/ and src/): `kunj agent` loads it

@@ -2161,3 +2161,8 @@ The user asked to be able to choose a remote in the app when remotes are availab
   then exit 0). Why: dash (/bin/sh in most Linux containers) exits 2 on a failed redirect, and Claude Code reads exit 2
   from PreToolUse as "block the tool call" and from Stop as "do not stop"; a missing state or plan folder would have
   blocked the agent. Tested in sh, dash and bash.
+- Teleport: `kunj agent start --teleport <session>` (a Claude Code web session id or its claude.ai/code URL) runs
+  `claude --teleport <id>` in the worktree's agent session; the /handoff skill takes `--teleport <session>` (no brief)
+  and a new `teleport` skill (also installed by `kunj install skill`) does the same. Why: the user wants
+  `/handoff claude --teleport session_…` and `/teleport session_…` to bring a web session into its own worktree and
+  agent tab. The id is validated (letters, digits, _ and -, not starting with -) because it goes into a shell command.

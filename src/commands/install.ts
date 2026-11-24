@@ -61,7 +61,7 @@ export class InstallCommand extends BaseCommand {
           '  macos      Kunj menu bar app, installed to /Applications (or ~/Applications)',
           '  workspace  Kunj Workspace app: worktrees, containers, terminals and agents in one window (macOS)',
           '  all        All of them, where available',
-          '  skill      The /handoff Claude Code skill, copied to ~/.claude/skills/ (not part of all)',
+          '  skill      The /handoff and /teleport Claude Code skills, copied to ~/.claude/skills/ (not part of all)',
           '',
           `They are downloaded from https://github.com/${RELEASES_REPO}/releases. The macOS apps are not`,
           'notarized; the download quarantine is cleared so they open without a warning.',

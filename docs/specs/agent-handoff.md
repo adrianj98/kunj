@@ -14,6 +14,7 @@ agent there with the brief as its first prompt, and the workspace app switches t
 | Workspace app: open, select and focus the handed-off agent | Shipped |
 | Skill: `claude-plugin/skills/handoff/SKILL.md`, `kunj install skill`, offered by `kunj setup` | Shipped |
 | Every kunj agent loads the skills (`claude-plugin/` as a Claude Code plugin, `--plugin-dir`) | Shipped |
+| Teleport: `kunj agent start --teleport <session>`, `/handoff --teleport <session>`, `/teleport <session>` skill | Shipped |
 
 ## The skill
 
@@ -53,6 +54,22 @@ The skill needs no app: outside it the agent runs in tmux and the user attaches 
 **`kunj events`.** When the agent poll sees a new session, one more `tmux list-sessions` reads
 `@kunj_worktree` and `@kunj_open` for it (only then, so a quiet poll stays one call). A new session's event gains `id` (its `--session` id or null), `worktree` (the
 tagged path) and `open: 'app'` when the option is set. Fields are only added (`EventJson`).
+
+## Teleport
+
+*Added 2026-11-24.* A Claude Code web session (claude.ai/code) can be continued in a new worktree the
+same way: `/handoff [claude] --teleport <session>` or the `teleport` skill (`/kunj:teleport <session>`,
+or `/teleport` with the installed copy, unless Claude Code's own `/teleport` command takes the name).
+No brief is written; the skill creates the worktree (`teleport-<last 8 of the id>` unless named) and runs
+`kunj agent start <branch> --session handoff|teleport --detach --open-in-app --teleport <session>`.
+
+`--teleport <session>` (src/commands/agent.ts) takes a session id or its claude.ai/code URL
+(`checkTeleportId()`: the last path segment, letters, digits, `_` and `-`, not starting with `-`, else
+`bad-teleport-id`), is claude only (`teleport-needs-claude`), refuses `--resume` and `--prompt-file`
+(`bad-option`), and on a new session appends `--teleport <id>` to the command (`withAgentTeleport()`);
+a running session is reattached without it. Claude checks out the web session's branch in the worktree,
+which git refuses when that branch is checked out in another worktree: the skill tells the user to run
+`kunj agent start <that branch> --teleport <session>` there instead.
 
 ## Workspace app
 

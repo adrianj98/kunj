@@ -17,7 +17,8 @@ import { SET_PLAN_TOOL_ID } from './plan-mcp';
 const execFileAsync = promisify(execFile);
 
 export type AgentErrorCode = 'tmux-missing' | 'no-tty' | 'not-running' | 'no-worktree' | 'bad-session-id' | 'unknown-agent'
-  | 'bad-option' | 'prompt-needs-claude' | 'prompt-not-found' | 'prompt-too-large' | 'start-failed' | 'tmux-failed';
+  | 'bad-option' | 'prompt-needs-claude' | 'prompt-not-found' | 'prompt-too-large' | 'start-failed' | 'tmux-failed'
+  | 'bad-teleport-id' | 'teleport-needs-claude';
 
 // Expected outcomes: printed without a stack trace
 export class AgentError extends Error {
@@ -467,6 +468,23 @@ export function withAgentResume(command: string, id: string | null): string {
   if (!id) return command;
   const first = command.trim().split(/\s+/)[0] ?? '';
   return path.basename(first) === 'claude' ? `${command.trim()} --resume ${id}` : command;
+}
+
+// A Claude Code web session id for `claude --teleport` (`session_01Gsw…`), or the id at the end of its
+// claude.ai/code URL. It is put in a shell command, so only letters, digits, _ and - pass, and it
+// cannot start with - (claude would read an option).
+export function checkTeleportId(value: string): string {
+  const id = value.trim().replace(/^https?:\/\/[^\s]*\/(?=[^/]+$)/, '').replace(/[?#].*$/, '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) {
+    throw new AgentError('bad-teleport-id', `Not a Claude Code session id: ${value} (expected something like session_01GswEqFVAEhfqNDfU19ZpW8).`);
+  }
+  return id;
+}
+
+// `command --teleport <id>` (a Claude Code web session continued here); claude only
+export function withAgentTeleport(command: string, id: string | null): string {
+  if (!id) return command;
+  return `${command.trim()} --teleport ${id}`;
 }
 
 // The hooks as `claude --settings` takes them. No single quotes anywhere, so the JSON can be

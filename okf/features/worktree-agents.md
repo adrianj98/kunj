@@ -128,6 +128,12 @@ Claude Code plugin in the package that `kunj agent` passes to every claude it st
 `kunj install skill` still copies the skill into `~/.claude/skills/` (`.kunj-version` marker,
 src/lib/skills.ts) for a claude started by hand. Spec: docs/specs/agent-handoff.md.
 
+`--teleport <session>` (a Claude Code web session id or its claude.ai/code URL, `checkTeleportId()`)
+appends `--teleport <id>` to a new claude session's command (`withAgentTeleport()`); claude only, not
+with `--resume` or `--prompt-file`. `/handoff --teleport <session>` and the `teleport` skill
+(`claude-plugin/skills/teleport/`, also in `KUNJ_SKILLS`) create a worktree and start it detached,
+with no brief.
+
 # Status in the listing
 
 With status, `listWorktreesDetailed()` makes one `tmux list-sessions` call in the same `Promise.all` as

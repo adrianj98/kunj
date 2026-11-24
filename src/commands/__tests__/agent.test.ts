@@ -389,6 +389,25 @@ describe('--resume', () => {
   });
 });
 
+describe('--teleport', () => {
+  test('a new session runs claude --teleport with the id from an id or a URL', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    await new AgentCommand().execute('start', 'feature-a', { teleport: 'https://claude.ai/code/session_01Gsw' } as any);
+    expect(JSON.stringify((runTmux as jest.Mock).mock.calls[0][0])).toContain('claude --teleport session_01Gsw --settings');
+  });
+
+  test('refuses a bad id, --resume or --prompt-file with it, and leaves a running session alone', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    await expect(new AgentCommand().execute('start', 'feature-a', { teleport: '$(id)' } as any)).rejects.toThrow(/Not a Claude Code session id/);
+    await expect(new AgentCommand().execute('start', 'feature-a', { teleport: 'session_1', resume: true } as any)).rejects.toThrow(/use one/);
+    await expect(new AgentCommand().execute('start', 'feature-a', { teleport: 'session_1', promptFile: '/b.md' } as any)).rejects.toThrow(/drop --prompt-file/);
+    expect(runTmux).not.toHaveBeenCalled();
+    tmuxSessions.mockResolvedValue([session]);
+    await new AgentCommand().execute('start', 'feature-a', { teleport: 'session_1' } as any);
+    for (const call of (runTmux as jest.Mock).mock.calls) expect(JSON.stringify(call[0])).not.toContain('--teleport');
+  });
+});
+
 describe('saved and forget', () => {
   const { savedAgents } = jest.requireMock<any>('../../lib/agent-session');
   const fs = jest.requireMock<any>('fs');
