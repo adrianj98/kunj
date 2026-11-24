@@ -2,6 +2,17 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-24 — Agents give a basic plan with set_plan
+
+- Removed the prompts-as-steps tracking (recorded prompts, Stop lines, transcript prompts). Why: the
+  user found tracking every question too much; they want the agent to give a basic plan itself.
+- Added `set_plan`, a tool in kunj's Claude plugin served by `kunj agent mcp`: one call with the
+  whole plan (a few short steps and the current one), replacing it each time, allowed without a
+  prompt. The system prompt and the per-prompt nudge now ask for it, even for short work. Why: the
+  task tools take a call per task and per change, so agents skipped them; one cheap call, like the
+  work-band mod's set_topic, gets done. Checked with a real Haiku agent: it set a 4-step plan first
+  and moved it on twice.
+
 ## 2026-11-24 — Steps from the transcript
 
 - An agent whose record has no prompts (started before prompts were recorded) now shows the last 30

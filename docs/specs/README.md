@@ -35,7 +35,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
-| An agent with no task list shows your prompts as its steps in the plan and the Overview (`kind: 'prompt'`) | [agent-overview.md](agent-overview.md#status) | this commit |
+| Agents give a basic plan through `set_plan` (kunj's plugin, `kunj agent mcp`): one call per change, shown as steps in the Overview | [agent-overview.md](agent-overview.md#status) | this commit |
 | Agents are nudged to keep a plan: a `UserPromptSubmit` hook runs `kunj agent nudge`, adding their task list's state and a reminder to every prompt | [agent-overview.md](agent-overview.md#status) | this commit |
 | Workspace app sidebar shows only active repositories: suspended sessions wait under `N more…`, a repositories menu beside the search picks Active/All or pins others | [workspace-ide.md](workspace-ide.md) | this commit |
 | Workspace app Overview fills as it goes: a quick host-only read and the full read per repository, each drawn as it arrives | [agent-overview.md](agent-overview.md#the-window) | this commit |

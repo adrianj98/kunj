@@ -11,7 +11,8 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { containerNames } from './container/names';
 import { kunjEntry } from './self';
-import { PLAN_TOOL_MATCHER, STOP_RECORD, hookSafe, planHookCommand, promptSubject, subagentToolHookCommand } from './agent-plan';
+import { PLAN_TOOL_MATCHER, hookSafe, planHookCommand, subagentToolHookCommand } from './agent-plan';
+import { SET_PLAN_TOOL_ID } from './plan-mcp';
 
 const execFileAsync = promisify(execFile);
 
@@ -263,13 +264,12 @@ export function kunjSelf(): string[] {
   return [process.execPath, kunjEntry()];
 }
 
-// The UserPromptSubmit hook of a host agent with a plan record (this kunj): `agent prompt` records
-// the prompt's first line as a step (never the whole prompt); `agent nudge` also tells the agent
-// where its task list is. Undefined when a path holds a quote (the settings JSON is single-quoted,
-// the command double-quotes the paths).
-export function promptHookCommand(nudge: boolean, self: string[] = kunjSelf()): string | undefined {
+// The UserPromptSubmit hook that tells a host agent where its task list is (`kunj agent nudge`, this
+// kunj), or undefined when a path holds a quote (the settings JSON is single-quoted, the command
+// double-quotes the paths).
+export function planNudgeHookCommand(self: string[] = kunjSelf()): string | undefined {
   if (self.some(p => /["'`$\\]/.test(p))) return undefined;
-  return hookSafe(`[ -z "$KUNJ_AGENT_PLAN" ] || ${self.map(p => `"${p}"`).join(' ')} agent ${nudge ? 'nudge' : 'prompt'}`);
+  return hookSafe(`[ -z "$KUNJ_AGENT_PLAN" ] || ${self.map(p => `"${p}"`).join(' ')} agent nudge`);
 }
 
 // `argv` under `kunj run`, which unlocks the vault and puts the host secrets in argv's environment.
@@ -398,43 +398,6 @@ export function conversationTitle(transcript: unknown, maxBytes = 256 * 1024): s
   return null;
 }
 
-/**
- * The prompts the user typed in a Claude transcript, oldest first, each as its subject (first line,
- * 80 characters) and time: what an agent was asked when its record has no prompts (hooks from before
- * prompts were recorded). Hook feedback, notifications and other meta lines are left out. Reads at
- * most the last `maxBytes`.
- */
-export function transcriptPrompts(transcript: unknown, maxBytes = 32 * 1024 * 1024): Array<{ subject: string; at: number }> {
-  if (typeof transcript !== 'string' || !path.isAbsolute(transcript)) return [];
-  let text: string;
-  try {
-    const fd = fs.openSync(transcript, 'r');
-    try {
-      const size = fs.fstatSync(fd).size;
-      const length = Math.min(size, maxBytes);
-      const buf = Buffer.alloc(length);
-      text = buf.subarray(0, fs.readSync(fd, buf, 0, length, size - length)).toString('utf8');
-    } finally {
-      fs.closeSync(fd);
-    }
-  } catch {
-    return [];
-  }
-  const out: Array<{ subject: string; at: number }> = [];
-  for (const line of text.split('\n')) {
-    if (!line.includes('"type":"user"')) continue;
-    let entry: any;
-    try { entry = JSON.parse(line); } catch { continue; }
-    if (entry?.type !== 'user' || entry.isMeta || entry.isCompactSummary || entry.isSidechain) continue;
-    const content = entry.message?.content;
-    if (typeof content !== 'string' || content.trimStart().startsWith('<')) continue;
-    const at = Date.parse(entry.timestamp);
-    const subject = promptSubject(content);
-    if (subject && isFinite(at)) out.push({ subject, at });
-  }
-  return out;
-}
-
 export interface SavedAgent {
   session: string;
   id: string | null;
@@ -487,19 +450,18 @@ export function withAgentResume(command: string, id: string | null): string {
 // With `plan`, the hooks that record the agent's plan into KUNJ_AGENT_PLAN (agent-plan.ts) are added:
 // a few events per step, never one per tool call. WorktreeCreate is left alone on purpose: a hook
 // there replaces the creation instead of observing it.
-// `prompt`: promptHookCommand(), run with every prompt the user sends (host agents); what it prints
-// is added to the prompt. With `plan`, Stop is recorded (a line with nothing of the hook's input) so
-// the step of a prompt ends when the agent answers.
-export function claudeHookSettings(plan = false, prompt?: string): string {
+// `nudge`: the command that prints planNudge() for the agent's record (a host agent that is asked to
+// keep a task list), run with every prompt the user sends; its output is added to the prompt.
+export function claudeHookSettings(plan = false, nudge?: string): string {
   const hook = (command: string, matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] }];
   // every command through hookSafe(): a failed write must never block a tool call or the agent's stop
   const write = (state: AgentHookState) => hookSafe(`printf ${state} > "$KUNJ_AGENT_STATE"`);
   const record = planHookCommand();
   return JSON.stringify({
     hooks: {
-      UserPromptSubmit: [...hook(write('running')), ...(prompt ? hook(prompt) : [])],
+      UserPromptSubmit: [...hook(write('running')), ...(nudge ? hook(nudge) : [])],
       PreToolUse: [...hook(write('running')), ...(plan ? [...hook(record, 'Agent|Task'), ...hook(subagentToolHookCommand())] : [])],
-      Stop: [...hook(write('waiting')), ...(plan ? hook(STOP_RECORD) : [])],
+      Stop: hook(write('waiting')),
       Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),
       SessionEnd: hook(hookSafe('rm -f "$KUNJ_AGENT_STATE"')),
       // Unset in containers (no resume there yet), where it does nothing
@@ -511,6 +473,8 @@ export function claudeHookSettings(plan = false, prompt?: string): string {
         CwdChanged: hook(record),
       } : {}),
     },
+    // set_plan (kunj's plugin, `kunj agent mcp`) never asks: it only writes the agent's own record
+    ...(plan ? { permissions: { allow: [SET_PLAN_TOOL_ID] } } : {}),
   });
 }
 
@@ -545,11 +509,11 @@ export function agentPromptFile(kunjDir: string, session: string): string {
 }
 
 // `command` with the hooks appended when it is claude (the setting agent.hooks, default on)
-export function withAgentHooks(command: string, _stateFile: string, enabled: boolean, plan = false, prompt?: string): string {
+export function withAgentHooks(command: string, _stateFile: string, enabled: boolean, plan = false, nudge?: string): string {
   if (!enabled) return command;
   const first = command.trim().split(/\s+/)[0] ?? '';
   if (path.basename(first) !== 'claude') return command;
-  return `${command.trim()} --settings '${claudeHookSettings(plan, prompt).replace(/'/g, "'\\''")}'`;
+  return `${command.trim()} --settings '${claudeHookSettings(plan, nudge).replace(/'/g, "'\\''")}'`;
 }
 
 // `command` with kunj's Claude Code plugin (its skills, e.g. /kunj:handoff) when it is claude and the
@@ -558,10 +522,10 @@ export function withAgentHooks(command: string, _stateFile: string, enabled: boo
  * What every claude kunj starts is told, so its work shows as steps in `kunj agent plan` and the
  * workspace app's Overview (`agent.taskList`). No single quote: it goes in a shell word.
  */
-export const TASK_LIST_PROMPT = 'This session runs under kunj, which shows your progress to the user as a line of steps built from '
-  + 'your task list. For any work with more than one step, first create a task list with your task tools (TaskCreate), '
-  + 'mark each task in progress when you start it and completed when it is done (TaskUpdate), and keep the list current '
-  + 'as the work changes. Skip it for a one-step answer.';
+export const TASK_LIST_PROMPT = 'This session runs under kunj, which shows the user your plan as a line of steps. When you start '
+  + 'on something, even short work, call the set_plan tool (kunj) with a basic plan: two to six short steps, a few words '
+  + 'each (one step is fine for a quick job or a question), and the index of the step you are on. Call it again when you '
+  + 'move to the next step or the plan changes; each call replaces the whole plan. Do not call it when nothing changed.';
 
 /** Appends `--append-system-prompt` with TASK_LIST_PROMPT to a claude command. */
 export function withAgentTaskList(command: string, on: boolean): string {

@@ -463,55 +463,24 @@ describe('resuming a Claude conversation', () => {
   });
 });
 
-describe('promptHookCommand', () => {
-  const { promptHookCommand, claudeHookSettings } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
+describe('planNudgeHookCommand', () => {
+  const { planNudgeHookCommand, claudeHookSettings } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
 
-  test('runs this kunj with agent nudge (or prompt) only when the agent has a plan record', () => {
-    expect(promptHookCommand(true, ['/usr/bin/node', '/opt/kunj/dist/index.js']))
-      .toContain('[ -z "$KUNJ_AGENT_PLAN" ] || "/usr/bin/node" "/opt/kunj/dist/index.js" agent nudge');
-    expect(promptHookCommand(false, ['/usr/bin/node', '/opt/kunj/dist/index.js'])).toMatch(/ agent prompt\) 2>\/dev\/null; true$/);
+  test('runs this kunj with agent nudge only when the agent has a plan record', () => {
+    const cmd = planNudgeHookCommand(['/usr/bin/node', '/opt/kunj/dist/index.js'])!;
+    expect(cmd).toContain('[ -z "$KUNJ_AGENT_PLAN" ] || "/usr/bin/node" "/opt/kunj/dist/index.js" agent nudge');
+    expect(cmd).toMatch(/; true$/);
   });
 
-  test('a path with a quote gets no hook (the settings are single-quoted)', () => {
-    expect(promptHookCommand(true, ['/usr/bin/node', "/opt/it's/index.js"])).toBeUndefined();
-    expect(promptHookCommand(true, ['/usr/bin/node', '/opt/"x"/index.js'])).toBeUndefined();
+  test('a path with a quote gets no nudge (the settings are single-quoted)', () => {
+    expect(planNudgeHookCommand(['/usr/bin/node', "/opt/it's/index.js"])).toBeUndefined();
+    expect(planNudgeHookCommand(['/usr/bin/node', '/opt/"x"/index.js'])).toBeUndefined();
   });
 
-  test('claudeHookSettings: UserPromptSubmit writes the state, then runs the prompt hook when given; Stop is recorded with a plan', () => {
+  test('claudeHookSettings adds it to UserPromptSubmit after the state write, and only when given', () => {
     expect(JSON.parse(claudeHookSettings(true)).hooks.UserPromptSubmit).toHaveLength(1);
-    const hooks = JSON.parse(claudeHookSettings(true, 'PROMPT')).hooks;
-    expect(hooks.UserPromptSubmit).toHaveLength(2);
-    expect(hooks.UserPromptSubmit[1].hooks[0].command).toBe('PROMPT');
-    expect(hooks.Stop).toHaveLength(2);
-    expect(JSON.parse(claudeHookSettings()).hooks.Stop).toHaveLength(1);
-  });
-});
-
-describe('transcriptPrompts', () => {
-  const { transcriptPrompts } = jest.requireActual<typeof import('../agent-session')>('../agent-session');
-  const fs = jest.requireActual<typeof import('fs')>('fs');
-  const os = jest.requireActual<typeof import('os')>('os');
-  const path = jest.requireActual<typeof import('path')>('path');
-
-  test('the typed prompts only, oldest first, as subjects with their time', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kunj-transcript-'));
-    const file = path.join(dir, 't.jsonl');
-    const user = (content: unknown, extra: object = {}) => JSON.stringify({ type: 'user', timestamp: '2026-11-23T10:00:00.000Z', message: { role: 'user', content }, ...extra });
-    fs.writeFileSync(file, [
-      user('fix the overview\nplease'),
-      user([{ type: 'tool_result', content: 'x' }]),
-      user('<task-notification>done</task-notification>'),
-      user('Stop hook feedback: run it', { isMeta: true }),
-      user('summary', { isCompactSummary: true }),
-      JSON.stringify({ type: 'assistant', message: { content: 'hi' } }),
-      user('then reinstall'),
-    ].join('\n'));
-    expect(transcriptPrompts(file)).toEqual([
-      { subject: 'fix the overview', at: Date.parse('2026-11-23T10:00:00.000Z') },
-      { subject: 'then reinstall', at: Date.parse('2026-11-23T10:00:00.000Z') },
-    ]);
-    expect(transcriptPrompts('relative.jsonl')).toEqual([]);
-    expect(transcriptPrompts(path.join(dir, 'missing.jsonl'))).toEqual([]);
-    fs.rmSync(dir, { recursive: true, force: true });
+    const hooks = JSON.parse(claudeHookSettings(true, 'NUDGE')).hooks.UserPromptSubmit;
+    expect(hooks).toHaveLength(2);
+    expect(hooks[1].hooks[0].command).toBe('NUDGE');
   });
 });

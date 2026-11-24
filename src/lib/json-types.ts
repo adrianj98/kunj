@@ -719,8 +719,6 @@ export interface AgentPlanStepJson {
   id: string;
   subject: string;
   status: 'pending' | 'in_progress' | 'completed';
-  /** `prompt`: no task list in that conversation, so the user's prompts stand in for its steps */
-  kind?: 'prompt';
   /** ISO times, when the hooks saw the change */
   startedAt?: string;
   completedAt?: string;

@@ -186,3 +186,4 @@
 - Agents nudged to keep a plan: kunj agent nudge from a UserPromptSubmit hook. Page updated: none.
 - Agent plan: user prompts recorded and shown as steps when there is no task list. Page updated: none.
 - Agent plan: steps from the Claude transcript's typed prompts for records without prompts. Page updated: none.
+- Agents give a basic plan with set_plan (kunj agent mcp in the plugin); prompts-as-steps removed. Page updated: none.

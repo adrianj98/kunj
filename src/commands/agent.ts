@@ -10,10 +10,10 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, promptHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile, transcriptPrompts } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, planNudgeHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile } from '../lib/agent-session';
 import { packagedPluginDir } from '../lib/skills';
 import { activePlans, buildOverview, subagentLabel } from '../lib/agent-overview';
-import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, HISTORY_STEPS, parentLine, planNudge, planPosition, promptRecordLine, withTranscriptPrompts, readPlanFile, reducePlan } from '../lib/agent-plan';
+import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, parentLine, planNudge, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
 import type { AgentForgetJson, AgentOverviewJson, AgentPlanItemJson, AgentPlanJson, AgentPlanStepJson, AgentSavedJson, AgentSessionJson, AgentStartJson, AgentStatusJson, AgentStopJson } from '../lib/json-types';
 
 interface AgentOptions {
@@ -33,7 +33,7 @@ interface AgentOptions {
 // The largest brief --prompt-file takes (it becomes one shell argument)
 const MAX_PROMPT_BYTES = 256 * 1024;
 
-const ACTIONS = ['start', 'status', 'stop', 'saved', 'forget', 'plan', 'overview', 'nudge', 'prompt'];
+const ACTIONS = ['start', 'status', 'stop', 'saved', 'forget', 'plan', 'overview', 'nudge', 'mcp'];
 
 // `kunj agent overview --containers` stops waiting for the containers after this long
 const OVERVIEW_CONTAINERS_TIMEOUT_MS = 8000;
@@ -65,7 +65,8 @@ export class AgentCommand extends BaseCommand {
         '  forget [branch]   forget a saved conversation (--session <id>, or --all)',
         '  plan [branch]     where each agent is in its plan: its task list as steps, subagents, branch changes',
         '  overview          the running agents of the repository, grouped and laid out as lines of stops (for the apps)',
-        '  nudge, prompt     (the agent\'s prompt hook) record the prompt\'s first line in $KUNJ_AGENT_PLAN; nudge also prints one line about its task list',
+        '  nudge             (for the agent\'s prompt hook) one line about its plan, from $KUNJ_AGENT_PLAN',
+        '  mcp               (for kunj\'s plugin) the MCP server with the set_plan tool, on stdin/stdout',
         '',
         '[branch] defaults to the current branch; `kunj agent my-branch` starts. Without tmux (or with',
         '--no-tmux) start runs the agent directly in this terminal, and it stops when the terminal closes.',
@@ -111,16 +112,16 @@ export class AgentCommand extends BaseCommand {
       target = positionals[1];
     }
 
-    // the UserPromptSubmit hook (no git): records the prompt's first line (the hook's input on stdin)
-    // and, for nudge, prints one line about the agent's task list
-    if (verb === 'nudge' || verb === 'prompt') {
+    // the UserPromptSubmit hook: one line about the agent's task list, from its record alone (no git)
+    // the set_plan tool every claude kunj starts gets through kunj's plugin (src/lib/plan-mcp.ts)
+    if (verb === 'mcp') {
+      const { servePlanMcp } = await import('../lib/plan-mcp');
+      const { getVersion } = await import('../lib/version');
+      return servePlanMcp(getVersion());
+    }
+    if (verb === 'nudge') {
       const file = process.env.KUNJ_AGENT_PLAN;
-      if (!file) return;
-      try {
-        const line = process.stdin.isTTY ? null : promptRecordLine(JSON.parse(fs.readFileSync(0, 'utf8'))?.prompt);
-        if (line) fs.appendFileSync(file, line);
-      } catch { /* no input, or not the hook's */ }
-      if (verb === 'nudge') process.stdout.write(`${planNudge(reducePlan(readPlanFile(file)))}\n`);
+      if (file) process.stdout.write(`${planNudge(reducePlan(readPlanFile(file)))}\n`);
       return;
     }
     const listing = await listWorktreesDetailed({ includeStatus: false, includePullRequests: false });
@@ -303,7 +304,7 @@ export class AgentCommand extends BaseCommand {
     const plugin = fs.existsSync(path.join(packagedPluginDir(), '.claude-plugin', 'plugin.json')) ? packagedPluginDir() : null;
     // the plan is only worth recording when the agent keeps a task list: ask it to (agent.taskList)
     const taskList = withPlan && config.agent?.taskList !== false;
-    const command = withAgentPrompt(withAgentPlugin(withAgentTaskList(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false, withPlan, withPlan ? promptHookCommand(taskList) : undefined), taskList), plugin), promptCopy);
+    const command = withAgentPrompt(withAgentPlugin(withAgentTaskList(withAgentHooks(withAgentResume(agentCmd, resumeId), stateFile, config.agent?.hooks !== false, withPlan, taskList ? planNudgeHookCommand() : undefined), taskList), plugin), promptCopy);
     const vars = {
       KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile,
       ...(withPlan ? { KUNJ_AGENT_PLAN: planFile, ...PLAN_ENV } : {}),
@@ -471,14 +472,7 @@ export class AgentCommand extends BaseCommand {
         const isRunning = running ? running.includes(s.session) : null;
         const text = readPlanFile(agentPlanFile(kunjDir, s.session));
         if (!text.trim() && isRunning !== true) continue;
-        let reduced = reducePlan(text, roots);
-        // hooks from before prompts were recorded: what the agent was asked, from its transcript
-        if (!text.includes('"UserPromptSubmit"') && reduced.transcript) {
-          // the latest ones, as many as the history keeps
-          const prompts = transcriptPrompts(reduced.transcript).slice(-HISTORY_STEPS);
-          if (prompts.length) reduced = reducePlan(withTranscriptPrompts(text, prompts), roots);
-        }
-        const { branch: _branch, transcript, ...plan } = reduced;
+        const { branch: _branch, transcript, ...plan } = reducePlan(text, roots);
         plans.push({
           session: s.session, id: s.id, branch: wt.branch!, worktree: wt.path,
           running: isRunning, state: isRunning === false ? null : readAgentState(agentStateFile(kunjDir, s.session)),
