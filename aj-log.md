@@ -2,6 +2,18 @@
 
 Changes made with Claude, and why.
 
+## 2026-11-24 — Fewer gcloud processes
+
+- SSH remotes share one master connection per destination (ControlMaster, 10 min persist) and each
+  kunj process adds and cancels its own forward; a master that cannot log in fails at once and is
+  remembered for 30 s. Why: every listing opened its own ssh, and behind the IAP ProxyCommand each was
+  a ~55 MB gcloud process; the `gce` remote (kunj-box) is down, so each try also took a minute.
+- The coordinator shares one listing of all machines for 15 s, filtered per caller; `find` before a
+  create still asks the cloud. Why: 10 repositories meant 10 concurrent `gcloud instances list`.
+- The hidden Overview runs only quick reads, at most every 5 s; shown, full reads two at a time. Why:
+  the app ran 10 `agent overview --containers` at once.
+- Audit (four read-only agents) found more; listed in the reply, not yet fixed.
+
 ## 2026-11-24 — Coordinator pile-up
 
 - 56 auto-started `kunj serve --machines --idle-exit 60` were running (up to 7.5 h), each polling

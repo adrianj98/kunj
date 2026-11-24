@@ -1,11 +1,22 @@
-// The SSH tunnel to a remote added with --ssh: `ssh -N -L <free local port>:127.0.0.1:<port>
-// <destination>`, one per kunj process, ended when the process exits. The server on the box listens
-// on its loopback, so the laptop reaches it only through this. SSH does the encryption, the host
-// identity and the user's keys; a prompt (passphrase, unknown host) shows on this process's stdin
-// when it has a terminal, which is why `kunj remote add --ssh` suggests one interactive ping first.
+// The SSH tunnel to a remote added with --ssh. The server on the box listens on its loopback, so the
+// laptop reaches it only through this. SSH does the encryption, the host identity and the user's keys;
+// a prompt (passphrase, unknown host) shows on this process's stdin when it has a terminal, which is
+// why `kunj remote add --ssh` suggests one interactive ping first.
+//
+// Shared (the default with the real ssh): one master connection per destination, kept by ssh itself
+// (`ControlMaster`, `ControlPersist` 10 min after its last use) behind a control socket in
+// ~/.kunj/ssh, and every kunj process adds its own forward to it (`ssh -O forward -L`) and removes it
+// on close or exit (`-O cancel`). A connection costs a login and, behind a ProxyCommand such as
+// `gcloud compute start-iap-tunnel`, a helper process: one per process left dozens of them alive at
+// once when the workspace app listed often. Without a master (it could not start) a process falls back
+// to its own `ssh -N -L <free local port>:127.0.0.1:<port> <destination>`, ended with the process.
 
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, spawn, spawnSync } from 'child_process';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
 import * as net from 'net';
+import * as os from 'os';
+import * as path from 'path';
 import { ContainerError } from '../container/errors';
 import { findFreePort } from '../container/forward';
 
@@ -20,6 +31,12 @@ export interface TunnelOptions {
   timeoutMs?: number;
   /** A fixed local port (tests); default: a free one */
   localPort?: number;
+  /**
+   * Share one master connection per destination (default: true with the real ssh, false when a test
+   * gives sshPath); `controlDir` holds the control sockets (default ~/.kunj/ssh).
+   */
+  share?: boolean;
+  controlDir?: string;
 }
 
 export interface Tunnel {
@@ -154,17 +171,153 @@ async function spawnTunnel(cmd: string, args: string[], localPort: number, timeo
   };
 }
 
+/** How long ssh keeps a shared master after its last use */
+export const CONTROL_PERSIST = '10m';
+
+/** The control socket of a destination: short (a unix socket path is limited to about 100 bytes). */
+export function controlPath(dir: string, destination: string): string {
+  return path.join(dir, crypto.createHash('sha256').update(destination).digest('hex').slice(0, 16));
+}
+
+/** Runs ssh to completion (argv only), within `timeoutMs`. */
+function runSsh(ssh: string, args: string[], timeoutMs: number, stdin: 'inherit' | 'ignore' = 'ignore'): Promise<{ code: number | null; stderr: string }> {
+  return new Promise(resolve => {
+    const child = spawn(ssh, args, { stdio: [stdin, 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr!.on('data', (d: Buffer) => { if (stderr.length < 4000) stderr += d.toString(); });
+    const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
+    child.on('error', err => { clearTimeout(timer); resolve({ code: null, stderr: err.message }); });
+    // a master that went to the background (-f) keeps the pipe: it must not keep this process alive
+    child.on('exit', code => { clearTimeout(timer); child.stderr?.destroy(); resolve({ code, stderr }); });
+  });
+}
+
+/** How long a destination whose master could not start is reported down without trying again */
+export const DOWN_FOR_MS = 30_000;
+
+/**
+ * A forward on the destination's shared master, starting the master when none answers (one starter
+ * at a time: a lock file next to the socket). A master that could not log in is an error, remembered
+ * for `DOWN_FOR_MS` (`<socket>.down`) so the commands that follow fail at once instead of each
+ * trying for a minute (an IAP ProxyCommand to a stopped box takes that long). Null when sharing is not
+ * possible here; the caller then opens its own connection.
+ */
+async function openShared(opts: TunnelOptions, ssh: string, localPort: number, unreachable: (detail: string) => Error): Promise<Tunnel | null> {
+  const dir = opts.controlDir ?? path.join(os.homedir(), '.kunj', 'ssh');
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  } catch {
+    return null;
+  }
+  const ctl = controlPath(dir, opts.ssh);
+  const control = ['-o', `ControlPath=${ctl}`];
+  const down = `${ctl}.down`;
+  const recentlyDown = (): string | null => {
+    try {
+      if (Date.now() - fs.statSync(down).mtimeMs < DOWN_FOR_MS) return fs.readFileSync(down, 'utf8').trim();
+    } catch { /* not down */ }
+    return null;
+  };
+  const alive = async () => (await runSsh(ssh, [...control, '-O', 'check', '--', opts.ssh], 10_000)).code === 0;
+  const timeoutMs = opts.timeoutMs ?? 120000;
+
+  if (!(await alive())) {
+    const known = recentlyDown();
+    if (known !== null) throw unreachable(known);
+    const lock = `${ctl}.lock`;
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      let mine = false;
+      try {
+        fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 });
+        mine = true;
+      } catch {
+        // another process is starting it; a lock older than the wait is from one that died
+        try {
+          if (Date.now() - fs.statSync(lock).mtimeMs > timeoutMs) fs.rmSync(lock, { force: true });
+        } catch { /* gone meanwhile */ }
+      }
+      if (mine) {
+        try {
+          if (!(await alive())) {
+            // -f: ssh goes to the background once logged in (prompts first, on this terminal)
+            const started = await runSsh(ssh, [
+              ...control, '-o', 'ControlMaster=yes', '-o', `ControlPersist=${CONTROL_PERSIST}`,
+              '-o', 'ServerAliveInterval=30', '-N', '-f', '--', opts.ssh,
+            ], timeoutMs, 'inherit');
+            if (started.code !== 0 || !(await alive())) {
+              const detail = started.stderr.trim().split('\n').find(l => l.trim()) ?? '';
+              try { fs.writeFileSync(down, detail, { mode: 0o600 }); } catch { /* not remembered */ }
+              throw unreachable(detail);
+            }
+            fs.rmSync(down, { force: true });
+          }
+        } finally {
+          fs.rmSync(lock, { force: true });
+        }
+        break;
+      }
+      if (await alive()) break;
+      // the starter failed meanwhile: its reason, not another try
+      const failed = recentlyDown();
+      if (failed !== null) throw unreachable(failed);
+      if (Date.now() >= deadline) return null;
+      await new Promise(r => setTimeout(r, 250));
+    }
+  }
+
+  const spec = `127.0.0.1:${localPort}:127.0.0.1:${opts.port}`;
+  const added = await runSsh(ssh, [...control, '-O', 'forward', '-L', spec, '--', opts.ssh], 30_000);
+  if (added.code !== 0) return null;
+  // Removed on close and when this process ends (a SIGKILL leaves it until the master ends)
+  let cancelled = false;
+  const cancelSync = () => {
+    if (cancelled) return;
+    cancelled = true;
+    spawnSync(ssh, [...control, '-O', 'cancel', '-L', spec, '--', opts.ssh], { stdio: 'ignore', timeout: 5000 });
+  };
+  const release = bindLifetime(cancelSync);
+  const deadline = Date.now() + 10_000;
+  while (!(await accepts(localPort))) {
+    if (Date.now() >= deadline) {
+      release();
+      cancelSync();
+      return null;
+    }
+    await new Promise(r => setTimeout(r, READY_POLL_MS));
+  }
+  return {
+    localPort,
+    pid: 0,
+    close: async () => {
+      release();
+      if (cancelled) return;
+      cancelled = true;
+      await runSsh(ssh, [...control, '-O', 'cancel', '-L', spec, '--', opts.ssh], 5000);
+    },
+  };
+}
+
 export async function openTunnel(opts: TunnelOptions): Promise<Tunnel> {
   const localPort = opts.localPort ?? (await findFreePort(0));
   const ssh = opts.sshPath ?? 'ssh';
+  const share = opts.share ?? (opts.sshPath === undefined && process.platform !== 'win32');
+  const exitedEarly = (detail: string) =>
+    new ContainerError(
+      `ssh to ${opts.ssh} ended before the tunnel was up${detail ? `: ${detail}` : ''}` +
+        ` (is kunj serve listening on 127.0.0.1:${opts.port} there? try: ssh ${opts.ssh} kunj serve token).`,
+      'remote-unreachable',
+    );
+  if (share) {
+    const shared = await openShared(opts, ssh, localPort, exitedEarly).catch(err => {
+      if (err instanceof ContainerError) throw err;
+      return null;
+    });
+    if (shared) return shared;
+  }
   return spawnTunnel(ssh, sshArgs({ ssh: opts.ssh, port: opts.port, localPort }), localPort, opts.timeoutMs ?? 120000, {
     spawnFailed: err => new ContainerError(`Could not run ${ssh}: ${err.message}. Install OpenSSH and make sure ssh is on your PATH.`, 'bad-remote'),
-    exitedEarly: detail =>
-      new ContainerError(
-        `ssh to ${opts.ssh} ended before the tunnel was up${detail ? `: ${detail}` : ''}` +
-          ` (is kunj serve listening on 127.0.0.1:${opts.port} there? try: ssh ${opts.ssh} kunj serve token).`,
-        'remote-unreachable',
-      ),
+    exitedEarly,
     timedOut: (seconds, detail) =>
       new ContainerError(
         `ssh to ${opts.ssh} did not bring the tunnel up within ${seconds} s${detail ? `: ${detail}` : ''}.` +

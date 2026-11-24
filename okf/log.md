@@ -189,3 +189,4 @@
 - Agents give a basic plan with set_plan (kunj agent mcp in the plugin); prompts-as-steps removed. Page updated: none.
 - Workspace app Overview: lanes scroll sideways beside the sidebar rows. Page updated: none.
 - Local coordinator pile-up fixed (single owner via coordinator.json, no Docker wait). Page updated: none.
+- Fewer gcloud processes: shared ssh master per remote, shared coordinator listing, throttled hidden Overview. Page updated: none.

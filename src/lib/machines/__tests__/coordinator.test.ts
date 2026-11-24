@@ -62,6 +62,24 @@ function setup(over: Partial<CoordinatorOptions> = {}) {
 }
 
 describe('Coordinator', () => {
+  it('shares one provider listing among callers for a few seconds (one for every filter), and asks again after a change', async () => {
+    let clock = 0;
+    const { provider, coordinator } = setup({ now: () => clock });
+    await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'b', create: true });
+    const before = provider.callsOf('list').length;
+    await Promise.all([coordinator.list(), coordinator.list(), coordinator.list()]);
+    await coordinator.list();
+    await coordinator.list({ 'kunj.branch': 'b' });
+    expect(provider.callsOf('list').length - before).toBe(1);
+    clock += 16_000;
+    await coordinator.list();
+    expect(provider.callsOf('list').length - before).toBe(2);
+    const [m] = await coordinator.list();
+    await coordinator.suspend(m.name);
+    expect((await coordinator.list())[0].state).not.toBe('running');
+    expect(provider.callsOf('list').length - before).toBe(3);
+  });
+
   it('creates a labelled machine, pairs with its serve and waits until it answers', async () => {
     const { provider, tokens, coordinator, serves } = setup();
     const r = await coordinator.locate({ repo: REPO, repoName: 'app', branch: 'feature/x', create: true, owner: 'laptop-a' });

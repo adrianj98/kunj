@@ -279,12 +279,19 @@ final class OverviewPanel: NSView {
     /// Also while hidden, so the Overview has the plans before it is opened (the first listing after
     /// kunj connects is the first read).
     func planChanged() {
+        // hidden and a read already waiting: that one will see this change too
+        if !isShown, let pending, !pending.isCancelled { return }
         pending?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated { self?.refresh() }
+            MainActor.assumeIsolated {
+                self?.pending = nil
+                self?.refresh()
+            }
         }
         pending = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        // hidden, the reads only keep it ready to open: at most one every 5 s (plan events come with
+        // every subagent tool call)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (isShown ? 0.3 : 5), execute: work)
     }
 
     func refresh() {
@@ -314,8 +321,11 @@ final class OverviewPanel: NSView {
         loading = true
         let started = generation
         loadingGeneration = started
+        // the full read (containers: a docker exec per container, a tunnel per remote) only while the
+        // Overview can be seen; hidden, the quick read keeps it ready to open
+        let full = isShown
         Task { [weak self] in
-            await self?.load(asked, generation: started)
+            await self?.load(asked, generation: started, full: full)
             // a newer scope's read is out: it owns the flags
             guard let self, self.loadingGeneration == started else { return }
             self.loading = false
@@ -326,11 +336,13 @@ final class OverviewPanel: NSView {
         }
     }
 
-    /// Every repository asked at once, twice: the quick read (host agents only) and the full one
-    /// (containers too, seconds). Each answer is drawn as it comes, so the Overview fills as it goes;
-    /// a quick answer only where `overviewQuickReadShows` allows and its full one is not back yet. A
-    /// repository that fails keeps the others; the first full read's message is shown.
-    private func load(_ asked: [RepoRef], generation started: Int) async {
+    /// Every repository's quick read (host agents only) at once, and with `full` its full one
+    /// (containers too, seconds) at most `fullReadsAtOnce` at a time. Each answer is drawn as it
+    /// comes, so the Overview fills as it goes; a quick answer only where `overviewQuickReadShows`
+    /// allows and its full one is not back yet. A repository that fails keeps the others; the first
+    /// full read's message is shown.
+    private static let fullReadsAtOnce = 2
+    private func load(_ asked: [RepoRef], generation started: Int, full withFull: Bool) async {
         let roots = asked.map(\.root)
         var byRoot: [String: AgentOverviewJson] = [:]
         for json in repos where roots.contains(json.repo.root) { byRoot[json.repo.root] = json }
@@ -339,11 +351,19 @@ final class OverviewPanel: NSView {
         let cli = self.cli
         await withTaskGroup(of: (Int, Bool, AgentOverviewJson?, String?).self) { group in
             for (index, repo) in asked.enumerated() {
-                for full in [false, true] {
-                    group.addTask { await OverviewPanel.read(cli: cli, repo: repo, index: index, full: full) }
-                }
+                group.addTask { await OverviewPanel.read(cli: cli, repo: repo, index: index, full: false) }
             }
+            // the full reads in a window: one more starts as one comes back
+            var nextFull = 0
+            func startFull() {
+                guard withFull, nextFull < asked.count else { return }
+                let index = nextFull, repo = asked[index]
+                nextFull += 1
+                group.addTask { await OverviewPanel.read(cli: cli, repo: repo, index: index, full: true) }
+            }
+            for _ in 0..<Self.fullReadsAtOnce { startFull() }
             for await (index, full, json, problem) in group {
+                if full { startFull() }
                 guard started == generation else { continue }
                 let root = asked[index].root
                 if full {
@@ -356,7 +376,7 @@ final class OverviewPanel: NSView {
                 }
                 repos = roots.compactMap { byRoot[$0] }
                 // the message only once every full read is back, so a slow repository's is not lost
-                errorLabel.stringValue = fullBack.count == asked.count
+                errorLabel.stringValue = withFull && fullBack.count == asked.count
                     ? problems.keys.sorted().first.flatMap { problems[$0] } ?? "" : errorLabel.stringValue
                 render()
             }

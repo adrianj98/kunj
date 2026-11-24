@@ -120,8 +120,14 @@ proxy) is a transport detail the protocol does not see.
   compared in constant time; a wrong token is `401` with no detail, and the server logs the client
   address once per minute at most (no token fragments).
 - **Reaching the box:** `kunj remote add <name> --ssh user@box [--port 7433]` records a remote reached
-  through an SSH tunnel; the client runs `ssh -N -L <local>:127.0.0.1:7433 user@box` on demand (one per
-  kunj process, reused for its lifetime, killed on exit) and talks HTTP to `127.0.0.1:<local>`. `kunj
+  through an SSH tunnel and talks HTTP to `127.0.0.1:<local>`. Every kunj process shares one master
+  connection per destination (`ControlMaster`, `ControlPersist` 10 min, control socket in `~/.kunj/ssh/`,
+  started by one process at a time under a lock) and adds its own forward to it (`ssh -O forward -L
+  <local>:127.0.0.1:7433`), cancelled on close and on exit (src/lib/serve/tunnel.ts). A master that cannot
+  log in is a `remote-unreachable` error remembered for 30 s (`<socket>.down`), so the commands that
+  follow fail at once instead of each trying again (a stopped box behind an IAP ProxyCommand takes a
+  minute per try, with a gcloud process each). Without sharing (it cannot start here) a process falls
+  back to its own `ssh -N -L <local>:127.0.0.1:7433 user@box`, killed on exit. `kunj
   remote add <name> --url https://box.example/kunj` records a URL the user has put behind TLS
   themselves; `http://` is accepted only for loopback addresses, unless `--allow-insecure-http` is given
   (for a network that already encrypts, such as a tailnet or WireGuard): the entry then records

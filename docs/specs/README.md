@@ -35,6 +35,7 @@ page only says where each thing stands.
 
 | Work | Spec | Commits |
 | --- | --- | --- |
+| Fewer gcloud processes: one shared ssh master per remote (forwards per process, a dead remote remembered 30 s), one coordinator listing shared 15 s, the hidden Overview reads quick only and at most every 5 s | [remote-containers.md](remote-containers.md), [cloud-machines.md](cloud-machines.md), [agent-overview.md](agent-overview.md) | this commit |
 | Local coordinator pile-up fixed: an auto-started coordinator exits when coordinator.json names another; coordinators listen without waiting for Docker | [cloud-machines.md](cloud-machines.md) | this commit |
 | Workspace app Overview lines scroll left and right beside the sidebar's rows; the demo's worktree paths match its plans | [agent-overview.md](agent-overview.md#the-window) | this commit |
 | Agents give a basic plan through `set_plan` (kunj's plugin, `kunj agent mcp`): one call per change, shown as steps in the Overview | [agent-overview.md](agent-overview.md#status) | this commit |

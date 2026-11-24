@@ -23,6 +23,9 @@ import {
   machineName,
 } from './provider';
 
+/** How long the coordinator shares one provider listing among its callers */
+export const LISTING_TTL_MS = 15_000;
+
 export const MACHINE_SERVE_PORT = 7433;
 
 // ---- machine tokens ----------------------------------------------------------------------------
@@ -202,6 +205,12 @@ export class Coordinator {
   private readonly inFlight = new Map<string, Promise<LocateResult>>();
   /** Machines a locate is creating or waking right now (by name, counted) */
   private readonly starting = new Map<string, number>();
+  /**
+   * One provider listing of every kunj machine, shared for `LISTING_TTL_MS`: every client's listing, `kunj events`'
+   * poll and the idle loop ask at once, and each provider listing is a cloud CLI run (gcloud: about
+   * 60 MB of python for a second or two). Dropped whenever this coordinator changes a machine.
+   */
+  private readonly listings = new Map<string, { at: number; machines: Promise<Machine[]> }>();
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.provider = opts.provider;
@@ -221,14 +230,37 @@ export class Coordinator {
   }
 
   /** kunj's machines matching `filter` (any state); never another tool's instances. */
-  async list(filter: Labels = {}): Promise<Machine[]> {
-    const machines = await this.provider.list({ ...filter, [MACHINE_LABEL.role]: 'machine' });
-    return machines.filter(isKunjMachine).sort((a, b) => a.name.localeCompare(b.name));
+  /**
+   * `fresh`: ask the provider now (and share that answer), for a decision such as whether to create a
+   * machine: another coordinator may have made one since the shared listing.
+   */
+  async list(filter: Labels = {}, opts: { fresh?: boolean } = {}): Promise<Machine[]> {
+    // one listing of all kunj's machines, filtered here: each repository's filter as its own cloud
+    // call was ten gcloud runs for ten repositories
+    const key = 'all';
+    const now = this.now();
+    let entry = this.listings.get(key);
+    if (!entry || opts.fresh || now - entry.at >= LISTING_TTL_MS) {
+      const machines = this.provider.list({ [MACHINE_LABEL.role]: 'machine' });
+      entry = { at: now, machines };
+      this.listings.set(key, entry);
+      // a failed listing is not kept: the next caller asks again
+      machines.catch(() => { if (this.listings.get(key)?.machines === machines) this.listings.delete(key); });
+    }
+    return (await entry.machines)
+      .filter(m => isKunjMachine(m) && Object.entries(filter).every(([k, v]) => m.labels[k] === v))
+      .map(m => ({ ...m, labels: { ...m.labels } }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** A machine changed here: the next listing asks the provider again. */
+  private changed(): void {
+    this.listings.clear();
   }
 
   /** The branch's machine, or null; two is `machine-ambiguous`. */
   async find(repo: string, branch: string): Promise<Machine | null> {
-    const found = await this.list({ [MACHINE_LABEL.repo]: repo, [MACHINE_LABEL.branch]: branch });
+    const found = await this.list({ [MACHINE_LABEL.repo]: repo, [MACHINE_LABEL.branch]: branch }, { fresh: true });
     if (found.length > 1) {
       throw new MachineError(`Branch ${branch} has ${found.length} machines (${found.map(m => m.name).join(', ')}). Delete the extra ones with kunj machine delete.`, 'machine-ambiguous');
     }
@@ -321,7 +353,7 @@ export class Coordinator {
     }
     const repo = machine.labels[MACHINE_LABEL.repo] ?? '';
     await this.dropShared(name);
-    await this.provider.stop(name);
+    await this.provider.stop(name); this.changed();
     const stopped = await this.waitForState(name, 'stopped');
     const stem = name.replace(/-[a-z0-9]+$/, '').slice(0, 40).replace(/-+$/, '');
     const imageName = `${stem}-img-${new Date(this.now()).toISOString().replace(/[^0-9]/g, '').slice(0, 14)}`;
@@ -369,11 +401,13 @@ export class Coordinator {
       [MACHINE_LABEL.owner]: req.owner ?? '',
     });
     this.log(`creating machine ${name} for ${req.branch}${image ? ` from image ${image}` : ''}`);
+    this.changed();
     let machine = await this.provider.create({ name, labels, size: req.size || d.size, image, diskGb: d.diskGb, spot: d.spot, selfSuspend: d.selfSuspend, startupScript: this.opts.startupScript, cacheStore: !!this.opts.cache });
     // A token left from an earlier machine of the same name would never match the new one. Only
     // after the create succeeded: a create refused with machine-exists (another coordinator made
     // it meanwhile) must leave that live machine's token alone
     this.opts.tokens.delete(name);
+    this.changed();
     machine = await this.waitForState(machine.name, 'running');
     await this.pair(machine);
     await this.ready(machine);
@@ -385,8 +419,10 @@ export class Coordinator {
     // On its way to sleep (a `ct stop` that did not wait): a cloud refuses to resume it until it is there
     if (machine.state === 'suspending') machine = await this.waitForState(machine.name, 'suspended');
     else if (machine.state === 'stopping') machine = await this.waitForState(machine.name, 'stopped');
+    this.changed();
     if (machine.state === 'suspended' || machine.state === 'suspending') await this.provider.resume(machine.name);
     else if (machine.state === 'stopped' || machine.state === 'stopping') await this.provider.start(machine.name);
+    this.changed();
     const awake = await this.waitForState(machine.name, 'running');
     if (!this.isPaired(awake.name)) await this.pair(awake);
     await this.ready(awake);
@@ -396,7 +432,7 @@ export class Coordinator {
   async suspend(name: string): Promise<void> {
     await this.get(name);
     await this.dropShared(name);
-    await this.provider.suspend(name);
+    await this.provider.suspend(name); this.changed();
   }
 
   async resume(name: string): Promise<Machine> {
@@ -406,7 +442,7 @@ export class Coordinator {
   async stop(name: string): Promise<void> {
     await this.get(name);
     await this.dropShared(name);
-    await this.provider.stop(name);
+    await this.provider.stop(name); this.changed();
   }
 
   async start(name: string): Promise<Machine> {
@@ -417,7 +453,7 @@ export class Coordinator {
     const m = await this.provider.get(name);
     if (m && !isKunjMachine(m)) throw new MachineError(`${name} was not created by kunj; it is left alone.`, 'machine-not-kunj');
     await this.dropShared(name);
-    await this.provider.delete(name, opts);
+    await this.provider.delete(name, opts); this.changed();
     this.opts.tokens.delete(name);
   }
 
@@ -560,6 +596,7 @@ export class Coordinator {
         this.log(`suspending idle machine ${machine.name}`);
         await this.dropShared(machine.name);
         await this.provider.suspend(machine.name).catch(err => this.log(`could not suspend ${machine.name}: ${(err as Error).message}`));
+        this.changed();
         this.lastBusy.delete(machine.name);
         suspended.push(machine.name);
       }
