@@ -12,6 +12,8 @@ Changes made with Claude, and why.
   create still asks the cloud. Why: 10 repositories meant 10 concurrent `gcloud instances list`.
 - The hidden Overview runs only quick reads, at most every 5 s; shown, full reads two at a time. Why:
   the app ran 10 `agent overview --containers` at once.
+- Review fixes: a control socket left by a dead master is removed before a new master starts (ssh
+  will not replace it); the idle loop reads a fresh listing, not the shared one.
 - Audit (four read-only agents) found more; listed in the reply, not yet fixed.
 
 ## 2026-11-24 — Coordinator pile-up

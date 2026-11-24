@@ -566,7 +566,8 @@ export class Coordinator {
    */
   async idleTick(idleMs: number, agentBusy: (baseUrl: string, token: string) => Promise<boolean>): Promise<string[]> {
     const suspended: string[] = [];
-    for (const machine of await this.list()) {
+    // fresh: another coordinator may have woken or suspended one since the shared listing
+    for (const machine of await this.list({}, { fresh: true })) {
       if (!isAwake(machine.state)) {
         this.lastBusy.delete(machine.name);
         continue;

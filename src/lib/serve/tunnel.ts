@@ -240,6 +240,9 @@ async function openShared(opts: TunnelOptions, ssh: string, localPort: number, u
       if (mine) {
         try {
           if (!(await alive())) {
+            // a socket that does not answer is left from a master that died (a reboot, a kill): ssh
+            // will not replace it (ControlMaster=yes would run without sharing), so it goes first
+            fs.rmSync(ctl, { force: true });
             // -f: ssh goes to the background once logged in (prompts first, on this terminal)
             const started = await runSsh(ssh, [
               ...control, '-o', 'ControlMaster=yes', '-o', `ControlPersist=${CONTROL_PERSIST}`,
