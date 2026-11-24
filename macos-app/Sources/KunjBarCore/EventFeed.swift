@@ -1,5 +1,5 @@
 // What a line of `kunj events --json` (`EventJson` in src/lib/json-types.ts) means for the panel:
-// refresh, restart the stream, or nothing. The stream itself is in KunjBar/CLI/EventStream.swift.
+// refresh or nothing. The stream itself is in KunjBar/CLI/EventStream.swift.
 
 import Foundation
 
@@ -7,8 +7,6 @@ public enum EventReaction: Equatable, Sendable {
     case ignore
     /// List the repositories again (debounced by the caller)
     case refresh
-    /// `kunj events` resolves its repositories once, at start: a new one needs a new stream
-    case restartStream
 }
 
 /// The reaction to one NDJSON line. `afterRestart` is true when the line comes from a stream
@@ -25,10 +23,9 @@ public func eventReaction(line: String, afterRestart: Bool) -> EventReaction {
         return object["repo"] is [String: Any] ? .refresh : .ignore
     case "git", "forwards", "agent", "backend":
         return .refresh
-    case "repos":
-        // The repos.json watcher refreshes the panel
-        return .restartStream
     default:
+        // `repos` is covered by the repos.json watcher, whose refresh restarts the stream only when
+        // the set of repositories changed (`kunj worktree list` rewrites the file for `lastSeen`);
         // `sessions` is covered by the worktree-sessions.json watcher; unknown types are newer than this app
         return .ignore
     }

@@ -174,6 +174,21 @@ struct WorktreeListResult: Codable {
         // Containers never cost the worktrees: a shape this app cannot read just hides them
         containers = try? c.decodeIfPresent(ContainerListing.self, forKey: .containers)
     }
+
+    private init(repoRoot: String, currentPath: String?, pullRequestLookup: String?, pullRequestsFromCache: Bool?, worktrees: [Worktree], containers: ContainerListing?) {
+        self.repoRoot = repoRoot
+        self.currentPath = currentPath
+        self.pullRequestLookup = pullRequestLookup
+        self.pullRequestsFromCache = pullRequestsFromCache
+        self.worktrees = worktrees
+        self.containers = containers
+    }
+
+    // This listing with another one's containers (a listing made without --containers)
+    func with(containers: ContainerListing?) -> WorktreeListResult {
+        WorktreeListResult(repoRoot: repoRoot, currentPath: currentPath, pullRequestLookup: pullRequestLookup,
+                           pullRequestsFromCache: pullRequestsFromCache, worktrees: worktrees, containers: containers)
+    }
 }
 
 struct ContainerOpenResult: Codable {

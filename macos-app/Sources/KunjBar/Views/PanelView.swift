@@ -23,8 +23,8 @@ struct PanelView: View {
         .frame(width: 420)
         .background(Palette.panel)
         .background(MenuBarAnchor())
-        .onAppear { store.refresh() }
-        .onDisappear { store.isSelecting = false }
+        .onAppear { store.panelOpened() }
+        .onDisappear { store.panelClosed() }
     }
 
     // MARK: - Header

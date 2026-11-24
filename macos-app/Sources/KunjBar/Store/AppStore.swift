@@ -1,7 +1,9 @@
 // App state: the known repositories (`kunj repos`) and each one's worktrees and
-// branch containers (`kunj worktree list --containers`), refreshed on a timer, when
-// the panel opens, when ~/.kunj/worktree-sessions.json or repos.json change, and on
-// `kunj events` (containers, agents, forwards, git).
+// branch containers (`kunj worktree list --containers`). While the panel is open it is
+// refreshed on the "Refresh every" timer, when ~/.kunj/worktree-sessions.json or repos.json
+// change, and on `kunj events` (containers, agents, forwards, git). While it is closed (nearly
+// always) only the pull request notifier needs it: a slow timer, worktrees without containers,
+// no events stream (RefreshPolicy in KunjBarCore).
 
 import AppKit
 import KunjBarCore
@@ -57,6 +59,9 @@ final class AppStore {
     // Set when the CLI refuses --containers (older than the option): list without it from then on
     @ObservationIgnored private var containersUnsupported = false
     @ObservationIgnored private var credentialsWarned = false
+    // The menu bar panel is showing; closed, the store refreshes only for notifications
+    @ObservationIgnored private(set) var panelOpen = false
+    @ObservationIgnored private var streamStop: Task<Void, Never>?
 
     init() {
         Pref.register()
@@ -70,9 +75,13 @@ final class AppStore {
 
     func start() {
         notifier.requestAuthorization()
-        watcher = KunjDirWatcher { [weak self] in self?.refresh() }
+        // The panel's next open lists everything anyway
+        watcher = KunjDirWatcher { [weak self] in
+            guard let self, self.panelOpen else { return }
+            self.refresh()
+        }
         watcher?.start()
-        startEvents()
+        makeEvents()
         armTimer()
         // Settings changes: CLI path and refresh interval apply right away
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -108,36 +117,67 @@ final class AppStore {
         }
     }
 
-    private func startEvents() {
-        let stream = EventStream(cli: cli) { [weak self] line, afterRestart in
+    // Created once, started only while the panel is open
+    private func makeEvents() {
+        events = EventStream(cli: cli) { [weak self] line, afterRestart in
             let reaction = eventReaction(line: line, afterRestart: afterRestart)
             guard reaction != .ignore else { return }
             Task { @MainActor in self?.handle(reaction) }
         }
-        events = stream
-        stream.start()
+    }
+
+    // MARK: - Panel open / closed
+
+    // The panel appeared: list everything (with containers) and follow events
+    func panelOpened() {
+        panelOpen = true
+        streamStop?.cancel()
+        streamStop = nil
+        events?.watch(roots: currentRoots)
+        events?.start()
+        armTimer()
+        refresh()
+    }
+
+    // The panel closed: back to the slow timer; the stream ends a little later unless it reopens
+    func panelClosed() {
+        panelOpen = false
+        isSelecting = false
+        eventRefresh?.cancel()
+        eventRefresh = nil
+        armTimer()
+        streamStop?.cancel()
+        streamStop = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(RefreshPolicy.streamLinger))
+            guard !Task.isCancelled, let self, !self.panelOpen else { return }
+            self.streamStop = nil
+            self.events?.stop()
+        }
+    }
+
+    private var currentRoots: Set<String> {
+        watchedRoots(repos.map { (root: $0.repo.root, hidden: $0.repo.hidden ?? false, exists: $0.repo.exists) })
     }
 
     // Changes come in bursts (a container start is several Docker events): one refresh a second at most
     private func handle(_ reaction: EventReaction) {
-        if reaction == .restartStream {
-            events?.restart()
-            return
-        }
-        guard eventRefresh == nil else { return }
+        guard RefreshPolicy.reactsToEvents(panelOpen: panelOpen), eventRefresh == nil else { return }
         eventRefresh = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
-            guard let self else { return }
+            guard !Task.isCancelled, let self else { return }
             self.eventRefresh = nil
+            guard RefreshPolicy.reactsToEvents(panelOpen: self.panelOpen) else { return }
             self.refresh()
         }
     }
 
     private func armTimer() {
         timer?.invalidate()
-        let seconds = UserDefaults.standard.kunjRefreshInterval
-        guard seconds > 0 else { timer = nil; return }
-        timer = Timer.scheduledTimer(withTimeInterval: max(seconds, 10), repeats: true) { [weak self] _ in
+        guard let seconds = RefreshPolicy.timerInterval(setting: UserDefaults.standard.kunjRefreshInterval, panelOpen: panelOpen) else {
+            timer = nil
+            return
+        }
+        timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
     }
@@ -193,7 +233,9 @@ final class AppStore {
         let defaults = UserDefaults.standard
         let includeStatus = defaults.kunjShowStatus
         let includePRs = defaults.kunjShowPullRequests
-        let includeContainers = defaults.kunjShowContainers && !containersUnsupported
+        // Closed, only pull request notifications need the listing: no fleet listing of containers
+        let wantContainers = defaults.kunjShowContainers && !containersUnsupported
+        let includeContainers = RefreshPolicy.includeContainers(setting: wantContainers, panelOpen: panelOpen)
         let cli = self.cli
         let previous = Dictionary(uniqueKeysWithValues: repos.map { ($0.id, $0) })
 
@@ -223,15 +265,24 @@ final class AppStore {
             return collected.sorted { $0.0 < $1.0 }.map { $0.1 }
         }
 
-        // Keep the last good listing when a refresh fails transiently
+        // Keep the last good listing when a refresh fails transiently, and the last containers
+        // when this listing left them out (closed panel), so the panel does not open without them
         repos = results.map { state in
             if state.listing == nil, state.repo.exists, let old = previous[state.id], old.listing != nil {
                 var kept = old
                 kept.error = state.error
                 return kept
             }
+            if !includeContainers, wantContainers, let listing = state.listing, listing.containers == nil,
+               let oldContainers = previous[state.id]?.listing?.containers {
+                var merged = state
+                merged.listing = listing.with(containers: oldContainers)
+                return merged
+            }
             return state
         }
+        // The stream follows the visible repositories; an unchanged set does not restart it
+        if panelOpen { events?.watch(roots: currentRoots) }
         notifier.update(with: allWorktrees)
     }
 

@@ -17,7 +17,7 @@ repository kunj knows about rather than one editor window:
 - Remove with the same force confirmation as the extension, prune stale worktrees
 - Notifications when a pull request's checks fail or pass, or it is approved or merged; failing
   checks count in the menu bar
-- Live refresh from `kunj events --json`: containers, agents, forwards and git changes show at once
+- Live refresh from `kunj events --json` while the panel is open: containers, agents, forwards and git changes show at once. Closed, it lists worktrees without containers every 5 minutes (enough for pull request notifications) and runs no events stream (stopped 30 s after the panel closes)
 - Filter field and an **Open only** toggle (just the worktrees open in an editor), launch at login, settings for the CLI path, refresh interval and terminal app
 - **Organize Windows** (⚙ menu): the worktrees' editor and terminal windows, two per desktop on a
   chosen screen, one on each half. A worktree's editor and terminal share a desktop; worktrees left

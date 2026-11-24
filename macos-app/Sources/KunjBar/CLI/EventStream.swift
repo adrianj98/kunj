@@ -2,9 +2,12 @@
 // show at once instead of on the next timer tick. Its stdin is held open (kunj events exits when
 // stdin ends, so the child dies with the app). An exited child is started again after a delay
 // that doubles from 2 s to 60 s, back to 2 s once a child has lived longer than that; a kunj
-// without `events` therefore costs one short-lived process a minute.
+// without `events` therefore costs one short-lived process a minute. It watches the roots given
+// to `watch(roots:)` (`--repo`), and is restarted only when that set changes. The store runs it
+// only while the panel is open (RefreshPolicy).
 
 import Foundation
+import KunjBarCore
 
 final class EventStream: @unchecked Sendable {
     private let cli: KunjCLI
@@ -20,6 +23,8 @@ final class EventStream: @unchecked Sendable {
     private var process: Process?
     private var stdinPipe: Pipe?
     private var delay = EventStream.backoff.lowerBound
+    // The repositories the next child watches (empty: every known visible one)
+    private var roots: Set<String> = []
 
     init(cli: KunjCLI, onLine: @escaping @Sendable (String, Bool) -> Void) {
         self.cli = cli
@@ -34,6 +39,15 @@ final class EventStream: @unchecked Sendable {
         let gen = generation
         lock.unlock()
         queue.async { self.launch(generation: gen) }
+    }
+
+    // The repositories to watch; a running child is restarted only when the set differs
+    func watch(roots newRoots: Set<String>) {
+        lock.lock()
+        guard newRoots != roots else { lock.unlock(); return }
+        roots = newRoots
+        lock.unlock()
+        restart()
     }
 
     // Ends the running child so a new one starts (with the repositories known now)
@@ -67,7 +81,10 @@ final class EventStream: @unchecked Sendable {
     }
 
     private func launch(generation gen: Int) {
-        let (executable, arguments, environment) = cli.spawnSpec(["events", "--json"])
+        lock.lock()
+        let watched = roots
+        lock.unlock()
+        let (executable, arguments, environment) = cli.spawnSpec(eventStreamArguments(roots: watched))
         let p = Process()
         p.executableURL = URL(fileURLWithPath: executable)
         p.arguments = arguments
@@ -95,8 +112,11 @@ final class EventStream: @unchecked Sendable {
         stdinPipe = input
         let afterRestart = runs > 0
         runs += 1
+        // The set changed while this child was being launched
+        let stale = watched != roots
         lock.unlock()
-        cli.log("kunj events --json (live refresh)")
+        if stale { restart() }
+        cli.log("kunj events --json (live refresh, \(watched.isEmpty ? "every repository" : "\(watched.count) repositories"))")
 
         let reader = out.fileHandleForReading
         let deliver = onLine

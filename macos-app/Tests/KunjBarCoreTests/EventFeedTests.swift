@@ -24,8 +24,9 @@ import Testing
     #expect(eventReaction(line: hello, afterRestart: true) == .refresh)
 }
 
-@Test func aNewRepositoryRestartsTheStream() {
-    #expect(eventReaction(line: #"{"at":"t","type":"repos"}"#, afterRestart: false) == .restartStream)
+// repos.json is rewritten for `lastSeen` by every listing: the directory watcher decides
+@Test func reposEventsAreLeftToTheWatcher() {
+    #expect(eventReaction(line: #"{"at":"t","type":"repos"}"#, afterRestart: false) == .ignore)
 }
 
 @Test func sessionsUnknownTypesAndNoiseAreIgnored() {

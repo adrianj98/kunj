@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { KunjCli, KunjCliError, Worktree } from './kunjCli';
 import { SessionManager } from './sessionManager';
+import { CappedOutputChannel } from './cappedOutput';
 import { EventStream } from './eventStream';
 import { kunjCommandLine, registerContainerCommands, runInTerminal, runToCompletion } from './containerCommands';
 import { RepoEntry, WorktreeNode, WorktreeProvider, describeSession, prBadge, samePath, shortenPath } from './worktreeProvider';
@@ -15,7 +16,8 @@ import { RepoEntry, WorktreeNode, WorktreeProvider, describeSession, prBadge, sa
 let sessions: SessionManager | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const output = vscode.window.createOutputChannel('Kunj');
+  // capped: every kunj call logs a line, and a window may stay open for days
+  const output = new CappedOutputChannel(vscode.window.createOutputChannel('Kunj'));
   const cli = new KunjCli(output);
   const provider = new WorktreeProvider(cli, process.pid);
   sessions = new SessionManager(cli, output);
