@@ -121,7 +121,7 @@ describe('kunj serve --machines and --allow-pairing', () => {
     });
     await cmd.execute({ machines: true, listen: '127.0.0.1:0' });
     expect(listened).toBe(true);
-    expect(stderr.join('\n')).toMatch(/no Docker here/);
+    expect(stderr.join('\n')).toMatch(/Docker has not answered yet/);
   });
 
   it('keeps named client tokens for the coordinator with token add|list|remove --machines', async () => {

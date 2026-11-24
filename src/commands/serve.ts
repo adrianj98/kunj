@@ -227,10 +227,11 @@ export class ServeCommand extends BaseCommand {
     // fails early, with docker's own message, when the daemon is down; a coordinator needs no Docker
     // and does not wait for it: a slow Docker kept an auto-started one from listening within the
     // launcher's wait, and the launcher started another, and another (docs/specs/cloud-machines.md)
+    let dockerLate = false;
     const engine = opts.machines
       ? await Promise.race([
           backend.info().catch(() => null),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), this.deps.coordinatorDockerWaitMs ?? 2000).unref?.()),
+          new Promise<null>(resolve => setTimeout(() => { dockerLate = true; resolve(null); }, this.deps.coordinatorDockerWaitMs ?? 2000).unref?.()),
         ]).finally(() => clearTimeout(waiting))
       : await backend.info().finally(() => clearTimeout(waiting));
 
@@ -366,7 +367,7 @@ export class ServeCommand extends BaseCommand {
       stderr(`  ${token}`);
       stderr(chalk.gray(`On the laptop: kunj remote add <name> --ssh <user>@<this host> --port ${address.port}  (or --url https://…), then paste it`));
     }
-    const docker = engine ? `Docker ${engine.serverVersion}, ${engine.operatingSystem}` : 'no Docker here';
+    const docker = engine ? `Docker ${engine.serverVersion}, ${engine.operatingSystem}` : dockerLate ? 'Docker has not answered yet' : 'no Docker here';
     stderr(`kunj serve ${getVersion()} listening on ${address.address}:${address.port}  (${opts.machines ? `coordinator for ${providerName}; ` : ''}${docker})`);
     if (pairing) stderr(chalk.yellow(`waiting for a coordinator to pair (POST /v1/pair) for ${Math.round(pairWindowMs / 60000)} min`));
     let recordFile: string | undefined;
@@ -386,7 +387,9 @@ export class ServeCommand extends BaseCommand {
         let owner: number | undefined;
         try {
           owner = JSON.parse(fs.readFileSync(file, 'utf8'))?.pid;
-        } catch {
+        } catch (err) {
+          // only a missing record means gone; a read that failed for another reason is tried again
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return;
           owner = undefined;
         }
         if (owner !== process.pid) {
@@ -436,5 +439,11 @@ export class ServeCommand extends BaseCommand {
     if (ownerCheck) clearInterval(ownerCheck);
     await machines?.coordinator.close();
     if (recordFile) (await import('../lib/machines/local-coordinator')).removeRecord(recordFile, process.pid);
+    // An auto-started coordinator really ends: a docker call still out (a hung Docker answering the
+    // start-up `docker info`) would otherwise keep the process alive after it stopped serving
+    if (opts.idleExit !== undefined && !this.deps.onListening) {
+      (backend as { killChildren?: () => void }).killChildren?.();
+      process.exit(0);
+    }
   }
 }

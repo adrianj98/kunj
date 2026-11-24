@@ -12,6 +12,9 @@ Changes made with Claude, and why.
 - Fix: an auto-started coordinator exits once coordinator.json names another (checked every minute);
   a coordinator waits at most 2 s for Docker before listening. Killed every coordinator and its
   gcloud polls (user asked).
+- Review fixes: an auto-started coordinator calls process.exit after stopping (a hung `docker info`
+  kept it alive), says "Docker has not answered yet" instead of "no Docker here" when Docker is only
+  slow, and treats only a missing coordinator.json as a takeover (other read errors retry).
 
 ## 2026-11-24 — Overview lines scroll sideways
 
