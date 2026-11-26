@@ -820,6 +820,8 @@ export interface AgentOverviewStopJson {
   kind: 'done' | 'current' | 'todo';
   /** The step's subject (a tooltip; drawn above the stop, or beside it when `labelBeside`) */
   label: string;
+  /** More about it for a hover card under `label`, one line each: "Step 3 of 5 · in progress", "Started 14:02" */
+  detail?: string[];
 }
 
 /** A subagent: a loop that leaves the line at `fromX`, runs along `y` and rejoins at `toX`. */
@@ -834,6 +836,11 @@ export interface AgentOverviewLoopJson {
   doneToX: number;
   stops: AgentOverviewStopJson[];
   label: string;
+  /** More about the subagent for a hover card under `label`: its type, task, progress, tool calls */
+  detail?: string[];
+  /** Several subagents with this one span (a fan-out), drawn as one stacked loop with a "×count" badge;
+   * its stops are then one per subagent (finished ones first). Absent for one subagent */
+  count?: number;
 }
 
 /** A branch or worktree change (or a fork): a diamond on the line at `x`,`y`, its label at `labelY`. */
@@ -841,7 +848,12 @@ export interface AgentOverviewMarkerJson {
   x: number;
   y: number;
   labelY: number;
+  /** "branch: main → feat/x", "worktree: a → b", "fork", "new conversation" */
   label: string;
+  /** What happened, so a consumer can tell a branch change from the rest; absent from an older kunj */
+  kind?: 'branch' | 'worktree' | 'fork' | 'new';
+  /** More about it for a hover card under `label`: "Switched branch", "From: main", "To: feat/x", "At 14:03" */
+  detail?: string[];
 }
 
 export interface AgentOverviewLaneJson {
@@ -866,12 +878,14 @@ export interface AgentOverviewLaneJson {
   line?: { fromX: number; toX: number; /** drawn as done up to here; null: none of it */ doneToX: number | null };
   loops: AgentOverviewLoopJson[];
   markers: AgentOverviewMarkerJson[];
-  /** The elbow from the parent's stop down to this lane's line */
-  elbow?: { fromX: number; fromY: number; toX: number; toY: number };
+  /** The elbow from the parent's stop down to this lane's line; `label` ("handoff → feat/x") goes at its corner */
+  elbow?: { fromX: number; fromY: number; toX: number; toY: number; label?: string; detail?: string[] };
   /** No task list: the one stop's label goes right of it */
   labelBeside: boolean;
   /** The agent ended: its last plan, drawn dimmed (only the newest of a place that has no running agent) */
   ended?: boolean;
+  /** More about the agent for a hover card under `title`: branch, worktree or container, status, current step, handoff, last change */
+  detail?: string[];
 }
 
 /** An agent with the agents it handed work to: `lanes[0]` is the root. */

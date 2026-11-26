@@ -193,3 +193,4 @@
 - Resource review part 2 (items 1-15): events poll, KunjBar idle, app terminals/threads, no waiting node wrappers, file cap, machine stop, snapshots, limits, setup --remove, tether. Page updated: none.
 - Teleport: kunj agent start --teleport, /handoff --teleport and a teleport skill. Page updated: features/worktree-agents.md.
 - Workspace app: Changes and Files columns follow worktree file edits (FSEvents watcher); Files tree colours branch changes. Page updated: apps/workspace-app.md.
+- Overview: hover cards (kunj `detail` lines), clear branch-change and handoff labels, stacked fan-out subagents. Page updated: apps/workspace-app.md.

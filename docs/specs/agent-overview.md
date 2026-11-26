@@ -31,6 +31,9 @@ main ⇄ fix/x    ●━━●━━⇄━━●━━━◉━━━○        
 | Agents give a basic plan with one cheap call, `set_plan` (whole plan: a few short steps and the current index; one step for a quick job), from `kunj agent mcp` in kunj's plugin, allowed without a prompt; a `KunjPlan` record line replaces the conversation's own steps like `TodoWrite`. Checked live: a Haiku agent set a 4-step plan first and moved it on twice. Prompts are not tracked as steps (tried and removed: too much) | Shipped 2026-11-24 (src/lib/plan-mcp.ts) |
 | An ended agent's last plan stays in the overview, dimmed (`ended` on the lane): the newest of a place with no running agent, with steps, changed in the last 3 days | Shipped 2026-11-23 (`endedPlans`) |
 | Workspace app: closing the Overview puts the rows back to their height; a read that comes back after it closed draws nothing | Shipped 2026-11-23 |
+| Hover details: every lane, stop, subagent loop, marker and handoff carries `detail` lines (`laneDetail`, `stepDetail`, `subagentDetail`, `markerDetail`, `handoffDetail`: where it runs, step N of M, start/finish times and duration, task, tool calls, from/to); the app shows them in a hover card at once (`OverviewHoverCard`), replacing the tooltips | Shipped 2026-11-26 |
+| Clear branch changes: marker labels say what changed (`branch: main → feat/x`, `worktree: a → b`) and carry `kind`; the app draws a branch change in the link colour. A handoff's elbow is labelled where the work goes on (`handoff → feat/x`, or `handoff · agent two` on the same branch), so the new branch shows beside the sidebar too | Shipped 2026-11-26 |
+| Subagent stacks: subagents with one span (a fan-out) are one loop with `count`, drawn as a deck with a `×N` badge, one dot per subagent (finished first, so the bottom fills like a progress bar; over 6 the bottom fills by the share done); its hover card lists them. Loop labels are cut to their loop's width | Shipped 2026-11-26 (`groupSubagents`, `stackedLoop`) |
 | Optional `kunj-plan` skill (agent-declared steps) | Later |
 | Rewind forks (needs the transcript) | Later, only if wanted |
 
@@ -161,8 +164,10 @@ inside a family x starts at the right edge of the label column and y at the fami
 by `buildOverview()` in `src/lib/agent-overview.ts` (pure, tested): `activePlans()` drops ended
 sessions, `overviewFamilies()` puts a handed-off agent under its parent (one whose parent ended is a
 root), `layoutFamily()` places everything (stops 116 apart, a child half a stop after the stop it
-branched from, overlapping loops stacked in levels, a marker's label under the line, or under the
-loops when it would cover one's legs). `--containers`
+branched from, overlapping loops stacked in levels, subagents with one span grouped into one stacked
+loop (`count`), a marker's label under the line, or under the loops when it would cover one's legs).
+Every lane, stop, loop, marker and elbow also has `detail`: the lines of its hover card, worded here
+like the rest (times as `14:02`, or `Nov 25 14:02` another day, in this machine's zone). `--containers`
 lists the repository's containers across its backends (`ContainerCommand.listJson`), reads the plans
 of the running ones that have an agent (`agentPlansJson`, each on its own backend), and gives up on
 them after 8 s: Docker down or slow is `available: false`, never a failed overview.
@@ -197,7 +202,11 @@ Mockup: [docs/workspace-app/design/mockups/overview.html](../workspace-app/desig
 Window ▸ Overview (⌘⇧O), `OverviewWindow` + `OverviewCanvas` (workspace-app/Sources/KunjWorkspace/Overview).
 Rows grouped by repository, one lane per running agent, a handed-off agent under its parent with the
 branch drawn. Done stops filled, current ringed (green working, amber waiting), pending hollow. A
-stop's tooltip is its subject; a click on a lane opens that agent's tab (`openHandedOffAgent`). An
+hover card (`OverviewHoverCard`, shown at once, never taking a click) gives kunj's title and `detail`
+lines for whatever is under the pointer: a stop (with its label), a subagent's dot, a loop's bottom or
+label, a marker or its pill, a handoff's pill or stroke, the lane's line or its label column. A branch
+change is drawn in the link colour; a stack has two outlines behind it and a `×N` badge where it
+leaves the line (green while one runs); a loop's label is no wider than the loop. A click on a lane opens that agent's tab (`openHandedOffAgent`). An
 agent with no task list is one stop, so it is still on the map. All / Waiting / Running filter
 families (a family shows when any of its lanes passes).
 

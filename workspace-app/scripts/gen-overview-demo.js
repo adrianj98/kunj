@@ -9,14 +9,20 @@ const fs = require('fs');
 const path = require('path');
 const { buildOverview } = require('../../dist/lib/agent-overview.js');
 
-const steps = items => items.map(([s, subject], i) => ({ id: String(i + 1), subject, status: s === 'd' ? 'completed' : s === 'c' ? 'in_progress' : 'pending' }));
+// steps start 4 minutes apart from 04:20Z and take 3; a step to come has no times
+const at = min => new Date(Date.parse('2026-11-23T04:20:00.000Z') + min * 60_000).toISOString();
+const steps = items => items.map(([s, subject], i) => ({ id: String(i + 1), subject, status: s === 'd' ? 'completed' : s === 'c' ? 'in_progress' : 'pending',
+  ...(s === 't' ? {} : { startedAt: at(i * 4) }), ...(s === 'd' ? { completedAt: at(i * 4 + 3) } : {}) }));
 const plan = (session, title, branch, items, extra = {}) => {
   const list = steps(items);
   const current = list.findIndex(s => s.status === 'in_progress');
   return { session, id: null, branch, worktree: `/Users/demo/src/${branch}`, title, running: true, state: 'running', steps: list,
     current: current === -1 ? null : current, markers: [], subagents: [], updatedAt: '2026-11-23T04:46:00.000Z', ...extra };
 };
-const sub = (id, task, fromStep, toStep, running, items) => ({ id, type: 'general-purpose', task, fromStep, toStep, running, steps: steps(items) });
+const sub = (id, task, fromStep, toStep, running, items, extra = {}) => ({ id, type: 'general-purpose', task, fromStep, toStep, running, steps: steps(items), ...extra });
+// a fan-out: four reviewers started at one step, two still running (a stack with a ×4 badge)
+const fanOut = (fromStep, tasks, running) => tasks.map((task, i) =>
+  sub(`r${i}`, task, fromStep, i < running ? null : fromStep + 1, i < running, [], { type: 'adversary', toolCalls: 6 + i * 5, lastTool: i < running ? 'Read' : undefined }));
 
 const repos = [
   { repo: { name: 'kunj', root: '/Users/demo/src/kunj' }, plans: [
@@ -40,13 +46,16 @@ const repos = [
       { id: 'two', container: 'alertd-core-feat-llm-insights', worktree: '/workspace', parent: { session: 'agent', step: 3 } }),
     plan('kunj-alertd-core-fix-alert-dedupe', 'Dedupe alert fan-out', 'fix/alert-dedupe',
       [['d', 'Reproduce'], ['d', 'Failing test'], ['c', 'Fix the fan-out'], ['t', 'Run the suite'], ['t', 'Open the PR']],
-      { subagents: [sub('s2', 'find fan-out callers', 0, 1, false, [['d', 'Grep callers'], ['d', 'Read queue code']])],
+      { subagents: [sub('s2', 'find fan-out callers', 0, 1, false, [['d', 'Grep callers'], ['d', 'Read queue code']]),
+        ...fanOut(2, ['review: correctness', 'review: failure paths', 'review: races', 'review: contracts'], 2)],
         // a branch change under the subagent's loop: its label goes under the loop
         markers: [{ type: 'branch', afterStep: 0, from: 'main', to: 'fix/alert-dedupe', at: '2026-11-23T04:30:00.000Z' }] }),
   ] },
 ];
 
-const overviews = repos.map(r => ({ repo: r.repo, ...buildOverview(r.plans), containers: { available: true } }));
+// a fixed now, so the times read the same on every run (in this machine's zone)
+const now = Date.parse('2026-11-23T05:00:00.000Z');
+const overviews = repos.map(r => ({ repo: r.repo, ...buildOverview(r.plans, undefined, now), containers: { available: true } }));
 const app = path.resolve(__dirname, '..');
 fs.writeFileSync(path.join(app, 'Tests/Fixtures/responses/agent_overview_containers.json'), JSON.stringify(overviews[0], null, 2) + '\n');
 const swift = `import Foundation

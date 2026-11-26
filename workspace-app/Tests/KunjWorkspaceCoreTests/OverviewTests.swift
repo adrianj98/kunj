@@ -37,8 +37,9 @@ import Testing
         #expect(o.metrics.labelWidth == 248)
         #expect(o.metrics.stopSpacing == 116)
         #expect(o.containers?.available == true)
-        // the ended agent is not among them; the handed-off one is under its parent
-        #expect(o.families.map { $0.lanes.count } == [2, 1, 1])
+        // the ended agent comes last (drawn dimmed); the handed-off one is under its parent
+        #expect(o.families.map { $0.lanes.count } == [2, 1, 1, 1])
+        #expect(o.families[3].lanes[0].isEnded)
 
         let root = o.families[0].lanes[0]
         #expect(root.title == "Agent overview window")
@@ -59,12 +60,17 @@ import Testing
         #expect(child.child)
         #expect(child.place == "handoff · feat/agent-overview-app")
         #expect(child.elbow?.fromX == 172)
+        #expect(child.elbow?.label == "handoff → feat/agent-overview-app")
+        #expect(child.detail?.first == "Branch: feat/agent-overview-app")
+        #expect(root.stops[0].detail?.first == "Step 1 of 6 · done")
         #expect(child.top == root.height)
 
         let waiting = o.families[1].lanes[0]
         #expect(waiting.waiting)
         #expect(waiting.status == "Waiting for input")
-        #expect(waiting.markers.map { $0.label } == ["main → feat/vscode-search"])
+        #expect(waiting.markers.map { $0.label } == ["branch: main → feat/vscode-search"])
+        #expect(waiting.markers.map { $0.kind } == ["branch"])
+        #expect(waiting.markers[0].detail?.prefix(3) == ["Switched branch", "From: main", "To: feat/vscode-search"])
 
         let noList = o.families[2].lanes[0]
         #expect(noList.container == "kunj-kunj-fix-remote-pty")
@@ -80,7 +86,7 @@ import Testing
 
     @Test func aFamilyIsShownWhenAnyLanePassesTheFilter() async throws {
         let families = try await fixture().families
-        #expect(filterFamilies(families, .all).count == 3)
+        #expect(filterFamilies(families, .all).count == 4)
         #expect(filterFamilies(families, .waiting).map { $0.lanes[0].title } == ["Search in VS Code"])
         #expect(filterFamilies(families, .running).map { $0.lanes[0].title } == ["Agent overview window", "Remote terminal hangup"])
         // a family with one waiting lane is in both

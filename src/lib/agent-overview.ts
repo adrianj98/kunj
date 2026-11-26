@@ -141,8 +141,8 @@ const folder = (p: string | undefined): string => (p ? p.replace(/\/+$/, '').spl
 /** A marker's label; null for one that is not drawn (`compact`, or a type this version does not know) */
 export function markerLabel(marker: AgentPlanMarkerJson): string | null {
   switch (marker.type as string) {
-    case 'branch': return `${marker.from ?? '?'} → ${marker.to ?? '?'}`;
-    case 'worktree': return `${folder(marker.from)} → ${folder(marker.to)}`;
+    case 'branch': return `branch: ${marker.from ?? '?'} → ${marker.to ?? '?'}`;
+    case 'worktree': return `worktree: ${folder(marker.from)} → ${folder(marker.to)}`;
     case 'fork': return 'fork';
     case 'new': return 'new conversation';
     default: return null;
@@ -159,6 +159,117 @@ export function subagentLabel(sub: AgentPlanSubagentJson): string {
   const calls = !sub.steps.length && sub.toolCalls ? `${sub.toolCalls} tool call${sub.toolCalls === 1 ? '' : 's'}` : '';
   if (sub.running) return calls ? `${name} · ${calls}${sub.lastTool ? `, now ${sub.lastTool}` : ''}` : name;
   return `${name} · done${calls ? `, ${calls}` : ''}`;
+}
+
+// ---- hover details (every line a consumer shows in a hover card; the times in this machine's zone)
+
+/** "14:02" today, "Nov 25 14:02" another day; null for a missing or bad time */
+export function clockText(iso: string | null | undefined, now: number = Date.now()): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const today = new Date(now);
+  if (d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()) return hm;
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+  return `${month} ${d.getDate()} ${hm}`;
+}
+
+/** "45s", "3m 10s", "2h 5m"; null when either end is missing or the order is wrong */
+export function durationText(fromIso: string | null | undefined, toIso: string | null | undefined): string | null {
+  if (!fromIso || !toIso) return null;
+  const ms = Date.parse(toIso) - Date.parse(fromIso);
+  if (!(ms >= 0)) return null;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `${m}m ${s % 60}s` : `${m}m`;
+  return m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`;
+}
+
+const kindWord = (kind: AgentOverviewStopJson['kind']): string => (kind === 'done' ? 'done' : kind === 'current' ? 'in progress' : 'to do');
+
+/** "Step 3 of 5 · in progress", then when it started and, once done, when it finished and how long it took */
+export function stepDetail(step: AgentPlanStepJson, index: number, count: number, kind: AgentOverviewStopJson['kind'],
+  now: number, prefix = 'Step'): string[] {
+  const lines = [`${prefix} ${index + 1} of ${count} · ${kindWord(kind)}`];
+  const started = clockText(step.startedAt, now);
+  const finished = clockText(step.completedAt, now);
+  const took = durationText(step.startedAt, step.completedAt);
+  if (started) lines.push(`Started ${started}`);
+  if (finished) lines.push(`Finished ${finished}${took ? ` · took ${took}` : ''}`);
+  return lines;
+}
+
+/** The subagent's type, task, state, progress, tool calls and where it left and rejoined the line */
+export function subagentDetail(sub: AgentPlanSubagentJson): string[] {
+  const lines = [`Subagent: ${sub.type}`];
+  if (sub.task?.trim()) lines.push(`Task: ${sub.task.trim()}`);
+  lines.push(sub.running ? 'Running' : 'Done');
+  if (sub.steps.length) {
+    const done = sub.steps.filter(s => s.status === 'completed').length;
+    lines.push(`${sub.steps.length} step${sub.steps.length === 1 ? '' : 's'}, ${done} done`);
+  }
+  if (sub.toolCalls) lines.push(`${sub.toolCalls} tool call${sub.toolCalls === 1 ? '' : 's'}${sub.lastTool ? ` · last: ${sub.lastTool}` : ''}`);
+  if (sub.fromStep !== null) {
+    lines.push(sub.toStep !== null && sub.toStep !== sub.fromStep
+      ? `From step ${sub.fromStep + 1} to step ${sub.toStep + 1}` : `Started at step ${sub.fromStep + 1}`);
+  }
+  return lines;
+}
+
+/** What the marker says in full: what happened, from and to (whole paths for a worktree), and when */
+export function markerDetail(marker: AgentPlanMarkerJson, now: number): string[] {
+  const lines: string[] = [];
+  switch (marker.type) {
+    case 'branch': lines.push('Switched branch', `From: ${marker.from ?? '?'}`, `To: ${marker.to ?? '?'}`); break;
+    case 'worktree': lines.push('Moved to another worktree', `From: ${marker.from ?? '?'}`, `To: ${marker.to ?? '?'}`); break;
+    case 'fork': lines.push('Forked the conversation'); break;
+    case 'new': lines.push('A new conversation (/clear or a fresh start)'); break;
+  }
+  const at = clockText(marker.at, now);
+  if (at) lines.push(`At ${at}`);
+  return lines;
+}
+
+/** The agent: where it runs, its session, how far it is, its subagents, who handed it the work, its last change */
+export function laneDetail(plan: AgentPlanItemJson, parent: AgentPlanItemJson | null, now: number): string[] {
+  const lines = [`Branch: ${plan.branch}`];
+  lines.push(plan.container ? `Container: ${plan.container}` : `Worktree: ${plan.worktree}`);
+  if (plan.id) lines.push(`Agent: ${plan.id}`);
+  lines.push(`Session: ${plan.session}`);
+  lines.push(planStatus(plan));
+  const current = plan.current !== null ? plan.steps[plan.current] : undefined;
+  if (current) lines.push(`Now: ${current.subject}`);
+  if (plan.subagents.length) {
+    const running = plan.subagents.filter(s => s.running).length;
+    lines.push(`${plan.subagents.length} subagent${plan.subagents.length === 1 ? '' : 's'}${running ? `, ${running} running` : ''}`);
+  }
+  if (parent) {
+    const at = plan.parent?.step;
+    lines.push(`Handed off from “${planTitleText(parent)}”${at !== null && at !== undefined ? ` at step ${at + 1}` : ''}`);
+  }
+  const changed = clockText(plan.updatedAt, now);
+  if (changed) lines.push(`Last change ${changed}`);
+  return lines;
+}
+
+/**
+ * The elbow's label, where the work goes on: "handoff → feat/x" when the new agent has a branch of its
+ * own, "handoff · agent two" on the same branch (another session of the same worktree or container).
+ */
+export function handoffLabel(plan: AgentPlanItemJson, parent: AgentPlanItemJson): string {
+  if (plan.branch !== parent.branch) return `handoff → ${plan.branch}`;
+  return plan.id ? `handoff · agent ${plan.id}` : 'handoff';
+}
+
+export function handoffDetail(plan: AgentPlanItemJson, parent: AgentPlanItemJson): string[] {
+  const at = plan.parent?.step;
+  const lines = [`Handed off from “${planTitleText(parent)}”${at !== null && at !== undefined ? ` at step ${at + 1}` : ''}`];
+  lines.push(plan.branch !== parent.branch ? `New branch: ${plan.branch} (from ${parent.branch})` : `Same branch: ${plan.branch}`);
+  if (plan.container) lines.push(`Container: ${plan.container}`);
+  else if (plan.worktree !== parent.worktree) lines.push(`Worktree: ${plan.worktree}`);
+  return lines;
 }
 
 // ---- geometry
@@ -187,7 +298,69 @@ export function loopLevels(spans: Array<{ from: number; to: number }>): number[]
 const stopKind = (step: AgentPlanStepJson, isCurrent: boolean): AgentOverviewStopJson['kind'] =>
   step.status === 'completed' ? 'done' : isCurrent ? 'current' : 'todo';
 
-export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVIEW_METRICS): AgentOverviewFamilyJson {
+/** Subagents grouped by their loop's span, in the order of each span's first one */
+export function groupSubagents(subs: AgentPlanSubagentJson[], span: (s: AgentPlanSubagentJson) => { from: number; to: number }):
+  Array<{ span: { from: number; to: number }; subs: AgentPlanSubagentJson[] }> {
+  const groups = new Map<string, { span: { from: number; to: number }; subs: AgentPlanSubagentJson[] }>();
+  for (const sub of subs) {
+    const sp = span(sub);
+    const key = `${sp.from}:${sp.to}`;
+    const g = groups.get(key);
+    if (g) g.subs.push(sub); else groups.set(key, { span: sp, subs: [sub] });
+  }
+  return [...groups.values()];
+}
+
+/** A stack shows one dot per subagent up to this many; more, and its bottom fills by the share done */
+export const STACK_DOTS = 6;
+/** A stack's hover card names at most this many of its subagents */
+const STACK_DETAIL_LINES = 12;
+
+/** "5 subagents · 2 running, 3 done", "5 subagents · all done" */
+export function subagentStackLabel(subs: AgentPlanSubagentJson[]): string {
+  const running = subs.filter(s => s.running).length;
+  const done = subs.length - running;
+  const state = running === 0 ? 'all done' : done === 0 ? `${running} running` : `${running} running, ${done} done`;
+  return `${subs.length} subagents · ${state}`;
+}
+
+/** "write tests · running, 12 tool calls, now Read" */
+function stackMemberLine(sub: AgentPlanSubagentJson): string {
+  const name = sub.task?.trim() || sub.type;
+  const calls = sub.toolCalls ? `, ${sub.toolCalls} tool call${sub.toolCalls === 1 ? '' : 's'}` : '';
+  const steps = sub.steps.length ? `, ${sub.steps.filter(s => s.status === 'completed').length}/${sub.steps.length} steps` : '';
+  return `${sub.running ? '●' : '✓'} ${name} · ${sub.running ? 'running' : 'done'}${steps}${calls}${sub.running && sub.lastTool ? `, now ${sub.lastTool}` : ''}`;
+}
+
+/**
+ * Several subagents with one span as one loop (`count`): the finished ones first, then the running
+ * ones, one dot each (a finished one `done`, a running one `current`), and the bottom drawn as done up
+ * to the last finished dot, so the stack reads as a progress bar. Over STACK_DOTS there are no dots
+ * and the bottom fills by the share done.
+ */
+function stackedLoop(subs: AgentPlanSubagentJson[], a: number, b: number, lineY: number, ly: number, now: number): AgentOverviewLoopJson {
+  const ordered = [...subs.filter(s => !s.running), ...subs.filter(s => s.running)];
+  const done = ordered.filter(s => !s.running).length;
+  const running = ordered.length - done;
+  let stops: AgentOverviewStopJson[] = [];
+  let doneToX: number;
+  if (ordered.length <= STACK_DOTS) {
+    const sx = (i: number) => a + 24 + (i * (b - a - 48)) / (ordered.length - 1);
+    stops = ordered.map((sub, i) => ({ x: sx(i), y: ly, kind: sub.running ? 'current' : 'done', label: sub.task?.trim() || sub.type,
+      detail: subagentDetail(sub) }));
+    doneToX = running === 0 ? b : done === 0 ? a : sx(done - 1);
+  } else {
+    doneToX = running === 0 ? b : a + ((b - a) * done) / ordered.length;
+  }
+  const lines = ordered.slice(0, STACK_DETAIL_LINES).map(stackMemberLine);
+  if (ordered.length > STACK_DETAIL_LINES) lines.push(`and ${ordered.length - STACK_DETAIL_LINES} more`);
+  const from = ordered[0].fromStep;
+  const head = from === null ? 'Ran side by side' : `Ran side by side from step ${from + 1}`;
+  return { fromX: a, toX: b, lineY, y: ly, running: running > 0, doneToX, stops, label: subagentStackLabel(ordered),
+    detail: [head, ...lines], count: ordered.length };
+}
+
+export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVIEW_METRICS, now: number = Date.now()): AgentOverviewFamilyJson {
   const lanes: AgentOverviewLaneJson[] = [];
   const firstX: number[] = [];
   let top = 0;
@@ -206,7 +379,8 @@ export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVI
       const at = Math.min(Math.max(0, plan.parent?.step ?? 0), Math.max(0, parentPlan.steps.length - 1));
       const fromX = firstX[lane.parent] + at * m.stopSpacing;
       x0 = fromX + m.stopSpacing / 2;
-      elbow = { fromX, fromY: lanes[lane.parent].y, toX: x0, toY: y };
+      elbow = { fromX, fromY: lanes[lane.parent].y, toX: x0, toY: y, label: handoffLabel(plan, parentPlan),
+        detail: handoffDetail(plan, parentPlan) };
     }
     firstX.push(x0);
     const x = (i: number) => x0 + i * m.stopSpacing;
@@ -217,10 +391,13 @@ export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVI
     if (labelBeside) {
       // still on the map: one stop saying there is no list
       const label = 'No task list yet';
-      stops = [{ x: x0, y, kind: 'current', label }];
+      stops = [{ x: x0, y, kind: 'current', label, detail: ['The agent has not made a plan for this work yet'] }];
       lastX = x0 + label.length * m.loneLabelCharWidth;
     } else {
-      stops = plan.steps.map((step, i) => ({ x: x(i), y, kind: stopKind(step, plan.current === i), label: step.subject }));
+      stops = plan.steps.map((step, i) => {
+        const kind = stopKind(step, plan.current === i);
+        return { x: x(i), y, kind, label: step.subject, detail: stepDetail(step, i, n, kind, now) };
+      });
       lastX = x(n - 1);
     }
 
@@ -237,20 +414,29 @@ export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVI
       if (label === null) continue;
       const after = marker.afterStep === null ? null : Math.min(Math.max(0, marker.afterStep), Math.max(0, n - 1));
       const mx = after === null ? x0 - m.stopSpacing / 4 : x(after) + m.stopSpacing / 2;
-      markers.push({ x: mx, y, labelY: y + 13, label });
+      markers.push({ x: mx, y, labelY: y + 13, label, kind: marker.type as NonNullable<AgentOverviewMarkerJson['kind']>,
+        detail: markerDetail(marker, now) });
       lastX = Math.max(lastX, mx);
     }
 
-    const spans = plan.subagents.map(sub => loopSpan(sub, plan.current, n));
+    // subagents that left and rejoin the line at the same stops (a fan-out) share one stacked loop
+    const groups = groupSubagents(plan.subagents, sub => loopSpan(sub, plan.current, n));
+    const spans = groups.map(g => g.span);
     const levels = loopLevels(spans);
-    const loops: AgentOverviewLoopJson[] = plan.subagents.map((sub, k) => {
+    const loops: AgentOverviewLoopJson[] = groups.map((group, k) => {
       const a = x(spans[k].from);
       const b = x(spans[k].to);
       const ly = y + m.loopDrop + levels[k] * m.loopSpacing;
+      lastX = Math.max(lastX, b);
+      if (group.subs.length > 1) return stackedLoop(group.subs, a, b, y, ly, now);
+      const sub = group.subs[0];
       const count = sub.steps.length;
       const sx = (i: number) => (count <= 1 ? (a + b) / 2 : a + 24 + (i * (b - a - 48)) / (count - 1));
       const currentSub = sub.running ? sub.steps.findIndex(s => s.status === 'in_progress') : -1;
-      const subStops = sub.steps.map((step, i): AgentOverviewStopJson => ({ x: sx(i), y: ly, kind: stopKind(step, currentSub === i), label: step.subject }));
+      const subStops = sub.steps.map((step, i): AgentOverviewStopJson => {
+        const kind = stopKind(step, currentSub === i);
+        return { x: sx(i), y: ly, kind, label: step.subject, detail: stepDetail(step, i, count, kind, now, 'Subagent step') };
+      });
       let doneToX = b;
       if (sub.running) {
         // as far as its current step, else its last finished one; with no steps, none of it
@@ -258,8 +444,8 @@ export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVI
         if (reached === -1) sub.steps.forEach((s, i) => { if (s.status === 'completed') reached = i; });
         doneToX = reached === -1 ? a : sx(reached);
       }
-      lastX = Math.max(lastX, b);
-      return { fromX: a, toX: b, lineY: y, y: ly, running: sub.running, doneToX, stops: subStops, label: subagentLabel(sub) };
+      return { fromX: a, toX: b, lineY: y, y: ly, running: sub.running, doneToX, stops: subStops, label: subagentLabel(sub),
+        detail: subagentDetail(sub) };
     });
 
     const levelCount = levels.length ? Math.max(...levels) + 1 : 0;
@@ -284,6 +470,7 @@ export function layoutFamily(family: OverviewFamily, m: OverviewMetrics = OVERVI
       title: planTitleText(plan), place: planPlace(plan, lane.parent !== null), status: planStatus(plan), waiting: isWaiting(plan),
       child: lane.parent !== null, top, height, y, stops, ...(line ? { line } : {}), loops, markers, ...(elbow ? { elbow } : {}), labelBeside,
       ...(plan.running === false ? { ended: true } : {}),
+      detail: laneDetail(plan, lane.parent !== null ? family.lanes[lane.parent].plan : null, now),
     });
     top += height;
     right = Math.max(right, lastX);
@@ -301,6 +488,6 @@ export function buildOverview(plans: AgentPlanItemJson[], m: OverviewMetrics = O
     agents: active.length, waiting, summary: overviewSummary(active.length, waiting),
     metrics: { labelWidth: m.labelWidth, stopSpacing: m.stopSpacing },
     // the running agents, then the ended ones still shown; the counts are the running ones only
-    families: [...overviewFamilies(active), ...overviewFamilies(endedPlans(plans, now))].map(f => layoutFamily(f, m)),
+    families: [...overviewFamilies(active), ...overviewFamilies(endedPlans(plans, now))].map(f => layoutFamily(f, m, now)),
   };
 }

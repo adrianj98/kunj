@@ -68,6 +68,8 @@ public struct OverviewLane: Decodable, Equatable, Sendable {
     public var labelBeside: Bool
     /// The agent ended: its last plan, drawn dimmed (nil from a kunj that does not say)
     public var ended: Bool?
+    /// The hover card's lines under the title (nil from an older kunj)
+    public var detail: [String]?
     public var isEnded: Bool { ended == true }
 }
 
@@ -81,6 +83,8 @@ public struct OverviewStop: Decodable, Equatable, Sendable {
     /// `done`, `current` or `todo`
     public var kind: String
     public var label: String
+    /// The hover card's lines under the label (nil from an older kunj)
+    public var detail: [String]?
 
     /// A kind a newer kunj adds is drawn as a step to come.
     public var stopKind: OverviewStopKind {
@@ -109,6 +113,9 @@ public struct OverviewLoop: Decodable, Equatable, Sendable {
     public var doneToX: Double
     public var stops: [OverviewStop]
     public var label: String
+    public var detail: [String]?
+    /// Several subagents with one span, drawn as a stack with a "×count" badge; nil for one
+    public var count: Int?
 }
 
 /// A branch or worktree change: a diamond on the line, its label at `labelY`.
@@ -117,6 +124,9 @@ public struct OverviewMarker: Decodable, Equatable, Sendable {
     public var y: Double
     public var labelY: Double
     public var label: String
+    /// `branch`, `worktree`, `fork`, `new` (nil from an older kunj)
+    public var kind: String?
+    public var detail: [String]?
 }
 
 /// From the parent's stop down to a child's line.
@@ -125,6 +135,9 @@ public struct OverviewElbow: Decodable, Equatable, Sendable {
     public var fromY: Double
     public var toX: Double
     public var toY: Double
+    /// "handoff → feat/x", drawn at the corner (nil from an older kunj)
+    public var label: String?
+    public var detail: [String]?
 }
 
 // ---- arguments

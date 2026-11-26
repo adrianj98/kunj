@@ -19,8 +19,17 @@ final class OverviewCanvas: NSView {
         case message(String, top: CGFloat)
     }
     private var rows: [Row] = []
-    /// Tooltip owners are not retained by the view.
-    private var tipOwners: [NSString] = []
+
+    /// Something the hover card can tell about: where it is (view coordinates) and kunj's text
+    private struct HoverTarget {
+        var rect: NSRect
+        var title: String
+        var lines: [String]
+    }
+    /// Small things first (stops, markers, handoffs), then loops, then lanes: the first hit wins
+    private var hoverTargets: [HoverTarget] = []
+    private var hovered: Int?
+    private lazy var hoverCard = OverviewHoverCard(theme: theme)
 
     private static let headingHeight: CGFloat = 34
     private static let messageHeight: CGFloat = 120
@@ -33,6 +42,7 @@ final class OverviewCanvas: NSView {
         // a layer of its own, for the pulse's ring layers
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
+        addSubview(hoverCard)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -130,7 +140,7 @@ final class OverviewCanvas: NSView {
             guard !p.lane.waiting, !p.lane.isEnded else { return [] }
             return p.lane.stops.filter { $0.stopKind == .current }.map { NSPoint(x: Self.alignedGx + CGFloat($0.x), y: p.dy + CGFloat($0.y)) }
         }
-        rebuildToolTips()
+        rebuildHoverTargets()
         window?.invalidateCursorRects(for: self)
         needsDisplay = true
     }
@@ -151,6 +161,7 @@ final class OverviewCanvas: NSView {
 
     func apply(_ t: Theme) {
         theme = t
+        hoverCard.theme = t
         needsDisplay = true
         // the rings take the theme's green
         for ring in pulseLayers { ring.strokeColor = t.color(\.green).cgColor }
@@ -200,7 +211,7 @@ final class OverviewCanvas: NSView {
         }
         let visible = enclosingScrollView?.contentSize ?? .zero
         setFrameSize(NSSize(width: max(width, visible.width), height: max(y, visible.height)))
-        rebuildToolTips()
+        rebuildHoverTargets()
         window?.invalidateCursorRects(for: self)
         needsDisplay = true
     }
@@ -329,36 +340,111 @@ final class OverviewCanvas: NSView {
         }
     }
 
-    private func rebuildToolTips() {
-        removeAllToolTips()
-        tipOwners = []
-        func tip(_ stop: OverviewStop, gx: CGFloat, top: CGFloat, radius: CGFloat) {
-            let owner = stop.label as NSString
-            tipOwners.append(owner)
-            addToolTip(NSRect(x: gx + CGFloat(stop.x) - radius, y: top + CGFloat(stop.y) - radius, width: radius * 2, height: radius * 2),
-                       owner: owner, userData: nil)
+    private func rebuildHoverTargets() {
+        hoverTargets = []
+        hovered = nil
+        hoverCard.hide()
+        var loopTargets: [HoverTarget] = []
+        var laneTargets: [HoverTarget] = []
+        func add(_ lane: OverviewLane, gx: CGFloat, top: CGFloat, elbowFromY: CGFloat?, labelColumn: NSRect?) {
+            func pt(_ x: Double, _ y: Double) -> NSPoint { NSPoint(x: gx + CGFloat(x), y: top + CGFloat(y)) }
+            func around(_ c: NSPoint, _ r: CGFloat) -> NSRect { NSRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2) }
+            for stop in lane.stops {
+                let dot = around(pt(stop.x, stop.y), 10)
+                // the stop's label above it (or beside it) says the same
+                let rect = dot.union(lane.labelBeside
+                    ? NSRect(x: dot.maxX, y: dot.minY, width: 300, height: dot.height)
+                    : NSRect(x: dot.midX - 40, y: dot.minY - 22, width: 80, height: 20))
+                hoverTargets.append(HoverTarget(rect: rect, title: stop.label, lines: stop.detail ?? []))
+            }
+            for loop in lane.loops {
+                for stop in loop.stops {
+                    hoverTargets.append(HoverTarget(rect: around(pt(stop.x, stop.y), 7), title: stop.label, lines: stop.detail ?? []))
+                }
+                // its bottom and its label
+                let bottom = NSRect(x: gx + CGFloat(loop.fromX) - 6, y: top + CGFloat(loop.y) - 8,
+                                    width: CGFloat(loop.toX - loop.fromX) + 12, height: 30)
+                loopTargets.append(HoverTarget(rect: bottom, title: loop.label, lines: loop.detail ?? []))
+            }
+            for marker in lane.markers {
+                let c = pt(marker.x, marker.y)
+                let lines = marker.detail ?? []
+                hoverTargets.append(HoverTarget(rect: around(c, 9), title: marker.label, lines: lines))
+                hoverTargets.append(HoverTarget(rect: markerPill(marker, at: c, top: top), title: marker.label, lines: lines))
+            }
+            if let b = lane.elbow, let label = b.label, let fromY = elbowFromY {
+                hoverTargets.append(HoverTarget(rect: elbowPill(label, elbow: b, gx: gx, top: top), title: label, lines: b.detail ?? []))
+                // its vertical stroke too
+                let x = gx + CGFloat(b.fromX)
+                let y0 = min(fromY, top + CGFloat(b.toY)), y1 = max(fromY, top + CGFloat(b.toY))
+                loopTargets.append(HoverTarget(rect: NSRect(x: x - 5, y: y0 + 10, width: 10, height: max(0, y1 - y0 - 10)),
+                                               title: label, lines: b.detail ?? []))
+            }
+            let laneLines = lane.detail ?? [lane.place, lane.status]
+            if let line = lane.line {
+                let from = pt(line.fromX, lane.y), to = pt(line.toX, lane.y)
+                laneTargets.append(HoverTarget(rect: NSRect(x: from.x, y: from.y - 6, width: to.x - from.x, height: 12),
+                                               title: lane.title, lines: laneLines))
+            }
+            if let labelColumn { laneTargets.append(HoverTarget(rect: labelColumn, title: lane.title, lines: laneLines)) }
         }
         if let aligned {
             for p in aligned {
-                // the lane's own text, which the row beside it does not say, over the lane's empty start
-                let owner = "\(p.lane.title) · \(p.lane.status)" as NSString
-                tipOwners.append(owner)
-                addToolTip(NSRect(x: 0, y: p.frame.minY, width: Self.alignedGx + 40, height: p.frame.height), owner: owner, userData: nil)
-                for stop in p.lane.stops where !p.lane.labelBeside {
-                    tip(stop, gx: Self.alignedGx, top: p.dy, radius: 9)
+                // the lane's empty start, where the row beside it ends
+                add(p.lane, gx: Self.alignedGx, top: p.dy, elbowFromY: parentLineY(of: p),
+                    labelColumn: NSRect(x: 0, y: p.frame.minY, width: Self.alignedGx + 40, height: p.frame.height))
+            }
+        } else {
+            for row in rows {
+                guard case .family(let repo, let family, let top) = row, repo < repos.count else { continue }
+                let gx = CGFloat(repos[repo].metrics.labelWidth)
+                for lane in family.lanes {
+                    add(lane, gx: gx, top: top, elbowFromY: lane.elbow.map { top + CGFloat($0.fromY) },
+                        labelColumn: NSRect(x: 0, y: top + CGFloat(lane.top), width: gx, height: CGFloat(lane.height)))
                 }
-                for loop in p.lane.loops { for stop in loop.stops { tip(stop, gx: Self.alignedGx, top: p.dy, radius: 7) } }
-            }
-            return
-        }
-        for row in rows {
-            guard case .family(let repo, let family, let top) = row, repo < repos.count else { continue }
-            let gx = CGFloat(repos[repo].metrics.labelWidth)
-            for lane in family.lanes {
-                for stop in lane.stops where !lane.labelBeside { tip(stop, gx: gx, top: top, radius: 9) }
-                for loop in lane.loops { for stop in loop.stops { tip(stop, gx: gx, top: top, radius: 7) } }
             }
         }
+        hoverTargets += loopTargets + laneTargets
+    }
+
+    // MARK: hovering
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let index = hoverTargets.firstIndex { $0.rect.contains(point) }
+        guard index != hovered else { return }
+        hovered = index
+        guard let index else { hoverCard.hide(); return }
+        let target = hoverTargets[index]
+        hoverCard.show(title: target.title, lines: target.lines, near: target.rect, in: visibleRect)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = nil
+        hoverCard.hide()
+    }
+
+    /// A marker's label pill under the line
+    private func markerPill(_ marker: OverviewMarker, at c: NSPoint, top: CGFloat) -> NSRect {
+        let size = (marker.label as NSString).size(withAttributes: [.font: Theme.mono(10)])
+        return NSRect(x: c.x - size.width / 2 - 8, y: top + CGFloat(marker.labelY), width: size.width + 16, height: 17)
+    }
+
+    /// The handoff's pill: left of the elbow's corner on the child's line, else under the child's line
+    /// right of the corner when there is no room on the left.
+    private func elbowPill(_ label: String, elbow b: OverviewElbow, gx: CGFloat, top: CGFloat) -> NSRect {
+        let w = ceil((label as NSString).size(withAttributes: [.font: Theme.mono(10)]).width) + 16
+        let corner = gx + CGFloat(b.fromX)
+        let y = top + CGFloat(b.toY)
+        if corner - 10 - w >= gx - 4 { return NSRect(x: corner - 10 - w, y: y - 8.5, width: w, height: 17) }
+        return NSRect(x: corner + 14, y: y + 13, width: w, height: 17)
     }
 
     // MARK: drawing
@@ -455,6 +541,11 @@ final class OverviewCanvas: NSView {
                 }
                 path.line(to: to)
                 stroke(path, lineColor, width: 3)
+                // where the work went on: "handoff → feat/x"
+                if let label = b.label {
+                    drawPill(label, in: elbowPill(label, elbow: b, gx: gx, top: top),
+                             accent: label.contains("→") ? theme.color(\.link) : nil)
+                }
             }
 
             // the line: all of it as "to come", then the done part over it
@@ -482,17 +573,12 @@ final class OverviewCanvas: NSView {
                 diamond.line(to: NSPoint(x: c.x, y: c.y + 6))
                 diamond.line(to: NSPoint(x: c.x - 6, y: c.y))
                 diamond.close()
+                // a branch change in the link colour, so it stands out from the line
+                let accent = marker.kind == "branch" ? theme.color(\.link) : nil
                 theme.color(\.bg).setFill()
                 diamond.fill()
-                stroke(diamond, lineColor, width: 2)
-                let font = Theme.mono(10)
-                let size = (marker.label as NSString).size(withAttributes: [.font: font])
-                let pill = NSRect(x: c.x - size.width / 2 - 8, y: top + CGFloat(marker.labelY), width: size.width + 16, height: 17)
-                let box = NSBezierPath(roundedRect: pill.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
-                theme.color(\.raised).setFill()
-                box.fill()
-                stroke(box, theme.color(\.borderStrong), width: 1)
-                drawText(marker.label, in: pill.insetBy(dx: 4, dy: 2), font: font, color: theme.color(\.text2), alignment: .center)
+                stroke(diamond, accent ?? lineColor, width: 2)
+                drawPill(marker.label, in: markerPill(marker, at: c, top: top), accent: accent)
             }
 
             for stop in lane.stops {
@@ -529,6 +615,14 @@ final class OverviewCanvas: NSView {
             path.line(to: p(loop.toX, loop.lineY))
             return path
         }
+        // a stack of subagents: two more outlines behind it, like a deck
+        if let count = loop.count, count > 1 {
+            for k in [2, 1] {
+                let shadow = path(to: nil)
+                shadow.transform(using: AffineTransform(translationByX: CGFloat(k) * 3, byY: CGFloat(k) * 4))
+                stroke(shadow, theme.color(\.idle, alpha: k == 2 ? 0.35 : 0.55), width: 1.5)
+            }
+        }
         if loop.running {
             stroke(path(to: nil), theme.color(\.idle), width: 2)
             if loop.doneToX > loop.fromX { stroke(path(to: loop.doneToX), lineColor, width: 2) }
@@ -537,10 +631,34 @@ final class OverviewCanvas: NSView {
         }
         for stop in loop.stops { draw(stop: stop, at: p(stop.x, stop.y), state: theme.color(\.green), small: true) }
         let font = Theme.mono(10)
-        let width = max(CGFloat(loop.toX - loop.fromX), (loop.label as NSString).size(withAttributes: [.font: font]).width + 8)
+        // no wider than the loop, so labels of loops side by side never run into each other (the
+        // hover card has the whole text)
+        let width = max(CGFloat(loop.toX - loop.fromX) - 4, 60)
         let mid = p((loop.fromX + loop.toX) / 2, loop.y)
         drawText(loop.label, in: NSRect(x: mid.x - width / 2, y: mid.y + 8, width: width, height: 14),
                  font: font, color: theme.color(\.muted), alignment: .center)
+        // the stack's count where it leaves the line
+        if let count = loop.count, count > 1 {
+            let badge = "×\(count)"
+            let bold = Theme.mono(10, weight: .semibold)
+            let w = ceil((badge as NSString).size(withAttributes: [.font: bold]).width) + 10
+            let corner = p(loop.fromX, loop.y)
+            let rect = NSRect(x: corner.x - w / 2, y: corner.y - 8, width: w, height: 16)
+            let box = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
+            theme.color(\.raised).setFill()
+            box.fill()
+            stroke(box, loop.running ? theme.color(\.green) : theme.color(\.borderStrong), width: 1)
+            drawText(badge, in: rect.insetBy(dx: 2, dy: 1.5), font: bold, color: theme.color(\.text), alignment: .center)
+        }
+    }
+
+    /// A label in a small rounded box (markers, handoffs); `accent` colours its border and text
+    private func drawPill(_ text: String, in pill: NSRect, accent: NSColor?) {
+        let box = NSBezierPath(roundedRect: pill.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+        theme.color(\.raised).setFill()
+        box.fill()
+        stroke(box, accent ?? theme.color(\.borderStrong), width: 1)
+        drawText(text, in: pill.insetBy(dx: 4, dy: 2), font: Theme.mono(10), color: accent ?? theme.color(\.text2), alignment: .center)
     }
 
     private func draw(stop: OverviewStop, at c: NSPoint, state: NSColor, small: Bool) {

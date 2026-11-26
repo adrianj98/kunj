@@ -2180,3 +2180,16 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - Adversarial review round 2: a folder moved into place (rename) also re-lists ignored folders, and stop() clears the
   listing-in-progress flag so a hung git call cannot keep the next watch from loading its filter. Accepted as is: events
   under a brand-new ignored folder that arrive before its listing finishes still reload once (debounced).
+- Overview hover cards: `kunj agent overview --json` now gives every lane, stop, subagent loop, marker and handoff
+  `detail` lines (where the agent runs, step N of M, start/finish times and how long, the subagent's task and tool
+  calls, branch from/to), and the workspace app shows them in a hover card as soon as the pointer is over the item.
+  Why: the user wants to mouse over the Overview and see more; the wording stays in kunj (CLAUDE.md: the CLI is the
+  brain, the app only draws).
+- Overview branch changes labelled clearly: markers say `branch: main → feat/x` / `worktree: a → b`, carry a `kind`,
+  and a branch change is drawn in the link colour; a handoff's elbow gets a pill `handoff → <new branch>` (or
+  `handoff · agent two` on the same branch). Why: the user found branch changes unclear and saw no new branch where
+  the line drops into a handed-off session (beside the sidebar there is no label column to say it).
+- Overview subagent stacks: subagents with the same span (a fan-out) collapse into one loop drawn as a deck with a
+  `×N` badge, one dot per subagent with finished ones first so it fills like a progress bar; loop labels are cut to
+  the loop's width. Why: the user's screenshot showed a dozen overlapping loops with labels written over each other,
+  and asked for them to be compacted ("x 5 or something, be creative").

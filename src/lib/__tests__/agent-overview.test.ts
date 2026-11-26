@@ -1,4 +1,4 @@
-import { OVERVIEW_METRICS as m, activePlans, buildOverview, endedPlans, layoutFamily, loopLevels, loopSpan, markerLabel, overviewFamilies, overviewSummary, planPlace, planStatus, planTitleText, subagentLabel } from '../agent-overview';
+import { OVERVIEW_METRICS as m, STACK_DOTS, activePlans, buildOverview, clockText, durationText, laneDetail, stepDetail, subagentDetail, endedPlans, layoutFamily, loopLevels, loopSpan, markerLabel, overviewFamilies, overviewSummary, planPlace, planStatus, planTitleText, subagentLabel } from '../agent-overview';
 import type { AgentPlanItemJson, AgentPlanStepJson, AgentPlanSubagentJson } from '../json-types';
 
 const step = (id: number, status: AgentPlanStepJson['status'] = 'pending'): AgentPlanStepJson => ({ id: String(id), subject: `step ${id}`, status });
@@ -68,8 +68,8 @@ describe('text', () => {
 
   it('marker and subagent labels; a marker that is not drawn has none', () => {
     const at = 'x';
-    expect(markerLabel({ type: 'branch', afterStep: 0, from: 'main', to: 'feat/x', at })).toBe('main → feat/x');
-    expect(markerLabel({ type: 'worktree', afterStep: null, from: '/r', to: '/r/.git/kunj/worktrees/b/', at })).toBe('r → b');
+    expect(markerLabel({ type: 'branch', afterStep: 0, from: 'main', to: 'feat/x', at })).toBe('branch: main → feat/x');
+    expect(markerLabel({ type: 'worktree', afterStep: null, from: '/r', to: '/r/.git/kunj/worktrees/b/', at })).toBe('worktree: r → b');
     expect(markerLabel({ type: 'fork', afterStep: 1, at })).toBe('fork');
     expect(markerLabel({ type: 'compact', afterStep: 1, at })).toBeNull();
     expect(markerLabel({ type: 'something-new' as any, afterStep: 1, at })).toBeNull();
@@ -115,7 +115,7 @@ describe('geometry', () => {
   it('an agent with no task list is one stop with its text beside, and no line', () => {
     const layout = layoutFamily({ lanes: [{ plan: plan('a', { container: 'c1' }), parent: null }] });
     const lane = layout.lanes[0];
-    expect(lane.stops).toEqual([{ x: 56, y: 40, kind: 'current', label: 'No task list yet' }]);
+    expect(lane.stops).toMatchObject([{ x: 56, y: 40, kind: 'current', label: 'No task list yet' }]);
     expect(lane.labelBeside).toBe(true);
     expect(lane).not.toHaveProperty('line');
     expect(lane.container).toBe('c1');
@@ -130,7 +130,8 @@ describe('geometry', () => {
     expect(lane.child).toBe(true);
     expect(lane.place).toBe('handoff · c');
     expect(lane.top).toBe(layout.lanes[0].height);
-    expect(lane.elbow).toEqual({ fromX: 172, fromY: 40, toX: 230, toY: lane.top + 40 });
+    expect(lane.elbow).toMatchObject({ fromX: 172, fromY: 40, toX: 230, toY: lane.top + 40 });
+    expect(lane.elbow!.label).toBe(`handoff → ${lane.branch}`);
     expect(lane.stops.map(s => s.x)).toEqual([230, 346]);
     expect(layout.height).toBe(layout.lanes[0].height + lane.height);
     const far = plan('c', { steps: [step(1)], parent: { session: 'p', step: 9 } });
@@ -155,7 +156,7 @@ describe('geometry', () => {
   it('a running loop is done as far as its last finished step, or not at all', () => {
     const lane = one(plan('a', { steps: [done, step(2)], subagents: [
       sub({ id: 'x', running: true, toStep: null, steps: [step(5, 'completed'), step(6)] }),
-      sub({ id: 'y', running: true, toStep: null, steps: [] }),
+      sub({ id: 'y', fromStep: 1, running: true, toStep: null, steps: [] }),
     ] }));
     expect(lane.loops[0].doneToX).toBe(lane.loops[0].stops[0].x);
     expect(lane.loops[1].doneToX).toBe(lane.loops[1].fromX);
@@ -184,7 +185,8 @@ describe('geometry', () => {
     const steps = [done, step(2, 'in_progress'), step(3)];
     const markers = [{ type: 'branch' as const, afterStep: 0, from: 'main', to: 'feat/x', at }, { type: 'compact' as const, afterStep: 1, at }];
     const lane = one(plan('a', { steps, current: 1, markers }));
-    expect(lane.markers).toEqual([{ x: 56 + m.stopSpacing / 2, y: 40, labelY: 53, label: 'main → feat/x' }]);
+    expect(lane.markers).toMatchObject([{ x: 56 + m.stopSpacing / 2, y: 40, labelY: 53, label: 'branch: main → feat/x', kind: 'branch' }]);
+    expect(lane.markers[0].detail).toEqual(['Switched branch', 'From: main', 'To: feat/x']);
     expect(lane.height).toBe(m.laneHeight);
     // a loop under the same steps: the label would cover its legs, so it goes under the loop's label
     const withLoop = one(plan('a', { steps, current: 1, markers, subagents: [sub()] }));
@@ -219,5 +221,78 @@ describe('buildOverview', () => {
     expect(o.families).toHaveLength(1);
     expect(o.families[0].lanes[0]).toMatchObject({ session: 'c', child: false });
     expect(o.families[0].lanes[0]).not.toHaveProperty('elbow');
+  });
+});
+
+describe('hover details', () => {
+  const now = new Date(2026, 10, 26, 15, 0).getTime();
+  const local = (d: number, h: number, mi: number, sec = 0) => new Date(2026, 10, d, h, mi, sec).toISOString();
+
+  it('says a time as a clock today and with the date another day, and a duration in its largest units', () => {
+    expect(clockText(local(26, 9, 5), now)).toBe('09:05');
+    expect(clockText(local(25, 14, 2), now)).toBe('Nov 25 14:02');
+    expect(clockText(null, now)).toBeNull();
+    expect(clockText('nonsense', now)).toBeNull();
+    expect(durationText(local(26, 9, 0), local(26, 9, 0, 45))).toBe('45s');
+    expect(durationText(local(26, 9, 0), local(26, 9, 3, 10))).toBe('3m 10s');
+    expect(durationText(local(26, 9, 0), local(26, 9, 4))).toBe('4m');
+    expect(durationText(local(26, 9, 0), local(26, 11, 5))).toBe('2h 5m');
+    expect(durationText(local(26, 9, 5), local(26, 9, 0))).toBeNull();
+    expect(durationText(undefined, local(26, 9, 0))).toBeNull();
+  });
+
+  it('a step says where it is, when it started and how long it took', () => {
+    const s = { ...step(1, 'completed'), startedAt: local(26, 14, 2), completedAt: local(26, 14, 5, 10) };
+    expect(stepDetail(s, 2, 5, 'done', now)).toEqual(['Step 3 of 5 · done', 'Started 14:02', 'Finished 14:05 · took 3m 10s']);
+    expect(stepDetail(step(2), 0, 1, 'todo', now, 'Subagent step')).toEqual(['Subagent step 1 of 1 · to do']);
+    const lane = one(plan('a', { steps: [s, step(2, 'in_progress')], current: 1 }));
+    expect(lane.stops[1].detail).toEqual(['Step 2 of 2 · in progress']);
+  });
+
+  it('a lane says where the agent runs, how far it is, who handed it the work and its last change', () => {
+    const parent = plan('p', { title: 'Big job' });
+    const p = plan('c', { id: 'two', container: 'ct-1', steps: [done, step(2, 'in_progress')], current: 1,
+      subagents: [sub({ running: true }), sub({ id: 'b' })], parent: { session: 'p', step: 0 }, updatedAt: local(26, 14, 50) });
+    expect(laneDetail(p, parent, now)).toEqual([
+      'Branch: c', 'Container: ct-1', 'Agent: two', 'Session: c', 'Step 2 of 2', 'Now: step 2', '2 subagents, 1 running',
+      'Handed off from “Big job” at step 1', 'Last change 14:50',
+    ]);
+    expect(laneDetail(plan('w'), null, now)).toEqual(['Branch: w', 'Worktree: /r/w', 'Session: w', 'Working']);
+  });
+
+  it('a subagent says its type, task, progress, tool calls and span', () => {
+    expect(subagentDetail(sub({ task: 'write tests', running: true, toolCalls: 12, lastTool: 'Read', fromStep: 1, toStep: null,
+      steps: [step(1, 'completed'), step(2)] }))).toEqual(['Subagent: t', 'Task: write tests', 'Running', '2 steps, 1 done', '12 tool calls · last: Read', 'Started at step 2']);
+    expect(subagentDetail(sub())).toEqual(['Subagent: t', 'Done', 'From step 1 to step 2']);
+  });
+});
+
+describe('subagent stacks', () => {
+  const fan = (k: number, running: number) => Array.from({ length: k }, (_, i) =>
+    sub({ id: `s${i}`, task: `job ${i}`, running: i < running, toStep: i < running ? null : 1, toolCalls: 3 }));
+
+  it('subagents with one span become one loop with a count, finished dots first, filled to the last finished one', () => {
+    const lane = one(plan('a', { steps: [done, step(2, 'in_progress')], current: 1, subagents: [...fan(5, 2), sub({ id: 'z', fromStep: 1, toStep: 1 })] }));
+    expect(lane.loops).toHaveLength(2);
+    const stack = lane.loops[0];
+    expect(stack).toMatchObject({ count: 5, running: true, label: '5 subagents · 2 running, 3 done' });
+    expect(stack.stops.map(s => s.kind)).toEqual(['done', 'done', 'done', 'current', 'current']);
+    expect(stack.stops.map(s => s.label)).toEqual(['job 2', 'job 3', 'job 4', 'job 0', 'job 1']);
+    expect(stack.doneToX).toBe(stack.stops[2].x);
+    expect(stack.detail![0]).toBe('Ran side by side from step 1');
+    expect(stack.detail![1]).toBe('✓ job 2 · done, 3 tool calls');
+    expect(stack.detail![4]).toBe('● job 0 · running, 3 tool calls');
+    expect(stack.stops[0].detail![0]).toBe('Subagent: t');
+    // the lone one keeps its own loop, with no count
+    expect(lane.loops[1].count).toBeUndefined();
+  });
+
+  it('a big stack has no dots and fills by the share done; an all-done one is done all along', () => {
+    const big = one(plan('a', { steps: [done, step(2)], subagents: fan(STACK_DOTS + 4, 5) })).loops[0];
+    expect(big.stops).toEqual([]);
+    expect(big.doneToX).toBe(big.fromX + (big.toX - big.fromX) * 5 / (STACK_DOTS + 4));
+    expect(big.detail).toHaveLength(1 + 10);
+    const all = one(plan('a', { steps: [done, step(2)], subagents: fan(3, 0) })).loops[0];
+    expect(all).toMatchObject({ label: '3 subagents · all done', running: false, doneToX: all.toX });
   });
 });

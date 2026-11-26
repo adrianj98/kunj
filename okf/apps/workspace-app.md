@@ -166,7 +166,8 @@ a line of its plan's steps. The CLI is the brain: `kunj agent overview --contain
 (`AgentOverviewJson`, built by `buildOverview()` in src/lib/agent-overview.ts) gives the agents, their
 grouping, text and every position. `KunjWorkspaceCore/Overview/AgentOverview.swift` only decodes it and
 adds `filterFamilies()`, `overviewSummary()` over several repositories and `laneIndex(at:in:)`;
-`KunjWorkspace/Overview/OverviewCanvas` strokes the positions as given. Since 2026-11-23 it is shown in the
+`KunjWorkspace/Overview/OverviewCanvas` strokes the positions as given. Hovering anything on it shows an `OverviewHoverCard` with kunj's
+`detail` lines (lane, stop, subagent, marker, handoff); fan-out subagents come as one stacked loop with a `×N` badge. Since 2026-11-23 it is shown in the
 main window's middle panel, not a window: the sidebar's Overview item (above the repositories, with the
 running agents' count) or ⌘⇧O selects it (`MainWindowController.showOverview()`; picking a row leaves
 it), and `OverviewPanel` holds the bar, canvas and legend. Its drop-down picks the repositories

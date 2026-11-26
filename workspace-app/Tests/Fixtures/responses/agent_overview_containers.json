@@ -33,37 +33,62 @@
               "x": 56,
               "y": 40,
               "kind": "done",
-              "label": "Probe the hooks"
+              "label": "Probe the hooks",
+              "detail": [
+                "Step 1 of 6 · done",
+                "Started Nov 22 23:20",
+                "Finished Nov 22 23:23 · took 3m"
+              ]
             },
             {
               "x": 172,
               "y": 40,
               "kind": "done",
-              "label": "Capture in hooks"
+              "label": "Capture in hooks",
+              "detail": [
+                "Step 2 of 6 · done",
+                "Started Nov 22 23:24",
+                "Finished Nov 22 23:27 · took 3m"
+              ]
             },
             {
               "x": 288,
               "y": 40,
               "kind": "done",
-              "label": "Plan reducer"
+              "label": "Plan reducer",
+              "detail": [
+                "Step 3 of 6 · done",
+                "Started Nov 22 23:28",
+                "Finished Nov 22 23:31 · took 3m"
+              ]
             },
             {
               "x": 404,
               "y": 40,
               "kind": "current",
-              "label": "agent plan --json"
+              "label": "agent plan --json",
+              "detail": [
+                "Step 4 of 6 · in progress",
+                "Started Nov 22 23:32"
+              ]
             },
             {
               "x": 520,
               "y": 40,
               "kind": "todo",
-              "label": "Events action"
+              "label": "Events action",
+              "detail": [
+                "Step 5 of 6 · to do"
+              ]
             },
             {
               "x": 636,
               "y": 40,
               "kind": "todo",
-              "label": "Docs and okf"
+              "label": "Docs and okf",
+              "detail": [
+                "Step 6 of 6 · to do"
+              ]
             }
           ],
           "line": {
@@ -84,26 +109,54 @@
                   "x": 312,
                   "y": 70,
                   "kind": "done",
-                  "label": "Record fixtures"
+                  "label": "Record fixtures",
+                  "detail": [
+                    "Subagent step 1 of 3 · done",
+                    "Started Nov 22 23:20",
+                    "Finished Nov 22 23:23 · took 3m"
+                  ]
                 },
                 {
                   "x": 346,
                   "y": 70,
                   "kind": "current",
-                  "label": "Unit tests"
+                  "label": "Unit tests",
+                  "detail": [
+                    "Subagent step 2 of 3 · in progress",
+                    "Started Nov 22 23:24"
+                  ]
                 },
                 {
                   "x": 380,
                   "y": 70,
                   "kind": "todo",
-                  "label": "Edge cases"
+                  "label": "Edge cases",
+                  "detail": [
+                    "Subagent step 3 of 3 · to do"
+                  ]
                 }
               ],
-              "label": "subagent · write reducer tests"
+              "label": "subagent · write reducer tests",
+              "detail": [
+                "Subagent: general-purpose",
+                "Task: write reducer tests",
+                "Running",
+                "3 steps, 1 done",
+                "Started at step 3"
+              ]
             }
           ],
           "markers": [],
-          "labelBeside": false
+          "labelBeside": false,
+          "detail": [
+            "Branch: feat/agent-overview",
+            "Worktree: /Users/demo/src/feat/agent-overview",
+            "Session: kunj-kunj-feat-agent-overview",
+            "Step 4 of 6",
+            "Now: agent plan --json",
+            "1 subagent, 1 running",
+            "Last change Nov 22 23:46"
+          ]
         },
         {
           "session": "kunj-kunj-feat-agent-overview-app",
@@ -123,31 +176,49 @@
               "x": 230,
               "y": 146,
               "kind": "done",
-              "label": "Layout maths"
+              "label": "Layout maths",
+              "detail": [
+                "Step 1 of 5 · done",
+                "Started Nov 22 23:20",
+                "Finished Nov 22 23:23 · took 3m"
+              ]
             },
             {
               "x": 346,
               "y": 146,
               "kind": "current",
-              "label": "Line view"
+              "label": "Line view",
+              "detail": [
+                "Step 2 of 5 · in progress",
+                "Started Nov 22 23:24"
+              ]
             },
             {
               "x": 462,
               "y": 146,
               "kind": "todo",
-              "label": "Row list"
+              "label": "Row list",
+              "detail": [
+                "Step 3 of 5 · to do"
+              ]
             },
             {
               "x": 578,
               "y": 146,
               "kind": "todo",
-              "label": "Demo data"
+              "label": "Demo data",
+              "detail": [
+                "Step 4 of 5 · to do"
+              ]
             },
             {
               "x": 694,
               "y": 146,
               "kind": "todo",
-              "label": "Screenshot check"
+              "label": "Screenshot check",
+              "detail": [
+                "Step 5 of 5 · to do"
+              ]
             }
           ],
           "line": {
@@ -161,9 +232,24 @@
             "fromX": 172,
             "fromY": 40,
             "toX": 230,
-            "toY": 146
+            "toY": 146,
+            "label": "handoff → feat/agent-overview-app",
+            "detail": [
+              "Handed off from “Agent overview window” at step 2",
+              "New branch: feat/agent-overview-app (from feat/agent-overview)",
+              "Worktree: /Users/demo/src/feat/agent-overview-app"
+            ]
           },
-          "labelBeside": false
+          "labelBeside": false,
+          "detail": [
+            "Branch: feat/agent-overview-app",
+            "Worktree: /Users/demo/src/feat/agent-overview-app",
+            "Session: kunj-kunj-feat-agent-overview-app",
+            "Step 2 of 5",
+            "Now: Line view",
+            "Handed off from “Agent overview window” at step 2",
+            "Last change Nov 22 23:46"
+          ]
         }
       ]
     },
@@ -189,25 +275,42 @@
               "x": 56,
               "y": 40,
               "kind": "done",
-              "label": "Quick pick"
+              "label": "Quick pick",
+              "detail": [
+                "Step 1 of 4 · done",
+                "Started Nov 22 23:20",
+                "Finished Nov 22 23:23 · took 3m"
+              ]
             },
             {
               "x": 172,
               "y": 40,
               "kind": "done",
-              "label": "Run kunj search"
+              "label": "Run kunj search",
+              "detail": [
+                "Step 2 of 4 · done",
+                "Started Nov 22 23:24",
+                "Finished Nov 22 23:27 · took 3m"
+              ]
             },
             {
               "x": 288,
               "y": 40,
               "kind": "current",
-              "label": "Open the result"
+              "label": "Open the result",
+              "detail": [
+                "Step 3 of 4 · in progress",
+                "Started Nov 22 23:28"
+              ]
             },
             {
               "x": 404,
               "y": 40,
               "kind": "todo",
-              "label": "Tests"
+              "label": "Tests",
+              "detail": [
+                "Step 4 of 4 · to do"
+              ]
             }
           ],
           "line": {
@@ -221,10 +324,25 @@
               "x": 114,
               "y": 40,
               "labelY": 53,
-              "label": "main → feat/vscode-search"
+              "label": "branch: main → feat/vscode-search",
+              "kind": "branch",
+              "detail": [
+                "Switched branch",
+                "From: main",
+                "To: feat/vscode-search",
+                "At Nov 22 23:40"
+              ]
             }
           ],
-          "labelBeside": false
+          "labelBeside": false,
+          "detail": [
+            "Branch: feat/vscode-search",
+            "Worktree: /Users/demo/src/feat/vscode-search",
+            "Session: kunj-kunj-feat-vscode-search",
+            "Waiting for input",
+            "Now: Open the result",
+            "Last change Nov 22 23:46"
+          ]
         }
       ]
     },
@@ -251,12 +369,66 @@
               "x": 56,
               "y": 40,
               "kind": "current",
-              "label": "No task list yet"
+              "label": "No task list yet",
+              "detail": [
+                "The agent has not made a plan for this work yet"
+              ]
             }
           ],
           "loops": [],
           "markers": [],
-          "labelBeside": true
+          "labelBeside": true,
+          "detail": [
+            "Branch: fix/remote-pty",
+            "Container: kunj-kunj-fix-remote-pty",
+            "Session: agent",
+            "Working",
+            "Last change Nov 22 23:46"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 454,
+      "height": 74,
+      "lanes": [
+        {
+          "session": "kunj-kunj-old-idea",
+          "id": null,
+          "branch": "old-idea",
+          "worktree": "/Users/demo/src/old-idea",
+          "title": "An agent that ended",
+          "place": "old-idea · worktree",
+          "status": "Ended, all 1 step done",
+          "waiting": false,
+          "child": false,
+          "top": 0,
+          "height": 74,
+          "y": 40,
+          "stops": [
+            {
+              "x": 56,
+              "y": 40,
+              "kind": "done",
+              "label": "Only step",
+              "detail": [
+                "Step 1 of 1 · done",
+                "Started Nov 22 23:20",
+                "Finished Nov 22 23:23 · took 3m"
+              ]
+            }
+          ],
+          "loops": [],
+          "markers": [],
+          "labelBeside": false,
+          "ended": true,
+          "detail": [
+            "Branch: old-idea",
+            "Worktree: /Users/demo/src/old-idea",
+            "Session: kunj-kunj-old-idea",
+            "Ended, all 1 step done",
+            "Last change Nov 22 23:46"
+          ]
         }
       ]
     }
