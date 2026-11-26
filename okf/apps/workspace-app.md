@@ -101,6 +101,9 @@ A branch with a container on two backends shows one row (ids are repo, kind, bra
 * The sidebar, the terminal/Changes split, the Files column and the Changes file list are resized by
   dragging their hairlines (`DividerHandle`, `PaneSizes` in KunjWorkspaceCore fitted to the window,
   saved as `paneSizes` in user defaults; double-click resets).
+* The Changes and Files columns reload on file events in the selected worktree (`Model/WorktreeWatcher`, FSEvents,
+  `.git` and ignored folders dropped), not only on `kunj events`; the Files tree colours the branch's changes against
+  its base (`DiffService.changedPaths`, `foldersWithChanges`).
 * The Files column has a Search mode (Find in Files ⌘⇧F, `SearchPanel`): `kunj search` in the selected
   worktree or container by default, all worktrees (and containers) from its scope menu; a match opens
   an editor tab at its line with the match selected (`EditorTab.reveal`, `revealLine` on the editor page, which turns kunj's character columns into UTF-16). Model in

@@ -141,10 +141,22 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   `kunj ct exec` in a running container), folders first, opened with a `Files` pill after `Changes` in the tab bar or View > Show
   Files ⌘⇧E, 260 px wide at the window's right edge (the terminal and Changes columns keep 11:9 of
   the rest). A double-click (or Return) on a file opens an editor tab. Open folders are kept per
-  environment for the session; it reloads 1 s after a `git` event of its repository; over 50,000
+  environment for the session; it reloads 1 s after a `git` event of its repository or a file event
+  in the selected worktree; files the branch changed against its base (committed, modified or
+  untracked: the Changes column's `vs base`, one `diff --name-status` + `ls-files --others`,
+  `DiffService.changedPaths`) are drawn in `green` (added) or `amber` with their letter at the right,
+  and a folder holding one in `amber` with a dot (`foldersWithChanges`); over 50,000
   files only the first 50,000 are listed. One app-wide setting (`showFiles`), remembered; closed it
   lists nothing. An × at the right of its bar closes it. `FileLister`/`buildFileTree` in Core,
   `FilesColumn` in the app.
+- **Worktree file watch:** `kunj events` cannot see an edit inside a worktree (only its 10 s status
+  poll, untracked files every minute), so the app watches the selected host worktree with one
+  FSEvents stream (`WorktreeWatcher`, 0.3 s latency) and sends the Changes and Files columns the
+  same reload a `git` event does (each debounces it, skips it while closed or hidden). Events in
+  `.git` and in ignored folders (`git ls-files --others --ignored --directory` when the watch starts
+  and when a `.gitignore` changes) are dropped (`worktreeEventMatters`), so a build in `dist` or
+  `node_modules` reloads nothing. A container's clone cannot be watched from the Mac and still
+  follows the events poll.
 - **Search (the Files column's second mode):** `Files` and `Search` are toggles in its bar; View >
   Find in Files ⌘⇧F opens the column in Search mode with the field focused. A search field (`⌘⇧F`
   badge), the options `Aa` (match case; ignore case by default), `W` (whole words), `.*` (regex;

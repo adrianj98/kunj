@@ -4,12 +4,19 @@ import KunjWorkspaceCore
 /// Where the Files column's listing comes from: `FileLister` in the app, `DemoFiles` for `--demo`.
 protocol FilesSource: AnyObject {
     func files(env: Environment) async throws -> FileLister.Listing
+    /// The branch's changed files against its base (working tree included), for the tree's colours
+    func changes(env: Environment) async throws -> [String: FileStatus]
+    /// The ignored folders, for the worktree watcher's filter
+    func ignoredDirectories(env: Environment) async -> [String]
 }
 
 final class FileListerSource: FilesSource {
     let lister: FileLister
-    init(cli: KunjCLI) { lister = FileLister(cli: cli) }
+    let diff: DiffService
+    init(cli: KunjCLI) { lister = FileLister(cli: cli); diff = DiffService(cli: cli) }
     func files(env: Environment) async throws -> FileLister.Listing { try await lister.list(env: env) }
+    func changes(env: Environment) async throws -> [String: FileStatus] { try await diff.changedPaths(env: env) }
+    func ignoredDirectories(env: Environment) async -> [String] { (try? await lister.ignoredDirectories(env: env)) ?? [] }
 }
 
 /// A node of the outline view (it needs objects, and the same object for the same item across
@@ -35,8 +42,11 @@ private final class FileItem: NSObject {
 /// files as a tree (tracked, untracked and ignored, see `FileLister`; folders first; ignored ones in
 /// `faint`, an ignored folder without its contents). A
 /// double-click (or Return) on a file opens it in an editor tab; on a folder opens or closes it.
-/// Open folders are kept per environment. It reloads when the environment changes and 1 s after a
-/// `git` event of its repository; closed, it lists nothing. In Search mode (Find in Files ⌘⇧F) the
+/// Open folders are kept per environment. A file the branch changed against its base (committed,
+/// modified or untracked, as the Changes column's `vs base`) is drawn in `green` (added) or `amber`
+/// (modified, renamed) with its status letter at the right, and a folder holding one in `amber`
+/// with a dot. It reloads when the environment changes and 1 s after a `git` event of its
+/// repository or a file event in the worktree (`WorktreeWatcher`); closed, it lists nothing. In Search mode (Find in Files ⌘⇧F) the
 /// `SearchPanel` takes the place of the tree.
 final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     enum Mode { case files, search }
@@ -77,6 +87,9 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     private let scroll = NSScrollView()
 
     private var items: [FileItem] = []
+    /// The branch's changes (path → status) and the folders that hold one, from the last listing
+    private var changes: [String: FileStatus] = [:]
+    private var changedFolders: Set<String> = []
     private var listedId: String?
     private var expanded: [String: Set<String>] = [:]
     private var restoring = false
@@ -251,8 +264,13 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         guard isActive, mode == .files, let env = environment, let source else { return }
         let gen = generation
         do {
+            // the colours are extra: without a base or on a failure the tree is still listed
+            async let changed: [String: FileStatus]? = try? await source.changes(env: env)
             let listing = try await source.files(env: env)
+            let changes = await changed ?? [:]
             guard gen == generation else { return }
+            self.changes = changes
+            changedFolders = foldersWithChanges(changes)
             // the tree of a large worktree takes tens of milliseconds: built off the main thread
             let tree = await Task.detached(priority: .userInitiated) {
                 FileItemTree(buildFileTree(listing.paths, directories: listing.ignoredDirectories,
@@ -329,6 +347,8 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             return v
         }()
         view.theme = theme
+        view.status = item.node.isDirectory || item.node.ignored ? nil : changes[item.node.path]
+        view.holdsChanges = item.node.isDirectory && changedFolders.contains(item.node.path)
         view.node = item.node
         view.selected = outlineView.row(forItem: item) == outlineView.selectedRow
         return view
@@ -374,10 +394,26 @@ final class FilesColumn: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
 }
 
 /// One row of the Files column (24 px): the name in sans 12 (`text` when selected, else `text2`;
-/// folders in `muted`, ignored entries in `faint`), truncated with an ellipsis; the selected row is filled with `raised`, radius
+/// folders in `muted`, ignored entries in `faint`; a changed file in `green` (added) or `amber`
+/// with its letter in mono 10 at the right, a folder holding changes in `amber` with a 5 px dot),
+/// truncated with an ellipsis; the selected row is filled with `raised`, radius
 /// 5, inset 6 px. Drawn in draw(_:) so cacheDisplay renders it.
 private final class FileRowView: NSTableCellView {
-    var node: FileNode? { didSet { needsDisplay = true; toolTip = node.map { $0.ignored ? "\($0.path) (ignored by git)" : $0.path }; setAccessibilityLabel(node?.name) } }
+    var node: FileNode? {
+        didSet {
+            needsDisplay = true
+            toolTip = node.map { n in
+                n.ignored ? "\(n.path) (ignored by git)"
+                    : status.map { s in "\(n.path) (\(Self.word(s)) on this branch)" }
+                    ?? (holdsChanges ? "\(n.path) (holds changes)" : n.path)
+            }
+            setAccessibilityLabel(node.map { n in status.map { "\(n.name), \(Self.word($0))" } ?? n.name })
+        }
+    }
+    /// Set before `node`: the file's change on the branch
+    var status: FileStatus?
+    /// Set before `node`: a folder with a changed file inside
+    var holdsChanges = false
     var selected = false { didSet { needsDisplay = true } }
     var theme: Theme { didSet { needsDisplay = true } }
 
@@ -398,14 +434,43 @@ private final class FileRowView: NSTableCellView {
         }
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingTail
-        let color = selected ? theme.color(\.text)
-            : theme.color(node.ignored ? \.faint : node.isDirectory ? \.muted : \.text2)
+        let changeColor: NSColor? = status.map {
+            $0 == .added ? theme.color(\.green) : $0 == .deleted ? theme.color(\.red) : theme.color(\.amber)
+        } ?? (holdsChanges ? theme.color(\.amber) : nil)
+        let color = changeColor ?? (selected ? theme.color(\.text)
+            : theme.color(node.ignored ? \.faint : node.isDirectory ? \.muted : \.text2))
+        // the status letter (or a folder's dot) at the right
+        var right = bounds.width - 10
+        if let status, let changeColor {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: Theme.mono(10), .foregroundColor: changeColor,
+            ]
+            let size = (status.rawValue as NSString).size(withAttributes: attrs)
+            right -= ceil(size.width)
+            (status.rawValue as NSString).draw(at: NSPoint(x: right, y: (bounds.midY - size.height / 2).rounded()),
+                                               withAttributes: attrs)
+            right -= 6
+        } else if holdsChanges, let changeColor {
+            changeColor.withAlphaComponent(0.8).setFill()
+            right -= 5
+            NSBezierPath(ovalIn: NSRect(x: right, y: (bounds.midY - 2.5).rounded(), width: 5, height: 5)).fill()
+            right -= 6
+        }
         let attrs: [NSAttributedString.Key: Any] = [
             .font: Theme.sans(DesignTokens.TypeScale.small), .foregroundColor: color, .paragraphStyle: style,
         ]
         let h = ceil((node.name as NSString).size(withAttributes: attrs).height)
         (node.name as NSString).draw(
-            with: NSRect(x: 6, y: (bounds.midY - h / 2).rounded(), width: max(0, bounds.width - 12), height: h),
+            with: NSRect(x: 6, y: (bounds.midY - h / 2).rounded(), width: max(0, right - 6), height: h),
             options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
+    }
+
+    private static func word(_ s: FileStatus) -> String {
+        switch s {
+        case .added: return "added"
+        case .modified: return "modified"
+        case .deleted: return "deleted"
+        case .renamed: return "renamed"
+        }
     }
 }

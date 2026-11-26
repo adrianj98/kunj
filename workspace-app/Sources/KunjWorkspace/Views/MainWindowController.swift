@@ -17,6 +17,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private var discoveryDetail: String?
     /// Finding kunj or the first listing still running (a spinner and the step in place of the columns)
     private var loading: LoadingStep?
+    /// The selected worktree's file events, for the Changes and Files columns
+    private let worktreeWatcher = WorktreeWatcher()
 
     /// The user selected a row. `render` never calls it: a selection whose row is gone stays
     /// selected (and shows "Select an environment") until the row returns.
@@ -109,6 +111,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
         terminalColumn.onToggleChanges = { [weak self] in self?.onToggleChanges() }
         terminalColumn.onToggleFiles = { [weak self] in self?.onToggleFiles() }
+        // an edit in the selected worktree: both columns reload (each debounces and skips while closed)
+        worktreeWatcher.onChange = { [weak self] env in
+            self?.changesColumn.repoChanged(RepoChange(env: env))
+            self?.filesColumn.repoChanged(RepoChange(env: env))
+        }
+        worktreeWatcher.ignoredDirectories = { [weak self] env in
+            guard let source = self?.filesColumn.source else { return nil }
+            return await source.ignoredDirectories(env: env)
+        }
         changesColumn.onClose = { [weak self] in self?.onToggleChanges() }
         filesColumn.onClose = { [weak self] in self?.onToggleFiles() }
         ThemeManager.shared.onChange.append { [weak self] t in self?.apply(t) }
@@ -284,6 +295,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         terminalColumn.show(env)
         changesColumn.show(env)
         filesColumn.show(env)
+        worktreeWatcher.watch(env)
         statusBar.show(env, environmentCount: environmentCount)
         terminalColumn.setChanges(count: env?.changedFiles ?? 0, open: changesVisible)
         terminalColumn.setFiles(open: filesVisible)

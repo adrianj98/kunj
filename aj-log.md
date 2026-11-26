@@ -2166,3 +2166,11 @@ The user asked to be able to choose a remote in the app when remotes are availab
   and a new `teleport` skill (also installed by `kunj install skill`) does the same. Why: the user wants
   `/handoff claude --teleport session_…` and `/teleport session_…` to bring a web session into its own worktree and
   agent tab. The id is validated (letters, digits, _ and -, not starting with -) because it goes into a shell command.
+- Workspace app auto-refresh: a `WorktreeWatcher` (one FSEvents stream on the selected host worktree) makes the
+  Changes and Files columns reload right after a file is edited, created or deleted. Why: the user wants both panels to
+  follow file changes; before, edits only reached them through `kunj events`' status poll (10 s, untracked files every
+  minute). Events in `.git` and in git-ignored folders are dropped so builds and `node_modules` do not cause reloads.
+- Files column colours the branch's changes: files changed against the base (committed, modified, untracked) in green
+  (added) or amber (modified) with their status letter, folders holding changes in amber with a dot. Why: the user
+  asked to see in the file tree which files the branch changed. One cheap `diff --name-status` + `ls-files --others`
+  (`DiffService.changedPaths`) runs beside the listing.

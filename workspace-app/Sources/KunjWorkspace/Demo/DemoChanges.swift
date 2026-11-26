@@ -84,4 +84,10 @@ final class DemoFiles: FilesSource {
         let paths = Set(DemoChanges.files.map(\.path) + around).sorted()
         return FileLister.Listing(paths: paths, truncated: false)
     }
+
+    func changes(env: Environment) async throws -> [String: FileStatus] {
+        Dictionary(DemoChanges.files.map { ($0.path, $0.status) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    func ignoredDirectories(env: Environment) async -> [String] { [] }
 }

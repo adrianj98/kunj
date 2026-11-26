@@ -115,6 +115,45 @@ public struct FileLister: Sendable {
     }
 }
 
+extension FileLister {
+    /// The ignored folders only (`node_modules`, build output), without a trailing slash: one
+    /// `git ls-files --others --ignored --directory` (folders end in a slash), for the worktree
+    /// watcher's filter.
+    public func ignoredDirectories(env: Environment) async throws -> [String] {
+        let target = try gitTarget(for: env)
+        let spec = gitArgv(target, cli: cli, ["--no-optional-locks", "-c", "core.quotePath=false", "ls-files", "-z",
+                                              "--others", "--ignored", "--exclude-standard", "--directory"])
+        let result = try await runner.run(spec.argv, cwd: spec.cwd, env: spec.env, stdin: nil)
+        guard result.exit == 0 else { throw DiffError.commandFailed("git ls-files exited with code \(result.exit)") }
+        return result.stdout.split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
+            .filter { $0.hasSuffix("/") }.map { String($0.dropLast()) }.sorted()
+    }
+}
+
+/// The folders that hold a changed file (every ancestor of a path that still exists), so the Files
+/// column can mark a closed folder with changes inside. A deleted file marks nothing: it is not listed.
+public func foldersWithChanges(_ changes: [String: FileStatus]) -> Set<String> {
+    var out = Set<String>()
+    for (path, status) in changes where status != .deleted {
+        var parts = path.split(separator: "/").dropLast()
+        while !parts.isEmpty {
+            let folder = parts.joined(separator: "/")
+            if !out.insert(folder).inserted { break }
+            parts = parts.dropLast()
+        }
+    }
+    return out
+}
+
+/// Whether a file event at `path` (relative to the worktree root) may change what the Files and
+/// Changes columns show: not inside `.git` (the main checkout's git directory, whose changes come as
+/// `git` events and which holds kunj's other worktrees) and not inside an ignored folder.
+public func worktreeEventMatters(_ path: String, ignoredDirectories: [String]) -> Bool {
+    if path == ".git" || path.hasPrefix(".git/") { return false }
+    for dir in ignoredDirectories where path == dir || path.hasPrefix(dir + "/") { return false }
+    return true
+}
+
 /// The `!!` entries of `git status --porcelain=v1 -z --ignored`, folders with a trailing slash. A
 /// rename or copy entry is followed by its source path, which is skipped.
 func parseIgnored(_ data: Data) -> [String] {

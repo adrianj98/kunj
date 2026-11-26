@@ -72,6 +72,19 @@ public final class DiffService: @unchecked Sendable {
         return (DiffSummary(files: changed), scope.label(base: baseRef))
     }
 
+    /// The branch's changed files against its base, working tree and untracked files included, for
+    /// the Files column's colours: one `diff --name-status` and one `ls-files --others`, without the
+    /// summary's numstat and line counts. Without a base (no origin) the uncommitted changes.
+    public func changedPaths(env: Environment) async throws -> [String: FileStatus] {
+        let target = try target(for: env)
+        let mergeBase = try? await resolveBase(target, prBase: env.pullRequest?.baseBranch).mergeBase
+        async let nameStatus = git(target, diffArgs(scope: .base, mergeBase: mergeBase).list[1])
+        async let untracked = untrackedFiles(target)
+        var map = parseNameStatus(try await nameStatus)
+        for path in try await untracked { map[path] = .added }
+        return map
+    }
+
     /// Both sides of `file` in `scope`: `git show <ref>:<path>` for a commit side, the working file
     /// (through `FileAccess`) for the working tree, empty for a side that does not exist.
     public func contents(env: Environment, scope: DiffScope, file: ChangedFile) async throws
