@@ -89,5 +89,5 @@ final class DemoFiles: FilesSource {
         Dictionary(DemoChanges.files.map { ($0.path, $0.status) }, uniquingKeysWith: { a, _ in a })
     }
 
-    func ignoredDirectories(env: Environment) async -> [String] { [] }
+    func ignoredDirectories(env: Environment) async -> [String]? { [] }
 }

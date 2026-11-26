@@ -6,8 +6,8 @@ protocol FilesSource: AnyObject {
     func files(env: Environment) async throws -> FileLister.Listing
     /// The branch's changed files against its base (working tree included), for the tree's colours
     func changes(env: Environment) async throws -> [String: FileStatus]
-    /// The ignored folders, for the worktree watcher's filter
-    func ignoredDirectories(env: Environment) async -> [String]
+    /// The ignored folders, for the worktree watcher's filter; nil when git failed (asked again later)
+    func ignoredDirectories(env: Environment) async -> [String]?
 }
 
 final class FileListerSource: FilesSource {
@@ -16,7 +16,7 @@ final class FileListerSource: FilesSource {
     init(cli: KunjCLI) { lister = FileLister(cli: cli); diff = DiffService(cli: cli) }
     func files(env: Environment) async throws -> FileLister.Listing { try await lister.list(env: env) }
     func changes(env: Environment) async throws -> [String: FileStatus] { try await diff.changedPaths(env: env) }
-    func ignoredDirectories(env: Environment) async -> [String] { (try? await lister.ignoredDirectories(env: env)) ?? [] }
+    func ignoredDirectories(env: Environment) async -> [String]? { try? await lister.ignoredDirectories(env: env) }
 }
 
 /// A node of the outline view (it needs objects, and the same object for the same item across

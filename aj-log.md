@@ -2174,3 +2174,6 @@ The user asked to be able to choose a remote in the app when remotes are availab
   (added) or amber (modified) with their status letter, folders holding changes in amber with a dot. Why: the user
   asked to see in the file tree which files the branch changed. One cheap `diff --name-status` + `ls-files --others`
   (`DiffService.changedPaths`) runs beside the listing.
+- Adversarial review fix: the worktree watcher re-lists ignored folders when a folder is created (one listing at a
+  time) and treats a failed listing as "ask again" instead of an empty filter. Why: a `node_modules` made by
+  `npm install` after the watch started was never filtered, so an install reloaded both columns for its whole run.

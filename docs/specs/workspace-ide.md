@@ -153,8 +153,9 @@ technical remarks (xterm.js, Electron, CSS variables) are superseded by the runt
   poll, untracked files every minute), so the app watches the selected host worktree with one
   FSEvents stream (`WorktreeWatcher`, 0.3 s latency) and sends the Changes and Files columns the
   same reload a `git` event does (each debounces it, skips it while closed or hidden). Events in
-  `.git` and in ignored folders (`git ls-files --others --ignored --directory` when the watch starts
-  and when a `.gitignore` changes) are dropped (`worktreeEventMatters`), so a build in `dist` or
+  `.git` and in ignored folders (`git ls-files --others --ignored --directory` when the watch starts,
+  when a `.gitignore` changes and when a folder is created, one listing at a time; a failed listing
+  is asked again on the next selection render) are dropped (`worktreeEventMatters`), so a build in `dist` or
   `node_modules` reloads nothing. A container's clone cannot be watched from the Mac and still
   follows the events poll.
 - **Search (the Files column's second mode):** `Files` and `Search` are toggles in its bar; View >
