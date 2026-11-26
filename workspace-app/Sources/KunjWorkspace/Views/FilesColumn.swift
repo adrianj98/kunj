@@ -6,7 +6,7 @@ protocol FilesSource: AnyObject {
     func files(env: Environment) async throws -> FileLister.Listing
     /// The branch's changed files against its base (working tree included), for the tree's colours
     func changes(env: Environment) async throws -> [String: FileStatus]
-    /// The ignored folders, for the worktree watcher's filter; nil when git failed (asked again later)
+    /// The ignored folders, for the worktree watcher's filter; nil when git failed (asked again on the watcher's next `watch` of it, a `.gitignore` change or a new folder)
     func ignoredDirectories(env: Environment) async -> [String]?
 }
 

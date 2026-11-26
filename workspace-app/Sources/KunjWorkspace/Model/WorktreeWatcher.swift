@@ -53,10 +53,11 @@ final class WorktreeWatcher {
             guard let info else { return }
             let watcher = Unmanaged<WorktreeWatcher>.fromOpaque(info).takeUnretainedValue()
             let list = unsafeBitCast(paths, to: NSArray.self) as? [String] ?? []
-            let created = FSEventStreamEventFlags(kFSEventStreamEventFlagItemCreated)
+            // created, or moved into place (a staged build output)
+            let appeared = FSEventStreamEventFlags(kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRenamed)
             let isDir = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsDir)
             let events = (0..<min(count, list.count)).map { i in
-                (path: list[i], newFolder: flags[i] & created != 0 && flags[i] & isDir != 0)
+                (path: list[i], newFolder: flags[i] & appeared != 0 && flags[i] & isDir != 0)
             }
             watcher.received(events)
         }
@@ -85,6 +86,9 @@ final class WorktreeWatcher {
         ignored = []
         ignoredLoaded = false
         ignoredQueued = false
+        // a listing still running belongs to the old watch (its generation is discarded); one that
+        // never returns must not keep the next watch from listing
+        ignoredLoading = false
     }
 
     /// One listing at a time: requests while one runs (a burst of new folders) make one more.
