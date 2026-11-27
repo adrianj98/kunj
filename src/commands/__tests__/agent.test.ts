@@ -367,6 +367,25 @@ describe('--session: several agents per worktree', () => {
   });
 });
 
+describe('idle suspend', () => {
+  test('an agent run directly gets no suspend delay and no inherited TMUX_PANE', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    const before = { pane: process.env.TMUX_PANE, after: process.env.KUNJ_AGENT_SUSPEND_AFTER };
+    process.env.TMUX_PANE = '%9';
+    process.env.KUNJ_AGENT_SUSPEND_AFTER = '60';
+    try {
+      await new AgentCommand().execute('start', 'feature-a', { tmux: false } as any);
+    } finally {
+      for (const [k, v] of [['TMUX_PANE', before.pane], ['KUNJ_AGENT_SUSPEND_AFTER', before.after]] as const) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+    }
+    const env = (runTmux as jest.Mock).mock.calls[0][2];
+    expect(env.KUNJ_AGENT_SUSPEND_AFTER).toBeUndefined();
+    expect(env.TMUX_PANE).toBeUndefined();
+  });
+});
+
 describe('--resume', () => {
   test('a session suspended while waiting resumes on its next start, and the mark is removed', async () => {
     tmuxSessions.mockResolvedValue([]);

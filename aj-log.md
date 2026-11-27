@@ -2210,3 +2210,6 @@ The user asked to be able to choose a remote in the app when remotes are availab
 - Tests: src/lib/__tests__/agent-teleport-suspend.test.ts (real sh, git, tmux), agent.test.ts (resume after suspend,
   detached teleport outcome). Docs: agent-handoff.md, tmux-sessions.md, specs README, okf, docs-site workspace-app page,
   CLAUDE.md.
+- Review fix: an agent run without kunj's tmux session (`--no-tmux`, `agent.tmux` false, no tmux) no longer gets
+  `KUNJ_AGENT_SUSPEND_AFTER` or an inherited `TMUX_PANE`. Why: run from a pane of the user's own tmux, the idle-suspend
+  hook would have ended the user's whole tmux session.

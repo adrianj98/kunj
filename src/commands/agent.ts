@@ -400,7 +400,11 @@ export class AgentCommand extends BaseCommand {
       return;
     }
     const secrets = await hostSecretEnv(wt.branch, wt.path);
-    process.exitCode = await runTmux(directArgv(command), wt.path, { ...env, ...vars, ...secrets });
+    // No idle suspend without kunj's own tmux session: an inherited TMUX_PANE would be the user's
+    // terminal pane, and the hook would end their tmux session
+    const { KUNJ_AGENT_SUSPEND_AFTER: _a, ...directVars } = vars as Record<string, string>;
+    const { KUNJ_AGENT_SUSPEND_AFTER: _b, TMUX_PANE: _p, ...directEnv } = env;
+    process.exitCode = await runTmux(directArgv(command), wt.path, { ...directEnv, ...directVars, ...secrets });
   }
 
   // `kunj agent overview`: the repository's running agents, grouped and laid out (agent-overview.ts)
