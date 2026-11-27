@@ -49,6 +49,13 @@ export function registerAgentSettings(): void {
       category: 'agent',
     },
     {
+      key: 'agent.suspendAfterMinutes',
+      description: 'End a Claude agent\'s tmux session after it has waited this many minutes for input; its next `kunj agent start` (the workspace app reopening its tab) resumes the conversation. 0 turns it off. Needs agent.hooks',
+      type: 'number',
+      defaultValue: 60,
+      category: 'agent',
+    },
+    {
       key: 'agent.hooks',
       description: 'Pass Claude Code hooks to the agent that report when it waits for input (agent.state in worktree list and ct list)',
       type: 'boolean',

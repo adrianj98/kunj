@@ -15,6 +15,7 @@ agent there with the brief as its first prompt, and the workspace app switches t
 | Skill: `claude-plugin/skills/handoff/SKILL.md`, `kunj install skill`, offered by `kunj setup` | Shipped |
 | Every kunj agent loads the skills (`claude-plugin/` as a Claude Code plugin, `--plugin-dir`) | Shipped |
 | Teleport: `kunj agent start --teleport <session>`, `/handoff --teleport <session>`, `/teleport <session>` skill | Shipped |
+| Teleport ends on the web session's branch: the start waits for the outcome (`AgentStartJson.teleport`), drops the placeholder branch, keeps a failed teleport's pane open | Shipped |
 
 ## The skill
 
@@ -70,6 +71,22 @@ No brief is written; the skill creates the worktree (`teleport-<last 8 of the id
 a running session is reattached without it. Claude checks out the web session's branch in the worktree,
 which git refuses when that branch is checked out in another worktree: the skill tells the user to run
 `kunj agent start <that branch> --teleport <session>` there instead.
+
+*Added 2026-11-27: ending on the right branch.* The worktree is created on a placeholder branch
+(`teleport-<id>`) because the web session's branch is only known to claude. Two teleports seen live
+ended on the placeholder: `claude --teleport` printed `Session not found: <id>` and exited in about
+2 s, the tmux session ended with it, and the workspace app's tab then started a plain claude there, so
+the error was never seen. Now:
+
+- The teleporting command runs under `TELEPORT_GUARD_SCRIPT` (`withTeleportGuard()`, POSIX sh): a
+  failed claude leaves the pane open with `kunj: claude --teleport exited with <code>; this worktree
+  stays on <placeholder>.`; a watcher (every 5 s, 30 minutes) deletes the placeholder branch once the
+  worktree is on another branch, only when nothing is lost (its tip is on a remote branch or in the new
+  HEAD).
+- `start --detach --teleport` waits up to 20 s (`teleportOutcome()`) and adds `teleport` to
+  `AgentStartJson`: `{ state: 'switched', branch }`, `{ state: 'failed', message }` (claude's last
+  lines before the mark, or the session ended) or `{ state: 'pending', message }` (often Claude's
+  folder-trust question in a new worktree). The skills report the branch or the error from it.
 
 ## Workspace app
 

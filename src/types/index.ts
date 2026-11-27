@@ -56,7 +56,7 @@ export interface KunjConfig {
     editorCommand?: string;
   };
   repos?: { cloneDir?: string; cloneBare?: boolean };
-  agent?: { command?: string; antigravityCommand?: string; hooks?: boolean; plan?: boolean; taskList?: boolean; tmux?: boolean; tmuxStatus?: boolean };
+  agent?: { command?: string; antigravityCommand?: string; hooks?: boolean; plan?: boolean; taskList?: boolean; tmux?: boolean; tmuxStatus?: boolean; suspendAfterMinutes?: number };
   container?: {
     image?: string;
     agentCommand?: string;

@@ -26,10 +26,17 @@ web session continued locally in its own worktree, not this conversation handed 
   kunj agent start <branch> --session handoff --detach --open-in-app --teleport <session> --json
   ```
   An error code `bad-teleport-id` means the id is not one; show kunj's message and stop.
-- Report as in step 4, without a brief path, and add: claude fetches and checks out the web session's
-  branch in that worktree, which fails when that branch is already checked out in another worktree; then
+  The JSON's `teleport` says how it went (kunj watches for up to 20 s):
+  - `switched`: claude checked out the web session's branch; report `teleport.branch` as the branch the
+    worktree is on (kunj deletes the placeholder branch it was created on).
+  - `failed`: claude could not teleport; show `teleport.message` (for example `Session not found: …`,
+    a wrong id or a session of another account or repository). The agent's pane stays open with the
+    error. Say the worktree stayed on the placeholder branch, and offer to remove it
+    (`kunj worktree remove <branch>`); do not retry with the same id.
+  - `pending`: show `teleport.message` (usually: answer Claude's folder-trust question in the agent's tab).
+- Report as in step 4, without a brief path, with the branch from `teleport` as above. When the web
+  session's branch is already checked out in another worktree, claude cannot check it out here; then
   run `kunj agent start <that branch> --teleport <session>` there instead (`kunj worktree list` shows it).
-  Nothing in this session can see whether the teleport succeeded: the user sees it in the agent's tab.
 
 ## 1. Write the brief
 

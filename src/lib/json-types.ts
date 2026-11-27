@@ -443,6 +443,12 @@ export interface AgentStartJson {
   id: string | null;
   /** false when the session was already running (left as it was) */
   started: boolean;
+  /**
+   * With `--teleport` on a new session: `switched` once claude checked out the web session's branch
+   * (the placeholder branch is then deleted), `failed` with claude's message (the pane stays open),
+   * `pending` when it had not finished within 20 s (often the folder-trust question)
+   */
+  teleport?: { state: 'switched'; branch: string } | { state: 'failed' | 'pending'; message: string };
 }
 
 /**
@@ -460,6 +466,8 @@ export interface AgentSavedJson {
     id: string | null;
     /** Claude Code's session id, what `claude --resume` takes */
     conversation: string;
+    /** Ended by agent.suspendAfterMinutes; its next `kunj agent start` resumes it */
+    suspended?: boolean;
     /** When the conversation was saved (ISO 8601): it started, or /clear began a new one */
     savedAt: string;
     /** The conversation's first prompt, shortened; null when it has none yet */

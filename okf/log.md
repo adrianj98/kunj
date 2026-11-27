@@ -1,5 +1,8 @@
 # Directory Update Log
 
+## 2026-11-27 (teleport branch, idle suspend)
+* `features/worktree-agents.md`: the teleport guard and outcome; idle agents suspend after `agent.suspendAfterMinutes` and resume on their next start.
+
 ## 2026-11-23 (overview in the middle panel)
 * `apps/workspace-app.md`: the Overview is a sidebar item shown in the middle panel, with a repository drop-down; File ▸ Open Repository….
 

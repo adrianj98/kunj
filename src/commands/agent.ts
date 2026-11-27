@@ -10,7 +10,7 @@ import { getKunjDir, loadResolvedConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { findWorktreeIn, listWorktreesDetailed } from '../lib/worktree';
 import { repoIdentity } from '../lib/repo-identity';
-import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, withAgentTeleport, checkTeleportId, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, planNudgeHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile, execScript, kunjSelf, shQuote } from '../lib/agent-session';
+import { AgentError, NO_TMUX_HINT, agentArgv, agentCommand, agentRunning, agentSessionName, agentResumeFile, agentStateDir, agentStateFile, readAgentResume, savedAgents, agentSessionId, conversationTitle, withAgentResume, withAgentTeleport, withTeleportGuard, teleportOutcome, agentSuspendedFile, checkTeleportId, checkShellSessionId, directArgv, hasTmuxSession, hostRunArgv, hostSecretEnv, killTmuxSession, killTmuxSessionIfExists, pickSession, readAgentState, readTaggedTmuxSessions, loginShell, worktreeAgentSessions, runTmux, withAgentHooks, planNudgeHookCommand, withAgentPlugin, withAgentTaskList, withAgentPrompt, isClaudeCommand, agentPromptFile, execScript, kunjSelf, shQuote } from '../lib/agent-session';
 import { packagedPluginDir } from '../lib/skills';
 import { activePlans, buildOverview, subagentLabel } from '../lib/agent-overview';
 import { PLAN_ENV, agentPlanDir, agentPlanFile, recordedPlanSessions, parentLine, planNudge, planPosition, readPlanFile, reducePlan } from '../lib/agent-plan';
@@ -208,6 +208,8 @@ export class AgentCommand extends BaseCommand {
           fs.unlinkSync(agentPlanFile(kunjDir, t));
           gone = true;
         } catch { /* no plan recorded */ }
+        // a forgotten conversation is not resumed by the next start either
+        try { fs.unlinkSync(agentSuspendedFile(agentStateFile(kunjDir, t))); } catch { /* not suspended */ }
         if (gone) forgotten.push(t);
       }
       if (this.jsonMode) {
@@ -260,9 +262,18 @@ export class AgentCommand extends BaseCommand {
     fs.mkdirSync(path.dirname(resumeFile), { recursive: true });
     const agentCmd = opts.command || agentCommand(opts.agent, config.agent);
     // A running session is reattached below; only a new one resumes the saved conversation
-    const resumeId = opts.resume && !(sessions?.includes(session) ?? false) ? readAgentResume(resumeFile) : null;
     // a failed listing does not mean it is not running: ask tmux about this one
     const alreadyRunning = sessions ? sessions.includes(session) : opts.detach === true && tmux === 'failed' && await hasTmuxSession(session);
+    // Suspended after waiting too long (agent.suspendAfterMinutes): its next start resumes it, unless it
+    // is given a new conversation (a brief, a teleport)
+    const suspendedFile = agentSuspendedFile(stateFile);
+    const suspended = !alreadyRunning && !(sessions?.includes(session) ?? false) && fs.existsSync(suspendedFile);
+    const resumeId = (opts.resume || (suspended && !opts.promptFile && opts.teleport === undefined)) && !(sessions?.includes(session) ?? false)
+      ? readAgentResume(resumeFile) : null;
+    if (suspended) {
+      try { fs.unlinkSync(suspendedFile); } catch { /* gone */ }
+      if (resumeId && !opts.resume && !this.jsonMode) process.stderr.write(`Resuming ${session}, suspended after waiting for input.\n`);
+    }
     if (teleportArg && !isClaudeCommand(agentCmd)) {
       throw new AgentError('teleport-needs-claude', `--teleport only works with claude, and this agent runs \`${agentCmd}\`.`);
     }
@@ -319,9 +330,14 @@ export class AgentCommand extends BaseCommand {
     const plugin = fs.existsSync(path.join(packagedPluginDir(), '.claude-plugin', 'plugin.json')) ? packagedPluginDir() : null;
     // the plan is only worth recording when the agent keeps a task list: ask it to (agent.taskList)
     const taskList = withPlan && config.agent?.taskList !== false;
-    const command = withAgentPrompt(withAgentPlugin(withAgentTaskList(withAgentHooks(withAgentTeleport(withAgentResume(agentCmd, resumeId), teleportId), stateFile, config.agent?.hooks !== false, withPlan, taskList ? planNudgeHookCommand() : undefined), taskList), plugin), promptCopy);
+    const built = withAgentPrompt(withAgentPlugin(withAgentTaskList(withAgentHooks(withAgentTeleport(withAgentResume(agentCmd, resumeId), teleportId), stateFile, config.agent?.hooks !== false, withPlan, taskList ? planNudgeHookCommand() : undefined), taskList), plugin), promptCopy);
+    // a teleport keeps its pane open when it fails and drops the placeholder branch once it switched
+    const command = teleportId ? withTeleportGuard(built, wt.branch) : built;
+    const suspendAfter = Number(config.agent?.suspendAfterMinutes ?? 60);
     const vars = {
       KUNJ_BRANCH: wt.branch, KUNJ_REPO: repo.name, KUNJ_WORKTREE: wt.path, KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: resumeFile,
+      // read only by the Stop/Notification hooks (claude with agent.hooks)
+      ...(Number.isFinite(suspendAfter) && suspendAfter > 0 && config.agent?.hooks !== false && isClaudeCommand(agentCmd) ? { KUNJ_AGENT_SUSPEND_AFTER: String(Math.round(suspendAfter * 60)) } : {}),
       ...(withPlan ? { KUNJ_AGENT_PLAN: planFile, ...PLAN_ENV } : {}),
     };
     // Without TMUX, tmux refuses to nest when run from a pane (or an app started in one)
@@ -351,11 +367,16 @@ export class AgentCommand extends BaseCommand {
           { status: config.agent?.tmuxStatus === true, worktree: wt.path, detach: true, openInApp: opts.openInApp });
         const code = await runTmux(argv, wt.path, tmuxEnv);
         if (code !== 0) throw new AgentError('start-failed', `tmux could not start ${session} (exit ${code}).`);
+        // the skill reports the branch the worktree ended on, or why the teleport failed
+        if (teleportId) result.teleport = await teleportOutcome(session, wt.path, wt.branch);
       }
       if (this.jsonMode) {
         this.outputJSON(result);
       } else {
         console.log(alreadyRunning ? chalk.dim(`${session} is already running`) : chalk.green(`✓ Started ${session}`));
+        const t = result.teleport;
+        if (t?.state === 'switched') console.log(chalk.green(`✓ Teleported: the worktree is on ${t.branch}`));
+        else if (t) console.log((t.state === 'failed' ? chalk.red : chalk.yellow)(`${t.state === 'failed' ? '✗ Teleport failed' : '… Teleport pending'}: ${t.message}`));
         console.log(chalk.dim(`  Attach with: kunj agent ${wt.branch}${id ? ` --session ${id}` : ''}`));
       }
       return;

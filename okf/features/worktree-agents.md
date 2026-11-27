@@ -87,6 +87,9 @@ sidebar row (`BranchLayout.suspended`, `restorePlan()`'s suspended indexes).
 `kunj agent saved [branch]` (`savedAgents()`, `AgentSavedJson`) lists the saved conversations whose session
 is not running, newest first, titled by their first prompt; `kunj agent forget` removes them. The workspace
 app's Resume Agent… (⌘⇧R) shows that list and opens the picked one with `--session <id> --resume`.
+Idle suspend: an agent waiting for input longer than `agent.suspendAfterMinutes` (default 60, 0 off) is ended by
+a sleeper the Stop/Notification hooks start (`IDLE_SUSPEND_HOOK`), which leaves `<state file>.suspended`; the
+next `kunj agent start` of that session resumes the conversation (docs/specs/tmux-sessions.md).
 **Plan record** (`agent.plan`, default on; src/lib/agent-plan.ts, docs/specs/agent-overview.md): the same
 `--settings` carry hooks (`PostToolUse` on `TaskCreate|TaskUpdate|TodoWrite|ExitPlanMode`, `PreToolUse` on
 `Agent|Task`, `SubagentStart`, `SubagentStop`, `CwdChanged`, `SessionStart`) that append one line
@@ -132,7 +135,10 @@ src/lib/skills.ts) for a claude started by hand. Spec: docs/specs/agent-handoff.
 appends `--teleport <id>` to a new claude session's command (`withAgentTeleport()`); claude only, not
 with `--resume` or `--prompt-file`. `/handoff --teleport <session>` and the `teleport` skill
 (`claude-plugin/skills/teleport/`, also in `KUNJ_SKILLS`) create a worktree and start it detached,
-with no brief.
+with no brief. The teleporting command runs under `TELEPORT_GUARD_SCRIPT` (`withTeleportGuard()`): a failed
+claude keeps its pane open with the error, and the placeholder branch is deleted once claude switched the
+worktree to the web session's branch; `start --detach` waits for that (`teleportOutcome()`, `teleport` in
+`AgentStartJson`).
 
 # Status in the listing
 

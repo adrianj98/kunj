@@ -34,6 +34,7 @@ jest.mock('../../lib/agent-session', () => ({
   killTmuxSessionIfExists: jest.fn(async () => true),
   readAgentResume: jest.fn(() => null),
   savedAgents: jest.fn(() => []),
+  teleportOutcome: jest.fn(async () => ({ state: 'switched', branch: 'claude/web' })),
 }));
 
 // No plugin unless a test points at one (the real claude-plugin/ would change every command)
@@ -116,7 +117,7 @@ test('status without a branch uses the current branch and reports null without t
 test('start runs tmux in the worktree with agent.command', async () => {
   tmuxSessions.mockResolvedValue([]);
   await new AgentCommand().execute('start', 'feature-a', {});
-  const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: `/h/.kunj/app/agent-resume/${session}.json`, ...planVars(session) };
+  const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: stateFile, KUNJ_AGENT_RESUME: `/h/.kunj/app/agent-resume/${session}.json`, KUNJ_AGENT_SUSPEND_AFTER: '3600', ...planVars(session) };
   expect(runTmux).toHaveBeenCalledWith(agentArgv(session, '/wt/feature-a', underRun('feature-a', claudeWithHooks), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(clientEnv(vars)));
   // tmux takes a new session's environment from its server, not this client: the values go in argv
   expect((runTmux as jest.Mock).mock.calls[0][0]).toEqual(expect.arrayContaining(['-e', 'KUNJ_BRANCH=feature-a', '-e', 'KUNJ_WORKTREE=/wt/feature-a']));
@@ -318,7 +319,7 @@ describe('--session: several agents per worktree', () => {
     tmuxSessions.mockResolvedValue([session]);
     await new AgentCommand().execute('start', 'feature-a', { session: 'two' } as any);
     const file = agentStateFile('/h/.kunj/app', two);
-    const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: file, KUNJ_AGENT_RESUME: `/h/.kunj/app/agent-resume/${two}.json`, ...planVars(two) };
+    const vars = { KUNJ_BRANCH: 'feature-a', KUNJ_REPO: 'app', KUNJ_WORKTREE: '/wt/feature-a', KUNJ_AGENT_STATE: file, KUNJ_AGENT_RESUME: `/h/.kunj/app/agent-resume/${two}.json`, KUNJ_AGENT_SUSPEND_AFTER: '3600', ...planVars(two) };
     expect(runTmux).toHaveBeenCalledWith(agentArgv(two, '/wt/feature-a', underRun('feature-a', withAgentTaskList(withAgentHooks('claude', file, true, true, planNudgeHookCommand()), true)), vars, { worktree: '/wt/feature-a' }), '/wt/feature-a', expect.objectContaining(clientEnv(vars)));
     expect(two).toBe(session + '-a-two');
   });
@@ -367,6 +368,19 @@ describe('--session: several agents per worktree', () => {
 });
 
 describe('--resume', () => {
+  test('a session suspended while waiting resumes on its next start, and the mark is removed', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    readAgentResume.mockReturnValue('5f0c-77');
+    const exists = jest.spyOn(require('fs'), 'existsSync').mockImplementation((f: any) => String(f).endsWith(`${session}.suspended`));
+    try {
+      await new AgentCommand().execute('start', 'feature-a', {});
+    } finally {
+      exists.mockRestore();
+    }
+    expect(JSON.stringify((runTmux as jest.Mock).mock.calls[0][0])).toContain('claude --resume 5f0c-77 --settings');
+    expect(jest.requireMock<any>('fs').unlinkSync).toHaveBeenCalledWith(`/h/.kunj/app/agent-state/${session}.suspended`);
+  });
+
   const { readAgentResume } = jest.requireMock<any>('../../lib/agent-session');
   afterEach(() => { readAgentResume.mockReturnValue(null); readAgentResume.mockClear(); });
 
@@ -390,6 +404,14 @@ describe('--resume', () => {
 });
 
 describe('--teleport', () => {
+  test('a detached teleport runs under the guard and reports where the worktree ended up', async () => {
+    tmuxSessions.mockResolvedValue([]);
+    await new AgentCommand().execute('start', 'feature-a', { teleport: 'session_01Gsw', detach: true, json: true } as any);
+    const argv = JSON.stringify((runTmux as jest.Mock).mock.calls[0][0]);
+    expect(argv).toContain("kunj-teleport 'feature-a' claude --teleport session_01Gsw");
+    expect(JSON.parse(stdout.join('')).teleport).toEqual({ state: 'switched', branch: 'claude/web' });
+  });
+
   test('a new session runs claude --teleport with the id from an id or a URL', async () => {
     tmuxSessions.mockResolvedValue([]);
     await new AgentCommand().execute('start', 'feature-a', { teleport: 'https://claude.ai/code/session_01Gsw' } as any);
@@ -592,7 +614,7 @@ describe('plan', () => {
     unlink.mockImplementation((file: string) => { if (!String(file).includes(`${session}-a-dead.ndjson`)) throw new Error('ENOENT'); });
     await new AgentCommand().execute('forget', 'feature-a', { json: true, all: true } as any);
     expect(JSON.parse(stdout.join('')).forgotten).toEqual([`${session}-a-dead`]);
-    expect(unlink.mock.calls.map(c => nodePath.basename(c[0]))).toEqual([`${session}-a-dead.json`, `${session}-a-dead.ndjson`]);
+    expect(unlink.mock.calls.map(c => nodePath.basename(c[0]))).toEqual([`${session}-a-dead.json`, `${session}-a-dead.ndjson`, `${session}-a-dead.suspended`]);
     unlink.mockReset();
   });
 

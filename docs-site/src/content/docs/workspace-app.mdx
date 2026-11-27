@@ -244,8 +244,10 @@ skill its session id or URL: `/kunj:handoff --teleport session_01Gsw…`, or `/k
 session_01Gsw…` (`/teleport` with the installed copy). No brief is written: the skill creates a
 worktree and starts `claude --teleport <session>` there
 (`kunj agent start <branch> --detach --open-in-app --teleport <session>`), and Claude checks out the
-web session's branch in it. If that branch is already checked out in another worktree, run
-`kunj agent start <that branch> --teleport <session>` instead.
+web session's branch in it; the skill tells you which branch the worktree ended on, and the temporary
+`teleport-…` branch is deleted. If Claude cannot open the session (`Session not found`), the agent's tab
+keeps the error on screen and the worktree stays on the temporary branch. If the web session's branch is
+already checked out in another worktree, run `kunj agent start <that branch> --teleport <session>` instead.
 
 To copy from a terminal where a program has the mouse (tmux with `mouse on`, or a full-screen agent),
 hold ⌥ (or ⇧) while you drag, then press ⌘C. The selection stays until you copy, click again or scroll.
@@ -277,6 +279,10 @@ Agent…** (⌘⇧R) or **Resume Agent…** in the sidebar row's menu. It lists 
 Claude conversations that are not running, newest first, by their first prompt; pick one and it
 opens in a new agent tab where it left off. **Forget These** clears the list. From a terminal,
 `kunj agent saved` lists the same conversations with the command that resumes each.
+
+A Claude agent that has waited for your input for an hour is suspended: its process ends, freeing its
+memory, and the tab says it exited. Resume it with **Resume Agent…**; a tab restored later resumes it by
+itself. Change the hour with the `agent.suspendAfterMinutes` setting (0 turns it off).
 
 **File > Open Repository…** (⌥⌘O) adds a repository from disk: pick its folder (or any folder
 inside it, or one of its worktrees) and it is listed and selected.

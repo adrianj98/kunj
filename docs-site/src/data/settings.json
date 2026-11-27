@@ -1754,6 +1754,18 @@
     "sensitive": false
   },
   {
+    "key": "agent.suspendAfterMinutes",
+    "type": "number",
+    "category": "agent",
+    "default": 60,
+    "description": "End a Claude agent's tmux session after it has waited this many minutes for input; its next `kunj agent start` (the workspace app reopening its tab) resumes the conversation. 0 turns it off. Needs agent.hooks",
+    "detailedDescription": null,
+    "options": null,
+    "examples": null,
+    "relatedSettings": null,
+    "sensitive": false
+  },
+  {
     "key": "agent.hooks",
     "type": "boolean",
     "category": "agent",

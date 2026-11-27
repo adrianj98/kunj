@@ -429,6 +429,8 @@ export interface SavedAgent {
   conversation: string;
   savedAt: string;
   title: string | null;
+  /** ended by the idle suspend (agent.suspendAfterMinutes) */
+  suspended?: boolean;
 }
 
 // The saved conversations of a branch's agent sessions (`base` and `base-a-<id>`) whose session is
@@ -458,7 +460,8 @@ export function savedAgents(kunjDir: string, base: string, running: string[] | n
     } catch {
       continue;
     }
-    items.push({ session, id, conversation, savedAt: mtime.toISOString(), title: conversationTitle(saved?.transcript_path) });
+    const suspended = fs.existsSync(agentSuspendedFile(agentStateFile(kunjDir, session)));
+    items.push({ session, id, conversation, savedAt: mtime.toISOString(), title: conversationTitle(saved?.transcript_path), ...(suspended ? { suspended } : {}) });
   }
   return items.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
 }
@@ -487,6 +490,93 @@ export function withAgentTeleport(command: string, id: string | null): string {
   return `${command.trim()} --teleport ${id}`;
 }
 
+/** What the teleport guard prints when claude --teleport fails; startTeleportOutcome() looks for it. */
+export const TELEPORT_FAILED_MARK = 'kunj: claude --teleport exited with';
+
+/**
+ * Runs a teleporting claude (`"$@"`) in a worktree created on a placeholder branch (`$1`):
+ * - claude checks out the web session's branch; once the worktree is on another branch, the
+ *   placeholder is deleted when nothing would be lost (its tip is on origin or in the new branch),
+ *   checked every 5 s for 30 minutes (the folder-trust prompt may hold the teleport up);
+ * - a failed teleport (`Session not found`, exits in seconds) keeps the pane open with claude's
+ *   message, instead of the session ending and a reattaching tab starting a plain claude on the
+ *   placeholder branch.
+ * POSIX sh, so the user's login shell (zsh, fish) only has to pass words to it.
+ */
+export const TELEPORT_GUARD_SCRIPT = [
+  'b=$1; shift',
+  '(i=0; while [ $i -lt 360 ]; do sleep 5; i=$((i+1)); c=$(git branch --show-current 2>/dev/null) || continue;',
+  ' if [ -n "$c" ] && [ "$c" != "$b" ]; then',
+  '  if [ -n "$(git branch -r --contains "refs/heads/$b" 2>/dev/null)" ] || git merge-base --is-ancestor "refs/heads/$b" HEAD 2>/dev/null; then git branch -D -q "$b" 2>/dev/null; fi;',
+  '  exit 0; fi; done) </dev/null >/dev/null 2>&1 &',
+  '"$@"; rc=$?',
+  `if [ $rc -ne 0 ]; then printf '\\n%s %s; this worktree stays on %s.\\nPress Enter to close. ' '${TELEPORT_FAILED_MARK}' "$rc" "$b"; read -r _ || true; fi`,
+  'exit $rc',
+].join('\n');
+
+/** The command wrapped in TELEPORT_GUARD_SCRIPT for the placeholder branch the worktree was made on. */
+export function withTeleportGuard(command: string, placeholder: string): string {
+  return `/bin/sh -c ${shQuote(TELEPORT_GUARD_SCRIPT)} kunj-teleport ${shQuote(placeholder)} ${command.trim()}`;
+}
+
+export type TeleportOutcome =
+  | { state: 'switched'; branch: string }
+  | { state: 'failed'; message: string }
+  | { state: 'pending'; message: string };
+
+/**
+ * Watches a detached teleporting session until claude has checked out the web session's branch
+ * (`switched`), failed (`failed`, with the lines claude printed), or `timeoutMs` passed (`pending`:
+ * often the folder-trust question, which only the user can answer in the agent's tab).
+ */
+export async function teleportOutcome(session: string, worktree: string, placeholder: string,
+  timeoutMs = 20_000, intervalMs = 500): Promise<TeleportOutcome> {
+  const deadline = Date.now() + timeoutMs;
+  let pane = '';
+  for (;;) {
+    try {
+      const { stdout } = await execFileAsync('git', ['-C', worktree, 'branch', '--show-current'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
+      const branch = stdout.trim();
+      if (branch && branch !== placeholder) return { state: 'switched', branch };
+    } catch { /* mid-checkout */ }
+    try {
+      pane = (await execFileAsync('tmux', ['capture-pane', '-p', '-J', '-t', `=${session}:`])).stdout;
+    } catch {
+      return { state: 'failed', message: 'The agent session ended before the teleport finished.' };
+    }
+    const mark = pane.indexOf(TELEPORT_FAILED_MARK);
+    if (mark >= 0) {
+      const lines = pane.slice(0, mark).split('\n').map(l => l.trim()).filter(Boolean);
+      return { state: 'failed', message: lines.slice(-3).join('\n') || 'claude --teleport failed.' };
+    }
+    if (Date.now() >= deadline) {
+      return { state: 'pending', message: /trust this folder/i.test(pane)
+        ? 'Claude is asking whether to trust this folder; answer it in the agent\'s tab and the teleport continues.'
+        : 'The teleport has not finished yet; watch the agent\'s tab.' };
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+}
+
+/**
+ * Idle suspend: the Stop and Notification hooks (the agent waits for input) start a sleeper. When the
+ * agent is still waiting `KUNJ_AGENT_SUSPEND_AFTER` seconds later, with no prompt or tool call since
+ * (the `.wait` token is the waiting spell's), it marks the session suspended and ends its tmux session
+ * (`$TMUX_PANE`'s). The next `kunj agent start` of that session resumes the conversation. Unset or 0,
+ * or outside tmux, nothing happens. No single quote: it goes in the hooks JSON.
+ */
+export const IDLE_SUSPEND_HOOK = [
+  '[ -n "$TMUX_PANE" ] && [ "${KUNJ_AGENT_SUSPEND_AFTER:-0}" -gt 0 ] || exit 0',
+  't="$(date +%s)-$$"; printf %s "$t" > "$KUNJ_AGENT_STATE.wait" || exit 0',
+  '(sleep "$KUNJ_AGENT_SUSPEND_AFTER"; [ "$(cat "$KUNJ_AGENT_STATE" 2>/dev/null)" = waiting ] && [ "$(cat "$KUNJ_AGENT_STATE.wait" 2>/dev/null)" = "$t" ]'
+    + ' && : > "$KUNJ_AGENT_STATE.suspended" && rm -f "$KUNJ_AGENT_STATE" "$KUNJ_AGENT_STATE.wait" && tmux kill-session -t "$TMUX_PANE") </dev/null >/dev/null 2>&1 &',
+].join('; ');
+
+/** Marks a session ended by IDLE_SUSPEND_HOOK; its next start resumes. */
+export function agentSuspendedFile(stateFile: string): string {
+  return `${stateFile}.suspended`;
+}
+
 // The hooks as `claude --settings` takes them. No single quotes anywhere, so the JSON can be
 // single-quoted for the shell tmux runs the command through.
 // With `plan`, the hooks that record the agent's plan into KUNJ_AGENT_PLAN (agent-plan.ts) are added:
@@ -503,8 +593,8 @@ export function claudeHookSettings(plan = false, nudge?: string): string {
     hooks: {
       UserPromptSubmit: [...hook(write('running')), ...(nudge ? hook(nudge) : [])],
       PreToolUse: [...hook(write('running')), ...(plan ? [...hook(record, 'Agent|Task'), ...hook(subagentToolHookCommand()), ...hook(setPlanGuardCommand(), SET_PLAN_TOOL_ID)] : [])],
-      Stop: hook(write('waiting')),
-      Notification: hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'),
+      Stop: [...hook(write('waiting')), ...hook(hookSafe(IDLE_SUSPEND_HOOK))],
+      Notification: [...hook(write('waiting'), 'permission_prompt|idle_prompt|elicitation_dialog'), ...hook(hookSafe(IDLE_SUSPEND_HOOK), 'permission_prompt|idle_prompt|elicitation_dialog')],
       SessionEnd: hook(hookSafe('rm -f "$KUNJ_AGENT_STATE"')),
       // Unset in containers (no resume there yet), where it does nothing
       SessionStart: [...hook(hookSafe('[ -z "$KUNJ_AGENT_RESUME" ] || cat > "$KUNJ_AGENT_RESUME"')), ...(plan ? [...hook(PLAN_TRIM_HOOK), ...hook(record)] : [])],

@@ -20,6 +20,7 @@ each, its CPU and memory, and whether it is orphaned, so stray sessions can be f
 | Host Claude agents save their session id; `kunj agent --resume`; restored agent tabs resume | Shipped |
 | Workspace app: Suspend Session / Resume Session (sidebar row menu, Environment menu ⌘⇧U); Close All on quit and ended agents restore suspended, sidebar shows "Suspended" | Shipped |
 | `kunj agent saved` / `forget` (`AgentSavedJson`, `AgentForgetJson`); workspace app Resume Agent… (⌘⇧R, sidebar row menu), exited agent tabs say so | Shipped |
+| Idle suspend: an agent waiting longer than `agent.suspendAfterMinutes` (60) ends; its next start resumes it | Shipped |
 | Resuming container agents | Not done |
 
 ## Why
@@ -131,6 +132,18 @@ picking one opens an agent tab with `--session <id> --resume`. A tab of that ses
 selected when it runs, and replaced when its process exited (`TabRegistry.dropExited()`, which does not run
 the tab's `agent stop`: that would race the new start). An exited agent tab prints the shortcut after
 its exit code (`canResumeAgent()`: a worktree agent of the default command).
+
+Idle suspend (`agent.suspendAfterMinutes`, default 60, 0 off; *added 2026-11-27*): `kunj agent` gives a
+claude with hooks `KUNJ_AGENT_SUSPEND_AFTER` (seconds, `new-session -e`). The Stop and Notification hooks
+(the agent now waits for input) also run `IDLE_SUSPEND_HOOK`: inside tmux (`$TMUX_PANE`) it writes a token
+to `<state file>.wait` and leaves a sleeper (`sleep`, stdio closed, so Claude Code does not wait for it).
+When it wakes and the state is still `waiting` with the same token (no prompt or tool call since, no newer
+waiting spell), it creates `<state file>.suspended` (`agentSuspendedFile()`), removes the state file and
+ends the session (`tmux kill-session -t $TMUX_PANE`). Nothing polls: no app or `kunj events` needs to run.
+The next `kunj agent start` of that session resumes as with `--resume` and removes the mark, unless it is
+given a new conversation (`--prompt-file`, `--teleport`); `agent saved` marks such conversations
+`suspended`, and `agent forget` removes the mark. The app's tab shows the exit and its Resume Agent hint;
+a tab restored later resumes anyway. Containers get no variable, so nothing is suspended there.
 
 Session > Close All Sessions… runs Close Session (`finishClosingSession`) for every environment that
 has tabs, after one confirmation; an unsaved editor stops it.

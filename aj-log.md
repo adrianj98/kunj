@@ -2193,3 +2193,20 @@ The user asked to be able to choose a remote in the app when remotes are availab
   `×N` badge, one dot per subagent with finished ones first so it fills like a progress bar; loop labels are cut to
   the loop's width. Why: the user's screenshot showed a dozen overlapping loops with labels written over each other,
   and asked for them to be compacted ("x 5 or something, be creative").
+
+## 2026-11-27 — teleport handoffs end on the right branch; idle agents suspend
+- src/lib/agent-session.ts, src/commands/agent.ts: `kunj agent start --teleport` runs claude under `TELEPORT_GUARD_SCRIPT`
+  (`withTeleportGuard()`): a failed teleport keeps its pane open with claude's error, and the placeholder `teleport-…`
+  branch is deleted once claude switched the worktree to the web session's branch (only when nothing is lost). With
+  `--detach` it waits up to 20 s (`teleportOutcome()`) and adds `teleport` to `AgentStartJson` (switched + branch,
+  failed + message, pending). Why: the user asked for a handoff of a session to end on the correct branch; two live
+  teleports (driveday_planner, driveday_arduino) stayed on the placeholder because `claude --teleport` printed
+  `Session not found` and exited in ~2 s, then the app's tab started a plain claude there and hid the error.
+- claude-plugin/skills/{handoff,teleport}/SKILL.md: report the branch the worktree ended on, or claude's error, from `teleport`.
+- Idle suspend: `agent.suspendAfterMinutes` (default 60, 0 off). The Stop/Notification hooks also run `IDLE_SUSPEND_HOOK`,
+  a sleeper that ends the agent's tmux session when it is still waiting after that long and leaves
+  `<state file>.suspended`; the next `kunj agent start` of the session resumes the conversation, `agent saved` marks it
+  `suspended`, `agent forget` clears it. Why: the user asked for agents waiting for input for a long time to suspend.
+- Tests: src/lib/__tests__/agent-teleport-suspend.test.ts (real sh, git, tmux), agent.test.ts (resume after suspend,
+  detached teleport outcome). Docs: agent-handoff.md, tmux-sessions.md, specs README, okf, docs-site workspace-app page,
+  CLAUDE.md.
